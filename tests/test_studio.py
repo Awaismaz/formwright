@@ -547,3 +547,83 @@ def test_rib_feature_on_l_bracket(app_client: TestClient) -> None:  # noqa: F811
     assert _vol(c, pid) - v0 == pytest.approx((0.5 * 29 * 145 / 6 - fillet) * 3, rel=1e-9)
     for bad in ({**rib, "chains": []}, {**rib, "t": 0}):
         assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def _elbow_sketches(c: TestClient, pid: str, r: float = 5) -> tuple[str, str]:
+    """Sketch nodes: a circle R`r` on the Top plane, and a path on the Front plane: up 20, then a quarter arc R30."""
+    m = [30 - 30 * math.cos(math.pi / 4), 20 + 30 * math.sin(math.pi / 4)]
+    prof = {"op": "sketch2d", "name": "Profile", "plane": TOP, "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": r}]}
+    path = {"op": "sketch2d", "name": "Path", "plane": FRONT, "chains": [[{"type": "line", "a": [0, 0], "b": [0, 20]},
+                                                                          {"type": "arc", "a": [0, 20], "m": m, "b": [30, 50]}]]}
+    ids = []
+    for f in (prof, path):
+        r_ = c.post(f"/api/projects/{pid}/manual", json={"feature": f})
+        assert r_.status_code == 200, r_.text
+        ids.append(r_.json()["features"][-1]["id"])
+    return ids[0], ids[1]
+
+
+def test_sweep_from_sketch_nodes(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "sweep@x.com")
+    pid = c.post("/api/projects", json={"name": "Elbow"}).json()["id"]
+    prof, path = _elbow_sketches(c, pid)
+    assert c.get(f"/api/projects/{pid}/manual").json()["features"][0]["op"] == "sketch2d"  # saved without a build
+    length = 20 + 15 * math.pi  # path length: 20 + quarter of 2*pi*30
+    sw = {"op": "sweep", "name": "Sweep1", "profile": prof, "path": path, "mode": "add"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": sw})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(math.pi * 25 * length, rel=1e-9)  # Pappus: area x path length
+    sid = r.json()["features"][-1]["id"]
+    # a swept cut with an R2 profile along the same path makes it a tube
+    hole = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sketch2d", "name": "Bore", "plane": TOP,
+                                                                     "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": 2}]}})
+    bore = hole.json()["features"][-1]["id"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sweep", "name": "Cut-Sweep1", "profile": bore, "path": path, "mode": "cut"}})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(math.pi * (25 - 4) * length, rel=1e-9)
+    cid = r.json()["features"][-1]["id"]
+    # mirror the swept boss and the swept cut about the elbow's end face (x = 30): a U-tube, the halves meet at that face
+    mir = {"op": "mirror", "name": "Mirror1", "source": [sid, cid], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": mir}).status_code == 200
+    v = _vol(c, pid)
+    assert v == pytest.approx(2 * math.pi * (25 - 4) * length, rel=1e-9)
+    # a sketch that a feature uses can't be deleted; bad references are refused
+    r = c.delete(f"/api/projects/{pid}/manual/{path}")
+    assert r.status_code == 422 and "is used by Sweep1" in r.json()["detail"]
+    for bad in ({**sw, "path": prof}, {**sw, "profile": ""}, {"op": "sketch2d", "plane": TOP}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**sw, "path": "nope"}})
+    assert r.status_code == 422 and "path sketch is missing" in r.json()["detail"]
+    assert _vol(c, pid) == pytest.approx(v, rel=1e-12)
+
+
+def test_loft_between_sketch_nodes(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "loft@x.com")
+    pid = c.post("/api/projects", json={"name": "Loft"}).json()["id"]
+
+    def node(name: str, z: float, prof: dict) -> str:
+        pl = {"origin": [0, 0, z], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+        r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sketch2d", "name": name, "plane": pl, "profiles": [prof]}})
+        assert r.status_code == 200, r.text
+        return r.json()["features"][-1]["id"]
+    s1, s2 = node("Square 20", 0, _rect(-10, -10, 10, 10)), node("Square 10", 20, _rect(-5, -5, 5, 5))
+    lo = {"op": "loft", "name": "Loft1", "sections": [s1, s2], "ruled": True, "mode": "add"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": lo})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(20 / 3 * (400 + 100 + 200), rel=1e-9)  # frustum h/3 (A1 + A2 + sqrt(A1 A2))
+    lid = r.json()["features"][-1]["id"]
+    c1, c2, c3 = node("R10", 0, {"kind": "circle", "cx": 0, "cy": 0, "r": 10}), node("R5", 20, {"kind": "circle", "cx": 0, "cy": 0, "r": 5}), \
+        node("R10 top", 40, {"kind": "circle", "cx": 0, "cy": 0, "r": 10})
+    assert c.patch(f"/api/projects/{pid}/manual/{lid}", json={"feature": {"sections": [c1, c2, c3], "ruled": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(2 * math.pi * 20 / 3 * (100 + 50 + 25), rel=1e-9)  # two cone frusta
+    assert c.patch(f"/api/projects/{pid}/manual/{lid}", json={"feature": {"sections": [c1, c2], "ruled": False}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(math.pi * 20 / 3 * 175, rel=1e-9)  # two sections: smooth = ruled
+    two = node("Two loops", 30, {"kind": "circle", "cx": 0, "cy": 0, "r": 3})
+    two_feat = c.get(f"/api/projects/{pid}/manual").json()["features"][-1]
+    c.patch(f"/api/projects/{pid}/manual/{two}", json={"feature": {"profiles": [*two_feat["profiles"], {"kind": "circle", "cx": 8, "cy": 0, "r": 1}]}})
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**lo, "sections": [c1, two]}})
+    assert r.status_code == 422 and "one closed profile" in r.json()["detail"]
+    for bad in ({**lo, "sections": [c1]}, {**lo, "sections": [c1, c1]}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422

@@ -17,9 +17,9 @@ import type { Topo, V3 } from "@/viewer/types";
 type ToolT = "select" | "line" | "centerline" | "rect" | "circle" | "arc" | "slot" | "polygon" | "dim" | "angle" | "trim" | "extend" | "fillet";
 type Sel = { kind: "pt" | "ent"; id: string };
 type NoId<T> = T extends unknown ? Omit<T, "id"> : never;
-export type SketchKind = "extrude" | "revolve" | "rib";
+export type SketchKind = "extrude" | "revolve" | "rib" | "sketch";
 export interface SketchPreset { feature?: SketchKind; mode?: "add" | "cut" }
-const OP_OF: Record<SketchKind, ManualFeature["op"]> = { extrude: "sketch", revolve: "revolve", rib: "rib" };
+const OP_OF: Record<SketchKind, ManualFeature["op"]> = { extrude: "sketch", revolve: "revolve", rib: "rib", sketch: "sketch2d" };
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const crossV = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -75,7 +75,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   // Focus and select the value once the click that placed the dimension has finished (its mousedown would blur it).
   useEffect(() => { if (!dimEdit) return; const t = setTimeout(() => { dimInput.current?.focus(); dimInput.current?.select(); }, 0); return () => clearTimeout(t); }, [dimEdit?.cid]); // eslint-disable-line react-hooks/exhaustive-deps
   const [mode, setMode] = useState<"add" | "cut">(editing?.mode ?? preset?.mode ?? "add");
-  const [kind, setKind] = useState<SketchKind>(editing ? (editing.op === "revolve" ? "revolve" : editing.op === "rib" ? "rib" : "extrude") : preset?.feature ?? "extrude");
+  const [kind, setKind] = useState<SketchKind>(editing ? (editing.op === "revolve" ? "revolve" : editing.op === "rib" ? "rib" : editing.op === "sketch2d" ? "sketch" : "extrude") : preset?.feature ?? "extrude");
   const [ribT, setRibT] = useState(String(editing?.op === "rib" ? editing.t ?? 5 : 5));
   const [ribFlip, setRibFlip] = useState(!!editing?.flip);
   const [end, setEnd] = useState<"blind" | "mid" | "through">(editing?.end ?? "blind");
@@ -348,15 +348,18 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   const prof = useMemo(() => profiles(sk), [sk]);
   const centerline = sk.entities.find(e => e.type === "line" && e.construction) as Extract<SEntity, { type: "line" }> | undefined;
   const finish = async () => {
-    if (kind === "rib" ? !prof.chains.length : !prof.loops.length) {
+    if (kind === "sketch" ? !prof.loops.length && !prof.chains.length : kind === "rib" ? !prof.chains.length : !prof.loops.length) {
+      if (kind === "sketch") { toast.error("The sketch is empty: draw a profile or a path."); return; }
       toast.error(kind === "rib" ? "A rib needs an open profile: a line or chain of lines/arcs that runs between walls of the part."
         : "Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return;
     }
-    const base = kind === "rib" ? "Rib" : kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
+    const base = kind === "sketch" ? "Sketch" : kind === "rib" ? "Rib" : kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
     const common = { name: editing && editing.op === OP_OF[kind] ? editing.name : nextName(base, existing),
       suppressed: editing?.suppressed ?? false, plane, plane_ref: planeRef?.id ?? null, editor: sk };
     let feature: Record<string, unknown>;
-    if (kind === "rib") {
+    if (kind === "sketch") {
+      feature = { op: "sketch2d", ...common, profiles: prof.loops, chains: prof.chains };
+    } else if (kind === "rib") {
       const t = Number(ribT); if (!(t > 0)) { toast.error("Enter a positive rib thickness"); return; }
       feature = { op: "rib", ...common, chains: prof.chains, t, flip: ribFlip };
     } else if (kind === "revolve") {
@@ -486,21 +489,24 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-border bg-panel px-3 py-2">
-        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{kind === "rib" ? `${prof.chains.length} open profile(s)` : `${prof.loops.length} closed profile(s)`}{kind === "revolve" && (centerline ? " · axis: centerline" : <span className="text-warning"> · draw a centerline</span>)}</span>
+        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{kind === "sketch" ? `${prof.loops.length} closed, ${prof.chains.length} open` : kind === "rib" ? `${prof.chains.length} open profile(s)` : `${prof.loops.length} closed profile(s)`}{kind === "revolve" && (centerline ? " · axis: centerline" : <span className="text-warning"> · draw a centerline</span>)}</span>
         <div className="ml-auto inline-flex overflow-hidden rounded border border-border text-[12.5px]">
+          <Tip content="Keep it as a sketch in the tree (for sweeps and lofts), without a feature" side="top">
+            <button onClick={() => setKind("sketch")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "sketch" ? "bg-primary text-white" : "text-muted")}><Pencil className="h-3.5 w-3.5" />Sketch only</button>
+          </Tip>
           <button onClick={() => setKind("extrude")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "extrude" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Extrude</button>
           <button onClick={() => setKind("revolve")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "revolve" ? "bg-primary text-white" : "text-muted")}><RotateCw className="h-3.5 w-3.5" />Revolve</button>
           <Tip content={hasBody ? "Thicken an open profile into a rib that runs to the walls of the part" : "A rib needs an existing solid"} side="top">
             <button disabled={!hasBody} onClick={() => setKind("rib")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", kind === "rib" ? "bg-primary text-white" : "text-muted")}><Fence className="h-3.5 w-3.5" />Rib</button>
           </Tip>
         </div>
-        {kind !== "rib" && <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
+        {kind !== "rib" && kind !== "sketch" && <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
           <button onClick={() => setMode("add")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "add" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Boss</button>
           <Tip content={hasBody ? "Remove material" : "A cut needs an existing solid. Start with a boss."} side="top">
             <button disabled={!hasBody} onClick={() => setMode("cut")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", mode === "cut" ? "bg-primary text-white" : "text-muted")}><ArrowDownToLine className="h-3.5 w-3.5" />Cut</button>
           </Tip>
         </div>}
-        {kind === "rib" ? <>
+        {kind === "sketch" ? null : kind === "rib" ? <>
           <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={ribT} onChange={e => setRibT(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" aria-label="Rib thickness" />mm</label>
           <Tip content="Try the other side of the profile first (the side closed off by the part is used)" side="top"><button onClick={() => setRibFlip(!ribFlip)} className={cx("rounded border p-1.5", ribFlip ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Flip material side"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
         </> : kind === "extrude" ? <>
@@ -510,7 +516,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
           {end !== "through" && <label className="flex items-center gap-1.5 text-[12.5px]">{mode === "add" ? "Distance" : "Depth"}<Input value={dist} onChange={e => setDist(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" />mm</label>}
           {end !== "mid" && <Tip content="Reverse direction" side="top"><button onClick={() => setReverse(!reverse)} className={cx("rounded border p-1.5", reverse ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>}
         </> : <label className="flex items-center gap-1.5 text-[12.5px]">Angle<Input value={angle} onChange={e => setAngle(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" />°</label>}
-        <Button size="sm" loading={busy} onClick={finish} icon={<Check className="h-4 w-4" />}>{editing ? "Update" : "Exit sketch & create"}</Button>
+        <Button size="sm" loading={busy} onClick={finish} icon={<Check className="h-4 w-4" />}>{editing ? "Update" : kind === "sketch" ? "Exit sketch" : "Exit sketch & create"}</Button>
         <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>
     </div>

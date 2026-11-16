@@ -75,8 +75,9 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   (manual ops: sketch extrude with blind / mid-plane / through-all ends, revolve about a centerline, hole,
   fillet, chamfer, shell, draft (faces tapered about a neutral face), rib (an open sketch profile thickened to
   the walls), mirror of the body or of selected earlier bosses/cuts/revolves/holes about a plane, and
-  linear/circular patterns of earlier features; `plane` entries are reference planes only, and a sketch with
-  `plane_ref` sits on that plane). To add your own geometry
+  linear/circular patterns of earlier features; `plane` entries are reference planes and `sketch2d` entries are
+  sketches kept in the tree (no geometry); a sketch with `plane_ref` sits on that plane; `sweep` sweeps its `profile`
+  sketch along its `path` sketch, `loft` blends its `sections` sketches in order). To add your own geometry
   to such a part, build it into `result` before the manual block (or fold the manual features into code if asked).
 - If the prompt mentions reference images under `refs/`, Read them first. Treat them as references
   for shape and proportions; ask for a real dimension if no scale is given.

@@ -563,8 +563,22 @@ export class CadViewer {
   }
 
   setSketchPreview(s: SketchPreview | null) {
-    if (this.sketchObj) { this.scene.remove(this.sketchObj); this.sketchObj = null; }
+    if (this.sketchObj) {
+      const parts = this.sketchObj instanceof THREE.Group ? [...this.sketchObj.children] : [this.sketchObj];
+      this.scene.remove(this.sketchObj); this.dropAll(parts); this.sketchObj = null;
+    }
     if (!s) return;
+    if (s.kind === "lines") {
+      const g = new THREE.Group();
+      for (const pl of s.lines ?? []) if (pl.length > 1) g.add(this.fatLine(pl.flat(), 0x2fa36b, 3, new THREE.Vector3()));
+      this.sketchObj = g; this.scene.add(g);
+      if (!this.topo && s.lines?.length) { // nothing modelled yet: frame the sketches themselves
+        this.box = new THREE.Box3().setFromPoints(s.lines.flat().map(p => new THREE.Vector3(...p)));
+        this.radius = Math.max(this.box.getSize(new THREE.Vector3()).length() / 2, 1);
+        this.setView("Iso");
+      }
+      return;
+    }
     const o = new THREE.Vector3(...s.origin), n = new THREE.Vector3(...s.normal).normalize(), x = new THREE.Vector3(...s.xDir).normalize();
     const y = n.clone().cross(x).normalize();
     const at = (u: number, v: number) => o.clone().addScaledVector(x, u + s.cx).addScaledVector(y, v + s.cy).addScaledVector(n, this.radius * 0.002);

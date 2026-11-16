@@ -17,6 +17,7 @@ from build123d import (
     Axis,
     Circle,
     Cylinder,
+    Edge,
     Face,
     Line,
     Location,
@@ -25,14 +26,17 @@ from build123d import (
     Pos,
     Rectangle,
     ThreePointArc,
+    Transition,
     Vector,
     Wire,
     chamfer,
     extrude,
     fillet,
+    loft,
     mirror,
     offset,
     revolve,
+    sweep,
 )
 
 from aicad import refplane as _refplane
@@ -310,8 +314,9 @@ def sketch_region(profiles: list[dict[str, Any]]) -> Any:
     return region
 
 
-TOOL_OPS = {"sketch", "extrude", "revolve", "hole"}
-BASE_OPS = {"sketch", "extrude", "revolve"}  # can create the first solid of a hand-modelled part
+TOOL_OPS = {"sketch", "extrude", "revolve", "hole", "sweep", "loft"}
+BASE_OPS = {"sketch", "extrude", "revolve", "sweep", "loft"}  # can create the first solid of a hand-modelled part
+SKETCH_USERS = {"sweep": ("profile", "path"), "loft": ("sections",)}  # features that consume sketch nodes (by id)
 NON_GEOMETRIC = _refplane.NON_GEOMETRIC
 ref_plane = _refplane.ref_plane
 
@@ -358,6 +363,13 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
         if not 0 < angle <= 360:
             raise ValueError("revolve angle must be between 0 and 360 degrees")
         return revolve(region, axis=_sketch_axis(plane, f["axis"]), revolution_arc=angle)
+    if op == "sweep":
+        prof, path = f["_profile"], f["_path"]
+        face = _plane(prof["plane"]) * _sketch_face(prof, "sweep profile")
+        return sweep(face, path=_path_wire(path), transition=Transition.RIGHT)
+    if op == "loft":
+        sections = [_plane(s["plane"]) * _sketch_face(s, "loft section", single=True) for s in f["_sections"]]
+        return loft(sections, ruled=bool(f.get("ruled")))
     if op == "hole":
         n = _v(f["normal"]).normalized()
         depth = float(f["depth"]) if f.get("depth") else diag * 2
@@ -372,6 +384,48 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
             return [Location(step * i) * tool for i in range(count)]
         return tool
     raise ValueError(f"operation {op!r} has no tool body")
+
+
+def _sketch_face(sk: dict[str, Any], what: str, single: bool = False) -> Any:
+    """Region of a sketch node's closed profiles (holes allowed unless `single`)."""
+    if not sk.get("profiles"):
+        raise ValueError(f"the {what} sketch '{sk.get('name', '')}' has no closed profile")
+    region = sketch_region(sk["profiles"])
+    if single and len(region.faces()) != 1:
+        raise ValueError(f"each {what} must be one closed profile ('{sk.get('name', '')}' has several)")
+    return region
+
+
+def _path_wire(sk: dict[str, Any]) -> Any:
+    """Sweep path: the sketch's one open chain of lines/arcs, or its one closed loop."""
+    plane = _plane(sk["plane"])
+    chains = sk.get("chains") or []
+    if len(chains) > 1:
+        raise ValueError(f"the path sketch '{sk.get('name', '')}' must be one connected chain of lines/arcs")
+    if chains:
+        return plane * Wire(_seg_edges(chains[0])[0])
+    loops = sk.get("profiles") or []
+    if len(loops) != 1:
+        raise ValueError(f"the path sketch '{sk.get('name', '')}' needs one connected chain or one closed loop")
+    lp = loops[0]
+    if lp["kind"] == "circle":
+        return plane * Wire([Pos(float(lp["cx"]), float(lp["cy"])) * Edge.make_circle(float(lp["r"]))])
+    return plane * Wire(_seg_edges(lp["segs"])[0])
+
+
+def _with_sketches(f: dict[str, Any], sketches: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Attach the sketch nodes a sweep/loft uses (resolved, on their current planes) for this build."""
+    def get(i: Any, role: str) -> dict[str, Any]:
+        sk = sketches.get(str(i))
+        if sk is None:
+            raise ValueError(f"its {role} sketch is missing (deleted?)")
+        return sk
+    if f["op"] == "sweep":
+        return {**f, "_profile": get(f.get("profile"), "profile"), "_path": get(f.get("path"), "path")}
+    secs = f.get("sections") or []
+    if len(secs) < 2:
+        raise ValueError("a loft needs at least two section sketches")
+    return {**f, "_sections": [get(i, "section") for i in secs]}
 
 
 def _is_cut(f: dict[str, Any]) -> bool:
@@ -516,7 +570,7 @@ def _sources(f: dict[str, Any], done: dict[str, dict[str, Any]] | None, verb: st
         raise ValueError(f"a {verb} feature is missing, suppressed or comes later in the tree")
     for src in sources:
         if src["op"] not in TOOL_OPS:
-            raise ValueError(f"'{src.get('name', src['op'])}' can't be {verb} (bosses, cuts, revolves, holes)")
+            raise ValueError(f"'{src.get('name', src['op'])}' can't be {verb} (bosses, cuts, revolves, sweeps, lofts, holes)")
     return [s for s in sources if s is not None]
 
 
@@ -574,6 +628,10 @@ def _diag(part: Any, features: list[dict[str, Any]]) -> float:
     for f in features:
         for c in (f.get("plane") or {}).get("origin") or f.get("point") or []:
             ext = max(ext, abs(float(c)))
+        for ch in f.get("chains", []) or []:
+            for sg in ch:
+                for u, v in (sg["a"], sg["b"]):
+                    ext = max(ext, abs(float(u)), abs(float(v)))
         for pr in f.get("profiles", []):
             r = float(pr.get("r", 0))
             pts = [(pr.get("cx", 0), pr.get("cy", 0))] if pr.get("kind") == "circle" else [sg["a"] for sg in pr.get("segs", [])]
@@ -593,6 +651,8 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
     # Reference planes resolve from their own numbers, independent of tree order. A sketch attached to one
     # (plane_ref) follows it; if the plane was deleted, the sketch keeps the placement it had.
     planes = {str(f.get("id", "")): ref_plane(f) for f in features if f["op"] == "plane"}
+    sketches = {str(f.get("id", "")): ({**f, "plane": planes[str(f["plane_ref"])]} if f.get("plane_ref") in planes else f)
+                for f in features if f["op"] == "sketch2d"}
     for f in features:
         if f.get("suppressed"):
             continue
@@ -601,6 +661,8 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
         if f.get("plane_ref") in planes:
             f = {**f, "plane": planes[str(f["plane_ref"])]}
         try:
+            if f["op"] in SKETCH_USERS:
+                f = _with_sketches(f, sketches)
             part = _op(part, f, diag, done)
         except Exception as e:
             raise ValueError(f"manual feature '{f.get('name', f.get('op'))}' failed: {e}") from e

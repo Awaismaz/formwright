@@ -17,7 +17,7 @@ import Chat from "./studio/Chat";
 import FeatureManager, { planePreview, selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
 import CommandManager, { type Command, type MakeModule } from "./studio/CommandManager";
 import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
-import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
+import { offsetPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { SimilarPartsDialog } from "@/components/SimilarParts";
@@ -111,7 +111,7 @@ export default function ProjectStudio() {
   };
   const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
     if (op === "revolve" && !ed) { openPm("sketch", null, { feature: "revolve", ...(preset ?? {}) }); return; }
-    if (op === "sketch" || op === "revolve" || op === "rib") {
+    if (op === "sketch" || op === "revolve" || op === "rib" || op === "sketch2d") {
       if (ed?.plane) {
         const pl = ed.plane; const n = pl.normal as V3;
         const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6
@@ -202,7 +202,11 @@ export default function ProjectStudio() {
                   onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`)}
                   onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onSketchOn={f => openSketchOnRef(f, sk?.phase === "pick" ? sk.preset : undefined)}
-                  onPreviewPlane={f => { if (!pm && !sk) setSketch(f?.plane ? planePreview(f.plane.origin, f.plane.normal, topo) : null); }}
+                  onPreviewPlane={f => { if (pm || sk) return;
+                    if (!f?.plane) { setSketch(null); return; }
+                    const pl = { origin: f.plane.origin, normal: f.plane.normal, x_dir: f.plane.x_dir ?? xDirFor(f.plane.normal) };
+                    setSketch(f.op === "sketch2d" ? { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines: sketchLines(pl, f.profiles, f.chains), cx: 0, cy: 0 }
+                      : planePreview(f.plane.origin, f.plane.normal, topo)); }}
                   onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
@@ -243,7 +247,8 @@ export default function ProjectStudio() {
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
-            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
+            empty={mf.length ? <div className="absolute bottom-10 rounded bg-panel/90 px-3 py-1.5 text-[12.5px] text-muted shadow-card">No solid yet: {mf.length} reference feature(s) in the tree. Add a boss, revolve, sweep or loft to create the body.</div>
+              : <div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 <button onClick={() => openPm("sketch", null, { feature: "extrude", mode: "add" })} className="pointer-events-auto rounded-md border border-primary/50 bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary hover:border-primary">Sketch on a plane</button>
                 <button onClick={() => { setTbInit(null); setDialog("toolbox"); }} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Toolbox component</button>

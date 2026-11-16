@@ -40,7 +40,7 @@ export function nextName(base: string, existing: { name: string }[]): string {
 
 export const FEATURE_LABEL: Record<string, string> = {
   fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror",
-  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane", draft: "Draft", rib: "Rib",
+  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane", draft: "Draft", rib: "Rib", sketch2d: "Sketch", sweep: "Sweep", loft: "Loft",
 };
 
 /**
@@ -62,4 +62,34 @@ export function resolveRefPlane(base: PlaneDef, offset: number, angle: number, a
   }
   const off = Number.isFinite(offset) ? offset : 0;
   return { origin: [base.origin[0] + n[0] * off, base.origin[1] + n[1] * off, base.origin[2] + n[2] * off], normal: n, x_dir: x };
+}
+
+type Seg2 = { type: string; a: [number, number]; b: [number, number]; m?: [number, number] };
+type Prof2 = { kind: "circle"; cx: number; cy: number; r: number } | { kind: "loop"; segs: Seg2[] };
+
+/** World-space polylines of a saved sketch (closed profiles and open chains) on its plane, for the 3D viewer. */
+export function sketchLines(plane: PlaneDef, profiles: unknown[] = [], chains: unknown[] = []): V3[][] {
+  const n = plane.normal, x = plane.x_dir;
+  const y: V3 = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]];
+  const to3 = (u: number, v: number): V3 => [plane.origin[0] + x[0] * u + y[0] * v, plane.origin[1] + x[1] * u + y[1] * v, plane.origin[2] + x[2] * u + y[2] * v];
+  const norm = (t: number) => ((t % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  const seg = (g: Seg2): V3[] => {
+    if (g.type !== "arc" || !g.m) return [to3(...g.a), to3(...g.b)];
+    const [ax, ay] = g.a, [mx, my] = g.m, [bx, by] = g.b;
+    const d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my));
+    if (Math.abs(d) < 1e-12) return [to3(...g.a), to3(...g.b)];
+    const ux = ((ax * ax + ay * ay) * (my - by) + (mx * mx + my * my) * (by - ay) + (bx * bx + by * by) * (ay - my)) / d;
+    const uy = ((ax * ax + ay * ay) * (bx - mx) + (mx * mx + my * my) * (ax - bx) + (bx * bx + by * by) * (mx - ax)) / d;
+    const r = Math.hypot(ax - ux, ay - uy);
+    const t0 = Math.atan2(ay - uy, ax - ux), tm = Math.atan2(my - uy, mx - ux), t1 = Math.atan2(by - uy, bx - ux);
+    const sweep = norm(tm - t0) < norm(t1 - t0) ? norm(t1 - t0) : -norm(t0 - t1);
+    return Array.from({ length: 33 }, (_, i) => to3(ux + r * Math.cos(t0 + (sweep * i) / 32), uy + r * Math.sin(t0 + (sweep * i) / 32)));
+  };
+  const out: V3[][] = [];
+  for (const p of profiles as Prof2[]) {
+    if (p.kind === "circle") out.push(Array.from({ length: 65 }, (_, i) => to3(p.cx + p.r * Math.cos((i / 64) * 2 * Math.PI), p.cy + p.r * Math.sin((i / 64) * 2 * Math.PI))));
+    else out.push(p.segs.flatMap((g, i) => (i ? seg(g).slice(1) : seg(g))));
+  }
+  for (const ch of chains as Seg2[][]) out.push(ch.flatMap((g, i) => (i ? seg(g).slice(1) : seg(g))));
+  return out;
 }

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-NON_GEOMETRIC = {"plane"}  # manual ops that are reference geometry only: recorded in the tree, never change the solid
+NON_GEOMETRIC = {"plane", "sketch2d"}  # reference planes and sketch nodes: in the tree, never change the solid
 
 V = tuple[float, float, float]
 

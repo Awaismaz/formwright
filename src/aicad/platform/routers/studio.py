@@ -111,7 +111,8 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
+       "sketch2d", "sweep", "loft"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -314,6 +315,34 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sketch2d":  # a sketch kept as a tree node (no feature): consumed by sweeps and lofts
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        if f.get("plane_ref"):
+            out["plane_ref"] = str(f["plane_ref"])[:40]
+        profs, chains = f.get("profiles") or [], f.get("chains") or []
+        if not profs and not chains:
+            raise HTTPException(422, "The sketch is empty")
+        out["profiles"] = _profiles(profs) if profs else []
+        if not isinstance(chains, list) or len(chains) > 20:
+            raise HTTPException(422, "The sketch has too many open chains")
+        out["chains"] = [_segs(ch) for ch in chains]
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sweep":
+        out["profile"], out["path"] = str(f.get("profile") or "")[:40], str(f.get("path") or "")[:40]
+        if not out["profile"] or not out["path"]:
+            raise HTTPException(422, "Choose a profile sketch and a path sketch")
+        if out["profile"] == out["path"]:
+            raise HTTPException(422, "The profile and the path must be different sketches")
+        out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+    elif op == "loft":
+        secs = f.get("sections") or []
+        if not isinstance(secs, list) or not 2 <= len(secs) <= 20 or len(set(map(str, secs))) != len(secs):
+            raise HTTPException(422, "Choose 2–20 different section sketches, in order")
+        out["sections"] = [str(s)[:40] for s in secs]
+        out["ruled"] = bool(f.get("ruled"))
+        out["mode"] = "cut" if f.get("mode") == "cut" else "add"
     elif op == "plane":
         out["base"] = _sketch_plane(f.get("base") or {})
         out["base_name"] = str(f.get("base_name") or "")[:60]
@@ -600,6 +629,10 @@ async def delete_manual(project_id: str, fid: str, ctx: Ctx = Depends(verified_c
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not any(f["id"] == fid for f in fs):
             raise HTTPException(404, "Feature not found")
+        users = [f["name"] for f in fs if fid in (f.get("profile"), f.get("path"), *(f.get("sections") or []))]
+        if users:
+            name = next(f["name"] for f in fs if f["id"] == fid)
+            raise HTTPException(422, f"“{name}” is used by {', '.join(users)}. Delete or edit {users[0]} first.")
         return [f for f in fs if f["id"] != fid]
     return await _apply_manual(ctx, project_id, mutate, "deleted")
 

@@ -12,7 +12,7 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
 | 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | Done | see git log "DS-026 (2)" |
 | 3 | Reference plane features | Done | see git log "DS-026 (3)" |
 | 4 | Draft and Rib | Done | see git log "DS-026 (4)" |
-| 5 | Sweep and Loft (sketch-only tree nodes) | Not started | |
+| 5 | Sweep and Loft (sketch-only tree nodes) | Done | see git log "DS-026 (5)" |
 | 6 | Feature tree polish (rollback, rename, context menu) | Not started | |
 
 ## 1. Sketcher tools (Done)
@@ -191,10 +191,60 @@ None), then a 20×10×10 boss on it: volume 2000, bbox z 5..15.
   1492.794219 (hand calculation from the drawn points: 1492.794220).
 - Screenshots reviewed: Draft PM with both boxes filled, drafted block, rib sketch with projected walls, rib on the bracket.
 
+## 5. Sweep and Loft with sketch nodes (Done)
+
+**What was built**
+- **Sketch nodes** (`op: "sketch2d"`, tree name "Sketch1"), as in SOLIDWORKS. The ribbon's **Sketch** button now opens a sketch whose default exit is
+  **Sketch only** (you can still switch to Extrude, Revolve or Rib). It saves the closed profiles and open chains as a tree node with
+  no geometry. Sketch nodes can sit on reference planes (`plane_ref`), are edited by clicking them in the tree, draw in green
+  in the viewer while hovered, and can come before any solid (saved without a build).
+- **Swept Boss/Base and Swept Cut** (`op: "sweep"`): `profile` = a sketch node's closed profiles (holes allowed, giving a
+  hollow sweep), `path` = a sketch node's one open chain of lines/arcs (or one closed loop). OCCT pipe with mitred corners
+  (`Transition.RIGHT`; checked against π·r²·L on an L-shaped path, where TRANSFORMED was wrong).
+- **Lofted Boss/Base and Lofted Cut** (`op: "loft"`): two or more section sketch nodes in order, each exactly one closed profile;
+  **Ruled** option.
+- Sweeps and lofts are tool features: they can start a part, and can be patterned and mirrored. The sketches are resolved by id at
+  build time (on their current planes), so editing a sketch or its plane updates the sweep/loft.
+- Deleting a sketch that a feature uses is refused: "“Sketch2” is used by Sweep1. Delete or edit Sweep1 first."
+  A missing reference gives a clean error, and the model is restored.
+- PropertyManagers: Sweep has profile and path pickers (sketch nodes, with the open-chain ones labelled) and a green 3D preview of both
+  sketches. Loft has sections clicked in order (numbered badges), Clear, and Ruled. Both have Boss/Cut and a guidance note when the
+  tree has fewer than two sketches. Ribbon: Swept Boss/Base, Lofted Boss/Base, Swept Cut, Lofted Cut.
+- Viewer: when nothing is modelled yet, the camera frames the sketch preview. The empty-state prompt becomes a short "No
+  solid yet" note once the tree has features, and its overlay no longer blocks orbiting. The preview lines are disposed on change (they
+  used to leak materials).
+- Agent prompt lists `sketch2d`, `sweep` and `loft`.
+
+**Tests**: `test_sweep_from_sketch_nodes`:
+- R5 along up-20 plus a quarter arc R30: π·25·(20 + 15π), by Pappus.
+- A swept cut R2 along the same path: π·21·L.
+- Mirror of both about the end face (x = 30): a U-tube of 2·π·21·L.
+- Deleting a used sketch gives 422 "is used by Sweep1"; bad references give 422; a missing path sketch gives a clean error.
+
+`test_loft_between_sketch_nodes`:
+- Squares 20 to 10 over 20 mm, ruled: h/3·(A1 + A2 + √(A1·A2)) = 4666.667.
+- Circles R10 → R5 → R10, ruled: 2·π·20/3·175.
+- Two circle sections, smooth: same as ruled.
+- A section with two loops gives 422 "one closed profile"; one section or a duplicate gives 422.
+
+**Browser walkthrough** (`sweep-loft.mjs`; the only console error is the intentional 422 from deleting a used sketch):
+- New part: **Sketch** on Top → R5 circle → Exit sketch (Sketch1, no build). **Sketch** on Front → line (0,0)→(0,20) plus a
+  centre-point arc about (30,20) → Exit sketch (Sketch2, an open chain). Swept Boss/Base PM (green profile and path framed in 3D)
+  → **5271.897977 mm³** (π·25·(20 + 15π) = 5271.897977), bbox 35 × 10 × 55. Hovering Sketch2 draws the path on the part.
+  Deleting Sketch2 → "“Sketch2” is used by Sweep1. Delete or edit Sweep1 first."
+- Loft: Sketch1 = 20×20 square on Top, Sketch2 = 10×10 on Top +20 → Lofted Boss/Base with sections 1, 2 →
+  **4666.666667 mm³** (frustum 4666.666667).
+- Screenshots reviewed: sketch-only exit, tree with sketch nodes, sweep PM with the 3D preview, swept elbow with the hovered path,
+  loft PM with ordered sections, lofted frustum.
+
 ## Parked decisions
 - PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),
   not "YZ through the model centre" as before. Existing features keep their stored plane.
 - PD (draft pull default): the default pull direction points into the part from the neutral face (a positive angle narrows
   the part away from it), with Reverse available. SOLIDWORKS shows a pull arrow instead; we use a fixed default plus Reverse.
+- PD (Sketch button default): the ribbon **Sketch** button now opens a sketch that defaults to "Sketch only" (a tree
+  node), as in SOLIDWORKS. Extruded/Revolved Boss and Cut still default to their feature. The sketch exit bar lets you switch.
+- PD (sweep options): mitred corners, no twist/guide curves, and the profile is swept as placed (the user puts it at the
+  path start). Loft: no guide curves or start/end tangency.
 - PD (rib options): symmetric thickness only, extruded within the sketch plane ("parallel to sketch"). There is no one-sided
   thickness, "normal to sketch" direction or rib draft yet.

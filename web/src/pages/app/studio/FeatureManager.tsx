@@ -6,12 +6,12 @@ import type { ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Button, Field, Input, Tip } from "@/components/ui";
 import { describe, edgeMid } from "@/viewer/measure";
-import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
+import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
-export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft" };
-const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole"]);
+export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib" | "sketch2d">;
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base" };
+const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole", "sweep", "loft"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
 
@@ -71,6 +71,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const patKind0 = (e?.kind ?? (pre.kind as "linear" | "circular" | undefined) ?? "linear");
   const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
     : op === "mirror" ? nextName("Mirror", manual) : op === "plane" ? nextName("Plane", manual) : op === "draft" ? nextName("Draft", manual)
+    : op === "sweep" ? nextName(pre.mode === "cut" ? "Cut-Sweep" : "Sweep", manual) : op === "loft" ? nextName(pre.mode === "cut" ? "Cut-Loft" : "Loft", manual)
     : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
   // feature pattern
   const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
@@ -105,6 +106,15 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [cy_, setCy] = useState(String(e?.sketch?.cy ?? 0));
   const [dist, setDist] = useState(String(e?.distance ?? 5));
   const [mode, setMode] = useState<"add" | "cut">(e?.mode ?? (pre.mode as "add" | "cut") ?? "add");
+  // sweep / loft: sketch nodes from the tree
+  const sketchNodes = manual.filter(m => m.op === "sketch2d");
+  const closedNodes = sketchNodes.filter(m => (m.profiles?.length ?? 0) > 0);
+  const [swProfile, setSwProfile] = useState<string>(e?.profile ?? closedNodes[0]?.id ?? "");
+  const [swPath, setSwPath] = useState<string>(e?.path ?? sketchNodes.find(m => (m.chains?.length ?? 0) > 0)?.id ?? sketchNodes.find(m => m.id !== (e?.profile ?? closedNodes[0]?.id))?.id ?? "");
+  const [loftSecs, setLoftSecs] = useState<string[]>(e?.sections ?? []);
+  const [ruled, setRuled] = useState(!!e?.ruled);
+  const usedSketches = op === "sweep" ? [swProfile, swPath] : op === "loft" ? loftSecs : [];
+  const sketchPreviewKey = usedSketches.join(",");
   // draft: a neutral face, then the faces to draft (the next picked face fills the active box)
   const [neutral, setNeutral] = useState<{ point: V3; normal: V3; label: string } | null>(e?.neutral ? { ...e.neutral, label: "Original neutral face" } : null);
   const [draftBox, setDraftBox] = useState<"neutral" | "faces">(e?.neutral ? "faces" : "neutral");
@@ -170,8 +180,12 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     else if (op === "hole" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind: "circle", r: num(size) / 2, cx: 0, cy: 0 });
     else if (mirrorPl) onSketch(planePreview(mirrorPl.origin, mirrorPl.normal, topo));
     else if (refResolved) onSketch(planePreview(refResolved.origin, refResolved.normal, topo));
+    else if (op === "sweep" || op === "loft") {
+      const lines = usedSketches.flatMap(id => { const s = sketchNodes.find(m => m.id === id); return s?.plane ? sketchLines({ origin: s.plane.origin, normal: s.plane.normal, x_dir: s.plane.x_dir ?? xDirFor(s.plane.normal) }, s.profiles, s.chains) : []; });
+      onSketch(lines.length ? { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines, cx: 0, cy: 0 } : null);
+    }
     else onSketch(null);
-  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(","), refResolved?.origin.join(","), refResolved?.normal.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(","), refResolved?.origin.join(","), refResolved?.normal.join(","), sketchPreviewKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onSketch(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (op === "pattern" && picked) { setAxisKey("pick"); if (patKind === "circular") setAxOrigin(picked.origin.map(fmt) as [string, string, string]); } }, [picked?.label, patKind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -186,6 +200,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "shell" ? (planarFaces.length > 0 || !!e?.faces?.length)
     : op === "mirror" ? !!mirrorPl && (mirrorWhat === "body" || sources.length > 0)
     : op === "plane" ? !!planeBase && Number.isFinite(num(planeOff)) && Number.isFinite(num(planeAng))
+    : op === "sweep" ? !!swProfile && !!swPath && swProfile !== swPath
+    : op === "loft" ? loftSecs.length >= 2
     : op === "draft" ? !!neutral && (draftFaces.length > 0 || !!e?.faces?.length) && num(draftAngle) > 0
     : !!plane;
 
@@ -207,6 +223,10 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     } else if (op === "shell") {
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
+    } else if (op === "sweep") {
+      f = { ...f, profile: swProfile, path: swPath, mode };
+    } else if (op === "loft") {
+      f = { ...f, sections: loftSecs, ruled, mode };
     } else if (op === "draft") {
       const faces = draftFaces.length && topo ? draftFaces.map(p => { const fc = topo.faces[p.id]!; return fc.type === "plane" && fc.normal ? { point: p.point, normal: fc.normal } : { point: p.point }; }) : e?.faces;
       f = { ...f, neutral: { point: neutral!.point, normal: neutral!.normal }, faces, angle: num(draftAngle), reverse: draftRev };
@@ -232,7 +252,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const featurePicker = (label: string, verb: string) => (
     <div className="rounded-lg border border-border bg-panel2 p-2.5">
       <div className="label mb-1">{label}</div>
-      {candidates.length === 0 ? <p className="text-[12px] text-muted">Add a boss, cut, revolve or hole first. Fillets and shells are not {verb}.</p>
+      {candidates.length === 0 ? <p className="text-[12px] text-muted">Add a boss, cut, revolve, sweep, loft or hole first. Fillets and shells are not {verb}.</p>
         : <ul className="space-y-0.5">{candidates.map(m => (
           <li key={m.id}><label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-text/5">
             <input type="checkbox" checked={sources.includes(m.id)} onChange={ev => setSources(s => ev.target.checked ? [...s, m.id] : s.filter(x => x !== m.id))} />
@@ -252,12 +272,35 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-primary-soft to-transparent px-3 py-2.5">
-        <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : op === "pattern" ? (patKind === "circular" ? "Circular Pattern" : "Linear Pattern") : TITLE[op]}</span>
+        <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : op === "pattern" ? (patKind === "circular" ? "Circular Pattern" : "Linear Pattern") : op === "sweep" ? (mode === "cut" ? "Swept Cut" : "Swept Boss/Base") : op === "loft" ? (mode === "cut" ? "Lofted Cut" : "Lofted Boss/Base") : TITLE[op]}</span>
         <button onClick={submit} disabled={!ready || busy} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button>
         <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
-        {op === "draft" ? <>
+        {op === "sweep" || op === "loft" ? <>
+          {sketchNodes.length < 2 && <p className="flex gap-1 rounded-lg border border-warning/40 bg-warning/5 p-2.5 text-[12px]"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <span>{op === "sweep" ? "A sweep needs two sketches in the tree: a closed profile, and a path (an open chain of lines/arcs) that starts where the profile is, across it."
+              : "A loft needs two or more sketches with one closed profile each, usually on parallel or offset planes."} Make each with <b>Sketch</b> on a plane, then choose <b>Sketch only</b> and <b>Exit sketch</b>.</span></p>}
+          {op === "sweep" ? <>
+            <Field label="Profile (closed sketch)"><select value={swProfile} onChange={ev => setSwProfile(ev.target.value)} className="h-8 w-full rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="Profile sketch">
+              <option value="">Choose a sketch…</option>{sketchNodes.map(m => <option key={m.id} value={m.id} disabled={!(m.profiles?.length)}>{m.name}{m.profiles?.length ? "" : " (no closed profile)"}</option>)}</select></Field>
+            <Field label="Path (open chain or one loop)"><select value={swPath} onChange={ev => setSwPath(ev.target.value)} className="h-8 w-full rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="Path sketch">
+              <option value="">Choose a sketch…</option>{sketchNodes.map(m => <option key={m.id} value={m.id} disabled={m.id === swProfile}>{m.name}{m.chains?.length ? " (open chain)" : ""}</option>)}</select></Field>
+            <p className="text-[11.5px] text-muted">The profile is swept along the path; sharp corners are mitred. The green lines show both sketches.</p>
+          </> : <>
+            <div className="rounded-lg border border-border bg-panel2 p-2.5">
+              <div className="label mb-1 flex items-center">Sections, in order{loftSecs.length > 0 && <button onClick={() => setLoftSecs([])} className="ml-auto text-[11px] font-normal normal-case text-primary hover:underline">Clear</button>}</div>
+              {closedNodes.length === 0 ? <p className="text-[12px] text-muted">No sketches with a closed profile yet.</p>
+                : <ul className="space-y-0.5">{closedNodes.map(m => { const k = loftSecs.indexOf(m.id); return (
+                  <li key={m.id}><button onClick={() => setLoftSecs(s => (k >= 0 ? s.filter(x => x !== m.id) : [...s, m.id]))} className={cx("flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-[12.5px] hover:bg-text/5", k >= 0 && "bg-primary-soft")}>
+                    <span className={cx("flex h-5 w-5 items-center justify-center rounded-full text-[10.5px] font-semibold", k >= 0 ? "bg-primary text-white" : "border border-border text-muted")}>{k >= 0 ? k + 1 : ""}</span>{m.name}</button></li>); })}</ul>}
+              <p className="mt-1 text-[11.5px] text-muted">Click the sketches in the order the loft passes through them.</p>
+            </div>
+            <label className="flex items-center gap-2 text-[12.5px]"><input type="checkbox" checked={ruled} onChange={ev => setRuled(ev.target.checked)} />Ruled (straight between sections)</label>
+          </>}
+          <div>{seg<"add" | "cut">([["add", op === "sweep" ? "Swept Boss" : "Lofted Boss"], ["cut", op === "sweep" ? "Swept Cut" : "Lofted Cut"]], mode, m => { if (m === "cut" && !topo) return; setMode(m); })}</div>
+          <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+        </> : op === "draft" ? <>
           {(["neutral", "faces"] as const).map(b => (
             <button key={b} onClick={() => setDraftBox(b)} className={cx("block w-full rounded-lg border p-2.5 text-left", draftBox === b ? "border-primary bg-primary-soft/40" : "border-border bg-panel2")}>
               <div className="label mb-1">{b === "neutral" ? "Neutral plane (a planar face)" : "Faces to draft"}</div>

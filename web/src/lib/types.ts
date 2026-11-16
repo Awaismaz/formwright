@@ -58,7 +58,7 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft"; name: string; suppressed: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
   axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
   source?: string[]; kind?: "linear" | "circular";
@@ -77,6 +77,8 @@ export interface ManualFeature {
   offset?: number; rot_axis?: "x" | "y";
   /** sketch attached to a reference plane feature (follows it when the plane is edited) */
   plane_ref?: string;
+  /** sweep: profile and path sketch node ids; loft: section sketch node ids in order */
+  profile?: string; path?: string; sections?: string[]; ruled?: boolean;
 }
 
 export interface Project {

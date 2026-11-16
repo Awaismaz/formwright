@@ -28,7 +28,9 @@ export type ViewName = "Iso" | "Front" | "Back" | "Top" | "Bottom" | "Right" | "
 
 export interface SketchPreview {
   origin: V3; normal: V3; xDir: V3;
-  kind: "rect" | "circle"; w?: number; h?: number; r?: number; cx: number; cy: number;
+  kind: "rect" | "circle" | "lines"; w?: number; h?: number; r?: number; cx: number; cy: number;
+  /** kind "lines": world-space polylines (e.g. saved sketches shown in the viewer) */
+  lines?: V3[][];
 }
 
 export function pickKey(p: Pick): string {
