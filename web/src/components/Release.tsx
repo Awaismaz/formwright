@@ -51,7 +51,7 @@ export function releaseChip(d: Deliverables | undefined): { text: string; tone: 
   const r = d.release;
   if (!r) return { text: "Not issued", tone: "neutral", tip: `Nothing has been issued yet. Issuing freezes the model, drawing and reports as Rev ${d.next_rev}.` };
   if (r.current) return { text: `Rev ${r.rev} issued`, tone: "success", tip: `Issued ${r.date ?? ""}${r.by ? ` by ${r.by}` : ""}. The model has not changed since.` };
-  return { text: `Draft · changes since Rev ${r.rev}`, tone: "warning", tip: `The model changed after Rev ${r.rev} was issued (${r.date ?? ""}). The shop still holds Rev ${r.rev}; issue Rev ${d.next_rev} when the change is ready.` };
+  return { text: `Draft since Rev ${r.rev}`, tone: "warning", tip: `The model changed after Rev ${r.rev} was issued (${r.date ?? ""}). The shop still holds Rev ${r.rev}; issue Rev ${d.next_rev} when the change is ready.` };
 }
 
 function localDay(): { local_date: string; tz: string } {

@@ -41,7 +41,7 @@ export function ModuleHeader({ code, icon, title, projectId, projectName, projec
       </div>
       {projectId && projects && onSwitch && <>
         <span className="mx-1 h-5 w-px bg-border" />
-        <select aria-label="Part" className="input h-8 w-48 py-0 text-[12.5px]" value={projectId} onChange={e => onSwitch(e.target.value || null)}>
+        <select aria-label="Part" className="input h-8 w-48 min-w-[120px] shrink py-0 text-[12.5px]" value={projectId} onChange={e => onSwitch(e.target.value || null)}>
           {projects.filter(p => !p.disabled || p.id === projectId).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           {!projects.some(p => p.id === projectId) && <option value={projectId}>{projectName ?? "Loading…"}</option>}
         </select>
@@ -59,7 +59,7 @@ function StatusChips({ code, d, onRelease }: { code: MakeCode; d: Deliverables; 
   const m = d.modules[code];
   const chip = releaseChip(d);
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex shrink-0 items-center gap-1.5">
       {d.build.model_rev && <Tip content="The model revision this module is looking at (each verified build of the part is a revision)" side="bottom">
         <span><Badge className="whitespace-nowrap">Model rev {d.build.model_rev}</Badge></span></Tip>}
       {m?.state === "stale" && <Tip content={`The part changed after this ${OUTPUT[code]} was made${m.made_from_rev ? ` (model rev ${m.made_from_rev})` : ""}. It is kept as it was until you update it.`} side="bottom">
