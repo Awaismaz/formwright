@@ -92,6 +92,47 @@ class AgentSession:
         self.busy = False
         self.session_id: str | None = None
         self.auth: str | None = None
+        self.turn_meta: dict[str, Any] = {}  # merged into the next result event (e.g. rev_before for undo)
+        self._state_dir = self.workspace / ".fw"
+        self._load()
+
+    # ------------------------------------------------------------- persistence
+    def _load(self) -> None:
+        """Restore the visible transcript and the agent session id so a server restart loses nothing."""
+        import json
+
+        try:
+            st = json.loads((self._state_dir / "agent.json").read_text(encoding="utf-8"))
+            self.session_id = st.get("session_id")
+        except (OSError, ValueError):
+            pass
+        try:
+            for line in (self._state_dir / "chat.jsonl").read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    self.history.append(json.loads(line))
+        except (OSError, ValueError):
+            pass
+
+    def _persist_event(self, ev: dict[str, Any]) -> None:
+        import json
+
+        if ev.get("type") in ("busy", "hello", "reset"):
+            return
+        try:
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            with (self._state_dir / "chat.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, default=str) + "\n")
+        except OSError:
+            pass
+
+    def _persist_session(self) -> None:
+        import json
+
+        try:
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            (self._state_dir / "agent.json").write_text(json.dumps({"session_id": self.session_id}), encoding="utf-8")
+        except OSError:
+            pass
 
     def options(self) -> ClaudeAgentOptions:
         return ClaudeAgentOptions(
@@ -106,13 +147,16 @@ class AgentSession:
                                               hooks=[make_guard(self.workspace)])]},
             max_turns=MAX_TURNS,
             model=self.model,
+            resume=self.session_id,  # continue the same agent conversation after a restart
         )
 
     def publish(self, ev: dict[str, Any]) -> None:
         ev.setdefault("t", time.time())
         if self.on_event is not None:
             self.on_event(ev)  # may enrich ev (e.g. tokens charged) before broadcast
-        self.history.append(ev)
+        if ev.get("type") not in ("busy", "hello"):
+            self.history.append(ev)
+        self._persist_event(ev)
         for q in list(self.subscribers):
             q.put_nowait(ev)
 
@@ -130,7 +174,13 @@ class AgentSession:
         self.publish({"type": "user", "text": prompt})
         self.publish({"type": "busy", "value": True})
         try:
-            client = await self.ensure_connected()
+            try:
+                client = await self.ensure_connected()
+            except Exception:
+                if not self.session_id:
+                    raise
+                self.session_id, self.client = None, None
+                client = await self.ensure_connected()
             await client.query(prompt)
             async for msg in client.receive_response():
                 self._handle(msg)
@@ -165,9 +215,11 @@ class AgentSession:
                                   "is_error": bool(b.is_error), "brief": first})
         elif isinstance(msg, ResultMessage):
             self.session_id = msg.session_id
+            self._persist_session()
             self.publish({"type": "result", "subtype": msg.subtype, "turns": msg.num_turns,
                           "duration_s": round(msg.duration_ms / 1000, 1),
-                          "cost_est_usd": msg.total_cost_usd, "auth": self.auth})
+                          "cost_est_usd": msg.total_cost_usd, "auth": self.auth, **self.turn_meta})
+            self.turn_meta = {}
 
     async def interrupt(self) -> None:
         if self.client and self.busy:
@@ -183,4 +235,11 @@ class AgentSession:
                 self.publish({"type": "error", "text": f"disconnect: {e}"})
         self.client = None
         self.history.clear()
+        self.session_id = None
+        for f in ("chat.jsonl", "agent.json"):
+            try:
+                (self._state_dir / f).unlink()
+            except OSError:
+                pass
         self.publish({"type": "reset"})
+        self.history.clear()

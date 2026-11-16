@@ -59,7 +59,12 @@ def _exec(script: Path) -> dict[str, Any]:
         for f in script.parent.glob("*.py"):
             if f.resolve() != script.resolve():
                 tripwire(f.read_text(encoding="utf-8"))
+        from aicad import fw
+
+        fw.reset()
         ns = runpy.run_path(str(script), run_name="__aicad_model__")
+        ns["__fw_log__"] = fw.log()
+        ns["__fw_manual__"] = fw.manual_count()
     finally:
         if sys.path and sys.path[0] == folder:
             sys.path.pop(0)
@@ -81,6 +86,25 @@ def _write(out: Path, status: dict[str, Any]) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(status, f, indent=2, default=str)
     os.replace(tmp, out / "status.json")
+
+
+def param_meta(raw: Any, params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Optional PARAM_META = {"NAME": {"min": .., "max": .., "step": .., "unit": "mm", "group": "..", "label": ".."}}."""
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return out
+    for k, m in raw.items():
+        if k not in params or not isinstance(m, dict):
+            continue
+        clean: dict[str, Any] = {}
+        for f in ("min", "max", "step"):
+            if isinstance(m.get(f), (int, float)) and not isinstance(m.get(f), bool):
+                clean[f] = m[f]
+        for f in ("unit", "group", "label", "help"):
+            if isinstance(m.get(f), str):
+                clean[f] = m[f][:80]
+        out[str(k)] = clean
+    return out
 
 
 def editable_params(source: str, declared: dict[str, Any]) -> dict[str, float | int]:
@@ -150,6 +174,7 @@ def main(script: Path, out: Path, determinism: bool = True) -> int:
         fe = checks.free_edge_count(shape)
         results.append(checks.CheckResult("CHK-03", "closed manifold (no free edges)", fe == 0,
                                           detail={"free_or_nonmanifold_edges": fe}))
+        manual = int(ns.get("__fw_manual__", 0) or 0)
         if "bbox" in exp:
             results.append(checks.check_bbox(shape, tuple(exp["bbox"])))  # type: ignore[arg-type]
         else:
@@ -162,6 +187,12 @@ def main(script: Path, out: Path, determinism: bool = True) -> int:
             r.passed = r.detail["rel_err"] <= tol
             r.detail["tol"] = tol
             results.append(r)
+        if manual:
+            for r in results:
+                if r.id in ("CHK-04", "CHK-05") and r.gating:
+                    r.gating = False
+                    r.name += " (informational: manual features not in EXPECTED)"
+                    r.detail["manual_features"] = manual
         else:
             results.append(checks.CheckResult("CHK-05", "volume (no expectation given)", False,
                                               gating=False, detail={"got_mm3": shape.volume}))
@@ -187,10 +218,26 @@ def main(script: Path, out: Path, determinism: bool = True) -> int:
 
         export_atomic(export_gltf, reimported, "model.glb", binary=True,
                       linear_deflection=0.01, angular_deflection=0.1)
+        from aicad.topo import export_topology, mass_properties
+
+        export_topology(reimported, out / "topo.json", ns.get("__fw_log__"))
+        mass = mass_properties(shape)
+        try:
+            from build123d import Mesher
+
+            mesher = Mesher()
+            mesher.add_shape(reimported, linear_deflection=0.01, angular_deflection=0.1)
+            tmp3 = out / "part.tmp.3mf"
+            mesher.write(str(tmp3))
+            os.replace(tmp3, out / "part.3mf")
+        except Exception:  # noqa: BLE001,S110 - 3MF is optional
+            pass
         status.update(
             ok=all(r.passed for r in results if r.gating),
             part=ns.get("NAME", script.stem), material=ns.get("MATERIAL", "unspecified"),
             params=params, editable_params=editable_params(source, params), expected=exp,
+            param_meta=param_meta(ns.get("PARAM_META"), params), mass=mass, manual_features=manual,
+            features=[{"name": e["name"], "kind": e["kind"], "params": e["params"]} for e in ns.get("__fw_log__", [])],
             fingerprint=checks.fingerprint(shape),
             step_sha256=hashlib.sha256(step.read_bytes()).hexdigest(),
             checks=checks.as_dicts(results),

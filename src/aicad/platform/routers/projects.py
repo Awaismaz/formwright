@@ -28,8 +28,9 @@ from aicad.platform.services import audit, debit, notify, org_modules, track, tr
 router = APIRouter(prefix="/api", tags=["projects"])
 
 FILES = {"model.glb": "model/gltf-binary", "status.json": "application/json", "part.step": "application/step",
-         "part.stl": "model/stl", "views.png": "image/png"}
-DOWNLOADS = {"part.step", "part.stl"}
+         "part.stl": "model/stl", "views.png": "image/png", "topo.json": "application/json",
+         "part.3mf": "model/3mf"}
+DOWNLOADS = {"part.step", "part.stl", "part.3mf"}
 
 TEMPLATES = [
     {"code": "plate", "name": "Mounting plate", "icon": "square",
@@ -67,8 +68,53 @@ class ProjectPatch(BaseModel):
     archived: bool | None = None
 
 
+class Attachment(BaseModel):
+    name: str
+    mime: str
+    data_b64: str
+
+
 class ChatIn(BaseModel):
     prompt: str
+    attachments: list[Attachment] = []
+
+
+ALLOWED_ATTACH = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
+MAX_ATTACH_BYTES = 6 * 1024 * 1024
+
+
+def save_attachments(ws: Path, atts: list[Attachment]) -> list[str]:
+    import base64
+    import uuid as _uuid
+
+    if len(atts) > 4:
+        raise HTTPException(422, "Attach at most 4 images")
+    saved = []
+    refs = ws / "refs"
+    for a in atts:
+        ext = ALLOWED_ATTACH.get(a.mime)
+        if not ext:
+            raise HTTPException(422, f"{a.name}: only PNG, JPEG, WebP or GIF images are supported")
+        try:
+            raw = base64.b64decode(a.data_b64, validate=True)
+        except ValueError:
+            raise HTTPException(422, f"{a.name}: invalid image data") from None
+        if len(raw) > MAX_ATTACH_BYTES:
+            raise HTTPException(413, f"{a.name}: image larger than 6 MB")
+        sig = {".png": b"\x89PNG", ".jpg": b"\xff\xd8", ".gif": b"GIF8", ".webp": b"RIFF"}[ext]
+        if not raw.startswith(sig):
+            raise HTTPException(422, f"{a.name}: file content doesn't match its type")
+        refs.mkdir(exist_ok=True)
+        fname = f"ref_{_uuid.uuid4().hex[:8]}{ext}"
+        (refs / fname).write_bytes(raw)
+        saved.append(f"refs/{fname}")
+    return saved
+
+
+def latest_revision(ws: Path) -> int | None:
+    root = ws / "revisions"
+    nums = [int(d.name) for d in root.iterdir() if d.is_dir() and d.name.isdigit()] if root.is_dir() else []
+    return max(nums) if nums else None
 
 
 # ------------------------------------------------------------------ agent sessions
@@ -101,6 +147,9 @@ def _snapshot(p: Project, ws: Path) -> int | None:
     d.mkdir()
     shutil.copy2(model_p, d / "model.py")
     shutil.copy2(status_p, d / "status.json")
+    for extra in ("topo.json", "part.step"):  # needed for revision overlay and compare
+        if (ws / "out" / extra).is_file():
+            shutil.copy2(ws / "out" / extra, d / extra)
     if (ws / "out" / "views.png").is_file():
         shutil.copy2(ws / "out" / "views.png", d / "views.png")
     return n
@@ -419,6 +468,10 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         was_int = isinstance(editable[name], int) and not isinstance(editable[name], bool)
         if was_int and not float(val).is_integer():
             raise HTTPException(422, f"{name} must be a whole number")
+        meta = (_read_status(ws).get("param_meta") or {}).get(name) or {}
+        if "min" in meta and val < meta["min"] or "max" in meta and val > meta["max"]:
+            raise HTTPException(422, f"{name} must be between {meta.get('min', '−∞')} and {meta.get('max', '∞')}"
+                                     f"{' ' + meta['unit'] if meta.get('unit') else ''} (limit set by the design)")
         if float(val) == float(editable[name]):
             continue
         lit = str(int(val)) if was_int else (repr(float(val)) if not float(val).is_integer() else f"{float(val):.1f}")
@@ -472,6 +525,13 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
     s = get_session(p, ctx)
     if s.busy:
         raise HTTPException(409, "The agent is still working on the previous request")
+    ws = workspace_for(p)
+    files = save_attachments(ws, body.attachments)
+    if files:
+        text += ("\n\n[Reference image(s) attached by the user: " + ", ".join(files) +
+                 ". Read them before modelling. Treat them as references: do not assume a scale — ask for at least "
+                 "one real dimension if none is given, and state what you inferred versus what you were told.]")
+    s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files}
     t = asyncio.create_task(s.send(text))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)

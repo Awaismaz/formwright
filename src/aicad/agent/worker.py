@@ -32,6 +32,26 @@ def child_env() -> dict[str, str]:
 
 
 # ----------------------------------------------------------------------------- worker side
+def _diff(a_step: Path, b_step: Path, out: Path) -> dict[str, Any]:
+    """Material added (b - a) and removed (a - b) between two STEP files, exported as topology for the viewer."""
+    from build123d import import_step
+
+    from aicad.topo import export_topology
+
+    out.mkdir(parents=True, exist_ok=True)
+    a, b = import_step(str(a_step)), import_step(str(b_step))
+    res: dict[str, Any] = {}
+    for name, shape in (("added", b - a), ("removed", a - b)):
+        vol = float(getattr(shape, "volume", 0.0) or 0.0)
+        f = out / f"{name}.json"
+        if vol > 1e-6 and shape.solids():
+            export_topology(shape, f)
+        elif f.exists():
+            f.unlink()
+        res[f"{name}_mm3"] = round(vol, 3)
+    return res
+
+
 def serve() -> None:
     proto = os.fdopen(os.dup(1), "w", encoding="utf-8", buffering=1)
     os.dup2(2, 1)  # anything a model script prints goes to stderr, never into the protocol stream
@@ -48,6 +68,8 @@ def serve() -> None:
             if req["op"] == "build":
                 rc = runner.main(Path(req["script"]), Path(req["out"]), determinism=bool(req.get("determinism", True)))
                 resp: dict[str, Any] = {"ok": True, "rc": rc}
+            elif req["op"] == "diff":
+                resp = {"ok": True, "rc": 0, **_diff(Path(req["a"]), Path(req["b"]), Path(req["out"]))}
             elif req["op"] == "render":
                 from aicad.agent.render import render
 
@@ -132,6 +154,10 @@ async def build(key: str, script: Path, out: Path, determinism: bool = True, tim
 
 async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float = 60) -> dict[str, Any]:
     return await get_worker(key).request({"op": "render", "stl": str(stl), "png": str(png), "title": title}, timeout)
+
+
+async def diff(key: str, a_step: Path, b_step: Path, out: Path, timeout: float = 180) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "diff", "a": str(a_step), "b": str(b_step), "out": str(out)}, timeout)
 
 
 async def shutdown_all() -> None:

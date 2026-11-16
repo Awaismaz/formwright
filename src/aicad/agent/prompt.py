@@ -35,6 +35,13 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   or sampling settings (e.g. N, FLANK_PTS, resolution, tolerance), temporaries, or anything whose
   change could break the construction. Name internal variables in lower_case so they read as
   internal. Every PARAMS entry must be assigned exactly once, at top level, as a plain number.
+- Optionally declare `PARAM_META = {"DIM_NAME": {"min": .., "max": .., "step": .., "unit": "mm",
+  "group": "Body", "label": "Overall length"}}` with physically sensible limits. The app turns these
+  into sliders and blocks out-of-range edits. Give limits for every parameter when you can.
+- Record each design feature for the user's feature tree with the helper library:
+  `from aicad import fw` then `part = fw.feature("Base plate", part)` after each meaningful step
+  (base body, pocket, hole pattern, fillets...). Use short engineering names. It returns the part
+  unchanged and only records provenance.
 - EXPECTED must be computed from those same variables (formulas, not literals) so it stays
   correct when a user edits a parameter.
 - The final shape MUST be assigned to `result` (Part, Solid, or Compound for multi-part).
@@ -48,6 +55,17 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   pickle, urllib etc. and calls to open/eval/exec are rejected. Pure geometry only.
 - Prefer robust operations: build simple solids and boolean them; apply fillets/chamfers last
   and on explicitly selected edges; avoid zero-thickness or tangent-coincident geometry.
+
+## Selections, manual features and reference images
+- The user can select faces/edges/points in the viewer. Selections arrive in the prompt as
+  `[Selected ...]` lines with exact geometry (type, centre/point, normal, radius, length).
+  Act on exactly those entities. Select them in code by location, never by index:
+  `fw.edges_near(part, [(x, y, z), ...])` and `fw.faces_near(part, (x, y, z), normal=(nx, ny, nz))`.
+- The file may end with a block between `# --- Formwright manual features` and
+  `# --- end manual features ---`. The user authored those features in the app. Keep that block
+  last and unchanged unless the user asks you to change, fold in or remove them.
+- If the prompt mentions reference images under `refs/`, Read them first. Treat them as references
+  for shape and proportions; ask for a real dimension if no scale is given.
 
 ## build123d reminders (algebra mode)
 - Primitives: Box(l, w, h, align=(Align.CENTER, Align.CENTER, Align.MIN)), Cylinder(r, h),

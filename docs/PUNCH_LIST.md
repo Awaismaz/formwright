@@ -204,6 +204,8 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DS-010a | Studio | DS-010 step 1: edge/face operations on selection (fillet, chamfer, hole, delete face) | P0 | Backlog | M2 | LT | Eng | DS-003 | | — | |
 | DS-010b | Studio | DS-010 step 2: sketch mode on a face with dimensions + extrude/cut | P0 | Backlog | M2 | LT | Eng | DS-010a, CAD-060 | | — | |
 | DS-010c | Studio | DS-010 step 3: feature tree edit/suppress/reorder with regeneration | P1 | Backlog | M2 | LT | Eng | DS-010b, DS-008 | | — | |
+| DS-012 | Studio | CAD orthographic projection by default (true parallel views); perspective toggle with adjustable perspective strength | P0 | In Progress | M1 | MVP | Eng | UX-004 | Front/Top/Right are true orthographic; setting persists | — | Founder request 2026-11-16 |
+| DS-013 | Studio | True CAD display modes from B-rep edges: shaded+edges, shaded, wireframe (model edges only, no triangles), hidden lines dimmed | P0 | In Progress | M1 | MVP | Eng | DS-002 | Wireframe shows only geometric edges | — | Founder-reported 2026-11-16 (triangulated wireframe) |
 | DS-011 | Studio | Quick wins: persist chat history, undo last agent change, 3MF + named-part STEP export, pre-run token estimate | P1 | Backlog | M1 | MVP | Eng | — | | — | |
 
 ## B. AI Manufacturing Advisor
