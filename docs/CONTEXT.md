@@ -49,6 +49,13 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Puppeteer e2e: Radix menus/tabs need real pointer events. Recipe + template: `.claude/skills/studio-e2e/`.
 - Second workstation (repo at `D:\AI CAD\formwright`, Windows 11 build 26300, 2026-11-16): fresh clone with **no uv, no
   `.venv`, no `web/node_modules`** yet; Node, Git, Chrome and Edge are present. Run `dev-setup` before the gate.
+- Second workstation hardware: Xeon W-2135, 12 logical CPUs, 32 GB RAM, so keep parallel CAD-building agents at
+  about 5 or fewer. Blender is not installed here. uv installed 2026-11-16 (`~/.local/bin`).
+- Orchestration (founder request 2026-11-16): the main session is the master; module agents work in git worktrees
+  `D:\AI CAD\fw-worktrees\<module>` (branch `module/<module>`), follow `docs/AGENT_BRIEF.md`, report in
+  `docs/reports/`; the master merges. Claude's built-in worktree isolation fails here (d:\ vs D:\ case), so create
+  worktrees manually with `git worktree add`.
+- Founder God-mode login exists in this machine's `data/` (see `data/ADMIN_CREDENTIALS.txt`); the app runs on 8765.
 - Workflow recipes live in project skills (`.claude/skills/`, listed in `CLAUDE.md`); `.gitignore` tracks only
   `.claude/skills/` (local settings stay ignored).
 
