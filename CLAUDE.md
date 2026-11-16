@@ -24,6 +24,13 @@ The governing brief is `CLAUDE_CODE_AI_ENGINEERING_PLATFORM_MASTER_PROMPT.md`.
 - Tests: `uv run pytest -q` (≈2–4 min, builds real CAD). Lint: `uv run ruff check src tests`.
 - Founder credentials are in `data/ADMIN_CREDENTIALS.txt` (gitignored, never commit `data/`).
 
+## Project skills (`.claude/skills/`, committed)
+`formwright-ship` (end-of-session gate + docs + push) · `formwright-review` (pre-commit checklist) ·
+`add-studio-feature` (manual CAD feature end to end) · `build123d-kernel` (kernel conventions, checks, pitfalls) ·
+`toolbox-component` · `design-agent` (in-app agent contracts) · `graduate-module` (Preview → Live, Drawing Studio next) ·
+`studio-e2e` (isolated app run + puppeteer walkthrough) · `dev-setup` (fresh machine). Update a skill when you learn
+something it should have told you.
+
 ## Rules that matter
 - Honesty labels: only Design Studio is Live; other modules are labelled **Preview**; sample data says SAMPLE.
 - Never expose agent internals in the UI (file names, tools, Python, model ids). `agent/session.py` scrubs them.

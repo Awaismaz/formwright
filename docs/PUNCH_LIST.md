@@ -1,6 +1,6 @@
 # Punch List
 
-Last updated: 2026-11-16 (Session 1d, Formwright platform). Synchronized with `ROADMAP.md`.
+Last updated: 2026-11-16 (Session 1i, project skills). Synchronized with `ROADMAP.md`.
 
 ## Legend
 
@@ -15,13 +15,13 @@ Last updated: 2026-11-16 (Session 1d, Formwright platform). Synchronized with `R
 
 | Module | Items | Done | In Progress | Blocked |
 |---|---|---|---|---|
-| GOV / ARC / LEG / COM | 32 | 15 | 1 | 7 |
+| GOV / ARC / LEG / COM | 33 | 16 | 1 | 7 |
 | CAD / IO / PRN / DRW / ASM | 67 | 0 | 8 | 2 |
 | AGT / EVAL | 22 | 1 | 2 | 1 |
 | MFG / ENG | 24 | 0 | 0 | 0 |
 | MSH | 12 | 0 | 0 | 0 |
 | PLT / SEC / UX / INF / DOC | 39 | 1 | 4 | 1 |
-| **Total** | **211** | **37** | **33** | **11** |
+| **Total** | **212** | **38** | **33** | **11** |
 
 Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboarding, tours, billing with tokens and add-ons, admin console, God mode) and the live **Design Studio** (AI agent, checks, live viewer, parameter edits, revisions). Other CAD modules are honest **Preview** placeholders (ADR-016). Per-module rows above are not re-split; the Total row is authoritative.
 
@@ -35,7 +35,8 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | GOV-002 | Governance | Create doc skeleton (7 docs) | P0 | Done | M0 | MVP | Eng | — | All 7 files exist and cross-reference | `docs/` | |
 | GOV-003 | Governance | Initial traceable punch list covering master prompt §2 | P0 | Done | M0 | MVP | Eng | GOV-002 | Every §2 bullet maps to ≥1 ID (see trace table at end) | This file §Trace | |
 | GOV-004 | Governance | Initialize git repo, `.gitignore`, commit docs | P0 | Done | M0 | MVP | Eng | approval | `git log` shows initial commit | `.git` + initial commit |  |
-| GOV-005 | Governance | Session start/end ritual (read punch list + log; update both) | P0 | In Progress | All | MVP | Eng | GOV-002 | Every session has a log entry with completed/blocked/next/decision | SESSION_LOG | Ongoing |
+| GOV-005 | Governance | Session start/end ritual (read punch list + log; update both) | P0 | In Progress | All | MVP | Eng | GOV-002 | Every session has a log entry with completed/blocked/next/decision | SESSION_LOG; `formwright-ship` skill | Ongoing |
+| GOV-006 | Governance | Project Claude Code skills for repeatable workflows (ship, review, studio feature, kernel, toolbox, design agent, module graduation, e2e, dev setup) | P1 | Done | All | MVP | Eng | GOV-005 | Skills committed in repo; CLAUDE.md lists them | `.claude/skills/*/SKILL.md`; SESSION_LOG 2026-11-16 (i) | Skills encode recipes from code as of 74dfc5d; e2e template not yet executed (toolchain missing on new machine) |
 | ARC-001 | Architecture | Initial critical architecture recommendation | P0 | Done | M0 | MVP | Eng | GOV-001 | ARCHITECTURE §1 with stack, changes, risks, wedge | ARCHITECTURE.md | Draft; approval pending |
 | ARC-002 | Architecture | Approve wedge + direction (ADR-001/002/003) | P0 | Done | M0 | MVP | Founder | ARC-001 | ADRs marked Accepted | DECISIONS ADR-001/002/003/005 Accepted 2026-11-16 | Founder: "Go ahead" |
 | ARC-003 | Architecture | Kernel comparison build123d/CadQuery/FreeCAD/OCCT | P0 | Done | M0 | MVP | Eng | — | Table with all §6 criteria | ARCHITECTURE §3.1 | Qualitative; spike ARC-010 verifies |

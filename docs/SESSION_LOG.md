@@ -4,6 +4,45 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (i): Project skills for Claude Code
+
+Founder request: "understand the project and add the relevant skills needed to get this app where it needs to be."
+
+### Done (GOV-006)
+- Nine project skills in `.claude/skills/`. Each is a recipe written from the code as of 74dfc5d, citing exact files
+  and functions:
+  - `formwright-ship`: gate, docs ritual, push
+  - `formwright-review`: product, geometry and security checklist
+  - `add-studio-feature`: every layer from `fw._op` and `validate_feature` through `types.ts`, FeatureManager,
+    CommandManager and tests; drives DS-024
+  - `build123d-kernel`: conventions, check table, determinism traps, OCP 7.9 pitfalls
+  - `toolbox-component`: tables, analytic EXPECTED, VERSION bumps, matching
+  - `design-agent`: prompt, session, scrub, block and runner contracts; AGT-015, EVAL-003
+  - `graduate-module`: ADR-016 bar for Preview → Live; Drawing Studio starting points
+  - `studio-e2e`: isolated `FW_DATA_DIR` run with its own superadmin; puppeteer template handling the CSRF header,
+    pointer clicks, tours and WebGL
+  - `dev-setup`: fresh-machine setup
+- `.gitignore`: `.claude/` → `.claude/*` + `!.claude/skills/`, so skills are versioned and local settings stay local.
+- `CLAUDE.md` lists the skills; `CONTEXT.md` machine notes cover the second workstation.
+
+### Evidence
+- `git check-ignore`: `settings.local.json` ignored, skills tracked. `node --check walkthrough.mjs` OK.
+- Gate **not run**: this machine (`D:\AI CAD\formwright`) is a fresh clone with no uv, `.venv` or `web/node_modules`.
+  This change touches only docs and skills, with no code.
+
+### Findings
+- Doc drift: VALIDATION.md defines CHK-09 as *metamorphic*, but the code uses CHK-09 for the imported-reference
+  symmetric difference. The skills follow the code; VALIDATION.md needs a renumber (not done).
+- The in-app agent uses `setting_sources=[]`, so these developer skills never reach the product agent.
+
+### Not done / limits
+- The e2e template has not been executed yet (needs the toolchain). Run it once with `dev-setup` + `studio-e2e`,
+  then fix anything it gets wrong.
+
+### Next
+`dev-setup` on this machine (installing uv needs founder OK) → full gate → DS-024 with `add-studio-feature`
+(revolve first) → Drawing Studio M1 slice with `graduate-module`.
+
 ## 2026-11-16 (h) — Exact STEP import, AI feature recognition, Studio layout
 
 Founder feedback: STEP import behaved like a geometric SOLIDWORKS-style recogniser that often fails (a gear came back

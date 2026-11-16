@@ -46,7 +46,11 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   to a file and run them. `gh` CLI is not installed; plain `git push` works (Git Credential Manager).
 - Repo: https://github.com/Awaismaz/formwright (branch `main`).
 - SOLIDWORKS 2025, Creo 11 and Blender are installed locally (useful for manual cross-checks of exported STEP).
-- Puppeteer e2e: Radix menus/tabs need real pointer events.
+- Puppeteer e2e: Radix menus/tabs need real pointer events. Recipe + template: `.claude/skills/studio-e2e/`.
+- Second workstation (repo at `D:\AI CAD\formwright`, Windows 11 build 26300, 2026-11-16): fresh clone with **no uv, no
+  `.venv`, no `web/node_modules`** yet; Node, Git, Chrome and Edge are present. Run `dev-setup` before the gate.
+- Workflow recipes live in project skills (`.claude/skills/`, listed in `CLAUDE.md`); `.gitignore` tracks only
+  `.claude/skills/` (local settings stay ignored).
 
 ## Where things stand
 See `docs/PUNCH_LIST.md` (DS-* rows for the Studio) and the latest `docs/SESSION_LOG.md` entry.
