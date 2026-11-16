@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import shutil
-import sys
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -135,15 +133,13 @@ def scenario(body: ScenarioIn, ctx: Ctx = Depends(god_ctx)) -> dict[str, Any]:
     return {"ok": True}
 
 
-async def _build(ws: Path, title: str) -> None:
-    p = await asyncio.create_subprocess_exec(sys.executable, "-I", "-m", "aicad.agent.runner", str(ws / "model.py"),
-                                             str(ws / "out"), cwd=str(ws))
-    await asyncio.wait_for(p.wait(), 180)
+async def _build(ws: Path, title: str, key: str) -> None:
+    from aicad.agent import worker
+
+    await worker.build(key, ws / "model.py", ws / "out", determinism=True)
     stl = ws / "out" / "part.stl"
     if stl.is_file():
-        r = await asyncio.create_subprocess_exec(sys.executable, "-m", "aicad.agent.render", str(stl),
-                                                 str(ws / "out" / "views.png"), title, cwd=str(ws))
-        await asyncio.wait_for(r.wait(), 60)
+        await worker.render(key, stl, ws / "out" / "views.png", title)
 
 
 @router.post("/seed-demo")
@@ -167,7 +163,7 @@ async def seed_demo(ctx: Ctx = Depends(god_ctx)) -> dict[str, Any]:
         ws = workspace_for(p)
         ws.mkdir(parents=True, exist_ok=True)
         shutil.copy2(script, ws / "model.py")
-        await _build(ws, title)
+        await _build(ws, title, org.id)
         sp = ws / "out" / "status.json"
         if sp.is_file():
             st = json.loads(sp.read_text(encoding="utf-8"))

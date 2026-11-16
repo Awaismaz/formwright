@@ -2,39 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
-import os
-import sys
 from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from aicad.agent import worker
+
 BUILD_TIMEOUT_S = 180
 RENDER_TIMEOUT_S = 60
-_SAFE_ENV_KEYS = ("PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE",
-                  "HOMEPATH", "LOCALAPPDATA", "APPDATA", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE")
-
-
-def _child_env() -> dict[str, str]:
-    """Minimal environment for model scripts: no API keys or other secrets."""
-    return {k: os.environ[k] for k in _SAFE_ENV_KEYS if k in os.environ}
-
-
-async def _run(args: list[str], cwd: Path, timeout: float) -> tuple[int, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *args, cwd=str(cwd), env=_child_env(),
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-    )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return -1, f"timed out after {timeout:.0f} s"
-    return proc.returncode or 0, out.decode("utf-8", "replace")[-4000:]
 
 
 def summarize(status: dict[str, Any]) -> str:
@@ -57,7 +35,9 @@ def summarize(status: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def make_cad_server(workspace: Path, out_dir: Path) -> Any:
+def make_cad_server(workspace: Path, out_dir: Path, worker_key: str | None = None) -> Any:
+    key = worker_key or str(workspace)
+
     @tool(
         "build_model",
         "Execute a build123d model script in the workspace (default model.py), export STEP/STL/GLB, "
@@ -74,23 +54,21 @@ def make_cad_server(workspace: Path, out_dir: Path) -> Any:
         if not script.is_file():
             return {"content": [{"type": "text", "text": f"{name} not found in workspace"}], "is_error": True}
         out_dir.mkdir(parents=True, exist_ok=True)
-        code, log = await _run([sys.executable, "-I", "-m", "aicad.agent.runner", str(script), str(out_dir)],
-                               workspace, BUILD_TIMEOUT_S)
+        res = await worker.build(key, script, out_dir, determinism=True, timeout=BUILD_TIMEOUT_S)
         status_p = out_dir / "status.json"
-        if code == -1 or not status_p.is_file():
-            return {"content": [{"type": "text", "text": f"BUILD FAILED: {log}"}], "is_error": True}
+        if res.get("rc") == -1 or not status_p.is_file():
+            return {"content": [{"type": "text", "text": f"BUILD FAILED: {res.get('error')}"}], "is_error": True}
         status = json.loads(status_p.read_text(encoding="utf-8"))
         content: list[dict[str, Any]] = [{"type": "text", "text": summarize(status)}]
         stl = out_dir / "part.stl"
         if not status.get("error") and stl.is_file():
             png = out_dir / "views.png"
-            rc, rlog = await _run([sys.executable, "-m", "aicad.agent.render", str(stl), str(png),
-                                   str(status.get("part", ""))], workspace, RENDER_TIMEOUT_S)
-            if rc == 0 and png.is_file():
+            r = await worker.render(key, stl, png, str(status.get("part", "")), timeout=RENDER_TIMEOUT_S)
+            if r.get("ok") and png.is_file():
                 content.append({"type": "image", "mimeType": "image/png",
                                 "data": base64.b64encode(png.read_bytes()).decode("ascii")})
             else:
-                content.append({"type": "text", "text": f"(render failed: {rlog[-500:]})"})
+                content.append({"type": "text", "text": f"(render failed: {r.get('error')})"})
         return {"content": content, "is_error": bool(status.get("error"))}
 
     return create_sdk_mcp_server(name="cad", version="0.1.0", tools=[build_model])

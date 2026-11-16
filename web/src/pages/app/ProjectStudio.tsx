@@ -165,10 +165,11 @@ function ParamsPanel({ project, status, onChanged }: { project: Project; status?
   const [busy, setBusy] = useState(false);
   useEffect(() => { setVals({}); }, [status?.build_id]);
   const editable = q.data?.editable ?? {};
-  const shown: Record<string, unknown> = { ...editable };
-  for (const [k, v] of Object.entries(status?.params ?? {})) if (!(k in shown)) shown[k] = v;
+  // Only parameters the model declares in PARAMS are shown; internal/derived variables never appear.
+  const shown: Record<string, unknown> = status?.params ?? {};
   const dirty = Object.entries(vals).filter(([k, v]) => v !== "" && Number(v) !== editable[k]);
   if (!status?.fingerprint) return <p className="p-4 text-sm text-muted">Parameters appear after the first successful build.</p>;
+  if (!Object.keys(shown).length) return <p className="p-4 text-sm text-muted">This model doesn't declare any design parameters. Ask the agent to “expose the key dimensions as parameters”.</p>;
   return (
     <div className="space-y-3 p-3">
       <p className="text-[12px] text-muted">Edit a value and rebuild instantly — <b className="text-text">no AI call, no tokens</b>. The change is kept only if the part still passes its checks.</p>
@@ -302,16 +303,16 @@ export default function ProjectStudio() {
       </div>
 
       {/* workspace */}
-      <div className="grid min-h-0 flex-1 grid-cols-[380px_1fr_330px] max-xl:grid-cols-[340px_1fr] max-md:grid-cols-1">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[380px_minmax(0,1fr)_330px] max-xl:grid-cols-[340px_minmax(0,1fr)] max-md:grid-cols-1">
         <Chat project={p} onActivity={refresh} />
-        <div className="relative min-h-[320px]">
+        <div className="relative min-h-[320px] min-w-0 overflow-hidden">
           <Viewer3D url={fp ? `/api/projects/${p.id}/files/model.glb` : null} version={st?.build_id} bboxMm={fp?.bbox}
             empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Your model appears here after the first build.</div>} />
         </div>
-        <aside className="flex min-h-0 flex-col border-l border-border bg-panel max-xl:hidden">
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-panel max-xl:hidden">
           <Tabs defaultValue="checks" className="flex min-h-0 flex-1 flex-col">
-            <TabList className="gap-0 px-1"><Tab compact value="checks"><Check className="h-3.5 w-3.5" />Checks</Tab><Tab compact value="params"><SlidersHorizontal className="h-3.5 w-3.5" />Params</Tab>
-              <Tab compact value="revs" title="Revisions"><History className="h-3.5 w-3.5" />Revs</Tab><Tab compact value="files" title="Files & exports"><Download className="h-3.5 w-3.5" />Files</Tab>
+            <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]"><Tab compact value="checks"><Check className="h-3.5 w-3.5" />Checks</Tab><Tab compact value="params"><SlidersHorizontal className="h-3.5 w-3.5" />Params</Tab>
+              <Tab compact value="revs" title="Revisions"><History className="h-3.5 w-3.5" />Revs</Tab><Tab compact value="files" title="Files & exports"><Download className="h-3.5 w-3.5" /></Tab>
               <Tab compact value="src" title="Parametric source (model.py)"><FileCode2 className="h-3.5 w-3.5" /></Tab></TabList>
             <div className="min-h-0 flex-1 overflow-y-auto">
               <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>

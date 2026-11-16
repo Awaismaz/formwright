@@ -5,6 +5,7 @@ No AI calls are made: agent runs are only exercised up to the paywall/preflight 
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ PW = "correct horse 42"
 
 
 @pytest.fixture()
-def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     from aicad.platform.routers import auth as auth_router
 
     auth_router._attempts.clear()
@@ -33,7 +34,14 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     c = TestClient(create_app())
     c.headers.update({"X-FW-CSRF": "1"})
-    return c
+    yield c
+    from aicad.agent import worker
+
+    for w in worker._workers.values():  # test-only cleanup: event loops of TestClient are short-lived
+        if w.proc is not None and w.proc.returncode is None:
+            w.proc.kill()
+        w.proc = None
+    worker._workers.clear()
 
 
 def _link_token(email: str, subject_part: str) -> str:
@@ -296,6 +304,11 @@ def _project_with_model(c: TestClient, script: str) -> tuple[str, Path]:
     ws = workspace_for(db.get(Project, pid))
     db.close()
     (ws / "model.py").write_text(script, encoding="utf-8")
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, "-I", "-m", "aicad.agent.runner", str(ws / "model.py"), str(ws / "out")],
+                   cwd=ws, timeout=180, check=True)  # first build records the declared PARAMS
     return pid, ws
 
 
@@ -306,6 +319,7 @@ def test_param_edit_rebuilds_without_ai_and_rolls_back_on_failure(app_client: Te
     pid, ws = _project_with_model(c, demo.read_text(encoding="utf-8"))
     editable = c.get(f"/api/projects/{pid}/params").json()["editable"]
     assert editable["L"] == 120.0 and editable["CH"] == 1.0 and "PL" in editable
+    assert "math" not in editable and len(editable) == 10
     before = c.get("/api/auth/me").json()["org"]["token_balance"]
     r = c.post(f"/api/projects/{pid}/params", json={"values": {"L": 150}})
     assert r.status_code == 200, r.text

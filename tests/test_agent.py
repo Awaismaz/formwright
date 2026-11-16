@@ -114,3 +114,52 @@ def test_app_endpoints(tmp_path: Path) -> None:
     s.busy = False
     assert c.post("/api/chat", json={"prompt": "hi"}).status_code == 200
     assert "Design agent" in c.get("/").text
+
+
+def test_editable_params_only_declared_plain_literals() -> None:
+    from aicad.agent.runner import editable_params
+
+    src = (
+        "MODULE = 3\nTEETH = 40\nFLANK_PTS = 16\nN = 4000\ntooth_int = 0.0\n"
+        "OFFSET = -2.5\nDERIVED = MODULE * TEETH\nLOOPED = 1\nLOOPED += 1\n"
+        "for i in range(3):\n    tooth_int += i\n"
+    )
+    declared = {"MODULE": 3, "TEETH": 40, "DERIVED": 120, "LOOPED": 2, "OFFSET": -2.5, "MISSING": 1}
+    ed = editable_params(src, declared)
+    assert ed == {"MODULE": 3, "TEETH": 40, "OFFSET": -2.5}  # N, FLANK_PTS, tooth_int not declared
+    assert isinstance(ed["TEETH"], int)
+
+
+def test_runner_reports_editable_params_and_skips_determinism(tmp_path: Path) -> None:
+    src = GOOD.replace('NAME = "t"', 'NAME = "t"\nL = 20.0\nPARAMS = dict(L=L)\nn_samples = 50')
+    s = _run_runner(tmp_path, src)
+    assert s["editable_params"] == {"L": 20.0}
+    script = tmp_path / "model.py"
+    subprocess.run([sys.executable, "-I", "-m", "aicad.agent.runner", str(script), str(tmp_path / "out2"),
+                    "--no-determinism"], cwd=tmp_path, timeout=180, check=False)
+    s2 = json.loads((tmp_path / "out2" / "status.json").read_text())
+    chk8 = next(c for c in s2["checks"] if c["id"] == "CHK-08")
+    assert s2["ok"] and chk8["gating"] is False and "skipped" in chk8["name"]
+
+
+def test_warm_worker_builds_renders_and_recovers(tmp_path: Path) -> None:
+    from aicad.agent import worker
+
+    script = tmp_path / "model.py"
+    script.write_text(GOOD)
+
+    async def go() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+        try:
+            r1 = await worker.build("t", script, tmp_path / "o1")
+            r2 = await worker.build("t", script, tmp_path / "o2", determinism=False)
+            rr = await worker.render("t", tmp_path / "o2" / "part.stl", tmp_path / "v.png", "t")
+            script.write_text("from build123d import *\nprint('noise to stdout')\nresult = Box(1, 2, 3)\n")
+            r3 = await worker.build("t", script, tmp_path / "o3")
+            return r1, r2, rr, r3
+        finally:
+            await worker.shutdown_all()
+
+    r1, r2, rr, r3 = asyncio.run(go())
+    assert r1["rc"] == 0 and r2["rc"] == 0 and rr["ok"] and (tmp_path / "v.png").stat().st_size > 1000
+    assert r2["elapsed_s"] < r1["elapsed_s"]  # warm + no determinism rebuild
+    assert r3["ok"] and json.loads((tmp_path / "o3" / "status.json").read_text())["fingerprint"]["volume"] == 6.0

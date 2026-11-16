@@ -51,7 +51,22 @@ def tripwire(source: str) -> None:
 
 
 def _exec(script: Path) -> dict[str, Any]:
-    ns = runpy.run_path(str(script), run_name="__aicad_model__")
+    """Run a model script. Its folder is importable (helper modules), and anything imported from that
+    folder is purged afterwards so a warm worker never serves stale helpers to the next build."""
+    folder = str(script.parent.resolve())
+    sys.path.insert(0, folder)
+    try:
+        for f in script.parent.glob("*.py"):
+            if f.resolve() != script.resolve():
+                tripwire(f.read_text(encoding="utf-8"))
+        ns = runpy.run_path(str(script), run_name="__aicad_model__")
+    finally:
+        if sys.path and sys.path[0] == folder:
+            sys.path.pop(0)
+        for name, mod in list(sys.modules.items()):
+            f = getattr(mod, "__file__", None)
+            if f and str(Path(f).resolve()).startswith(folder):
+                del sys.modules[name]
     if "result" not in ns:
         raise ScriptRejected("script must assign the final build123d shape to a variable named `result`")
     return ns
@@ -68,7 +83,30 @@ def _write(out: Path, status: dict[str, Any]) -> None:
     os.replace(tmp, out / "status.json")
 
 
-def main(script: Path, out: Path) -> int:
+def editable_params(source: str, declared: dict[str, Any]) -> dict[str, float | int]:
+    """Parameters a user may edit without the AI: names the script declares in PARAMS *and* that are
+    assigned exactly once at module level as a plain numeric literal (`NAME = 12.5`). Internal, derived,
+    loop or computed variables are never editable."""
+    tree = ast.parse(source)
+    counts: dict[str, int] = {}
+    literal: dict[str, float | int] = {}
+    for node in tree.body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(
+            node, (ast.AnnAssign, ast.AugAssign)) else []
+        for t in targets:
+            for n in ast.walk(t):
+                if isinstance(n, ast.Name):
+                    counts[n.id] = counts.get(n.id, 0) + 1
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            v = node.value
+            neg = isinstance(v, ast.UnaryOp) and isinstance(v.op, ast.USub)
+            c = v.operand if neg else v  # type: ignore[union-attr]
+            if isinstance(c, ast.Constant) and type(c.value) in (int, float):
+                literal[node.targets[0].id] = -c.value if neg else c.value
+    return {k: literal[k] for k in declared if k in literal and counts.get(k) == 1}
+
+
+def main(script: Path, out: Path, determinism: bool = True) -> int:
     import hashlib
     import os
     import tempfile
@@ -81,7 +119,8 @@ def main(script: Path, out: Path) -> int:
     t0 = time.perf_counter()
     status: dict[str, Any] = {"ok": False, "script": script.name, "checks": []}
     try:
-        tripwire(script.read_text(encoding="utf-8"))
+        source = script.read_text(encoding="utf-8")
+        tripwire(source)
         ns = _exec(script)
         shape = ns["result"]
         if not isinstance(shape, Shape):
@@ -128,23 +167,30 @@ def main(script: Path, out: Path) -> int:
                                               gating=False, detail={"got_mm3": shape.volume}))
         results.append(checks.check_roundtrip(shape, reimported))
 
-        ns2 = _exec(script)
-        same_fp = checks.fingerprint(ns2["result"]) == checks.fingerprint(shape)
-        with tempfile.TemporaryDirectory() as td:
-            p2 = Path(td) / "p2.step"
-            export_step(ns2["result"], str(p2), timestamp=STEP_TIMESTAMP)
-            same_step = p2.read_bytes() == step.read_bytes()
-        results.append(checks.CheckResult("CHK-08", "deterministic regeneration",
-                                          same_fp and same_step,
-                                          detail={"fingerprint_equal": same_fp,
-                                                  "step_bytes_equal": same_step}))
+        if determinism:
+            ns2 = _exec(script)
+            same_fp = checks.fingerprint(ns2["result"]) == checks.fingerprint(shape)
+            with tempfile.TemporaryDirectory() as td:
+                p2 = Path(td) / "p2.step"
+                export_step(ns2["result"], str(p2), timestamp=STEP_TIMESTAMP)
+                same_step = p2.read_bytes() == step.read_bytes()
+            results.append(checks.CheckResult("CHK-08", "deterministic regeneration",
+                                              same_fp and same_step,
+                                              detail={"fingerprint_equal": same_fp,
+                                                      "step_bytes_equal": same_step}))
+        else:
+            results.append(checks.CheckResult(
+                "CHK-08", "deterministic regeneration (skipped for parameter edit)", False, gating=False,
+                detail={"note": "script structure unchanged since the agent build that verified it"}))
+        declared = ns.get("PARAMS") if isinstance(ns.get("PARAMS"), dict) else {}
+        params = {str(k): v for k, v in declared.items() if isinstance(v, (int, float, str, bool))}
 
         export_atomic(export_gltf, reimported, "model.glb", binary=True,
                       linear_deflection=0.01, angular_deflection=0.1)
         status.update(
             ok=all(r.passed for r in results if r.gating),
             part=ns.get("NAME", script.stem), material=ns.get("MATERIAL", "unspecified"),
-            params=ns.get("PARAMS", {}), expected=exp,
+            params=params, editable_params=editable_params(source, params), expected=exp,
             fingerprint=checks.fingerprint(shape),
             step_sha256=hashlib.sha256(step.read_bytes()).hexdigest(),
             checks=checks.as_dicts(results),
@@ -173,4 +219,5 @@ def _ver(*names: str) -> str:
 
 
 if __name__ == "__main__":
-    sys.exit(main(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve()))
+    sys.exit(main(Path(sys.argv[1]).resolve(), Path(sys.argv[2]).resolve(),
+                  determinism="--no-determinism" not in sys.argv))

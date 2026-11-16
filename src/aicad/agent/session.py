@@ -80,11 +80,12 @@ def _brief(d: dict[str, Any], limit: int = 160) -> str:
 
 class AgentSession:
     def __init__(self, workspace: Path, model: str | None = None,
-                 on_event: Callable[[dict[str, Any]], None] | None = None) -> None:
+                 on_event: Callable[[dict[str, Any]], None] | None = None, worker_key: str | None = None) -> None:
         self.workspace = workspace.resolve()
         self.out_dir = self.workspace / "out"
         self.model = model
         self.on_event = on_event
+        self.worker_key = worker_key
         self.client: ClaudeSDKClient | None = None
         self.history: list[dict[str, Any]] = []
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -98,7 +99,7 @@ class AgentSession:
             tools=BUILTIN_TOOLS,
             allowed_tools=BUILTIN_TOOLS + CAD_TOOLS,
             permission_mode="dontAsk",
-            mcp_servers={"cad": make_cad_server(self.workspace, self.out_dir)},
+            mcp_servers={"cad": make_cad_server(self.workspace, self.out_dir, self.worker_key)},
             system_prompt={"type": "preset", "preset": "claude_code", "append": CAD_AGENT_INSTRUCTIONS},
             setting_sources=[],  # isolate from the developer's personal ~/.claude config
             hooks={"PreToolUse": [HookMatcher(matcher="Read|Write|Edit|Glob|Grep|WebFetch",

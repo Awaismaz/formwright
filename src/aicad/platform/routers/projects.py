@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +14,8 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from aicad.agent import worker
+from aicad.agent.runner import editable_params
 from aicad.agent.session import AgentSession
 from aicad.platform.catalog import TOKEN_COSTS
 from aicad.platform.config import get_settings
@@ -154,7 +155,8 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
 def get_session(p: Project, ctx: Ctx) -> AgentSession:
     s = _sessions.get(p.id)
     if s is None:
-        s = AgentSession(workspace_for(p), on_event=_on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens")))
+        s = AgentSession(workspace_for(p), on_event=_on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens")),
+                         worker_key=p.org_id)
         _sessions[p.id] = s
     else:  # refresh who is driving (token attribution, god flags)
         s.on_event = _on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens"))
@@ -312,9 +314,48 @@ def revisions(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
     return {"items": items}
 
 
+def _read_status(ws: Path) -> dict[str, Any]:
+    f = ws / "out" / "status.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+
+
+def _status_summary(st: dict[str, Any]) -> dict[str, Any]:
+    return {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
+
+
+async def _render_later(p: Project, ws: Path) -> None:
+    stl = ws / "out" / "part.stl"
+    if stl.is_file():
+        await worker.render(p.org_id, stl, ws / "out" / "views.png", p.name)
+
+
+async def _rebuild(p: Project, ws: Path, determinism: bool) -> dict[str, Any]:
+    """Build on the warm worker (no interpreter/kernel start-up); the 4-view PNG renders in the background
+    because the live viewer uses the GLB, not the PNG."""
+    res = await worker.build(p.org_id, ws / "model.py", ws / "out", determinism=determinism)
+    if res.get("rc") == -1:
+        raise HTTPException(504, f"Rebuild failed: {res.get('error')}")
+    t = asyncio.create_task(_render_later(p, ws))
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)
+    return _read_status(ws)
+
+
+def current_editable(ws: Path) -> dict[str, float | int]:
+    """Editable = declared in the script's PARAMS *and* a plain single numeric assignment
+    (runner.editable_params). Never internal, derived or loop variables."""
+    st = _read_status(ws)
+    if "editable_params" in st:
+        return dict(st["editable_params"] or {})
+    f = ws / "model.py"
+    if not f.is_file() or not st.get("params"):
+        return {}
+    return editable_params(f.read_text(encoding="utf-8"), st["params"])
+
+
 @router.post("/projects/{project_id}/revisions/{n}/restore")
 async def restore_revision(project_id: str, n: int, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Restore a revision's model.py and rebuild it deterministically (no AI call, no tokens)."""
+    """Restore a revision's model.py and rebuild it (no AI call, no tokens)."""
     p = _project(ctx, project_id)
     if ctx.role == "viewer":
         raise HTTPException(403)
@@ -326,20 +367,8 @@ async def restore_revision(project_id: str, n: int, ctx: Ctx = Depends(verified_
     if not src.is_file():
         raise HTTPException(404)
     shutil.copy2(src, ws / "model.py")
-    proc = await asyncio.create_subprocess_exec(sys.executable, "-I", "-m", "aicad.agent.runner",
-                                                str(ws / "model.py"), str(ws / "out"), cwd=str(ws))
-    try:
-        await asyncio.wait_for(proc.wait(), 180)
-    except TimeoutError:
-        proc.kill()
-        raise HTTPException(504, "Rebuild timed out") from None
-    stl = ws / "out" / "part.stl"
-    if stl.is_file():
-        r = await asyncio.create_subprocess_exec(sys.executable, "-m", "aicad.agent.render", str(stl),
-                                                 str(ws / "out" / "views.png"), p.name, cwd=str(ws))
-        await asyncio.wait_for(r.wait(), 60)
-    st = json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
-    p.last_status = {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
+    st = await _rebuild(p, ws, determinism=False)  # the revision was verified when first built
+    p.last_status = _status_summary(st)
     p.updated_at = utcnow()
     audit(ctx.db, "project.revision_restored", ctx.user, p.org_id, target=p.id, revision=n)
     ctx.db.commit()
@@ -355,42 +384,16 @@ class ParamsIn(BaseModel):
 _ASSIGN = r"^(?P<name>{name})(?P<sp>\s*=\s*)(?P<val>-?\d+(?:\.\d+)?)(?P<rest>\s*(?:#.*)?)$"
 
 
-def editable_params(source: str) -> dict[str, float]:
-    """Top-level `NAME = <number>` assignments that can be edited without the AI."""
-    import re
-
-    out: dict[str, float] = {}
-    for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:#.*)?$", source, re.MULTILINE):
-        out[m.group(1)] = float(m.group(2))
-    return out
-
-
-async def _rebuild(p: Project, ws: Path) -> dict[str, Any]:
-    proc = await asyncio.create_subprocess_exec(sys.executable, "-I", "-m", "aicad.agent.runner",
-                                                str(ws / "model.py"), str(ws / "out"), cwd=str(ws))
-    try:
-        await asyncio.wait_for(proc.wait(), 180)
-    except TimeoutError:
-        proc.kill()
-        raise HTTPException(504, "Rebuild timed out") from None
-    stl = ws / "out" / "part.stl"
-    if stl.is_file():
-        r = await asyncio.create_subprocess_exec(sys.executable, "-m", "aicad.agent.render", str(stl),
-                                                 str(ws / "out" / "views.png"), p.name, cwd=str(ws))
-        await asyncio.wait_for(r.wait(), 60)
-    return json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
-
-
 @router.get("/projects/{project_id}/params")
 def get_params(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    f = workspace_for(_project(ctx, project_id)) / "model.py"
-    return {"editable": editable_params(f.read_text(encoding="utf-8")) if f.is_file() else {}}
+    return {"editable": current_editable(workspace_for(_project(ctx, project_id)))}
 
 
 @router.post("/projects/{project_id}/params")
 async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Deterministic parameter edit: rewrite simple numeric assignments in model.py and rebuild (no AI, no tokens).
-    The edit is kept only if the rebuilt part passes its checks; otherwise model.py is restored."""
+    """Deterministic parameter edit: rewrite declared parameters in model.py and rebuild (no AI, no tokens).
+    The edit is kept only if the rebuilt part passes its checks; otherwise the previous model and outputs
+    are restored from a snapshot."""
     import math
     import re
 
@@ -405,34 +408,43 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     if not f.is_file():
         raise HTTPException(404, "No model yet")
     src = f.read_text(encoding="utf-8")
-    editable = editable_params(src)
+    editable = current_editable(ws)
     new = src
     changes = {}
     for name, val in body.values.items():
         if name not in editable:
-            raise HTTPException(422, f"{name} is not a simple editable parameter. Ask the design agent instead.")
+            raise HTTPException(422, f"{name} is not an editable design parameter. Ask the design agent instead.")
         if not math.isfinite(val):
             raise HTTPException(422, f"{name}: invalid number")
-        raw = re.search(_ASSIGN.format(name=re.escape(name)), new, re.MULTILINE)
-        was_int = raw is not None and "." not in raw["val"]
+        was_int = isinstance(editable[name], int) and not isinstance(editable[name], bool)
         if was_int and not float(val).is_integer():
             raise HTTPException(422, f"{name} must be a whole number")
+        if float(val) == float(editable[name]):
+            continue
         lit = str(int(val)) if was_int else (repr(float(val)) if not float(val).is_integer() else f"{float(val):.1f}")
-        new, n = re.subn(_ASSIGN.format(name=re.escape(name)), lambda m, lit=lit: f"{m['name']}{m['sp']}{lit}{m['rest']}", new,
-                         count=1, flags=re.MULTILINE)
-        if n:
-            changes[name] = {"from": editable[name], "to": val}
+        new, n = re.subn(_ASSIGN.format(name=re.escape(name)),
+                         lambda m, lit=lit: f"{m['name']}{m['sp']}{lit}{m['rest']}", new, count=1, flags=re.MULTILINE)
+        if not n:
+            raise HTTPException(422, f"{name} is written in a form that can't be edited here. Ask the design agent.")
+        changes[name] = {"from": editable[name], "to": val}
     if not changes:
         return {"ok": True, "changed": {}}
+    backup = ws / ".out_backup"
+    shutil.rmtree(backup, ignore_errors=True)
+    if (ws / "out").is_dir():
+        shutil.copytree(ws / "out", backup)
     f.write_text(new, encoding="utf-8")
-    st = await _rebuild(p, ws)
+    st = await _rebuild(p, ws, determinism=False)
     if not st.get("ok"):
         f.write_text(src, encoding="utf-8")
-        await _rebuild(p, ws)
+        if backup.is_dir():
+            shutil.rmtree(ws / "out", ignore_errors=True)
+            backup.rename(ws / "out")
         reason = st.get("error") or ", ".join(c["id"] for c in st.get("checks", []) if c["gating"] and not c["passed"])
-        raise HTTPException(422, f"That change failed the geometry checks ({reason}); the previous model was restored. "
-                                 "Ask the design agent if the change needs a design update (e.g. EXPECTED values).")
-    p.last_status = {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
+        raise HTTPException(422, f"That change failed the geometry checks ({reason}); the previous model was "
+                                 "restored. Ask the design agent if the change needs a design update.")
+    shutil.rmtree(backup, ignore_errors=True)
+    p.last_status = _status_summary(st)
     p.builds += 1
     p.updated_at = utcnow()
     rev = _snapshot(p, ws)
@@ -441,7 +453,7 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     if s:
         s.publish({"type": "text", "text": "Parameters updated without AI: " + ", ".join(
             f"`{k}` {v['from']:g} → {v['to']:g}" for k, v in changes.items()) + f" (revision {rev})."})
-    return {"ok": True, "changed": changes, "revision": rev}
+    return {"ok": True, "changed": changes, "revision": rev, "build_s": st.get("timings_s", {}).get("total_s")}
 
 
 @router.post("/projects/{project_id}/agent/chat")
