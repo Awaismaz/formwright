@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { Check, Coins, ImagePlus, ListTree, Loader2, Lock, MousePointer2, RotateCcw, Send, Sparkles, Square, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { AgentEvent, AgentQuestion, Project } from "@/lib/types";
-import { cx, num } from "@/lib/format";
+import { cx } from "@/lib/format";
 import { Markdown } from "@/lib/markdown";
 import { Button, Modal, Tip } from "@/components/ui";
+import RunMeter, { type MeterEvent } from "@/components/RunMeter";
 import { agentDescriptor, describe } from "@/viewer/measure";
 import type { Pick, Topo } from "@/viewer/types";
 import { pickKey } from "@/viewer/types";
@@ -143,7 +143,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   const [drag, setDrag] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const est = useQuery({ queryKey: ["estimate", project.id, items.length], queryFn: () => api.get<{ typical: number; low: number; high: number; basis: string }>(`/api/projects/${project.id}/estimate`) });
+  const [meter, setMeter] = useState<MeterEvent | null>(null);
+  const [runBudget, setRunBudget] = useState<number | null>(null);
   const agent = project.agent;
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
 
@@ -152,8 +153,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     const es = new EventSource(`/api/projects/${project.id}/agent/events`);
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data) as AgentEvent;
+      if (ev.type === "meter") { setMeter(ev); return; }
       if (ev.type === "hello") setBusy(ev.busy);
-      if (ev.type === "busy") setBusy(ev.value);
+      if (ev.type === "busy") { setBusy(ev.value); if (!ev.value) setMeter(null); }
       if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Feature|Created|Imported|Rebuilt|Undone|Redone)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
     };
@@ -188,7 +190,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     if (selection.length && topo) t += "\n\n[Selected in viewer: " + selection.map((p, i) => `(${i + 1}) ${agentDescriptor(p, topo)}`).join("; ") + "]";
     if (features.length && !override) t += "\n\n[Selected feature(s) in the feature tree: " + features.map(f => `“${f}”`).join(", ") + "]";
     try {
-      await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
+      await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
       if (!override || skipToolbox) { if (!override || skipToolbox) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
@@ -237,7 +239,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             </div>);
           return (
             <div key={n} className="flex flex-wrap items-center justify-center gap-x-2 border-b border-dashed border-border pb-2 text-[11px] text-muted">
-              <span>{i.ev.subtype === "success" ? "Done" : i.ev.subtype}</span>·<span>{i.ev.turns} turns</span>·<span>{i.ev.duration_s}s</span>
+              <span>{i.ev.budget_stopped ? `Stopped at the ${i.ev.budget_tokens ?? ""} token budget` : i.ev.subtype === "success" ? "Done" : i.ev.subtype === "error_max_turns" ? "Stopped at the step limit" : "Stopped"}</span>{i.ev.turns ? <>·<span>{i.ev.turns} turns</span></> : null}·<span>{i.ev.duration_s}s</span>
               {i.ev.tokens_charged !== undefined && <>·<span className="inline-flex items-center gap-1 font-medium text-text"><Coins className="h-3 w-3 text-accent" />{i.ev.tokens_charged} tokens</span></>}
               {n === lastResultIdx && typeof i.ev.rev_before === "number" && !busy &&
                 <>·<button onClick={() => undo(i.ev.rev_before as number)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><Undo2 className="h-3 w-3" />Undo this change</button></>}
@@ -283,7 +285,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             <Tip content="Attach a sketch, photo or drawing (or paste / drop an image)" side="top">
               <button onClick={() => fileRef.current?.click()} className="rounded p-1.5 text-muted hover:bg-text/5" aria-label="Attach image"><ImagePlus className="h-4 w-4" /></button>
             </Tip>
-            <span className="flex-1 text-[11px] text-muted">{unlimited ? "Unlimited tokens (God mode)" : est.data ? `≈ ${est.data.typical} tokens (${est.data.low}–${est.data.high}) · balance ${num(me?.org?.token_balance)}` : ""} · <span className="kbd">Ctrl ↵</span></span>
+            <RunMeter projectId={project.id} busy={busy} meter={meter} unlimited={unlimited} balance={me?.org?.token_balance}
+              long={text.length >= 1200} budget={runBudget} onBudget={setRunBudget} version={items.length} />
             {busy ? <Button size="sm" variant="secondary" icon={<Square className="h-3.5 w-3.5" />} onClick={() => api.post(`/api/projects/${project.id}/agent/interrupt`)}>Stop</Button>
               : <Button size="sm" icon={<Send className="h-3.5 w-3.5" />} onClick={() => send()} disabled={!text.trim() && !atts.length}>Send</Button>}
           </div>

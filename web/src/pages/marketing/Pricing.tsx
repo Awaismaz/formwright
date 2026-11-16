@@ -2,28 +2,35 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Coins, Minus } from "lucide-react";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
+import { useTitle } from "@/lib/title";
 import type { Catalog } from "@/lib/types";
-import { money } from "@/lib/format";
+import { money, num } from "@/lib/format";
+import { SALES } from "./Landing";
 import { PageLoader, StatusBadge } from "@/components/ui";
 import { PlanCards } from "@/components/PlanCards";
 
 export default function Pricing() {
+  useTitle("Pricing");
   const nav = useNavigate();
+  const { me } = useSession();
+  const signedIn = !!me?.user;
   const q = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog") });
   if (!q.data) return <PageLoader />;
-  const { plans, addons, topups, modules } = q.data;
+  const { plans, addons, topups, modules, typical_run: run } = q.data;
+  const trial = q.data.trial_tokens ?? 1000;
   const paid = plans.filter(p => p.code !== "trial");
   return (
     <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
       <div className="mx-auto max-w-2xl text-center">
         <div className="label">Pricing</div>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">Pay for the engineering you use.</h1>
-        <p className="mt-3 text-muted">Every plan starts with a free 14-day trial and 300 tokens. Add modules when you need them, top up tokens any time.</p>
+        <p className="mt-3 text-muted">Every plan starts with a free 14-day trial: {num(trial)} tokens (about 3 new parts) and every module on your own parts. Add modules when you need them, top up tokens any time.</p>
       </div>
 
       <div className="mt-12">
-        <PlanCards plans={paid} onChoose={(p) => p.contact_sales ? (location.href = "mailto:sales@formwright.dev?subject=Formwright%20Enterprise") : nav(`/signup?plan=${p.code}`)}
-          ctaLabel={(p) => p.contact_sales ? "Contact sales" : "Start free trial"} />
+        <PlanCards plans={paid} onChoose={(p) => p.contact_sales ? (location.href = SALES) : nav(signedIn ? "/app/billing" : `/signup?plan=${p.code}`)}
+          ctaLabel={(p) => p.contact_sales ? "Contact sales" : signedIn ? `Switch to ${p.name}` : "Start free trial"} />
       </div>
 
       <section className="mt-20">
@@ -36,7 +43,7 @@ export default function Pricing() {
             <tbody className="divide-y divide-border">
               {modules.map(m => (
                 <tr key={m.code}>
-                  <td className="px-4 py-3"><span className="mr-2">{m.name}</span><StatusBadge status={m.status} /></td>
+                  <td className="px-4 py-3"><span className="mr-2">{m.name}</span>{m.status !== "live" && <StatusBadge status={m.status} />}</td>
                   {plans.map(p => <td key={p.code} className="px-4 py-3 text-center">
                     {p.modules.includes(m.code) ? <Check className="mx-auto h-4 w-4 text-success" />
                       : addons.some(a => a.modules.includes(m.code)) && !p.contact_sales ? <span className="text-xs text-muted">Add-on</span>
@@ -54,13 +61,13 @@ export default function Pricing() {
       <section className="mt-20 grid gap-10 lg:grid-cols-[1.6fr_1fr]">
         <div>
           <h2 className="text-xl font-semibold">Add-on modules</h2>
-          <p className="mt-1 text-sm text-muted">Unlock individual modules on any plan. Preview modules open for early access as they ship.</p>
+          <p className="mt-1 text-sm text-muted">Unlock individual modules on any plan. Each one opens straight on the part you designed.</p>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {addons.map(a => {
               const m = modules.find(x => x.code === a.modules[0]);
               return (
                 <div key={a.code} className="card flex items-start justify-between gap-3 p-4">
-                  <div><div className="flex items-center gap-2 font-medium">{a.name}{m && <StatusBadge status={m.status} />}</div>
+                  <div><div className="flex items-center gap-2 font-medium">{a.name}{m && m.status !== "live" && <StatusBadge status={m.status} />}</div>
                     <div className="mt-1 text-xs text-muted">{a.tagline}</div></div>
                   <div className="whitespace-nowrap text-sm font-semibold">{money(a.price_cents, a.interval)}</div>
                 </div>
@@ -80,7 +87,12 @@ export default function Pricing() {
               </div>
             ))}
           </div>
-          <p className="mt-4 text-xs text-muted">A typical part takes 20–80 tokens depending on complexity and iterations. Every run shows its exact cost.</p>
+          {run && <div className="mt-5 rounded-lg border border-border bg-panel p-4 text-xs leading-relaxed text-muted">
+            <div className="mb-1 font-medium text-text">What a run costs</div>
+            A new part from a written brief typically uses <b className="text-text">{run.new.low}–{run.new.high} tokens</b> (measured; most about {run.new.typical}).
+            A change to an existing part usually uses {run.change.low}–{run.change.high}. Parameter edits, manual features, Toolbox parts and restores are free.
+            Every run shows a live meter, stops at the budget you set and is never charged beyond it.
+          </div>}
         </div>
       </section>
     </main>

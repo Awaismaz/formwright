@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
 import { Button, Logo } from "@/components/ui";
+import { useTitle } from "@/lib/title";
 
 export default function NotFound() {
+  useTitle("Page not found");
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-6 bg-bg px-6 text-center">
       <Logo size={28} />

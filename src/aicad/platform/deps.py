@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request
@@ -16,6 +17,7 @@ from aicad.platform.security import hash_token
 from aicad.platform.services import ROLE_RANK
 
 COOKIE = "fw_session"
+VERIFY_GRACE = timedelta(hours=24)  # a new account may use the app this long before confirming its email
 GOD_KEYS = ("bypass_paywall", "bypass_tokens", "skip_verification", "skip_onboarding")
 
 
@@ -103,10 +105,22 @@ def auth_ctx(request: Request, db: Session = Depends(get_db)) -> Ctx:
     return ctx
 
 
+def in_grace(user: User) -> bool:
+    """Unverified, but signed up less than `VERIFY_GRACE` ago: may use the app with a reminder banner."""
+    return user.email_verified_at is None and utcnow() - user.created_at < VERIFY_GRACE
+
+
 def verified_ctx(ctx: Ctx = Depends(auth_ctx)) -> Ctx:
-    """Signed in and email verified (God mode may skip verification)."""
-    if ctx.user.email_verified_at is None and not ctx.god_on("skip_verification"):
+    """Signed in and email verified, or still inside the first-day grace (God mode may skip verification)."""
+    if ctx.user.email_verified_at is None and not ctx.god_on("skip_verification") and not in_grace(ctx.user):
         raise HTTPException(403, "Verify your email to continue")
+    return ctx
+
+
+def confirmed_ctx(ctx: Ctx = Depends(verified_ctx)) -> Ctx:
+    """Email actually confirmed: required for money and for inviting people (no grace)."""
+    if ctx.user.email_verified_at is None and not ctx.god_on("skip_verification"):
+        raise HTTPException(403, "Confirm your email address first. We sent you a link.")
     return ctx
 
 

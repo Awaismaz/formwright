@@ -10,6 +10,7 @@ import { cx, num } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import Viewer3D, { type Tool, type ViewerApi } from "@/components/Viewer3D";
+import NotFoundPanel from "@/components/NotFoundPanel";
 import { ProjectStatus } from "@/components/ProjectCard";
 import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3, ViewName } from "@/viewer/types";
@@ -244,7 +245,7 @@ export default function ProjectStudio() {
   };
 
   if (project.isLoading) return <PageLoader />;
-  if (!p) return <div className="p-10 text-center text-muted">Project not found. <Link to="/app/projects" className="link">Back to projects</Link></div>;
+  if (!p) return <NotFoundPanel title="Project not found" body="It may have been deleted, or it belongs to a workspace you're not signed in to." action={<Link to="/app/projects"><Button>Back to projects</Button></Link>} />;
   const fp = st?.fingerprint;
   const mf = manual.data?.features ?? [];
   const tabs: [string, React.ReactNode, string][] = [["tree", <ListTree className="h-3.5 w-3.5" />, "Tree"], ["checks", <Check className="h-3.5 w-3.5" />, "Checks"],
@@ -262,7 +263,7 @@ export default function ProjectStudio() {
               onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); setRedo([]); refresh(); setTool("orbit"); }}
               onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
           ) : (
-            <Tabs value={tab} onValueChange={t => { setTab(t); if (t !== "params") setParamFocus(null); }} className="flex min-h-0 flex-1 flex-col">
+            <Tabs value={tab} onValueChange={t => { setTab(t); if (t !== "params") setParamFocus(null); }} className="flex min-h-0 flex-1 flex-col" data-tour="feature-tree">
               <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]">
                 {tabs.map(([v, icon, label]) => <Tab key={v} compact value={v} title={label}>{icon}{tab === v && label}</Tab>)}
               </TabList>
@@ -322,7 +323,7 @@ export default function ProjectStudio() {
         {leftOpen && <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-panel">
           {sidePanel}
         </aside>}
-        <div className="relative min-h-[320px] min-w-0 overflow-hidden">
+        <div className="relative min-h-[320px] min-w-0 overflow-hidden" data-tour="viewer">
           <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/topo.json` : null} version={fp ? st?.build_id : `keep`}
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}

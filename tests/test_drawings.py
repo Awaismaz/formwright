@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from trial_helpers import set_trial_ended
 
 from aicad.drawing import geometry
 from aicad.drawing.check import chk12
@@ -306,6 +307,7 @@ def test_api_auth_entitlement_scoping_and_files(app_client: Any) -> None:
     c = app_client
     assert c.get("/api/m/drawings/projects").status_code == 401
     signup(c, "drw@x.com")
+    set_trial_ended("drw@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.get("/api/m/drawings/projects")
     assert r.status_code == 402 and "add-on" in r.json()["detail"]["message"]
     pid = c.post("/api/projects", json={"name": "Block"}).json()["id"]
@@ -313,6 +315,7 @@ def test_api_auth_entitlement_scoping_and_files(app_client: Any) -> None:
     ws = workspace_for(db.get(Project, pid))
     db.close()
     assert c.post(f"/api/m/drawings/projects/{pid}/generate", json={}).status_code == 402
+    set_trial_ended("drw@x.com", False)
     # unlock the add-on (simulated payment)
     pay = c.post("/api/billing/checkout", json={"product_code": "addon_drawings"}).json()["payment_id"]
     c.post(f"/api/billing/payments/{pay}/simulate", json={"outcome": "success"})

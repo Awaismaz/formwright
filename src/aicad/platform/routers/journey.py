@@ -17,12 +17,13 @@ from aicad.platform.models import (
     Organization,
     Project,
 )
-from aicad.platform.services import audit, notify, start_trial, track
+from aicad.platform.services import audit, notify, seat_limit, start_trial, track
 
 router = APIRouter(prefix="/api", tags=["journey"])
 
 CLIENT_EVENTS = {"tour_started", "tour_step", "tour_skipped", "module_viewed", "pricing_viewed", "upgrade_clicked",
-                 "template_used", "checkout_started", "paywall_shown", "help_opened", "download"}
+                 "template_used", "checkout_started", "paywall_shown", "help_opened", "download", "start_box",
+                 "onboarding_skipped", "next_step_clicked"}
 
 
 class OnboardingIn(BaseModel):
@@ -70,7 +71,8 @@ def save_onboarding(body: OnboardingIn, ctx: Ctx = Depends(auth_ctx)) -> dict[st
             start_trial(ctx.db, org, u)
             audit(ctx.db, "org.created", u, org.id, target=name)
             notify(ctx.db, u.id, "Your 14-day trial has started",
-                   "You have trial tokens to design with. Start with a template project.", "/app/projects")
+                   f"{org.token_balance:,} tokens and every module, on your own parts. Describe a part to begin.",
+                   "/app")
             ctx.org, ctx.role = org, "owner"
         elif ctx.role in ("owner", "admin"):
             ctx.org.name = name
@@ -118,17 +120,26 @@ def checklist(ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
         Project.org_id == org.id, Project.builds > 0)) if org else 0
     team = (db.scalar(select(func.count()).select_from(Membership).where(Membership.org_id == org.id)) or 0) + (
         db.scalar(select(func.count()).select_from(Invite).where(Invite.org_id == org.id)) or 0) if org else 0
+    solo = (u.onboarding or {}).get("company_size") == "Just me"
     items = [
-        {"key": "verify", "title": "Verify your email", "done": u.email_verified_at is not None, "link": "/verify-email"},
-        {"key": "workspace", "title": "Set up your workspace", "done": org is not None, "link": "/onboarding"},
-        {"key": "tour", "title": "Take the 2-minute tour", "done": u.tour_completed_at is not None, "link": "?tour=1"},
-        {"key": "project", "title": "Create your first project", "done": projects > 0, "link": "/app/projects?new=1"},
-        {"key": "build", "title": "Generate and verify a part", "done": built > 0, "link": "/app/projects"},
-        {"key": "explore", "title": "Explore the module roadmap", "done": has("module_viewed"), "link": "/app/modules"},
-        {"key": "team", "title": "Invite a teammate", "done": team > 1, "link": "/app/team"},
-        {"key": "plan", "title": "Choose a plan", "done": bool(org and org.plan_code != "trial"), "link": "/app/billing"},
+        {"key": "verify", "title": "Confirm your email", "done": u.email_verified_at is not None, "link": "/verify-email"},
+        {"key": "tour", "title": "Take the 1-minute tour", "done": u.tour_completed_at is not None, "link": "?tour=1"},
+        {"key": "build", "title": "Make your first verified part", "done": built > 0,
+         "link": "/app/projects" if projects else "/app"},
+        {"key": "module", "title": "Open a module on your part", "done": has("module_viewed"), "link": "/app/modules"},
     ]
-    return {"items": items, "done": sum(i["done"] for i in items), "total": len(items)}
+    if org is not None and seat_limit(db, org) > 1 and not solo:
+        items.append({"key": "team", "title": "Invite a teammate", "done": team > 1, "link": "/app/team"})
+    done = sum(i["done"] for i in items)
+    dismissed = bool((u.preferences or {}).get("checklist_dismissed"))
+    return {"items": items, "done": done, "total": len(items), "hidden": dismissed or done == len(items)}
+
+
+@router.post("/checklist/dismiss")
+def checklist_dismiss(ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
+    ctx.user.preferences = {**(ctx.user.preferences or {}), "checklist_dismissed": True}
+    ctx.db.commit()
+    return {"ok": True}
 
 
 @router.get("/notifications")

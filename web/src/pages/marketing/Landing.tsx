@@ -5,7 +5,10 @@ import {
   PackageCheck, ScanSearch, ShieldCheck, Sparkles, Wrench,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
+import { useTitle } from "@/lib/title";
 import type { Catalog } from "@/lib/types";
+import { num } from "@/lib/format";
 import { Badge, Button, StatusBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import HeroVisual from "@/components/HeroVisual";
@@ -28,19 +31,28 @@ const DIFFS = [
 const FAQ = [
   ["Is this a replacement for SOLIDWORKS?", "No. Formwright gets you from idea to a verified, editable starting model fast. Your team keeps refining and documenting in the CAD system it already uses."],
   ["What exactly is checked?", "Shape validity, solid count, closed manifold, bounding box and volume against values computed from your requirements, STEP export/re-import equality and deterministic regeneration. Checks prove geometric consistency — not strength or manufacturability."],
-  ["What are tokens?", "AI work is metered in tokens so you only pay for what you use. Each run shows its cost. Trials include 300 tokens; paid plans include a monthly allowance and you can top up any time."],
   ["Who owns the designs?", "You do. Generated models and source belong to your organization."],
 ];
 
+export const SALES = "mailto:sales@formwright.dev?subject=Formwright%20Enterprise";
+
 export default function Landing() {
+  useTitle(null);
+  const { me } = useSession();
+  const signedIn = !!me?.user;
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog") });
+  const trial = catalog.data?.trial_tokens ?? 1000;
+  const run = catalog.data?.typical_run;
+  const tokensFaq: [string, string] = ["What are tokens?", `AI work is metered in tokens, so you pay for what you use. ${run
+    ? `A new part from a written brief typically uses ${run.new.low}–${run.new.high} tokens; a change to an existing part usually uses less. `
+    : ""}Parameter edits, manual features, Toolbox parts and restores are free. Every run shows a live meter and stops at the budget you set. The trial includes ${num(trial)} tokens, about 3 new parts.`];
   const mods = catalog.data?.modules ?? [];
   const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
   const live = list(mods.filter(m => m.status === "live").map(m => m.name));
   const preview = list(mods.filter(m => m.status !== "live").map(m => m.name));
-  const faq = [...FAQ.slice(0, 3), ["Which modules are available today?", mods.length
+  const faq = [...FAQ.slice(0, 2), tokensFaq, ["Which modules are available today?", mods.length
     ? `Live today: ${live}. ${preview ? `${preview} ${preview.includes(" and ") ? "are" : "is"} on the roadmap and marked Preview in the app.` : ""}`
-    : "See the module list above: each is marked Live or Preview."], ...FAQ.slice(3)];
+    : "See the module list above: each is marked Live or Preview."], ...FAQ.slice(2)];
   return (
     <main>
       {/* hero */}
@@ -51,16 +63,17 @@ export default function Landing() {
           <div className="mx-auto max-w-3xl text-center">
             <Badge tone="accent" className="mb-5"><Sparkles className="h-3 w-3" /> AI design engineer for mechanical teams</Badge>
             <h1 className="text-[40px] font-semibold leading-[1.08] tracking-tight sm:text-[56px]">
-              From idea to <span className="bg-gradient-to-r from-primary to-[#5C93E6] bg-clip-text text-transparent">verified</span>, manufacturable CAD.
+              From idea to <span className="bg-gradient-to-r from-primary to-[#5C93E6] bg-clip-text text-transparent">verified</span>, editable CAD.
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-[17px] leading-relaxed text-muted">
               Describe a part in plain language. Formwright's agent writes parametric CAD, builds it, checks it numerically and shows it live — so your engineers start from a correct model, not a blank sketch.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <Link to="/signup"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free — 300 tokens</Button></Link>
+              {signedIn ? <Link to="/app"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button></Link>
+                : <Link to="/signup"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free · {num(trial)} tokens</Button></Link>}
               <a href="#how"><Button size="lg" variant="secondary">See how it works</Button></a>
             </div>
-            <p className="mt-3 text-xs text-muted">No credit card required · 14-day trial · STEP & STL export included</p>
+            <p className="mt-3 text-xs text-muted">No credit card · 14-day trial with every module · STEP & STL export included</p>
           </div>
           <div className="mx-auto mt-14 max-w-5xl"><HeroVisual /></div>
         </div>
@@ -118,8 +131,8 @@ export default function Landing() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="max-w-2xl">
             <div className="label">Platform</div>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight">One workspace. A growing set of modules.</h2>
-            <p className="mt-3 text-muted">Start with Design Studio today. Add modules as your team needs them — each one is clearly marked Live or Preview.</p>
+            <h2 className="mt-2 text-3xl font-semibold tracking-tight">One part, every next step.</h2>
+            <p className="mt-3 text-muted">Design in the Studio, then make the drawing, check manufacturability, prepare a print or render it, on the same part. The trial includes every module; afterwards, add the ones your team needs.</p>
           </div>
           <Link to="/pricing" className="link text-sm font-medium">Compare plans →</Link>
         </div>
@@ -144,7 +157,7 @@ export default function Landing() {
             <div className="label">Security & IP</div>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight">Your designs stay yours.</h2>
             <p className="mt-3 text-muted">Built for firms that handle client IP every day. Enterprise deployments add SSO, audit export and private hosting.</p>
-            <Link to="/signup" className="mt-6 inline-block"><Button variant="secondary">Talk to us about Enterprise</Button></Link>
+            <a href={SALES} className="mt-6 inline-block"><Button variant="secondary">Talk to us about Enterprise</Button></a>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             {[
@@ -178,8 +191,8 @@ export default function Landing() {
         <div className="relative mx-auto max-w-6xl overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-[#143E80] px-8 py-14 text-center text-white">
           <div className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full bg-accent/30 blur-3xl" />
           <h2 className="relative text-3xl font-semibold tracking-tight">Your next part, verified in minutes.</h2>
-          <p className="relative mx-auto mt-3 max-w-xl text-white/80">Start with 300 free tokens. No credit card. Export everything you make.</p>
-          <Link to="/signup" className="relative mt-7 inline-block"><Button size="lg" variant="accent" icon={<ArrowRight className="h-4 w-4" />}>Start your free trial</Button></Link>
+          <p className="relative mx-auto mt-3 max-w-xl text-white/80">{signedIn ? "Pick up where you left off." : `Start with ${num(trial)} free tokens and every module. No credit card. Export everything you make.`}</p>
+          <Link to={signedIn ? "/app" : "/signup"} className="relative mt-7 inline-block"><Button size="lg" variant="accent" icon={<ArrowRight className="h-4 w-4" />}>{signedIn ? "Open the app" : "Start your free trial"}</Button></Link>
         </div>
       </section>
     </main>

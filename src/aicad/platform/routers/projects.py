@@ -17,18 +17,26 @@ from sqlalchemy import select
 from aicad.agent import worker
 from aicad.agent.runner import editable_params
 from aicad.agent.session import AgentSession
-from aicad.platform.catalog import TOKEN_COSTS
+from aicad.platform import metering
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory, utcnow
-from aicad.platform.deps import Ctx, verified_ctx
-from aicad.platform.models import Organization, Project, User
-from aicad.platform.routers.billing import tokens_for_cost
-from aicad.platform.services import audit, debit, notify, org_modules, track, trial_state
+from aicad.platform.deps import Ctx, in_grace, verified_ctx
+from aicad.platform.models import AgentRun, Organization, Project, User
+from aicad.platform.services import (
+    audit,
+    debit,
+    notify,
+    notify_revision,
+    org_modules,
+    track,
+    trial_state,
+)
 
 router = APIRouter(prefix="/api", tags=["projects"])
 
 FILES = {"model.glb": "model/gltf-binary", "status.json": "application/json", "part.step": "application/step",
-         "part.stl": "model/stl", "views.png": "image/png", "topo.json": "application/json",
+         "part.stl": "model/stl", "views.png": "image/png", "thumb.png": "image/png",
+         "topo.json": "application/json",
          "part.3mf": "model/3mf", "recognition.json": "application/json"}
 DOWNLOADS = {"part.step", "part.stl", "part.3mf"}
 
@@ -77,6 +85,7 @@ class Attachment(BaseModel):
 class ChatIn(BaseModel):
     prompt: str
     attachments: list[Attachment] = []
+    budget_tokens: int | None = None  # stop this run at N tokens (default: the workspace's run budget)
 
 
 ALLOWED_ATTACH = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
@@ -178,6 +187,15 @@ def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None =
 
 def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
     def handle(ev: dict[str, Any]) -> None:
+        if ev.get("type") == "meter":
+            spent = ev.get("spent_usd") or 0.0
+            ev["tokens"] = metering.tokens_for_usd(spent) if spent else 0
+            b = ev.get("budget_usd")
+            ev["budget_tokens"] = round(b / metering.USD_PER_TOKEN) if b else None
+            return
+        if ev.get("type") == "busy" and ev.get("value") is False:
+            _finish_run(project_id)  # no-op when the result already closed the run
+            return
         if ev.get("type") not in ("result", "tool_result"):
             return
         db = session_factory()()
@@ -196,33 +214,87 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                     p.updated_at = utcnow()
                     s = _sessions.get(project_id)
                     who = db.get(User, user_id)
-                    rev = _snapshot(p, ws, cause=getattr(s, "last_prompt", None) or "Design agent build", kind="agent",
-                                    by=who.name if who else None)
+                    why = getattr(s, "last_prompt", None) or "Design agent build"
+                    rev = _snapshot(p, ws, cause=why, kind="agent", by=who.name if who else None)
                     if rev:
                         ev["revision"] = rev
+                        notify_revision(db, p, rev, who, why)
                     if p.builds == 1:
-                        user = db.get(User, user_id)
-                        track(db, "first_build", user, p.org_id, ok=bool(st.get("ok")))
+                        track(db, "first_build", who, p.org_id, ok=bool(st.get("ok")))
                 db.commit()
                 return
             org = db.get(Organization, p.org_id)
             user = db.get(User, user_id)
-            cost = ev.get("cost_est_usd")
-            tokens = tokens_for_cost(cost)
+            tokens = metering.tokens_for_usd(ev.get("cost_est_usd"))
+            budget = ev.get("budget_tokens")
+            if isinstance(budget, int):
+                tokens = min(tokens, budget)  # a run is never charged more than its budget
             ev["tokens_charged"] = 0 if god_tokens else tokens
             if org is not None and not god_tokens:
+                before = org.token_balance
                 debit(db, org, tokens, "usage", f"Design agent · {p.name}", user, ref=project_id)
                 ev["token_balance"] = org.token_balance
-                if org.token_balance < 50:
-                    for uid in {user_id}:
-                        notify(db, uid, "Tokens running low",
-                               f"{max(org.token_balance, 0)} tokens left. Top up or upgrade to keep designing.",
-                               "/app/billing")
+                if org.token_balance < metering.LOW_TOKENS <= before:
+                    notify(db, user_id, "Tokens running low",
+                           f"{max(org.token_balance, 0)} tokens left, less than a typical new part. Top up or "
+                           "upgrade to keep designing.", "/app/billing#tokens")
             track(db, "agent_run", user, p.org_id, subtype=ev.get("subtype"), tokens=tokens, turns=ev.get("turns"))
+            built = (latest_revision(ws) or 0) > (ev.get("rev_before") or 0)
+            verified = bool((p.last_status or {}).get("ok")) if built else None
+            status = ("stopped_budget" if ev.get("budget_stopped") else "ok" if ev.get("subtype") == "success"
+                      else "stopped" if ev.get("subtype") == "stopped" else "failed")
+            run = db.get(AgentRun, ev.get("run_id") or "")
+            if run is not None:
+                run.tokens, run.cost_usd, run.status = ev["tokens_charged"], ev.get("cost_est_usd"), status
+                run.verified, run.turns, run.duration_s = verified, ev.get("turns"), ev.get("duration_s")
+                run.finished_at = utcnow()
+                metering.release(run.org_id, run.id)
+            if (ev.get("duration_s") or 0) >= 20 or status == "stopped_budget":
+                _notify_run(db, p, user_id, status, verified, ev["tokens_charged"], budget)
             db.commit()
         finally:
             db.close()
     return handle
+
+
+def _notify_run(db: Any, p: Project, user_id: str, status: str, verified: bool | None, tokens: int,
+                budget: int | None) -> None:
+    """Agent runs take minutes and people tab away: say how the run ended, linked to the part."""
+    link = f"/app/projects/{p.id}"
+    if status == "stopped_budget":
+        notify(db, user_id, f"{p.name}: stopped at the run budget",
+               f"The run used its {budget}-token budget and stopped. The last verified build is kept.", link)
+    elif verified:
+        notify(db, user_id, f"{p.name} is ready", f"Built and verified: all geometry checks passed · {tokens} tokens.",
+               link)
+    elif verified is False:
+        notify(db, user_id, f"{p.name}: checks failing", "The agent finished, but the latest build does not pass "
+               "its checks. Open the project to review.", link)
+    elif status in ("stopped", "failed"):
+        notify(db, user_id, f"{p.name}: the design agent stopped", "No new build was made. Open the project to "
+               "continue.", link)
+    else:
+        notify(db, user_id, f"{p.name}: the design agent replied", "No geometry changed. Open the project to read "
+               "the answer.", link)
+
+
+def _finish_run(project_id: str) -> None:
+    """Close a run that ended without a result (a crash or lost connection): release its reserved budget."""
+    s = _sessions.get(project_id)
+    run_id = getattr(s, "run_id", None)
+    if s is None or not run_id:
+        return
+    s.run_id = None  # type: ignore[attr-defined]
+    db = session_factory()()
+    try:
+        run = db.get(AgentRun, run_id)
+        if run is not None:
+            metering.release(run.org_id, run.id)
+            if run.status == "running":
+                run.status, run.finished_at = "failed", utcnow()
+                db.commit()
+    finally:
+        db.close()
 
 
 def get_session(p: Project, ctx: Ctx) -> AgentSession:
@@ -230,6 +302,7 @@ def get_session(p: Project, ctx: Ctx) -> AgentSession:
     if s is None:
         s = AgentSession(workspace_for(p), on_event=_on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens")),
                          worker_key=p.org_id)
+        s.run_id = None  # type: ignore[attr-defined]
         _sessions[p.id] = s
     else:  # refresh who is driving (token attribution, god flags)
         s.on_event = _on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens"))
@@ -244,8 +317,11 @@ def _project(ctx: Ctx, project_id: str) -> Project:
 
 
 def _thumb(p: Project) -> str | None:
-    ws = workspace_for(p)
-    return f"/api/projects/{p.id}/files/views.png" if (ws / "out" / "views.png").is_file() else None
+    out = workspace_for(p) / "out"
+    for name in ("thumb.png", "views.png"):  # thumb.png: one clean view; older builds only have the 2x2 sheet
+        if (out / name).is_file():
+            return f"/api/projects/{p.id}/files/{name}"
+    return None
 
 
 def project_dict(p: Project, creator: str | None = None) -> dict[str, Any]:
@@ -259,6 +335,8 @@ def can_run_agent(ctx: Ctx) -> tuple[bool, str | None, str | None]:
     org = ctx.require_org()
     if ctx.role == "viewer":
         return False, "Viewers can't run the design agent. Ask an admin for engineer access.", None
+    if ctx.user.email_verified_at is None and not ctx.god_on("skip_verification") and not in_grace(ctx.user):
+        return False, "Verify your email to keep designing.", "/verify-email"
     if "design" not in org_modules(ctx.db, org) and not ctx.god_on("bypass_paywall"):
         if org.plan_code == "trial" or org.plan_status == "canceled":
             return False, "Your plan doesn't include Design Studio. Choose a plan to continue.", "/app/billing"
@@ -266,9 +344,13 @@ def can_run_agent(ctx: Ctx) -> tuple[bool, str | None, str | None]:
     ts = trial_state(org)
     if ts.get("expired") and not ctx.god_on("bypass_paywall"):
         return False, "Your free trial has ended. Choose a plan to keep designing.", "/app/billing"
-    if org.token_balance < TOKEN_COSTS["design_run_preflight"] and not ctx.god_on("bypass_tokens"):
-        return False, f"You need at least {TOKEN_COSTS['design_run_preflight']} tokens to run the agent.", \
-            "/app/billing#tokens"
+    if not ctx.god_on("bypass_tokens"):
+        budget, why = metering.run_budget(ctx.db, org, ctx.user, None)
+        if budget is None:
+            if why == "verify":
+                return False, (f"Verify your email to keep designing. Until then an account can use "
+                               f"{metering.UNVERIFIED_TOKEN_CAP} tokens."), "/verify-email"
+            return False, why, "/app/billing#tokens"
     return True, None, None
 
 
@@ -332,6 +414,47 @@ def patch_project(project_id: str, body: ProjectPatch, ctx: Ctx = Depends(verifi
     p.updated_at = utcnow()
     ctx.db.commit()
     return project_dict(p)
+
+
+class DuplicateIn(BaseModel):
+    name: str | None = None
+
+
+def _copy_name(ctx: Ctx, base: str) -> str:
+    """"Bracket (copy)", then "Bracket (copy 2)"... unique among the workspace's projects."""
+    names = set(ctx.db.scalars(select(Project.name).where(Project.org_id == ctx.require_org().id)))
+    stem = f"{base} (copy)"[:120]
+    n, name = 2, stem
+    while name in names:
+        name, n = f"{base} (copy {n})"[:120], n + 1
+    return name
+
+
+@router.post("/projects/{project_id}/duplicate")
+def duplicate_project(project_id: str, body: DuplicateIn | None = None,
+                      ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Save as: a new project with the same model, verified outputs, settings and revision history (no AI, no
+    tokens). The design conversation is not copied; the copy starts a fresh one."""
+    src = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403, "Viewers can't create projects")
+    s = _sessions.get(src.id)
+    if s and s.busy:
+        raise HTTPException(409, "The design agent is working on this part. Duplicate it when the run has finished.")
+    name = ((body.name if body else None) or "").strip()[:120] or _copy_name(ctx, src.name)
+    p = Project(org_id=src.org_id, name=name, description=src.description, template=src.template,
+                created_by=ctx.user.id, last_status=dict(src.last_status or {}), builds=src.builds)
+    ctx.db.add(p)
+    ctx.db.flush()
+    a, b = workspace_for(src), workspace_for(p)
+    if a.is_dir():
+        shutil.copytree(a, b, ignore=shutil.ignore_patterns(".fw", ".out_backup"))
+    else:
+        b.mkdir(parents=True, exist_ok=True)
+    audit(ctx.db, "project.duplicated", ctx.user, p.org_id, target=p.id, source=src.id)
+    track(ctx.db, "project_duplicated", ctx.user, p.org_id)
+    ctx.db.commit()
+    return project_dict(p, ctx.user.name)
 
 
 @router.delete("/projects/{project_id}")
@@ -707,6 +830,7 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     p.updated_at = utcnow()
     rev = _snapshot(p, ws, cause="Parameters changed: " + ", ".join(f"{k} {v['from']:g} → {v['to']:g}" for k, v in changes.items()),
                     kind="params", by=ctx.user.name)
+    notify_revision(ctx.db, p, rev, ctx.user, "Parameters changed")
     schedule_finalize(p, ws, rev)
     audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
     ctx.db.commit()
@@ -736,13 +860,29 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
     s = get_session(p, ctx)
     if s.busy:
         raise HTTPException(409, "The agent is still working on the previous request")
+    org = ctx.require_org()
+    unlimited = ctx.god_on("bypass_tokens")
+    budget, why = metering.run_budget(ctx.db, org, ctx.user, body.budget_tokens, unlimited)
+    if budget is None and not unlimited:
+        raise HTTPException(402, {"message": why if why != "verify" else "Verify your email to keep designing.",
+                                  "cta": "/verify-email" if why == "verify" else "/app/billing#tokens"})
     ws = workspace_for(p)
     files = save_attachments(ws, body.attachments)
     if files:
         text += ("\n\n[Reference image(s) attached by the user: " + ", ".join(files) +
                  ". Read them before modelling. Treat them as references: do not assume a scale — ask for at least "
                  "one real dimension if none is given, and state what you inferred versus what you were told.]")
-    s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files}
+    kind = "change" if p.builds else "new"
+    est = metering.estimate(ctx.db, org, kind, len(body.prompt))
+    run = AgentRun(org_id=org.id, project_id=p.id, user_id=ctx.user.id, kind=kind, template=p.template,
+                   brief_chars=len(body.prompt), budget_tokens=budget, est_tokens=est["typical"], est_high=est["high"])
+    ctx.db.add(run)
+    ctx.db.flush()
+    if budget is not None:
+        metering.reserve(org.id, run.id, budget)
+    s.run_id = run.id  # type: ignore[attr-defined]
+    s.run_budget_usd = budget * metering.USD_PER_TOKEN if budget is not None else None
+    s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files, "run_id": run.id, "budget_tokens": budget}
     t = asyncio.create_task(s.send(text))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)

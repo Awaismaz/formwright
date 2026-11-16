@@ -8,7 +8,7 @@ export default function HeroVisual() {
       <div className="flex h-9 items-center gap-2 border-b border-white/5 bg-chrome px-3">
         <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" /><span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" /><span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
         <LogoMark size={16} className="ml-3" /><span className="text-[11px] text-chrome-muted">Formwright · Bracket rev 3</span>
-        <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-chrome-fg"><Coins className="h-3 w-3" />1,412</span>
+        <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-chrome-fg"><Coins className="h-3 w-3" />1,240</span>
       </div>
       <div className="grid grid-cols-[1fr_1.5fr_0.95fr] text-[11px] max-md:grid-cols-[1fr_1.4fr]">
         {/* chat */}
@@ -17,8 +17,8 @@ export default function HeroVisual() {
           <div className="rounded-lg border border-border bg-panel2 px-2.5 py-1.5 text-text">
             <b>Interpreted:</b> legs to outside corner · Ø5.5 holes (ISO 273 medium) · 15 mm from ends.
           </div>
-          <div className="flex items-center gap-1.5 text-muted"><Check className="h-3 w-3 text-success" /> Write model.py</div>
-          <div className="flex items-center gap-1.5 text-muted"><Check className="h-3 w-3 text-success" /> build_model — all checks pass</div>
+          <div className="flex items-center gap-1.5 text-muted"><Check className="h-3 w-3 text-success" /> Drafting the design</div>
+          <div className="flex items-center gap-1.5 text-muted"><Check className="h-3 w-3 text-success" /> Building and checking the part — all checks passed</div>
           <div className="rounded-lg border border-border bg-panel2 px-2.5 py-1.5 text-text">Built and verified. Volume matches hand calc exactly. ⚠ Vertical-leg holes are 10 mm apart — confirm?</div>
           <div className="mt-auto flex items-center gap-1.5 rounded border border-border bg-panel2 px-2 py-1.5 text-muted">Ask for a change… <Send className="ml-auto h-3 w-3 text-primary" /></div>
         </div>
@@ -58,8 +58,8 @@ export default function HeroVisual() {
             <div key={a} className="flex items-center gap-1.5"><span className="rounded bg-success/12 px-1 text-[9px] font-bold text-success">PASS</span><span className="flex-1">{a}</span><span className="text-muted">{b}</span></div>
           ))}
           <div className="pt-2 text-[9.5px] font-bold uppercase tracking-wider text-muted">Parameters</div>
-          {[["LEG_H", "60"], ["LEG_V", "40"], ["WIDTH", "50"], ["T", "5"], ["FILLET_IN", "3"]].map(([a, b]) => (
-            <div key={a} className="flex justify-between font-mono text-[10px]"><span className="text-muted">{a}</span><span>{b}</span></div>
+          {[["Horizontal leg", "60 mm"], ["Vertical leg", "40 mm"], ["Width", "50 mm"], ["Thickness", "5 mm"], ["Inside fillet", "R3"]].map(([a, b]) => (
+            <div key={a} className="flex justify-between text-[10px] tabular-nums"><span className="text-muted">{a}</span><span>{b}</span></div>
           ))}
         </div>
       </div>

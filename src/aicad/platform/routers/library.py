@@ -29,7 +29,7 @@ from aicad.platform.routers.projects import (
     wait_finalized,
     workspace_for,
 )
-from aicad.platform.services import audit, track
+from aicad.platform.services import audit, notify_revision, track
 
 router = APIRouter(prefix="/api", tags=["library"])
 
@@ -97,6 +97,7 @@ async def install_model(p: Project, ctx: Ctx, source: str, strict: bool, note: s
     p.builds += 1
     p.updated_at = utcnow()
     rev = _snapshot(p, ws, cause=note.replace("**", ""), kind="library", by=ctx.user.name)
+    notify_revision(ctx.db, p, rev, ctx.user, note.replace("**", ""))
     schedule_finalize(p, ws, rev)
     if s:
         s.publish({"type": "text", "text": f"{note} (revision {rev}, no AI used)."})
