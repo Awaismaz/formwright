@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
-  Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
-  ScanSearch, Squircle, Upload, Wrench,
+  Cone, Fence, Layers2, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
+  ScanSearch, Squircle, Triangle, Upload, Waypoints, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Tip } from "@/components/ui";
@@ -10,8 +10,8 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern"; preset?: Record<string, unknown> }
-  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve"; mode?: "add" | "cut" } }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft"; preset?: Record<string, unknown> }
+  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib" | "sketch"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
   | { kind: "import" } | { kind: "toolbox" } | { kind: "similar" };
@@ -43,18 +43,26 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "revolve", label: "Revolved Boss/Base", icon: <RotateCw className="h-5 w-5" />, tip: "Sketch a profile and a centerline, then revolve it", cmd: { kind: "sketch", preset: { feature: "revolve", mode: "add" } } },
       { id: "cut", label: "Extruded Cut", icon: <ArrowDownToLine className="h-5 w-5" />, tip: "Sketch, then cut: blind, mid plane or through all", cmd: { kind: "sketch", preset: { feature: "extrude", mode: "cut" } }, needsBody: true },
       { id: "revcut", label: "Revolved Cut", icon: <RefreshCcwDot className="h-5 w-5" />, tip: "Sketch a profile and a centerline, then revolve it to remove material (grooves)", cmd: { kind: "sketch", preset: { feature: "revolve", mode: "cut" } }, needsBody: true },
+      { id: "sweep", label: "Swept Boss/Base", icon: <Waypoints className="h-5 w-5" />, tip: "Sweep a closed profile sketch along a path sketch", cmd: { kind: "feature", op: "sweep", preset: { mode: "add" } } },
+      { id: "loft", label: "Lofted Boss/Base", icon: <Cone className="h-5 w-5" />, tip: "Blend between two or more closed profile sketches", cmd: { kind: "feature", op: "loft", preset: { mode: "add" } } },
+      { id: "sweepcut", label: "Swept Cut", icon: <Waypoints className="h-5 w-5" />, tip: "Remove material by sweeping a profile along a path", cmd: { kind: "feature", op: "sweep", preset: { mode: "cut" } }, needsBody: true },
+      { id: "loftcut", label: "Lofted Cut", icon: <Cone className="h-5 w-5" />, tip: "Remove material lofted between profile sketches", cmd: { kind: "feature", op: "loft", preset: { mode: "cut" } }, needsBody: true },
       { id: "hole", label: "Hole", icon: <CircleDot className="h-5 w-5" />, tip: "Simple, blind or through hole on a planar face (optionally patterned)", cmd: { kind: "feature", op: "hole" }, needsBody: true },
     ], [
       { id: "fillet", label: "Fillet", icon: <Squircle className="h-5 w-5" />, tip: "Round selected edges", cmd: { kind: "feature", op: "fillet" }, needsBody: true },
       { id: "chamfer", label: "Chamfer", icon: <Diamond className="h-5 w-5" />, tip: "Bevel selected edges", cmd: { kind: "feature", op: "chamfer" }, needsBody: true },
       { id: "shell", label: "Shell", icon: <Package className="h-5 w-5" />, tip: "Hollow the part, removing the selected faces", cmd: { kind: "feature", op: "shell" }, needsBody: true },
+      { id: "draft", label: "Draft", icon: <Triangle className="h-5 w-5" />, tip: "Taper faces by an angle about a neutral plane (moulding/casting release)", cmd: { kind: "feature", op: "draft" }, needsBody: true },
+      { id: "rib", label: "Rib", icon: <Fence className="h-5 w-5" />, tip: "Sketch an open line between walls, then thicken it into a rib", cmd: { kind: "sketch", preset: { feature: "rib" } }, needsBody: true },
     ], [
       { id: "linpat", label: "Linear Pattern", icon: <Grid3x3 className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes along a direction", cmd: { kind: "feature", op: "pattern", preset: { kind: "linear" } }, needsBody: true },
       { id: "cirpat", label: "Circular Pattern", icon: <RotateCw className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes around an axis", cmd: { kind: "feature", op: "pattern", preset: { kind: "circular" } }, needsBody: true },
-      { id: "mirror", label: "Mirror", icon: <FlipHorizontal2 className="h-5 w-5" />, tip: "Mirror the body about a face or principal plane", cmd: { kind: "feature", op: "mirror" }, needsBody: true },
+      { id: "mirror", label: "Mirror", icon: <FlipHorizontal2 className="h-5 w-5" />, tip: "Mirror selected features, or the whole body, about a plane or face", cmd: { kind: "feature", op: "mirror" }, needsBody: true },
+    ], [
+      { id: "plane", label: "Reference Plane", icon: <Layers2 className="h-5 w-5" />, tip: "A plane offset from Front/Top/Right or a face, optionally at an angle, to sketch on", cmd: { kind: "feature", op: "plane" } },
     ]],
     Sketch: [[
-      { id: "sketch", label: "Sketch", icon: <PenLine className="h-5 w-5" />, tip: "Open a 2D sketch on a planar face (lines, arcs, circles, dimensions, constraints)", cmd: { kind: "sketch" } },
+      { id: "sketch", label: "Sketch", icon: <PenLine className="h-5 w-5" />, tip: "A 2D sketch on a plane or planar face, kept in the tree (profiles and paths for sweeps and lofts); you can still turn it into a feature on exit", cmd: { kind: "sketch", preset: { feature: "sketch" } } },
     ], [
       { id: "rect", label: "Quick Rectangle", icon: <RectangleHorizontal className="h-5 w-5" />, tip: "Quick rectangle boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "rect" } }, needsBody: true },
       { id: "circ", label: "Quick Circle", icon: <Circle className="h-5 w-5" />, tip: "Quick circular boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "circle" } }, needsBody: true },

@@ -17,6 +17,7 @@ from build123d import (
     Axis,
     Circle,
     Cylinder,
+    Edge,
     Face,
     Line,
     Location,
@@ -25,15 +26,20 @@ from build123d import (
     Pos,
     Rectangle,
     ThreePointArc,
+    Transition,
     Vector,
     Wire,
     chamfer,
     extrude,
     fillet,
+    loft,
     mirror,
     offset,
     revolve,
+    sweep,
 )
+
+from aicad import refplane as _refplane
 
 _STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
 
@@ -308,8 +314,11 @@ def sketch_region(profiles: list[dict[str, Any]]) -> Any:
     return region
 
 
-TOOL_OPS = {"sketch", "extrude", "revolve", "hole"}
-BASE_OPS = {"sketch", "extrude", "revolve"}  # can create the first solid of a hand-modelled part
+TOOL_OPS = {"sketch", "extrude", "revolve", "hole", "sweep", "loft"}
+BASE_OPS = {"sketch", "extrude", "revolve", "sweep", "loft"}  # can create the first solid of a hand-modelled part
+SKETCH_USERS = {"sweep": ("profile", "path"), "loft": ("sections",)}  # features that consume sketch nodes (by id)
+NON_GEOMETRIC = _refplane.NON_GEOMETRIC
+ref_plane = _refplane.ref_plane
 
 
 def _sketch_axis(plane: Plane, axis: dict[str, Any]) -> Axis:
@@ -354,6 +363,13 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
         if not 0 < angle <= 360:
             raise ValueError("revolve angle must be between 0 and 360 degrees")
         return revolve(region, axis=_sketch_axis(plane, f["axis"]), revolution_arc=angle)
+    if op == "sweep":
+        prof, path = f["_profile"], f["_path"]
+        face = _plane(prof["plane"]) * _sketch_face(prof, "sweep profile")
+        return sweep(face, path=_path_wire(path), transition=Transition.RIGHT)
+    if op == "loft":
+        sections = [_plane(s["plane"]) * _sketch_face(s, "loft section", single=True) for s in f["_sections"]]
+        return loft(sections, ruled=bool(f.get("ruled")))
     if op == "hole":
         n = _v(f["normal"]).normalized()
         depth = float(f["depth"]) if f.get("depth") else diag * 2
@@ -368,6 +384,48 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
             return [Location(step * i) * tool for i in range(count)]
         return tool
     raise ValueError(f"operation {op!r} has no tool body")
+
+
+def _sketch_face(sk: dict[str, Any], what: str, single: bool = False) -> Any:
+    """Region of a sketch node's closed profiles (holes allowed unless `single`)."""
+    if not sk.get("profiles"):
+        raise ValueError(f"the {what} sketch '{sk.get('name', '')}' has no closed profile")
+    region = sketch_region(sk["profiles"])
+    if single and len(region.faces()) != 1:
+        raise ValueError(f"each {what} must be one closed profile ('{sk.get('name', '')}' has several)")
+    return region
+
+
+def _path_wire(sk: dict[str, Any]) -> Any:
+    """Sweep path: the sketch's one open chain of lines/arcs, or its one closed loop."""
+    plane = _plane(sk["plane"])
+    chains = sk.get("chains") or []
+    if len(chains) > 1:
+        raise ValueError(f"the path sketch '{sk.get('name', '')}' must be one connected chain of lines/arcs")
+    if chains:
+        return plane * Wire(_seg_edges(chains[0])[0])
+    loops = sk.get("profiles") or []
+    if len(loops) != 1:
+        raise ValueError(f"the path sketch '{sk.get('name', '')}' needs one connected chain or one closed loop")
+    lp = loops[0]
+    if lp["kind"] == "circle":
+        return plane * Wire([Pos(float(lp["cx"]), float(lp["cy"])) * Edge.make_circle(float(lp["r"]))])
+    return plane * Wire(_seg_edges(lp["segs"])[0])
+
+
+def _with_sketches(f: dict[str, Any], sketches: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Attach the sketch nodes a sweep/loft uses (resolved, on their current planes) for this build."""
+    def get(i: Any, role: str) -> dict[str, Any]:
+        sk = sketches.get(str(i))
+        if sk is None:
+            raise ValueError(f"its {role} sketch is missing (deleted?)")
+        return sk
+    if f["op"] == "sweep":
+        return {**f, "_profile": get(f.get("profile"), "profile"), "_path": get(f.get("path"), "path")}
+    secs = f.get("sections") or []
+    if len(secs) < 2:
+        raise ValueError("a loft needs at least two section sketches")
+    return {**f, "_sections": [get(i, "section") for i in secs]}
 
 
 def _is_cut(f: dict[str, Any]) -> bool:
@@ -406,19 +464,126 @@ def pattern_instances(tool: Any, f: dict[str, Any]) -> list[Any]:
     return out
 
 
+def _single_solid(part: Any, what: str) -> Any:
+    sols = list(part.solids())
+    if len(sols) != 1:
+        raise ValueError(f"{what} works on a single solid body")
+    return sols[0]
+
+
+def _draft(part: Any, f: dict[str, Any]) -> Any:
+    """Draft the picked faces by `angle` degrees about the neutral plane. The pull direction points into the part
+    from the neutral face (so a positive angle narrows the part away from it); `reverse` flips it."""
+    solid = _single_solid(part, "Draft")
+    n = _v(f["neutral"]["normal"]).normalized() * (1.0 if f.get("reverse") else -1.0)
+    neutral = Plane(origin=_v(f["neutral"]["point"]), z_dir=n)
+    faces = []
+    for fc in f["faces"]:
+        found = faces_near(solid, fc["point"], normal=fc.get("normal"))
+        if not found:
+            raise ValueError("a face to draft was not found (geometry changed?)")
+        faces += [x for x in found if x not in faces]
+    try:
+        return solid.draft(faces, neutral, float(f["angle"]))
+    except Exception as e:  # OCCT reports a failed draft with a bare exception
+        raise ValueError("the draft could not be applied to these faces (try a smaller angle, or planar/cylindrical "
+                         "faces that meet the neutral plane)") from e
+
+
+def _xy(v: Vector) -> tuple[float, float]:
+    return (v.X, v.Y)
+
+
+def _seg_edges(segs: list[dict[str, Any]]) -> tuple[list[Any], Vector, Vector, Vector, Vector]:
+    """2D edges of an ordered open chain plus its start point/tangent (pointing backwards) and end point/tangent."""
+    def tangent(s: dict[str, Any], at_end: bool) -> Vector:
+        a, b = Vector(*s["a"], 0), Vector(*s["b"], 0)
+        if s["type"] != "arc":
+            return (b - a).normalized()
+        m = Vector(*s["m"], 0)
+        ax, ay, mx, my, bx, by = a.X, a.Y, m.X, m.Y, b.X, b.Y
+        d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my))
+        ux = ((ax * ax + ay * ay) * (my - by) + (mx * mx + my * my) * (by - ay) + (bx * bx + by * by) * (ay - my)) / d
+        uy = ((ax * ax + ay * ay) * (bx - mx) + (mx * mx + my * my) * (ax - bx) + (bx * bx + by * by) * (mx - ax)) / d
+        c = Vector(ux, uy, 0)
+        ccw = (m - a).cross(b - m).Z > 0
+        p = b if at_end else a
+        r = p - c
+        t = Vector(-r.Y, r.X, 0) if ccw else Vector(r.Y, -r.X, 0)
+        return t.normalized()
+    edges = []
+    for s in segs:
+        a, b = (float(s["a"][0]), float(s["a"][1])), (float(s["b"][0]), float(s["b"][1]))
+        edges.append(ThreePointArc(a, (float(s["m"][0]), float(s["m"][1])), b) if s["type"] == "arc" else Line(a, b))
+    return (edges, Vector(*segs[0]["a"], 0), tangent(segs[0], False), Vector(*segs[-1]["b"], 0), tangent(segs[-1], True))
+
+
+def _rib(part: Any, f: dict[str, Any], diag: float) -> Any:
+    """Rib from an open sketch profile: the region between the profile (extended along its end tangents) and the body,
+    `t` thick symmetric about the sketch plane, in the sketch plane. The side that is closed off by the body is used
+    (`flip` tries the other side first)."""
+    plane = _plane(f["plane"])
+    t = float(f["t"])
+    bb = part.bounding_box()
+    big = diag * 4
+    for chain in f["chains"]:
+        edges, p0, t0, p1, t1 = _seg_edges(chain)
+        e0, e1 = p0 - t0 * big, p1 + t1 * big
+        chord = (e1 - e0).normalized()
+        left = Vector(-chord.Y, chord.X, 0)
+        mid_seg = chain[len(chain) // 2]
+        mid = Vector(*mid_seg["m"], 0) if mid_seg["type"] == "arc" else (Vector(*mid_seg["a"], 0) + Vector(*mid_seg["b"], 0)) * 0.5
+        added = None
+        for side in ((-1.0, 1.0) if f.get("flip") else (1.0, -1.0)):
+            n = left * side
+            loop = [Line(_xy(e0), _xy(p0)), *edges, Line(_xy(p1), _xy(e1)),
+                    Line(_xy(e1), _xy(e1 + n * big)),
+                    Line(_xy(e1 + n * big), _xy(e0 + n * big)),
+                    Line(_xy(e0 + n * big), _xy(e0))]
+            try:
+                region = Face(Wire(loop))
+            except Exception:  # noqa: BLE001,S112 - a self-crossing closure on this side; try the other one
+                continue
+            slab = extrude(plane * region, amount=t / 2, both=True)
+            probe = plane.from_local_coords(_xy(mid + n * min(t, 0.05)))
+            pieces = sorted((slab - part).solids(), key=lambda s: s.distance_to(Vector(probe)))
+            if not pieces or pieces[0].distance_to(Vector(probe)) > 1e-6:
+                continue
+            pb = pieces[0].bounding_box()
+            tol = t + 1e-6
+            inside = (pb.min.X >= bb.min.X - tol and pb.min.Y >= bb.min.Y - tol and pb.min.Z >= bb.min.Z - tol
+                      and pb.max.X <= bb.max.X + tol and pb.max.Y <= bb.max.Y + tol and pb.max.Z <= bb.max.Z + tol)
+            if inside:
+                added = pieces[0]
+                break
+        if added is None:
+            raise ValueError("the rib profile isn't closed off by the body on either side (the profile, extended along "
+                             "its ends, must run between walls of the part)")
+        part = part + added
+    return part
+
+
+def _sources(f: dict[str, Any], done: dict[str, dict[str, Any]] | None, verb: str) -> list[dict[str, Any]]:
+    """Earlier, unsuppressed tool features a pattern or mirror refers to (by id)."""
+    sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
+    if not sources or any(s is None for s in sources):
+        raise ValueError(f"a {verb} feature is missing, suppressed or comes later in the tree")
+    for src in sources:
+        if src["op"] not in TOOL_OPS:
+            raise ValueError(f"'{src.get('name', src['op'])}' can't be {verb} (bosses, cuts, revolves, sweeps, lofts, holes)")
+    return [s for s in sources if s is not None]
+
+
 def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any]] | None = None) -> Any:
     op = f["op"]
+    if op in NON_GEOMETRIC:
+        return part
     if part is None and op not in BASE_OPS:
         raise ValueError("this feature needs an existing solid; start the part with a boss or revolve")
     if op in TOOL_OPS:
         return _apply_tool(part, _tool(f, diag), _is_cut(f))
     if op == "pattern":
-        sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
-        if not sources or any(s is None for s in sources):
-            raise ValueError("a patterned feature is missing, suppressed or comes later in the tree")
-        for src in sources:
-            if src["op"] not in TOOL_OPS:
-                raise ValueError(f"'{src.get('name', src['op'])}' can't be patterned (bosses, cuts, revolves, holes)")
+        for src in _sources(f, done, "patterned"):
             for inst in pattern_instances(_tool(src, diag), f):
                 part = _apply_tool(part, inst, _is_cut(src))
         return part
@@ -440,8 +605,16 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
                 raise ValueError("a face to remove was not found (geometry changed?)")
             openings += found
         return offset(part, amount=-float(f["t"]), openings=openings)
+    if op == "draft":
+        return _draft(part, f)
+    if op == "rib":
+        return _rib(part, f, diag)
     if op == "mirror":
         pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
+        if f.get("source"):  # mirror features: each source's tool body, reflected, added or cut like the original
+            for src in _sources(f, done, "mirrored"):
+                part = _apply_tool(part, _moved(_tool(src, diag), lambda t: t.mirror(pl)), _is_cut(src))
+            return part
         return part + mirror(part, about=pl)
     raise ValueError(f"unknown manual operation {op!r}")
 
@@ -455,6 +628,10 @@ def _diag(part: Any, features: list[dict[str, Any]]) -> float:
     for f in features:
         for c in (f.get("plane") or {}).get("origin") or f.get("point") or []:
             ext = max(ext, abs(float(c)))
+        for ch in f.get("chains", []) or []:
+            for sg in ch:
+                for u, v in (sg["a"], sg["b"]):
+                    ext = max(ext, abs(float(u)), abs(float(v)))
         for pr in f.get("profiles", []):
             r = float(pr.get("r", 0))
             pts = [(pr.get("cx", 0), pr.get("cy", 0))] if pr.get("kind") == "circle" else [sg["a"] for sg in pr.get("segs", [])]
@@ -471,10 +648,21 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
         return part
     diag = _diag(part, features)
     done: dict[str, dict[str, Any]] = {}
+    # Reference planes resolve from their own numbers, independent of tree order. A sketch attached to one
+    # (plane_ref) follows it; if the plane was deleted, the sketch keeps the placement it had.
+    planes = {str(f.get("id", "")): ref_plane(f) for f in features if f["op"] == "plane"}
+    sketches = {str(f.get("id", "")): ({**f, "plane": planes[str(f["plane_ref"])]} if f.get("plane_ref") in planes else f)
+                for f in features if f["op"] == "sketch2d"}
     for f in features:
-        if f.get("suppressed"):
+        if f.get("suppressed") or f.get("rolled_back"):  # rolled back: below the rollback bar
             continue
+        if f["op"] in NON_GEOMETRIC:
+            continue
+        if f.get("plane_ref") in planes:
+            f = {**f, "plane": planes[str(f["plane_ref"])]}
         try:
+            if f["op"] in SKETCH_USERS:
+                f = _with_sketches(f, sketches)
             part = _op(part, f, diag, done)
         except Exception as e:
             raise ValueError(f"manual feature '{f.get('name', f.get('op'))}' failed: {e}") from e

@@ -139,7 +139,7 @@ export default function Viewer3D(props: Props) {
   return (
     <div className={cx("viewport-bg relative h-full w-full overflow-hidden", className)} data-tour="viewer">
       <div ref={host} className="absolute inset-0 [&>canvas]:h-full [&>canvas]:w-full" />
-      {!topo && <div className="absolute inset-0 flex items-center justify-center">{empty}</div>}
+      {!topo && <div className="pointer-events-none absolute inset-0 flex items-center justify-center">{empty}</div>}
 
       {/* toolbar */}
       <div className="absolute left-3 top-3 flex flex-wrap items-center gap-0.5 rounded-lg border border-border bg-panel/95 p-1 shadow-card">

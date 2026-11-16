@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from aicad import materials
+from aicad import materials, refplane
 from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
@@ -111,7 +111,8 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
+       "sketch2d", "sweep", "loft"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -175,6 +176,32 @@ def _sketch_plane(pl: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _segs(segs: Any) -> list[dict[str, Any]]:
+    """Line/arc segments of a sketch chain (arcs through a mid point)."""
+    if not isinstance(segs, list) or not 1 <= len(segs) <= 2000:
+        raise HTTPException(422, "Profile has too many segments")
+    cs = []
+    for sg in segs:
+        t = "arc" if sg.get("type") == "arc" else "line"
+        item = {"type": t, "a": _pt2(sg.get("a"), "point"), "b": _pt2(sg.get("b"), "point")}
+        if t == "arc":
+            item["m"] = _pt2(sg.get("m"), "arc mid")
+        cs.append(item)
+    return cs
+
+
+def _face_refs(faces: Any, what: str) -> list[dict[str, Any]]:
+    if not isinstance(faces, list) or not 1 <= len(faces) <= 50:
+        raise HTTPException(422, f"Select 1–50 {what}")
+    out = []
+    for x in faces:
+        item = {"point": _pt(x.get("point"), "face point")}
+        if x.get("normal") is not None:
+            item["normal"] = _pt(x["normal"], "face normal")
+        out.append(item)
+    return out
+
+
 def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
     if not 1 <= len(profs) <= 100:
         raise HTTPException(422, "The sketch needs 1–100 closed profiles")
@@ -184,17 +211,7 @@ def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
             clean.append({"kind": "circle", "cx": _num(pr.get("cx"), "cx"), "cy": _num(pr.get("cy"), "cy"),
                           "r": _num(pr.get("r"), "radius", 0.001, 1e5)})
         elif pr.get("kind") == "loop":
-            segs = pr.get("segs") or []
-            if not 1 <= len(segs) <= 2000:
-                raise HTTPException(422, "Profile has too many segments")
-            cs = []
-            for sg in segs:
-                t = "arc" if sg.get("type") == "arc" else "line"
-                item = {"type": t, "a": _pt2(sg.get("a"), "point"), "b": _pt2(sg.get("b"), "point")}
-                if t == "arc":
-                    item["m"] = _pt2(sg.get("m"), "arc mid")
-                cs.append(item)
-            clean.append({"kind": "loop", "segs": cs})
+            clean.append({"kind": "loop", "segs": _segs(pr.get("segs") or [])})
         else:
             raise HTTPException(422, "Unknown profile")
     return clean
@@ -219,6 +236,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, f"Unsupported operation {op!r}")
     out: dict[str, Any] = {"id": str(f.get("id") or uuid.uuid4().hex[:8]), "op": op,
                            "name": str(f.get("name") or op.title())[:60], "suppressed": bool(f.get("suppressed"))}
+    if f.get("rolled_back"):  # below the rollback bar: kept in the tree, not built
+        out["rolled_back"] = True
     if op in ("fillet", "chamfer"):
         edges = f.get("edges") or []
         if not edges or len(edges) > 200:
@@ -256,6 +275,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             if math.dist(out["axis"]["a"], out["axis"]["b"]) < 1e-6:
                 raise HTTPException(422, "Draw a centerline in the sketch to revolve about")
             out["angle"] = _num(f.get("angle", 360), "angle", 0.01, 360)
+        if f.get("plane_ref"):  # attached to a reference plane feature: follows it when the plane is edited
+            out["plane_ref"] = str(f["plane_ref"])[:40]
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))  # full sketch (constraints, dimensions) for re-editing
@@ -275,9 +296,72 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             out.update(kind="linear", step=_pt(f.get("step"), "spacing"))
             if math.hypot(*out["step"]) < 1e-6:
                 raise HTTPException(422, "spacing: must not be zero")
+    elif op == "draft":
+        nf = f.get("neutral") or {}
+        out["neutral"] = {"point": _pt(nf.get("point"), "neutral plane point"), "normal": _pt(nf.get("normal"), "neutral plane normal")}
+        if math.hypot(*out["neutral"]["normal"]) < 1e-9:
+            raise HTTPException(422, "Pick a planar face as the neutral plane")
+        out["faces"] = _face_refs(f.get("faces"), "faces to draft")
+        out["angle"] = _num(f.get("angle"), "draft angle", 0.01, 45)
+        out["reverse"] = bool(f.get("reverse"))
+    elif op == "rib":
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        if f.get("plane_ref"):
+            out["plane_ref"] = str(f["plane_ref"])[:40]
+        chains = f.get("chains") or []
+        if not isinstance(chains, list) or not 1 <= len(chains) <= 20:
+            raise HTTPException(422, "A rib needs an open sketch profile (lines or arcs that don't close)")
+        out["chains"] = [_segs(c) for c in chains]
+        out["t"] = _num(f.get("t"), "rib thickness", 0.01, 1e4)
+        out["flip"] = bool(f.get("flip"))
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sketch2d":  # a sketch kept as a tree node (no feature): consumed by sweeps and lofts
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        if f.get("plane_ref"):
+            out["plane_ref"] = str(f["plane_ref"])[:40]
+        profs, chains = f.get("profiles") or [], f.get("chains") or []
+        if not profs and not chains:
+            raise HTTPException(422, "The sketch is empty")
+        out["profiles"] = _profiles(profs) if profs else []
+        if not isinstance(chains, list) or len(chains) > 20:
+            raise HTTPException(422, "The sketch has too many open chains")
+        out["chains"] = [_segs(ch) for ch in chains]
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sweep":
+        out["profile"], out["path"] = str(f.get("profile") or "")[:40], str(f.get("path") or "")[:40]
+        if not out["profile"] or not out["path"]:
+            raise HTTPException(422, "Choose a profile sketch and a path sketch")
+        if out["profile"] == out["path"]:
+            raise HTTPException(422, "The profile and the path must be different sketches")
+        out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+    elif op == "loft":
+        secs = f.get("sections") or []
+        if not isinstance(secs, list) or not 2 <= len(secs) <= 20 or len(set(map(str, secs))) != len(secs):
+            raise HTTPException(422, "Choose 2–20 different section sketches, in order")
+        out["sections"] = [str(s)[:40] for s in secs]
+        out["ruled"] = bool(f.get("ruled"))
+        out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+    elif op == "plane":
+        out["base"] = _sketch_plane(f.get("base") or {})
+        out["base_name"] = str(f.get("base_name") or "")[:60]
+        out["offset"] = _num(f.get("offset") or 0, "offset", -1e5, 1e5)
+        out["angle"] = _num(f.get("angle") or 0, "angle", -180, 180)
+        out["rot_axis"] = "y" if f.get("rot_axis") == "y" else "x"
+        out["plane"] = refplane.ref_plane(out)  # resolved placement, for the app and for attached sketches
     elif op == "mirror":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
+        if math.hypot(*out["plane"]["normal"]) < 1e-9:
+            raise HTTPException(422, "mirror plane: normal must not be zero")
+        src = f.get("source")
+        if src:  # mirror features (otherwise the whole body)
+            if not isinstance(src, list) or len(src) > 20:
+                raise HTTPException(422, "Choose 1–20 features to mirror")
+            out["source"] = [str(s)[:40] for s in src]
     elif op == "extrude":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
@@ -320,10 +404,17 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
         f.write_text(BLANK_MODEL.format(name=p.name), encoding="utf-8")
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
-    new_feats = mutate([dict(x) for x in feats])
+    new_feats = normalize_rollback(sync_planes(mutate([dict(x) for x in feats])))
     if transform is not None and fresh:
         f.unlink()
         raise HTTPException(404, "There is no design to change yet")
+    if transform is None and _blank(src) and all(x["op"] in refplane.NON_GEOMETRIC for x in new_feats):
+        # a hand-modelled part with only reference geometry so far: nothing to build yet
+        f.write_text(write_manual(src, new_feats), encoding="utf-8")
+        p.updated_at = utcnow()
+        audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
+        ctx.db.commit()
+        return {"ok": True, "features": new_feats, "revision": None, "build_s": None}
     await wait_finalized(p.id)  # never snapshot while background exports are writing
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
@@ -358,7 +449,9 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
     if s:
-        s.publish({"type": "text", "text": f"{'Feature' if transform is not None else 'Manual feature'} {action} without AI (revision {rev})."})
+        what = (f"Feature tree {action[5:].replace('_', ' ')}" if action.startswith("tree_")
+                else f"{'Feature' if transform is not None else 'Manual feature'} {action}")
+        s.publish({"type": "text", "text": f"{what} without AI (revision {rev})."})
     return {"ok": True, "features": new_feats, "revision": rev, "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
@@ -483,6 +576,36 @@ async def delete_design_feature(project_id: str, body: NameIn, ctx: Ctx = Depend
 
 
 
+def _blank(src: str) -> bool:
+    """A part modelled only by hand (no design code before the manual block)."""
+    head = src.split(BLOCK_START)[0]
+    return "result = None  # the first boss or revolve" in head and "fw.feature(" not in head
+
+
+def normalize_rollback(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Everything below the rollback bar (the first rolled-back feature) is rolled back."""
+    bar = next((i for i, x in enumerate(fs) if x.get("rolled_back")), None)
+    if bar is not None:
+        for x in fs[bar:]:
+            x["rolled_back"] = True
+    return fs
+
+
+def sync_planes(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep each attached sketch's stored placement equal to its reference plane's. A sketch whose plane was
+    deleted keeps the last placement and is detached."""
+    planes = {x["id"]: x.get("plane") for x in fs if x["op"] == "plane" and x.get("plane")}
+    for x in fs:
+        ref = x.get("plane_ref")
+        if not ref:
+            continue
+        if ref in planes:
+            x["plane"] = dict(planes[ref])
+        else:
+            x.pop("plane_ref", None)
+    return fs
+
+
 class FeatureIn(BaseModel):
     feature: dict[str, Any]
 
@@ -499,8 +622,41 @@ def list_manual(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, 
 
 @router.post("/projects/{project_id}/manual")
 async def add_manual(project_id: str, body: FeatureIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    feat = validate_feature(body.feature)
-    return await _apply_manual(ctx, project_id, lambda fs: [*fs, feat], "added")
+    feat = validate_feature({**body.feature, "rolled_back": False})
+
+    def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bar = next((i for i, x in enumerate(fs) if x.get("rolled_back")), len(fs))
+        return [*fs[:bar], feat, *fs[bar:]]  # a new feature goes in at the rollback bar
+    return await _apply_manual(ctx, project_id, mutate, "added")
+
+
+class RollbackIn(BaseModel):
+    before: str | None = None  # roll back to just before this feature; None = roll forward to the end
+
+
+@router.post("/projects/{project_id}/manual/rollback")
+async def rollback_manual(project_id: str, body: RollbackIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Move the rollback bar: features from `before` down stay in the tree but are not built (as in SOLIDWORKS).
+    New features are inserted at the bar. `before = None` rolls forward to the end."""
+    model = workspace_for(_project(ctx, project_id)) / "model.py"
+    blank = model.is_file() and _blank(model.read_text(encoding="utf-8"))
+
+    def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ids = [x["id"] for x in fs]
+        if body.before is not None and body.before not in ids:
+            raise HTTPException(404, "Feature not found")
+        bar = ids.index(body.before) if body.before is not None else len(fs)
+        if blank and not any(x["op"] not in refplane.NON_GEOMETRIC and not x.get("suppressed") for x in fs[:bar]):
+            raise HTTPException(422, "This part is modelled by hand: keep its first boss above the rollback bar")
+        for i, x in enumerate(fs):
+            if i >= bar:
+                x["rolled_back"] = True
+            else:
+                x.pop("rolled_back", None)
+        return fs
+    rolled = body.before is not None
+    return await _apply_manual(ctx, project_id, mutate, "tree_rolled_back" if rolled else "tree_rolled_forward",
+                               cause="Moved the rollback bar (no AI)" if rolled else "Rolled the feature tree forward to the end (no AI)")
 
 
 @router.patch("/projects/{project_id}/manual/{fid}")
@@ -508,7 +664,10 @@ async def edit_manual(project_id: str, fid: str, body: FeatureIn, ctx: Ctx = Dep
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for i, f in enumerate(fs):
             if f["id"] == fid:
-                fs[i] = validate_feature({**f, **body.feature, "id": fid})
+                new = validate_feature({**f, **body.feature, "id": fid})
+                if new["name"] != f["name"] and any(x["name"] == new["name"] for x in fs if x["id"] != fid):
+                    raise HTTPException(422, f"A feature named “{new['name']}” already exists")
+                fs[i] = new
                 return fs
         raise HTTPException(404, "Feature not found")
     return await _apply_manual(ctx, project_id, mutate, "edited")
@@ -519,6 +678,10 @@ async def delete_manual(project_id: str, fid: str, ctx: Ctx = Depends(verified_c
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not any(f["id"] == fid for f in fs):
             raise HTTPException(404, "Feature not found")
+        users = [f["name"] for f in fs if fid in (f.get("profile"), f.get("path"), *(f.get("sections") or []))]
+        if users:
+            name = next(f["name"] for f in fs if f["id"] == fid)
+            raise HTTPException(422, f"“{name}” is used by {', '.join(users)}. Delete or edit {users[0]} first.")
         return [f for f in fs if f["id"] != fid]
     return await _apply_manual(ctx, project_id, mutate, "deleted")
 

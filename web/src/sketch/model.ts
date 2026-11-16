@@ -15,7 +15,11 @@ export type SConstraint =
   | { id: string; type: "onLine"; pt: string; line: string }
   | { id: string; type: "onCircle"; pt: string; ent: string }
   | { id: string; type: "tangent"; line: string; ent: string }
-  | { id: string; type: "concentric"; e1: string; e2: string };
+  | { id: string; type: "concentric"; e1: string; e2: string }
+  /** angle in degrees between two lines; f1/f2 flip a line's direction (p2→p1) so the angle is measured at their corner */
+  | { id: string; type: "angle"; l1: string; l2: string; value: number; f1?: boolean; f2?: boolean }
+  /** points a and b mirror each other about the (infinite) line */
+  | { id: string; type: "symmetric"; a: string; b: string; line: string };
 
 export interface Sketch { points: SPoint[]; entities: SEntity[]; constraints: SConstraint[] }
 
@@ -59,8 +63,21 @@ function residuals(s: Sketch, g: Getter): number[] {
       case "fix": break; // handled by removing the point from the unknowns
       case "onLine": { const l = line(k.line); if (l) { const p = g.pt(k.pt); const L = Math.hypot(l.dx, l.dy) || 1; r.push(((p[0] - l.a[0]) * l.dy - (p[1] - l.a[1]) * l.dx) / L); } break; }
       case "onCircle": { const c = radius(k.ent); if (c) { const p = g.pt(k.pt); r.push(Math.hypot(p[0] - c.c[0], p[1] - c.c[1]) - c.r); } break; }
-      case "tangent": { const l = line(k.line), c = radius(k.ent); if (l && c) { const L = Math.hypot(l.dx, l.dy) || 1; r.push(Math.abs(((c.c[0] - l.a[0]) * l.dy - (c.c[1] - l.a[1]) * l.dx) / L) - c.r); } break; }
+      case "tangent": { const l = line(k.line), c = radius(k.ent); if (l && c) {
+        const L = Math.hypot(l.dx, l.dy) || 1;
+        // An arc ending on the line: radius perpendicular to the line at the shared point (the distance form has a
+        // zero gradient there, which hides a degree of freedom).
+        const le = entOf(s, k.line) as Extract<SEntity, { type: "line" }>, ae = entOf(s, k.ent)!;
+        const shared = ae.type === "arc" ? [ae.p1, ae.p2].find(p => p === le.p1 || p === le.p2) : undefined;
+        if (shared) { const p = g.pt(shared); const vx = p[0] - c.c[0], vy = p[1] - c.c[1]; r.push((vx * l.dx + vy * l.dy) / ((Math.hypot(vx, vy) || 1) * L)); }
+        else r.push(Math.abs(((c.c[0] - l.a[0]) * l.dy - (c.c[1] - l.a[1]) * l.dx) / L) - c.r); } break; }
       case "concentric": { const a = radius(k.e1), b = radius(k.e2); if (a && b) { r.push(a.c[0] - b.c[0], a.c[1] - b.c[1]); } break; }
+      case "angle": { const a = line(k.l1), b = line(k.l2); if (a && b) {
+        const ax = k.f1 ? -a.dx : a.dx, ay = k.f1 ? -a.dy : a.dy, bx = k.f2 ? -b.dx : b.dx, by = k.f2 ? -b.dy : b.dy;
+        r.push(Math.atan2(Math.abs(ax * by - ay * bx), ax * bx + ay * by) - (k.value * Math.PI) / 180); } break; }
+      case "symmetric": { const l = line(k.line); if (l) { const p = g.pt(k.a), q = g.pt(k.b); const L = Math.hypot(l.dx, l.dy) || 1;
+        const mx = (p[0] + q[0]) / 2 - l.a[0], my = (p[1] + q[1]) / 2 - l.a[1];
+        r.push((mx * l.dy - my * l.dx) / L, ((q[0] - p[0]) * l.dx + (q[1] - p[1]) * l.dy) / L); } break; }
     }
   }
   return r;
@@ -159,38 +176,61 @@ export type ProfileSeg = { type: "line"; a: [number, number]; b: [number, number
 export interface Profile { kind: "loop"; segs: ProfileSeg[] }
 export interface CircleProfile { kind: "circle"; cx: number; cy: number; r: number }
 
-/** Closed loops from the non-construction geometry, by chaining shared endpoints. */
-export function profiles(s: Sketch): { loops: (Profile | CircleProfile)[]; open: number } {
+/** Canonical id per point: points at the same position (within 1e-6 mm) chain as one. */
+export function coincidentMap(s: Sketch, tol = 1e-6): Map<string, string> {
+  const out = new Map<string, string>(); const reps: SPoint[] = [];
+  for (const p of s.points) {
+    const r = reps.find(q => Math.abs(q.x - p.x) < tol && Math.abs(q.y - p.y) < tol);
+    if (r) out.set(p.id, r.id); else { reps.push(p); out.set(p.id, p.id); }
+  }
+  return out;
+}
+
+type ChainSeg = Extract<SEntity, { type: "line" | "arc" }>;
+/** Chains of lines/arcs joined end to end (by position). `rev` means the entity is travelled p2 → p1. */
+export function chainsOf(s: Sketch, segs: ChainSeg[]): { items: { e: ChainSeg; rev: boolean }[]; closed: boolean }[] {
+  const canon = coincidentMap(s); const C = (id: string) => canon.get(id) ?? id;
+  const used = new Set<string>(); const out: { items: { e: ChainSeg; rev: boolean }[]; closed: boolean }[] = [];
+  for (const start of segs) {
+    if (used.has(start.id)) continue;
+    used.add(start.id);
+    const items: { e: ChainSeg; rev: boolean }[] = [{ e: start, rev: false }];
+    const head = C(start.p1); let tail = C(start.p2); let closed = head === tail;
+    while (!closed) { // forward from the tail
+      const nxt = segs.find(e => !used.has(e.id) && (C(e.p1) === tail || C(e.p2) === tail)); if (!nxt) break;
+      used.add(nxt.id); const rev = C(nxt.p2) === tail; items.push({ e: nxt, rev }); tail = rev ? C(nxt.p1) : C(nxt.p2);
+      if (tail === head) closed = true;
+    }
+    if (!closed) { // backward from the head
+      let h = head;
+      for (;;) {
+        const prv = segs.find(e => !used.has(e.id) && (C(e.p1) === h || C(e.p2) === h)); if (!prv) break;
+        used.add(prv.id); const rev = C(prv.p1) === h; items.unshift({ e: prv, rev }); h = rev ? C(prv.p2) : C(prv.p1);
+      }
+    }
+    out.push({ items, closed });
+  }
+  return out;
+}
+
+/** Closed loops (and open chains) from the non-construction geometry, chaining coincident endpoints. */
+export function profiles(s: Sketch): { loops: (Profile | CircleProfile)[]; open: number; chains: ProfileSeg[][] } {
   const P = new Map(s.points.map(p => [p.id, [p.x, p.y] as [number, number]]));
   const out: (Profile | CircleProfile)[] = [];
   for (const e of s.entities) if (e.type === "circle" && !e.construction) { const c = P.get(e.c)!; out.push({ kind: "circle", cx: c[0], cy: c[1], r: e.r }); }
-  const segs = s.entities.filter(e => (e.type === "line" || e.type === "arc") && !e.construction) as Extract<SEntity, { type: "line" | "arc" }>[];
-  const used = new Set<string>(); let open = 0;
-  const ends = (e: (typeof segs)[number]) => [e.p1, e.p2];
-  for (const start of segs) {
-    if (used.has(start.id)) continue;
-    const chain: { e: (typeof segs)[number]; rev: boolean }[] = [{ e: start, rev: false }];
-    used.add(start.id);
-    let tail = start.p2; const head = start.p1; let closed = false;
-    for (let guard = 0; guard < segs.length + 1; guard++) {
-      if (tail === head) { closed = true; break; }
-      const nxt = segs.find(e => !used.has(e.id) && ends(e).includes(tail));
-      if (!nxt) break;
-      used.add(nxt.id);
-      const rev = nxt.p2 === tail;
-      chain.push({ e: nxt, rev });
-      tail = rev ? nxt.p1 : nxt.p2;
-    }
-    if (!closed) { open++; continue; }
-    out.push({ kind: "loop", segs: chain.map(({ e, rev }) => {
-      const a = P.get(rev ? e.p2 : e.p1)!, b = P.get(rev ? e.p1 : e.p2)!;
-      if (e.type === "line") return { type: "line", a, b } as ProfileSeg;
-      const c = P.get(e.c)!; const R = Math.hypot(a[0] - c[0], a[1] - c[1]);
-      const a1 = Math.atan2(P.get(e.p1)![1] - c[1], P.get(e.p1)![0] - c[0]);
-      let a2 = Math.atan2(P.get(e.p2)![1] - c[1], P.get(e.p2)![0] - c[0]); if (a2 <= a1) a2 += Math.PI * 2;
-      const am = (a1 + a2) / 2;
-      return { type: "arc", a, b, m: [c[0] + R * Math.cos(am), c[1] + R * Math.sin(am)] } as ProfileSeg;
-    }) });
+  const segs = s.entities.filter(e => (e.type === "line" || e.type === "arc") && !e.construction) as ChainSeg[];
+  const toSegs = (items: { e: ChainSeg; rev: boolean }[]) => items.map(({ e, rev }) => {
+    const a = P.get(rev ? e.p2 : e.p1)!, b = P.get(rev ? e.p1 : e.p2)!;
+    if (e.type === "line") return { type: "line", a, b } as ProfileSeg;
+    const c = P.get(e.c)!; const R = Math.hypot(P.get(e.p1)![0] - c[0], P.get(e.p1)![1] - c[1]);
+    const a1 = Math.atan2(P.get(e.p1)![1] - c[1], P.get(e.p1)![0] - c[0]);
+    let a2 = Math.atan2(P.get(e.p2)![1] - c[1], P.get(e.p2)![0] - c[0]); if (a2 <= a1) a2 += Math.PI * 2;
+    const am = (a1 + a2) / 2;
+    return { type: "arc", a, b, m: [c[0] + R * Math.cos(am), c[1] + R * Math.sin(am)] } as ProfileSeg;
+  });
+  const chains: ProfileSeg[][] = [];
+  for (const ch of chainsOf(s, segs)) {
+    if (ch.closed) out.push({ kind: "loop", segs: toSegs(ch.items) }); else chains.push(toSegs(ch.items));
   }
-  return { loops: out, open };
+  return { loops: out, open: chains.length, chains };
 }

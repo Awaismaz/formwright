@@ -307,6 +307,66 @@ def test_revolved_part_from_scratch(app_client: TestClient) -> None:  # noqa: F8
     assert r.status_code == 422 and "centerline" in r.json()["detail"]
 
 
+# ----------------------------------------------------------------------------- DS-026 mirror, planes, draft, rib, sweep, loft
+
+TOP10 = {"origin": [0, 0, 10], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+
+
+def _block(c: TestClient, email: str, name: str) -> str:
+    """Hand-modelled 60 x 40 x 10 block on the Top plane (x -30..30, y -20..20, z 0..10)."""
+    signup(c, email)
+    pid = c.post("/api/projects", json={"name": name}).json()["id"]
+    base = {"op": "sketch", "name": "Base", "plane": TOP, "profiles": [_rect(-30, -20, 30, 20)], "distance": 10, "mode": "add"}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": base}).status_code == 200
+    return pid
+
+
+def _vol(c: TestClient, pid: str) -> float:
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"], st
+    return st["fingerprint"]["volume"]
+
+
+def test_mirror_features_about_a_principal_plane(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "mirrorfeat@x.com", "Mirror features")
+    ids = []
+    for f in ({"op": "sketch", "name": "Hole", "plane": TOP10, "profiles": [{"kind": "circle", "cx": 15, "cy": 5, "r": 3}],
+               "mode": "cut", "end": "through"},
+              {"op": "sketch", "name": "Lug", "plane": TOP10, "profiles": [_rect(18, -15, 26, -5)], "distance": 5, "mode": "add"},
+              {"op": "hole", "name": "Pin hole", "point": [20, 12, 10], "normal": [0, 0, 1], "d": 4, "depth": 6}):
+        r = c.post(f"/api/projects/{pid}/manual", json={"feature": f})
+        assert r.status_code == 200, r.text
+        ids.append(r.json()["features"][-1]["id"])
+    one_side = -math.pi * 9 * 10 + 8 * 10 * 5 - math.pi * 4 * 6
+    assert _vol(c, pid) == pytest.approx(24000 + one_side, rel=1e-9)
+    mir = {"op": "mirror", "name": "Mirror1", "source": ids, "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": mir})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(24000 + 2 * one_side, rel=1e-9)
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["fingerprint"]["bbox"] == pytest.approx([60, 40, 15], abs=1e-6)
+    feats = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert feats[-1]["source"] == ids
+    # editing it into a body mirror drops the feature list
+    mid = feats[-1]["id"]
+    r = c.patch(f"/api/projects/{pid}/manual/{mid}", json={"feature": {"source": None, "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}})
+    assert r.status_code == 200, r.text
+    assert "source" not in c.get(f"/api/projects/{pid}/manual").json()["features"][-1]
+    assert _vol(c, pid) == pytest.approx(2 * (24000 + one_side), rel=1e-9)
+    c.patch(f"/api/projects/{pid}/manual/{mid}", json={"feature": {"source": ids[:1], "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}}})
+    assert _vol(c, pid) == pytest.approx(24000 + one_side - math.pi * 9 * 10, rel=1e-9)
+    # suppressing a mirrored feature fails cleanly and restores the model; non-tool features can't be mirrored
+    r = c.patch(f"/api/projects/{pid}/manual/{ids[0]}", json={"feature": {"suppressed": True}})
+    assert r.status_code == 422 and "mirrored feature" in r.json()["detail"]
+    ch = {"op": "chamfer", "name": "Edge break", "edges": [[30, 0, 10]], "d": 1}
+    chid = c.post(f"/api/projects/{pid}/manual", json={"feature": ch}).json()["features"][-1]["id"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**mir, "source": [chid]}})
+    assert r.status_code == 422 and "can't be mirrored" in r.json()["detail"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**mir, "plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}}})
+    assert r.status_code == 422
+
+
 def test_suppress_design_agent_features(app_client: TestClient) -> None:  # noqa: F811
     """Features the agent recorded with fw.feature can be suppressed and restored from the tree, without AI."""
     c = app_client
@@ -383,3 +443,223 @@ def test_delete_design_feature_without_ai(app_client: TestClient) -> None:  # no
     assert "DELETED_FEATURES = ['Mounting holes (4x)']" in src and "SUPPRESSED_FEATURES" not in src
     chk5 = next(x for x in st["checks"] if x["id"] == "CHK-05")
     assert chk5["gating"] is False and "deleted" in chk5["name"]
+
+
+def test_reference_plane_features(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "planes@x.com", "Planes")
+    # Top plane turned 90 degrees about its X axis is a Front-facing plane (normal -Y); offset -10 puts it at y = +10
+    pl = {"op": "plane", "name": "Plane1", "base": TOP, "base_name": "Top Plane", "angle": 90, "rot_axis": "x", "offset": -10}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pl})
+    assert r.status_code == 200, r.text
+    plane = r.json()["features"][-1]
+    assert plane["plane"] == {"origin": [0, 10, 0], "normal": [0, -1, 0], "x_dir": [1, 0, 0]}
+    assert _vol(c, pid) == pytest.approx(24000, rel=1e-12)  # reference geometry never changes the solid
+    # a through-all cut sketched on it (stored placement is stale on purpose: the plane wins)
+    cut = {"op": "sketch", "name": "Cross hole", "plane": TOP, "plane_ref": plane["id"], "mode": "cut", "end": "through",
+           "profiles": [{"kind": "circle", "cx": 0, "cy": 5, "r": 3}]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": cut})
+    assert r.status_code == 200, r.text
+    assert r.json()["features"][-1]["plane"] == plane["plane"]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 10, rel=1e-9)  # y = 10..20
+    # moving the plane moves the attached sketch
+    assert c.patch(f"/api/projects/{pid}/manual/{plane['id']}", json={"feature": {"offset": 0}}).status_code == 200
+    feats = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert feats[-1]["plane"]["origin"] == [0, 0, 0]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)  # y = 0..20
+    # order and suppression of the plane don't matter; deleting it leaves the sketch where it was
+    ids = [f["id"] for f in feats]
+    assert c.post(f"/api/projects/{pid}/manual/reorder", json={"ids": [ids[0], ids[2], ids[1]]}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    assert c.patch(f"/api/projects/{pid}/manual/{plane['id']}", json={"feature": {"suppressed": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    assert c.delete(f"/api/projects/{pid}/manual/{plane['id']}").status_code == 200
+    left = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert [f["op"] for f in left] == ["sketch", "sketch"] and "plane_ref" not in left[-1]
+    assert left[-1]["plane"]["origin"] == [0, 0, 0]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    for bad in ({**pl, "base": {**TOP, "normal": [0, 0, 0]}}, {**pl, "angle": 200}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def test_reference_plane_before_any_solid(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "planefirst@x.com")
+    pid = c.post("/api/projects", json={"name": "Plane first"}).json()["id"]
+    pl = {"op": "plane", "name": "Plane1", "base": TOP, "offset": 5}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pl})
+    assert r.status_code == 200 and r.json()["revision"] is None, r.text
+    pid_plane = r.json()["features"][0]["id"]
+    boss = {"op": "sketch", "name": "Boss", "plane": TOP, "plane_ref": pid_plane, "mode": "add", "distance": 10,
+            "profiles": [_rect(-10, -5, 10, 5)]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": boss})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(20 * 10 * 10, rel=1e-12)
+    topo = c.get(f"/api/projects/{pid}/files/topo.json").json()
+    assert topo["bbox"] == pytest.approx([-10, -5, 5, 10, 5, 15], abs=1e-9)
+
+
+def test_draft_feature(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "draft@x.com", "Draft")
+    a, b, h, t = 60.0, 40.0, 10.0, math.tan(math.radians(3))
+    sides = [{"point": [30, 0, 5], "normal": [1, 0, 0]}, {"point": [-30, 0, 5], "normal": [-1, 0, 0]},
+             {"point": [0, 20, 5], "normal": [0, 1, 0]}, {"point": [0, -20, 5], "normal": [0, -1, 0]}]
+    dr = {"op": "draft", "name": "Draft1", "neutral": {"point": [0, 0, 0], "normal": [0, 0, -1]}, "faces": sides, "angle": 3}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": dr})
+    assert r.status_code == 200, r.text
+    # all four sides narrow away from the bottom: V = abh - (a+b)h^2 tan + 4/3 h^3 tan^2
+    assert _vol(c, pid) == pytest.approx(a * b * h - (a + b) * h * h * t + 4 / 3 * h ** 3 * t * t, rel=1e-9)
+    did = r.json()["features"][-1]["id"]
+    # one face, pull reversed: that side leans outwards (+ b h^2 tan / 2)
+    r = c.patch(f"/api/projects/{pid}/manual/{did}", json={"feature": {"faces": sides[:1], "reverse": True}})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(a * b * h + b * h * h * t / 2, rel=1e-9)
+    assert c.patch(f"/api/projects/{pid}/manual/{did}", json={"feature": {"suppressed": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(a * b * h, rel=1e-12)
+    for bad in ({**dr, "angle": 0}, {**dr, "angle": 60}, {**dr, "faces": []}, {**dr, "neutral": {"point": [0, 0, 0], "normal": [0, 0, 0]}}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**dr, "faces": [{"point": [99, 0, 5], "normal": [1, 0, 0]}]}})
+    assert r.status_code == 422 and "not found" in r.json()["detail"]
+    assert _vol(c, pid) == pytest.approx(a * b * h, rel=1e-12)
+
+
+def test_rib_feature_on_l_bracket(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "rib@x.com")
+    pid, _ = _project_with_model(c, (DEMO / "l_bracket.py").read_text(encoding="utf-8"))
+    v0 = _vol(c, pid)
+    mid = {"origin": [0, 25, 0], "normal": [0, -1, 0], "x_dir": [1, 0, 0]}  # Front-facing plane through the middle (u = x, v = z)
+    fillet = 9 * (1 - math.pi / 4)  # the R3 inside fillet already fills that much of the corner
+    # gusset from the vertical leg (x = T = 5, z = 30) to the horizontal leg (z = 5, x = 35), 4 mm thick
+    rib = {"op": "rib", "name": "Rib1", "plane": mid, "t": 4, "chains": [[{"type": "line", "a": [5, 30], "b": [35, 5]}]]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": rib})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 30 * 25 - fillet) * 4, rel=1e-9)
+    # a profile that stops short of the walls is extended along its ends to meet them
+    rid = r.json()["features"][-1]["id"]
+    short = [{"type": "line", "a": [10, 25], "b": [30, 25 - 20 * 5 / 6]}]  # extends to (5, 29.1667) and (34, 5)
+    assert c.patch(f"/api/projects/{pid}/manual/{rid}", json={"feature": {"chains": [short], "t": 3}}).status_code == 200
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 29 * 145 / 6 - fillet) * 3, rel=1e-9)
+    # a profile with nothing to close it off fails cleanly and keeps the model
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**rib, "chains": [[{"type": "line", "a": [20, 50], "b": [40, 50]}]]}})
+    assert r.status_code == 422 and "closed off by the body" in r.json()["detail"]
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 29 * 145 / 6 - fillet) * 3, rel=1e-9)
+    for bad in ({**rib, "chains": []}, {**rib, "t": 0}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def _elbow_sketches(c: TestClient, pid: str, r: float = 5) -> tuple[str, str]:
+    """Sketch nodes: a circle R`r` on the Top plane, and a path on the Front plane: up 20, then a quarter arc R30."""
+    m = [30 - 30 * math.cos(math.pi / 4), 20 + 30 * math.sin(math.pi / 4)]
+    prof = {"op": "sketch2d", "name": "Profile", "plane": TOP, "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": r}]}
+    path = {"op": "sketch2d", "name": "Path", "plane": FRONT, "chains": [[{"type": "line", "a": [0, 0], "b": [0, 20]},
+                                                                          {"type": "arc", "a": [0, 20], "m": m, "b": [30, 50]}]]}
+    ids = []
+    for f in (prof, path):
+        r_ = c.post(f"/api/projects/{pid}/manual", json={"feature": f})
+        assert r_.status_code == 200, r_.text
+        ids.append(r_.json()["features"][-1]["id"])
+    return ids[0], ids[1]
+
+
+def test_sweep_from_sketch_nodes(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "sweep@x.com")
+    pid = c.post("/api/projects", json={"name": "Elbow"}).json()["id"]
+    prof, path = _elbow_sketches(c, pid)
+    assert c.get(f"/api/projects/{pid}/manual").json()["features"][0]["op"] == "sketch2d"  # saved without a build
+    length = 20 + 15 * math.pi  # path length: 20 + quarter of 2*pi*30
+    sw = {"op": "sweep", "name": "Sweep1", "profile": prof, "path": path, "mode": "add"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": sw})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(math.pi * 25 * length, rel=1e-9)  # Pappus: area x path length
+    sid = r.json()["features"][-1]["id"]
+    # a swept cut with an R2 profile along the same path makes it a tube
+    hole = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sketch2d", "name": "Bore", "plane": TOP,
+                                                                     "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": 2}]}})
+    bore = hole.json()["features"][-1]["id"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sweep", "name": "Cut-Sweep1", "profile": bore, "path": path, "mode": "cut"}})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(math.pi * (25 - 4) * length, rel=1e-9)
+    cid = r.json()["features"][-1]["id"]
+    # mirror the swept boss and the swept cut about the elbow's end face (x = 30): a U-tube, the halves meet at that face
+    mir = {"op": "mirror", "name": "Mirror1", "source": [sid, cid], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": mir}).status_code == 200
+    v = _vol(c, pid)
+    assert v == pytest.approx(2 * math.pi * (25 - 4) * length, rel=1e-9)
+    # a sketch that a feature uses can't be deleted; bad references are refused
+    r = c.delete(f"/api/projects/{pid}/manual/{path}")
+    assert r.status_code == 422 and "is used by Sweep1" in r.json()["detail"]
+    for bad in ({**sw, "path": prof}, {**sw, "profile": ""}, {"op": "sketch2d", "plane": TOP}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**sw, "path": "nope"}})
+    assert r.status_code == 422 and "path sketch is missing" in r.json()["detail"]
+    assert _vol(c, pid) == pytest.approx(v, rel=1e-12)
+
+
+def test_loft_between_sketch_nodes(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "loft@x.com")
+    pid = c.post("/api/projects", json={"name": "Loft"}).json()["id"]
+
+    def node(name: str, z: float, prof: dict) -> str:
+        pl = {"origin": [0, 0, z], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+        r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "sketch2d", "name": name, "plane": pl, "profiles": [prof]}})
+        assert r.status_code == 200, r.text
+        return r.json()["features"][-1]["id"]
+    s1, s2 = node("Square 20", 0, _rect(-10, -10, 10, 10)), node("Square 10", 20, _rect(-5, -5, 5, 5))
+    lo = {"op": "loft", "name": "Loft1", "sections": [s1, s2], "ruled": True, "mode": "add"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": lo})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(20 / 3 * (400 + 100 + 200), rel=1e-9)  # frustum h/3 (A1 + A2 + sqrt(A1 A2))
+    lid = r.json()["features"][-1]["id"]
+    c1, c2, c3 = node("R10", 0, {"kind": "circle", "cx": 0, "cy": 0, "r": 10}), node("R5", 20, {"kind": "circle", "cx": 0, "cy": 0, "r": 5}), \
+        node("R10 top", 40, {"kind": "circle", "cx": 0, "cy": 0, "r": 10})
+    assert c.patch(f"/api/projects/{pid}/manual/{lid}", json={"feature": {"sections": [c1, c2, c3], "ruled": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(2 * math.pi * 20 / 3 * (100 + 50 + 25), rel=1e-9)  # two cone frusta
+    assert c.patch(f"/api/projects/{pid}/manual/{lid}", json={"feature": {"sections": [c1, c2], "ruled": False}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(math.pi * 20 / 3 * 175, rel=1e-9)  # two sections: smooth = ruled
+    two = node("Two loops", 30, {"kind": "circle", "cx": 0, "cy": 0, "r": 3})
+    two_feat = c.get(f"/api/projects/{pid}/manual").json()["features"][-1]
+    c.patch(f"/api/projects/{pid}/manual/{two}", json={"feature": {"profiles": [*two_feat["profiles"], {"kind": "circle", "cx": 8, "cy": 0, "r": 1}]}})
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**lo, "sections": [c1, two]}})
+    assert r.status_code == 422 and "one closed profile" in r.json()["detail"]
+    for bad in ({**lo, "sections": [c1]}, {**lo, "sections": [c1, c1]}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def test_rollback_bar_and_rename(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "rollback@x.com", "Rollback")
+    hole = {"op": "sketch", "name": "Hole", "plane": TOP10, "profiles": [{"kind": "circle", "cx": 15, "cy": 5, "r": 3}], "mode": "cut", "end": "through"}
+    lug = {"op": "sketch", "name": "Lug", "plane": TOP10, "profiles": [_rect(18, -15, 26, -5)], "distance": 5, "mode": "add"}
+    for f in (hole, lug):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": f}).status_code == 200
+    ids = [f["id"] for f in c.get(f"/api/projects/{pid}/manual").json()["features"]]
+    full = 24000 - math.pi * 9 * 10 + 400
+    assert _vol(c, pid) == pytest.approx(full, rel=1e-9)
+    # roll back to before the hole: hole and lug stay in the tree but aren't built
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": ids[1]})
+    assert r.status_code == 200, r.text
+    assert [bool(f.get("rolled_back")) for f in r.json()["features"]] == [False, True, True]
+    assert _vol(c, pid) == pytest.approx(24000, rel=1e-12)
+    # a feature added while rolled back goes in at the bar
+    pin = {"op": "sketch", "name": "Pin", "plane": TOP10, "profiles": [{"kind": "circle", "cx": -15, "cy": 5, "r": 2}], "mode": "cut", "end": "through"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pin})
+    assert r.status_code == 200, r.text
+    assert [f["name"] for f in r.json()["features"]] == ["Base", "Pin", "Hole", "Lug"]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 4 * 10, rel=1e-9)
+    # roll forward to the end
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": None})
+    assert r.status_code == 200 and not any(f.get("rolled_back") for f in r.json()["features"])
+    assert _vol(c, pid) == pytest.approx(full - math.pi * 4 * 10, rel=1e-9)
+    # rename (unique names only)
+    assert c.patch(f"/api/projects/{pid}/manual/{ids[1]}", json={"feature": {"name": "Bore"}}).status_code == 200
+    assert [f["name"] for f in c.get(f"/api/projects/{pid}/manual").json()["features"]] == ["Base", "Pin", "Bore", "Lug"]
+    r = c.patch(f"/api/projects/{pid}/manual/{ids[1]}", json={"feature": {"name": "Lug"}})
+    assert r.status_code == 422 and "already exists" in r.json()["detail"]
+    # a hand-modelled part keeps its first boss above the bar
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": ids[0]})
+    assert r.status_code == 422 and "first boss" in r.json()["detail"]
+    assert c.post(f"/api/projects/{pid}/manual/rollback", json={"before": "nope"}).status_code == 404

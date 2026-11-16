@@ -14,10 +14,10 @@ import { ProjectStatus } from "@/components/ProjectCard";
 import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
-import FeatureManager, { selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
+import FeatureManager, { planePreview, selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
 import CommandManager, { type Command, type MakeModule } from "./studio/CommandManager";
 import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
-import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
+import { offsetPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { SimilarPartsDialog } from "@/components/SimilarParts";
@@ -47,7 +47,7 @@ export default function ProjectStudio() {
   const [showCom, setShowCom] = useState(false);
   const [sketch, setSketch] = useState<SketchPreview | null>(null);
   const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
-  const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset } | null>(null);
+  const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset; planeRef?: ManualFeature } | null>(null);
   const [planeOffset, setPlaneOffset] = useState("0");
   const [dialog, setDialog] = useState<"import" | "toolbox" | "similar" | null>(null);
   const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
@@ -71,7 +71,7 @@ export default function ProjectStudio() {
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
     queryFn: () => fetch(`/api/projects/${id}/files/status.json`).then(r => (r.ok ? (r.json() as Promise<BuildStatus>) : null)) });
-  const manual = useQuery({ queryKey: ["manual", id, status.data?.build_id], enabled: hasBuilds, queryFn: () => api.get<{ features: ManualFeature[] }>(`/api/projects/${id}/manual`) });
+  const manual = useQuery({ queryKey: ["manual", id, status.data?.build_id], enabled: !!id, queryFn: () => api.get<{ features: ManualFeature[] }>(`/api/projects/${id}/manual`) });
   const recog = useQuery({ queryKey: ["recognition", id, status.data?.build_id], enabled: hasBuilds,
     queryFn: () => api.get<{ recognition: Recognition | null }>(`/api/projects/${id}/recognition`) });
   const p = project.data;
@@ -84,6 +84,7 @@ export default function ProjectStudio() {
     return () => clearTimeout(t);
   }, [p?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (st?.build_id) setCompare(null); }, [st?.build_id]);
+  useEffect(() => { setHl([]); }, [topo]); // face ids highlighted from a previous build are meaningless now
 
   const refresh = () => {
     for (const k of ["status", "project", "manual", "revisions", "params", "recognition"]) qc.invalidateQueries({ queryKey: [k, id] });
@@ -101,14 +102,22 @@ export default function ProjectStudio() {
     const off = Number.isFinite(offset) ? offset : 0;
     setPm(null); setSk({ phase: "edit", plane: offsetPlane(name, off), faceId: null, editing: null, preset }); setSelection([]); setTool("orbit");
   };
+  /** Sketch on a reference plane feature: the sketch is attached to it and follows it when the plane is edited. */
+  const openSketchOnRef = (f: ManualFeature, preset?: SketchPreset) => {
+    if (!f.plane) return;
+    const n = f.plane.normal as V3;
+    setPm(null); setSk({ phase: "edit", plane: { origin: f.plane.origin, normal: n, x_dir: (f.plane.x_dir ?? xDirFor(n)) as V3 }, faceId: null, editing: null, preset, planeRef: f });
+    setSelection([]); setTool("orbit"); setSketch(null);
+  };
   const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
     if (op === "revolve" && !ed) { openPm("sketch", null, { feature: "revolve", ...(preset ?? {}) }); return; }
-    if (op === "sketch" || op === "revolve") {
+    if (op === "sketch" || op === "revolve" || op === "rib" || op === "sketch2d") {
       if (ed?.plane) {
         const pl = ed.plane; const n = pl.normal as V3;
         const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6
           && Math.abs((f.center[0] - pl.origin[0]) * n[0] + (f.center[1] - pl.origin[1]) * n[1] + (f.center[2] - pl.origin[2]) * n[2]) < 1e-4)?.id ?? null;
-        setSk({ phase: "edit", plane: { origin: pl.origin, normal: n, x_dir: (pl.x_dir ?? xDirFor(n)) as V3 }, faceId, editing: ed });
+        const ref = ed.plane_ref ? manual.data?.features.find(x => x.id === ed.plane_ref) : undefined;
+        setSk({ phase: "edit", plane: { origin: pl.origin, normal: n, x_dir: (pl.x_dir ?? xDirFor(n)) as V3 }, faceId: ref ? null : faceId, editing: ed, planeRef: ref });
       } else {
         const sp = preset as SketchPreset | undefined;
         const face = selection.find(x => x.kind === "face");
@@ -192,6 +201,15 @@ export default function ProjectStudio() {
                   onPickFeature={n => { setFeatureChips(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n])); if (!chatOpen) setChatOpen(true); }}
                   onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`)}
                   onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
+                  onSketchOn={f => openSketchOnRef(f, sk?.phase === "pick" ? sk.preset : undefined)}
+                  onRename={(f, name) => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { name } }), `Renamed to ${name}`, l => l.map(x => (x.id === f.id ? { ...x, name } : x)))}
+                  onRollback={before => manualCall(() => api.post(`/api/projects/${id}/manual/rollback`, { before }), before ? "Rolled back" : "Rolled forward to the end",
+                    l => { const k = before ? l.findIndex(x => x.id === before) : l.length; return l.map((x, j) => ({ ...x, rolled_back: j >= k })); })}
+                  onPreviewPlane={f => { if (pm || sk) return;
+                    if (!f?.plane) { setSketch(null); return; }
+                    const pl = { origin: f.plane.origin, normal: f.plane.normal, x_dir: f.plane.x_dir ?? xDirFor(f.plane.normal) };
+                    setSketch(f.op === "sketch2d" ? { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines: sketchLines(pl, f.profiles, f.chains), cx: 0, cy: 0 }
+                      : planePreview(f.plane.origin, f.plane.normal, topo)); }}
                   onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
@@ -232,7 +250,8 @@ export default function ProjectStudio() {
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
-            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
+            empty={mf.length ? <div className="absolute bottom-10 rounded bg-panel/90 px-3 py-1.5 text-[12.5px] text-muted shadow-card">No solid yet: {mf.length} reference feature(s) in the tree. Add a boss, revolve, sweep or loft to create the body.</div>
+              : <div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 <button onClick={() => openPm("sketch", null, { feature: "extrude", mode: "add" })} className="pointer-events-auto rounded-md border border-primary/50 bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary hover:border-primary">Sketch on a plane</button>
                 <button onClick={() => { setTbInit(null); setDialog("toolbox"); }} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Toolbox component</button>
@@ -241,6 +260,7 @@ export default function ProjectStudio() {
           {sk?.phase === "pick" && (
             <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-primary/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
               <PenLine className="h-4 w-4 text-primary" />{fp ? "Select a flat face, or a plane:" : "Choose a sketch plane:"}
+              {mf.filter(f => f.op === "plane" && f.plane).map(f => <button key={f.id} data-plane={f.name} onClick={() => openSketchOnRef(f, sk.preset)} className="rounded border border-border px-2 py-0.5 font-medium hover:border-primary hover:text-primary">{f.name}</button>)}
               {(["Front", "Top", "Right"] as RefPlane[]).map(n => <button key={n} data-plane={n} onClick={() => openSketchOnPlane(n, sk.preset, Number(planeOffset))} className="rounded border border-border px-2 py-0.5 font-medium hover:border-primary hover:text-primary">{n}</button>)}
               <label className="flex items-center gap-1 text-muted">offset<Input value={planeOffset} onChange={e => setPlaneOffset(e.target.value)} className="h-6 w-14 px-1 text-right" inputMode="decimal" aria-label="Plane offset" />mm</label>
               <button onClick={() => { setSk(null); setTool("orbit"); }} className="ml-1 text-muted hover:text-text" aria-label="Cancel sketch"><X className="h-4 w-4" /></button>
@@ -251,7 +271,7 @@ export default function ProjectStudio() {
             </div>)}
           {sk?.phase === "edit" && (
             <SketchEditor key={sk.editing?.id ?? "new"} project={p} topo={fp ? topo : null} plane={sk.plane} faceId={sk.faceId} editing={sk.editing}
-              preset={sk.preset} hasBody={!!fp} existing={mf}
+              preset={sk.preset} hasBody={!!fp} existing={mf} planeRef={sk.planeRef}
               onDone={() => { setSk(null); refresh(); }} onCancel={() => setSk(null)} />)}
           {st?.error && (
             <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-danger/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">

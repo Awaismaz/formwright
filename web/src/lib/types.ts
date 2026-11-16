@@ -58,11 +58,15 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft"; name: string; suppressed: boolean;
+  /** below the rollback bar: kept in the tree, not built */
+  rolled_back?: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
   axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
   source?: string[]; kind?: "linear" | "circular";
-  faces?: { point: [number, number, number]; normal: [number, number, number] }[]; t?: number;
+  faces?: { point: [number, number, number]; normal?: [number, number, number] }[]; t?: number;
+  /** draft: neutral plane face; rib: open profile chains and material side */
+  neutral?: { point: [number, number, number]; normal: [number, number, number] }; chains?: unknown[]; flip?: boolean;
   pattern?: "circular"; center?: [number, number, number];
   edges?: [number, number, number][]; r?: number; d?: number;
   point?: [number, number, number]; normal?: [number, number, number]; depth?: number | null; count?: number; step?: [number, number, number];
@@ -70,6 +74,13 @@ export interface ManualFeature {
   sketch?: { kind: "rect" | "circle" | "poly"; w?: number; h?: number; r?: number; cx?: number; cy?: number };
   distance?: number; mode?: "add" | "cut";
   profiles?: unknown[]; editor?: unknown;
+  /** reference plane: base plane, offset, angle about the base X/Y axis; `plane` holds the resolved placement */
+  base?: { origin: [number, number, number]; normal: [number, number, number]; x_dir: [number, number, number] }; base_name?: string;
+  offset?: number; rot_axis?: "x" | "y";
+  /** sketch attached to a reference plane feature (follows it when the plane is edited) */
+  plane_ref?: string;
+  /** sweep: profile and path sketch node ids; loft: section sketch node ids in order */
+  profile?: string; path?: string; sections?: string[]; ruled?: boolean;
 }
 
 export interface Project {
