@@ -34,8 +34,11 @@ Return exactly one fenced block:
 ```fw-read
 {{"drawing_kind": "drawing" | "sketch" | "photo",
  "part": "one line: what the part appears to be",
+ "title": "the part title written in the title block, without the drawing number, or null",
+ "drawing_no": "the drawing or part number written in the title block, or null",
  "units": "mm" | "in" | null, "units_evidence": "where the units are written, or null",
  "scale": "1:2" | null,
+ "projection": "first" | "third" | null, "projection_evidence": "the projection symbol or text you saw, or null",
  "views": [{{"id": "v1", "label": "text written next to it or null", "looks_like": "front | top | side | \
 isometric | section | detail | unknown", "box": [x0, y0, x1, y1]}}],
  "dimensions": [{{"text": "the callout exactly as written, e.g. 4X Ø6.6 THRU", "x": 0.42, "y": 0.31, \
@@ -48,7 +51,11 @@ overall width"}}],
 
 x, y and box are fractions of the image width and height measured from the top-left corner (0 to 1), at the \
 centre of the text. Use the symbols Ø, R, ±, ° and X as written. List every dimension you can see, even partly \
-readable ones (with low confidence). An empty list is a valid answer."""
+readable ones (with low confidence). An empty list is a valid answer.
+"describes" says what a dimension measures in plain words; leave out colour or legend tags (such as "red: \
+INFERRED"). "projection" comes from the ISO projection symbol or a written note; null when neither is there.
+"missing" lists only sizes needed to make the shape. Tolerances, approval status, surface finish, material and \
+other title-block fields are not sizes: leave them out of "missing"."""
 
 _BLOCK = re.compile(r"```(?:fw-read|json)?\s*\n(.*?)\n?```", re.DOTALL)
 
@@ -109,6 +116,17 @@ def _s(v: Any, n: int = 160) -> str:
     return " ".join(str(v or "").split())[:n]
 
 
+# colour-legend tags a reader copies from a sheet's legend, e.g. "(red: INFERRED)", "[blue = SPEC]", "- green: REF"
+_LEGEND = re.compile(r"\s*(?:[(\[]\s*|[-–—,;]\s*)?\b(?:red|blue|green|black|orange|grey|gray|amber|purple)\s*[:=]\s*"
+                     r"[A-Z][A-Z ]{1,20}?\b\s*[)\]]?", re.IGNORECASE)
+
+
+def clean_describes(text: Any) -> str | None:
+    """What a dimension measures, without colour-legend tags copied from the sheet."""
+    s = _LEGEND.sub("", _s(text, 160)).strip(" ,;-–—")
+    return s[:100] or None
+
+
 def to_read(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate the agent's block into the same read schema as a vector PDF (positions normalised 0..1)."""
     views = []
@@ -141,7 +159,7 @@ def to_read(raw: dict[str, Any]) -> dict[str, Any]:
         d = parse(text)
         base = {"x": x, "y": y, "box": None, "rot": 0, "dir": None, "view": view if view in vids else None,
                 "view_alt": None, "confidence": conf, "source": "vision", "alternatives": alts,
-                "kind_unclear": unclear, "describes": _s(item.get("describes"), 100) or None, "style": "regular"}
+                "kind_unclear": unclear, "describes": clean_describes(item.get("describes")), "style": "regular"}
         if d is None or d["kind"] == "scale":
             if d is None:
                 unparsed.append({"text": text, "x": x, "y": y, "confidence": conf,
@@ -160,10 +178,14 @@ def to_read(raw: dict[str, Any]) -> dict[str, Any]:
     missing = [{"what": _s(m.get("what"), 120), "why": _s(m.get("why"), 200) or None}
                for m in (raw.get("missing") or [])[:12] if isinstance(m, dict) and m.get("what")]
     kind = raw.get("drawing_kind") if raw.get("drawing_kind") in ("drawing", "sketch", "photo") else "drawing"
+    proj = raw.get("projection") if raw.get("projection") in ("first", "third") else None
+    projection = ({"value": proj, "evidence": _s(raw.get("projection_evidence"), 120) or "Read by vision"}
+                  if proj else None)
     return {"method": "vision", "drawing_kind": kind, "part": _s(raw.get("part"), 200) or None, "dims": dims,
             "views": views, "title": {}, "title_block": None, "scale": scale,
+            "title_text": _s(raw.get("title"), 80) or None, "drawing_no": _s(raw.get("drawing_no"), 40) or None,
             "units": {"value": units, "evidence": _s(raw.get("units_evidence"), 120) or "Read by vision"}
-            if units else None, "projection": None, "unparsed": unparsed[:40], "unreadable": unreadable,
+            if units else None, "projection": projection, "unparsed": unparsed[:40], "unreadable": unreadable,
             "missing": missing, "checks": []}
 
 

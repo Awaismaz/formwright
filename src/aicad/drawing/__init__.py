@@ -12,7 +12,7 @@ Pipeline (all deterministic, no AI):
 Only geometry.py and render.to_dxf import the CAD kernel; the rest is plain Python and unit-testable quickly.
 """
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"  # 1.0.1: model parameter names no longer printed in the sheet notes
 
 
 class DrawingInputError(ValueError):

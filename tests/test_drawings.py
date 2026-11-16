@@ -241,6 +241,21 @@ def test_same_model_gives_identical_svg(model: Path, tmp_path: Path, drawing: di
     assert (other / "sheet.svg").read_bytes() == first
 
 
+def test_unmapped_parameter_names_stay_off_the_sheet(tmp_path: Path) -> None:
+    """AMI-28: a parameter with no match in the geometry is listed in the record (the Drawing Studio panel shows
+    it), but its name is never printed on the sheet, where readers took "L1, L2" for missing sizes."""
+    ws = tmp_path / "ws"
+    write_model(ws / "out")
+    st = json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
+    st["params"] = {**st["params"], "L1": 37.25, "L2": 41.75}
+    (ws / "out" / "status.json").write_text(json.dumps(st), encoding="utf-8")
+    rec = generate(ws / "out", ws / "drawings", {"section": "y"}, DRAW_META)
+    assert {"L1", "L2"} <= set(rec["mapping"]["unmapped"])
+    svg = (ws / "drawings" / "sheet.svg").read_text(encoding="utf-8")
+    assert "NOT DIMENSIONED" not in svg and ">L1" not in svg and "L1, L2" not in svg
+    assert rec["check"]["passed"], rec["check"]["problems"]
+
+
 def test_options_change_sheet_and_projection(model: Path, tmp_path: Path) -> None:
     rec = generate(model / "out", tmp_path / "a4", {"sheet": "A4", "projection": "third",
                                                     "tolerance": {"mode": "iso2768", "class": "m"}}, DRAW_META)

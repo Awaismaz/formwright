@@ -27,6 +27,49 @@ KIND_NAMES = {"linear": "length", "diameter": "diameter", "radius": "radius", "s
 SIZE_KINDS = ("linear", "diameter", "radius", "square", "spherical_radius", "spherical_diameter")
 UNITS = ("mm", "in")
 _HANDLED = re.compile(r"(?i)^\s*(units?|(general )?tolerances?|scale)\s*$")
+# Vision lists everything a drawing doesn't give. Only sizes that change the model are questions; documentation
+# (tolerances, approval, finish, treatment, material, title-block fields) becomes a note, never a blocking question.
+_DOC = re.compile(r"(?i)(toleranc|approv|sign[- ]?off|release status|status for|finish|roughness|\bra\b|"
+                  r"coating|plating|anodi[sz]|paint|heat[- ]?treat|harden|revision|\brev\b|drawn by|"
+                  r"checked by|\btitle\b|drawing (no|number)|part (no|number)|material|weight|\bmass\b|"
+                  r"deburr|break (all )?(sharp )?edges|inspection|quantity|\bqty\b|\bnotes?\b|\bdate\b)")
+
+
+def is_documentation(item: dict[str, Any]) -> bool:
+    """True when a missing item does not change the model's geometry (it is documentation, not a size)."""
+    return bool(_DOC.search(f"{item.get('what') or ''}"))
+
+
+_NO_FIELDS = ("DRAWING NO", "DWG NO", "DWG. NO", "PART NO", "DRAWING NUMBER")
+_CODE_IN_PARENS = re.compile(r"\s*[(\[]\s*(?:dwg\.?\s*|drawing\s*(?:no\.?|number)\s*:?\s*)?([A-Z0-9][A-Z0-9._/-]*\d[A-Z0-9._/-]*)\s*[)\]]\s*$",
+                             re.IGNORECASE)
+
+
+def drawing_number(read: dict[str, Any]) -> str | None:
+    """The drawing number from the title block (vector) or as read by vision; None when not written."""
+    title = read.get("title") or {}
+    for k, v in title.items():
+        if any(k.upper().rstrip(".:").startswith(f.rstrip(".")) for f in _NO_FIELDS) and str(v).strip():
+            return " ".join(str(v).split())[:40]
+    no = read.get("drawing_no")
+    if no:
+        return " ".join(str(no).split())[:40]
+    m = _CODE_IN_PARENS.search(read.get("part") or "")
+    return m.group(1) if m else None
+
+
+def suggested_name(read: dict[str, Any], filename: str | None) -> str | None:
+    """Project name: the title read from the title block, else the read part name without its drawing number,
+    else the file name without its extension (None when there is nothing)."""
+    title = read.get("title") or {}
+    t = next((v for k, v in title.items() if k.upper().rstrip(".:") in ("TITLE", "PART NAME", "DESCRIPTION")
+              and str(v).strip()), None) or read.get("title_text")
+    if not t and read.get("part") and len(str(read["part"]).split()) <= 6:  # a short name, not a description
+        t = _CODE_IN_PARENS.sub("", read["part"])
+    if not t and filename:
+        t = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", filename)
+    t = " ".join(str(t or "").split()).strip(" .,;:-")
+    return t[:80] or None
 
 
 def empty_review() -> dict[str, Any]:
@@ -254,7 +297,9 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
 
     # 7. missing sizes
     # units are set with the reference and tolerances are stated as an assumption: not separate questions
-    missing = [m for m in read.get("missing", []) if not _HANDLED.match(m.get("what") or "")]
+    listed = [m for m in read.get("missing", []) if not _HANDLED.match(m.get("what") or "")]
+    documentation = [m for m in listed if is_documentation(m)]
+    missing = [m for m in listed if not is_documentation(m)]
     if read.get("method") == "vector" and len([v for v in views if v.get("kind") in ("ortho", "section")]) == 1:
         missing.append({"what": "Depth (the third dimension)", "why": "Only one view is drawn"})
     if not [d for d in dims if not d["excluded"]]:
@@ -271,7 +316,9 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
 
     open_n = sum(1 for n in needs if n["blocking"] and not n["answered"])
     return {"dims": dims, "needs": needs, "open": open_n, "ready": open_n == 0,
-            "scale": scale_state(read, review, by_id), "assumptions": assumptions(read, review, dims, missing)}
+            "scale": scale_state(read, review, by_id), "assumptions": assumptions(read, review, dims, missing),
+            "documentation": documentation, "name": suggested_name(read, None),
+            "drawing_no": drawing_number(read)}
 
 
 def dim_what(d: dict[str, Any], read: dict[str, Any]) -> str:
@@ -373,8 +420,13 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
            "vision": f"a {read.get('drawing_kind', 'drawing')} image (values read by vision, then checked by me)"}
     lines = [(f"Model this part from {src.get(read.get('method'), 'a drawing')} that I reviewed: “{meta['name']}”. "
               "The drawing is attached as a reference image."), ""]
-    if read.get("part"):
-        lines += [f"Part: {read['part']}", ""]
+    name, no = st.get("name") or suggested_name(read, None), st.get("drawing_no")
+    if name:
+        lines.append(f"Part name: {name}" + (f" (drawing number {no}: keep it out of the part name)" if no else ""))
+    if read.get("part") and read["part"] != name:
+        lines.append(f"What it is: {read['part']}")
+    if name or read.get("part"):
+        lines.append("")
     lines.append(f"Units: {unit}. Reference dimension (confirmed by me): {fmt(ref['value'])} {unit}, {ref['describes']}.")
     if read.get("scale"):
         lines.append(f"Drawing scale: {read['scale']['text']} ({read['scale']['evidence'].lower()}).")
@@ -450,3 +502,26 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
               "change the overall size or how the part fits, ask me with choices first. Make the listed sizes "
               "editable parameters, and finish with a short list of what you assumed.")]
     return "\n".join(lines)
+
+
+def handoff_summary(meta: dict[str, Any], st: dict[str, Any], review: dict[str, Any]) -> str:
+    """What the Studio chat shows as the user's message for a hand-off: a short summary in the user's words.
+    The full structured request (values, provenance, modelling rules) goes to the design agent only."""
+    ref = st["scale"]["reference"] or {}
+    live = [d for d in st["dims"] if not d["excluded"]]
+    answers = review.get("answers", {})
+    missing = [n for n in st["needs"] if n["kind"] == "missing"]
+    not_needed = sum(1 for n in missing if (answers.get(n["id"]) or {}).get("choice") == "not_needed")
+    estimated = sum(1 for n in missing if (answers.get(n["id"]) or {}).get("choice") == "estimate")
+    bits = [f"{len(live)} confirmed value{'s' if len(live) != 1 else ''}"]
+    if ref.get("value"):
+        bits.append(f"reference {fmt(ref['value'])} {ref['unit']}" + (f" ({ref['describes']})" if ref.get("describes") else ""))
+    if estimated:
+        bits.append(f"{estimated} size{'s' if estimated != 1 else ''} to estimate (flagged)")
+    if not_needed:
+        bits.append(f"{not_needed} item{'s' if not_needed != 1 else ''} not needed")
+    out = f"Model from {meta.get('name') or 'my drawing'}: " + ", ".join(bits) + "."
+    if live:
+        vals = [d["label"] for d in live[:24]]
+        out += "\nValues: " + ", ".join(vals) + (f" and {len(live) - 24} more" if len(live) > 24 else "") + "."
+    return out

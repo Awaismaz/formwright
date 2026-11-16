@@ -287,12 +287,15 @@ class AgentSession:
             await self.client.connect()
         return self.client
 
-    async def send(self, prompt: str) -> None:
+    async def send(self, prompt: str, shown: str | None = None) -> None:
+        """One agent turn. ``shown``: what the chat shows as the user's message when ``prompt`` is a structured
+        brief a module wrote on the user's behalf (the brief itself is never published)."""
         if self.busy:
             raise RuntimeError("agent is busy")
         self.busy = True
-        self.publish({"type": "user", "text": prompt})
-        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)", prompt)[0].strip()[:600]
+        self.publish({"type": "user", "text": shown or prompt})
+        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)",
+                                    shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         try:
             try:

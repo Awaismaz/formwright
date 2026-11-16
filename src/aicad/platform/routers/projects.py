@@ -642,7 +642,10 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
                  ". Read them before modelling. Treat them as references: do not assume a scale — ask for at least "
                  "one real dimension if none is given, and state what you inferred versus what you were told.]")
     s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files}
-    t = asyncio.create_task(s.send(text))
+    shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief
+    if shown and files:
+        shown += "\n\n[Reference image attached]"
+    t = asyncio.create_task(s.send(text, shown=shown) if shown else s.send(text))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
     track(ctx.db, "prompt_sent", ctx.user, p.org_id, chars=len(text))

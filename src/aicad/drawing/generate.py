@@ -120,8 +120,8 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
         notes.append("NO TOLERANCES SPECIFIED.")
     else:  # printed exactly as chosen (ISO 2768 class letters are lower case)
         notes.append(f"GENERAL TOLERANCES {tol}, AS SELECTED BY THE USER. NO OTHER TOLERANCES OR GD&T.")
-    if mapping["unmapped"]:
-        notes.append("NOT DIMENSIONED (NO UNAMBIGUOUS MATCH IN THE GEOMETRY): " + ", ".join(mapping["unmapped"]) + ".")
+    # Parameters with no unambiguous match (mapping["unmapped"]) are listed in the Drawing Studio panel, never on the
+    # sheet: model parameter names are not manufacturing information (and a reader takes them for missing sizes).
     notes += [n.upper() for n in notes_extra]
     sheet = compose(an, dims, callouts, notes, opts, sheet_meta, history)
     expected = {v: bbox_extents(cen["bbox"], v) for v in ("front", "top", "right") if v in enabled}
