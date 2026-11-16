@@ -137,7 +137,8 @@ export default function AppLayout() {
   const logout = async () => { await api.post("/api/auth/logout"); setCurrentOrg(null); qc.clear(); location.href = "/"; };
   const setTheme = async (theme: string) => { await api.patch("/api/auth/profile", { preferences: { theme } }); await refresh(); };
   const dark = user?.preferences?.theme === "dark";
-  const lowTokens = (org?.token_balance ?? 0) < 50;
+  const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
+  const lowTokens = !unlimited && (org?.token_balance ?? 0) < 50;
 
   return (
     <div className="flex h-full flex-col">
@@ -210,11 +211,11 @@ export default function AppLayout() {
             </button>
             <div className="ml-auto flex items-center gap-1.5">
               {org && (
-                <Tip content={org.god_unlock ? "God mode: token limits may be bypassed" : "Token balance — metered AI usage"} side="bottom">
+                <Tip content={unlimited ? "God mode: unlimited tokens — runs are not charged" : "Token balance — metered AI usage"} side="bottom">
                   <Link to="/app/billing#tokens" data-tour="tokens"
                     className={cx("mr-1 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium tabular-nums",
                       lowTokens ? "border-warning/40 bg-warning/10 text-warning" : "border-border bg-panel2 text-text hover:border-primary/40")}>
-                    <Coins className="h-4 w-4" /> {num(org.token_balance)} <span className="hidden text-muted sm:inline">tokens</span>
+                    <Coins className="h-4 w-4" /> {unlimited ? "∞" : num(org.token_balance)} <span className="hidden text-muted sm:inline">{unlimited ? "unlimited" : "tokens"}</span>
                   </Link>
                 </Tip>
               )}
