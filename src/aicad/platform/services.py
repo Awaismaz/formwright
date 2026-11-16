@@ -45,7 +45,19 @@ def track(db: Session, event: str, user: User | None = None, org_id: str | None 
 
 
 def notify(db: Session, user_id: str, title: str, body: str = "", link: str | None = None) -> None:
-    db.add(Notification(user_id=user_id, title=title, body=body, link=link))
+    db.add(Notification(user_id=user_id, title=title[:160], body=body, link=link))
+
+
+def notify_revision(db: Session, project: Any, rev: int | None, actor: User | None, what: str) -> None:
+    """Tell a project's creator when someone else makes a new revision of it."""
+    owner = project.created_by
+    if not rev or not owner or actor is None or owner == actor.id:
+        return
+    if db.scalar(select(Membership).where(Membership.user_id == owner, Membership.org_id == project.org_id)) is None:
+        return
+    what = " ".join(what.split())
+    notify(db, owner, f"{actor.name} changed {project.name}",
+           f"Revision {rev}: {what[:140]}{'…' if len(what) > 140 else ''}", f"/app/projects/{project.id}")
 
 
 def send_email(db: Session, to: str, subject: str, body: str, link: str | None = None) -> Outbox:
@@ -100,7 +112,12 @@ def plan_product(db: Session, org: Organization) -> Product | None:
 def org_modules(db: Session, org: Organization) -> set[str]:
     mods: set[str] = set()
     plan = plan_product(db, org)
-    if plan and org.plan_status in ("trialing", "active", "past_due"):
+    if org.plan_code == "trial" and org.plan_status == "trialing":
+        # A running trial can use every live module on its own parts; once it ends, parts and the Design Studio
+        # stay open (edits, exports) and the other modules lock until a plan or add-on includes them.
+        mods |= {"design"} if trial_state(org).get("expired") else {c for c, m in MODULES.items()
+                                                                     if m["status"] == "live"}
+    elif plan and org.plan_status in ("trialing", "active", "past_due"):
         mods |= set(plan.modules or [])
     mods |= {e.module for e in db.scalars(select(Entitlement).where(Entitlement.org_id == org.id))}
     return mods
@@ -111,8 +128,14 @@ def seats_used(db: Session, org: Organization) -> int:
 
 
 def seat_limit(db: Session, org: Organization) -> int:
+    from aicad.platform.models import OrgPrefs
+
     plan = plan_product(db, org)
-    return plan.seats if plan and plan.seats else 1000
+    if not (plan and plan.seats):
+        return 1000
+    row = db.get(OrgPrefs, org.id)
+    extra = (row.data or {}).get("extra_seats", 0) if row else 0
+    return plan.seats + (int(extra) if isinstance(extra, int) and plan.code == "team" else 0)
 
 
 def trial_state(org: Organization) -> dict[str, Any]:
@@ -143,7 +166,11 @@ def module_catalog(db: Session, org: Organization, god_unlock: bool = False) -> 
 
 
 def public_user(u: User) -> dict[str, Any]:
+    from aicad.platform.deps import VERIFY_GRACE
+
+    grace = (u.created_at + VERIFY_GRACE).isoformat() if u.email_verified_at is None else None
     return {"id": u.id, "email": u.email, "name": u.name, "email_verified": u.email_verified_at is not None,
+            "verify_by": grace,
             "is_superadmin": u.is_superadmin, "onboarding": u.onboarding or {},
             "onboarding_completed": u.onboarding_completed_at is not None,
             "tour_completed": u.tour_completed_at is not None, "preferences": u.preferences or {},

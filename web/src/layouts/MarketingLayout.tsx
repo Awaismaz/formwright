@@ -42,8 +42,10 @@ export default function MarketingLayout() {
         <div className={cx("border-t border-border px-4 pb-4 md:hidden", !open && "hidden")}>
           {LINKS.map(l => <Link key={l.to} to={l.to} className="block py-2.5 text-sm">{l.label}</Link>)}
           <div className="mt-2 flex gap-2">
-            <Link to="/login" className="flex-1"><Button variant="secondary" className="w-full">Sign in</Button></Link>
-            <Link to="/signup" className="flex-1"><Button className="w-full">Start free</Button></Link>
+            {me?.user ? <Link to="/app" className="flex-1"><Button className="w-full">Open app</Button></Link> : <>
+              <Link to="/login" className="flex-1"><Button variant="secondary" className="w-full">Sign in</Button></Link>
+              <Link to="/signup" className="flex-1"><Button className="w-full">Start free</Button></Link>
+            </>}
           </div>
         </div>
       </header>
@@ -52,11 +54,11 @@ export default function MarketingLayout() {
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-14 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Logo size={26} dark />
-            <p className="mt-4 max-w-xs text-sm text-chrome-muted">The AI design engineer for mechanical teams. From idea to verified, manufacturable CAD.</p>
+            <p className="mt-4 max-w-xs text-sm text-chrome-muted">The AI design engineer for mechanical teams. From idea to verified, editable CAD.</p>
           </div>
           {[
             { h: "Product", l: [["How it works", "/#how"], ["Modules", "/#modules"], ["Pricing", "/pricing"], ["Start free trial", "/signup"]] },
-            { h: "Company", l: [["Security", "/#trust"], ["Contact", "mailto:hello@formwright.dev"], ["Careers", "mailto:hello@formwright.dev"]] },
+            { h: "Company", l: [["Security", "/#trust"], ["Contact", "mailto:hello@formwright.dev"], ["Enterprise sales", "mailto:sales@formwright.dev?subject=Formwright%20Enterprise"]] },
             { h: "Legal", l: [["Terms of service", "/legal/terms"], ["Privacy policy", "/legal/privacy"], ["Acceptable use", "/legal/aup"]] },
           ].map(c => (
             <div key={c.h}>

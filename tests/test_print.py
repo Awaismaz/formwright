@@ -15,6 +15,7 @@ import pytest
 from build123d import Align, Box, Cylinder, Pos, Rot, export_step
 from fastapi.testclient import TestClient
 from test_platform import admin, app_client, signup  # noqa: F401  (fixture re-export)
+from trial_helpers import set_trial_ended
 
 from aicad.printprep import analysis, presets, service
 from aicad.printprep.bvh import BVH
@@ -253,8 +254,10 @@ def test_api_auth_scoping_upload_limits_and_flow(app_client: TestClient, tmp_pat
     assert c.get("/api/m/print/presets").status_code == 401
     signup(c, "print@x.com")
     pid = c.post("/api/projects", json={"name": "Tee"}).json()["id"]
+    set_trial_ended("print@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.post(f"/api/m/print/projects/{pid}/analyse", json={})
     assert r.status_code == 402 and "3D Print Prep" in r.json()["detail"]["message"]
+    set_trial_ended("print@x.com", False)
     _grant(c)
     assert c.get("/api/m/print/presets").json()["processes"]["fdm"]["min_wall_mm"] == 0.8
     assert c.post(f"/api/m/print/projects/{pid}/analyse", json={}).status_code == 409  # not built yet

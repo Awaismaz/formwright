@@ -51,7 +51,7 @@ function FindingsTable({ rows }: { rows: [string, string, "high" | "med" | "low"
   return (
     <table className="w-full text-[13px]"><thead className="text-left text-xs text-muted"><tr><th className="pb-2 font-medium">Feature</th><th className="pb-2 font-medium">Finding</th><th className="pb-2 font-medium">Severity</th><th className="pb-2 font-medium">Suggestion</th></tr></thead>
       <tbody className="divide-y divide-border">{rows.map(([f, r, s, sug]) => (
-        <tr key={f + r}><td className="py-2 pr-3 font-mono text-[12px]">{f}</td><td className="py-2 pr-3">{r}</td><td className="py-2 pr-3"><Badge tone={tone[s]}>{s === "ok" ? "OK" : s.toUpperCase()}</Badge></td><td className="py-2 text-muted">{sug}</td></tr>))}
+        <tr key={f + r}><td className="py-2 pr-3 text-[12.5px] font-medium">{f}</td><td className="py-2 pr-3">{r}</td><td className="py-2 pr-3"><Badge tone={tone[s]}>{s === "ok" ? "OK" : s.toUpperCase()}</Badge></td><td className="py-2 text-muted">{sug}</td></tr>))}
       </tbody></table>
   );
 }
@@ -65,10 +65,10 @@ const SAMPLES: Record<string, () => JSX.Element> = {
           <div key={p} className={cx("rounded-lg border p-3", i === 0 ? "border-success/40 bg-success/5" : "border-border")}><div className="text-sm font-medium">{p}</div><div className="text-xs text-muted">{l} · {d}</div></div>))}
       </div>
       <FindingsTable rows={[
-        ["pocket_1", "Internal corner R3 needs Ø6 end mill", "low", "R4 allows Ø8 tool, faster roughing"],
-        ["hole_pattern_1", "Ø6.6 is a non-standard drill", "med", "Use Ø6.5 or Ø6.8 standard drill"],
-        ["chamfer_top", "Edge break on top only", "low", "Add 0.5 mm break on bottom edges"],
-        ["body", "Stock 125×85×12 → 34% removal", "ok", "Fine for this quantity"],
+        ["Centre pocket", "R3 internal corners need a Ø6 end mill or smaller", "low", "R4 corners allow a Ø8 tool and faster roughing"],
+        ["4× M6 clearance holes", "Ø6.6 through, 6.7 mm wall to the edge", "ok", "Stock drill size; no change needed"],
+        ["Top edge chamfer", "Edge break on the top edges only", "low", "Add a 0.5 mm break on the bottom edges"],
+        ["Blank", "Stock 125×85×12 → 34% removal", "ok", "Fine for this quantity"],
       ]} />
     </SampleFrame>),
   engineering: () => (

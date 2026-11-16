@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from test_platform import _project_with_model, app_client, signup  # noqa: F401  (fixture re-export)
+from trial_helpers import set_trial_ended
 
 from aicad.engineering import REGISTRY, InputError, output, run, units, wording
 from aicad.engineering import standards as std
@@ -443,8 +444,10 @@ def _unlock(c: TestClient) -> None:
 def test_api_entitlement_catalog_and_run(app_client: TestClient) -> None:  # noqa: F811
     c = app_client
     signup(c, "eng@x.com")
+    set_trial_ended("eng@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.get("/api/m/engineering/catalog")
     assert r.status_code == 402 and r.json()["detail"]["cta"] == "/app/modules/engineering"
+    set_trial_ended("eng@x.com", False)
     _unlock(c)
     cat = c.get("/api/m/engineering/catalog").json()
     ids = {x["id"] for x in cat["calculators"]}

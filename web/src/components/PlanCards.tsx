@@ -4,17 +4,21 @@ import { money } from "@/lib/format";
 import { Badge, Button } from "./ui";
 import { cx } from "@/lib/format";
 
+const COLS: Record<number, string> = {
+  1: "max-w-sm", 2: "max-w-3xl md:grid-cols-2", 3: "max-w-5xl md:grid-cols-3", 4: "md:grid-cols-2 xl:grid-cols-4",
+};
+
 export function PlanCards({ plans, current, onChoose, busy, ctaLabel }: {
   plans: Product[]; current?: string | null; busy?: string | null;
   onChoose: (p: Product) => void; ctaLabel?: (p: Product) => string;
 }) {
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className={cx("mx-auto grid gap-4", COLS[Math.min(Math.max(plans.length, 1), 4)])}>
       {plans.map(p => {
         const isCurrent = current === p.code;
         return (
           <div key={p.code} className={cx("card relative flex flex-col p-5", p.highlight && "border-primary ring-1 ring-primary")}>
-            {p.highlight && <Badge tone="primary" className="absolute -top-2.5 left-5 bg-primary text-white">Most popular</Badge>}
+            {p.highlight && <Badge tone="solid" className="absolute -top-2.5 left-5">Most popular</Badge>}
             <div className="flex items-center justify-between">
               <h3 className="text-[15px] font-semibold">{p.name}</h3>
               {isCurrent && <Badge tone="success">Current</Badge>}

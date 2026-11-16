@@ -91,15 +91,33 @@ MODULES: dict[str, dict[str, Any]] = {
 
 TOKEN_COSTS = {
     "design_run_min": 1,       # minimum per agent run
-    "design_run_preflight": 10,  # balance required to start a run
+    "design_run_preflight": 20,  # balance required to start a run (or an image read)
     "usd_per_token": 0.01,     # metering: tokens = ceil(estimated compute USD / usd_per_token)
+}
+
+# One written line per add-on (never a slice of the module summary). Honesty notes stay in the line.
+ADDON_TAGLINES = {
+    "drawings": "Drawing sheets from your verified part: views, a section, dimensions and a title block, marked "
+                "not approved for manufacture.",
+    "image2cad": "Rebuild a part from a PDF drawing, scan, sketch or photo. Every value read is shown for review "
+                 "before modelling.",
+    "assembly": "Assemble your parts with honest mate status, exact interference checks, a BOM and fastener "
+                "auto-fit.",
+    "manufacturing": "Advisory DFM checks on your exact model, a process shortlist and a relative cost estimate "
+                     "(not a quote).",
+    "engineering": "Hand-calculation checks (beams, bolts, shafts, fits) with the working shown. Estimates, never "
+                   "validation.",
+    "print": "Watertightness, wall thickness, overhang and orientation checks before you slice. Not a slicer.",
+    "mesh": "Product renders and turntables of your parts, for presentation, not engineering geometry.",
 }
 
 DEFAULT_PRODUCTS: list[dict[str, Any]] = [
     # plans
-    {"code": "trial", "kind": "plan", "name": "Free trial", "tagline": "Try the full design loop",
-     "price_cents": 0, "interval": None, "tokens": 300, "seats": 1, "modules": ["design"],
-     "features": ["300 trial tokens", "Design Studio", "STEP / STL export", "14 days"],
+    {"code": "trial", "kind": "plan", "name": "Free trial", "tagline": "Every module, on your own parts",
+     "price_cents": 0, "interval": None, "tokens": 1000, "seats": 1,
+     "modules": [c for c, m in MODULES.items() if m["status"] == "live"],
+     "features": ["1,000 trial tokens: about 3 new parts", "Every module on your own parts", "STEP / STL export",
+                  "14 days, no card"],
      "purchasable": False, "sort": 0},
     {"code": "pro", "kind": "plan", "name": "Pro", "tagline": "For independent engineers",
      "price_cents": 4900, "interval": "month", "tokens": 1500, "seats": 1,
@@ -131,6 +149,9 @@ DEFAULT_PRODUCTS: list[dict[str, Any]] = [
      "modules": ["print"], "sort": 15},
     {"code": "addon_mesh", "kind": "addon", "name": "Mesh Studio", "price_cents": 1900, "interval": "month",
      "modules": ["mesh"], "sort": 16},
+    # extra seats (Team plan)
+    {"code": "seat_team", "kind": "seat", "name": "Extra seat", "tagline": "One more teammate on the Team plan",
+     "price_cents": 3900, "interval": "month", "seats": 1, "features": ["Shares the pooled Team tokens"], "sort": 30},
     # token packs (one-off)
     {"code": "tokens_500", "kind": "topup", "name": "500 tokens", "price_cents": 1000, "tokens": 500, "sort": 20},
     {"code": "tokens_2000", "kind": "topup", "name": "2,000 tokens", "tagline": "Save 12%", "price_cents": 3500,
@@ -142,14 +163,34 @@ DEFAULT_PRODUCTS: list[dict[str, Any]] = [
 for p in DEFAULT_PRODUCTS:
     if p["kind"] == "addon":
         m = MODULES[p["modules"][0]]
-        p.setdefault("tagline", m["summary"][:190])
+        p.setdefault("tagline", ADDON_TAGLINES[p["modules"][0]])
         p.setdefault("features", m["bullets"])
+
+# Shipped defaults that changed. A stored row is upgraded only while it still holds the old default, so edits made
+# in the admin catalog are never overwritten.
+_OLD_DEFAULTS: dict[str, dict[str, Any]] = {
+    "trial": {"tokens": 300, "modules": ["design"], "tagline": "Try the full design loop",
+              "features": ["300 trial tokens", "Design Studio", "STEP / STL export", "14 days"]},
+}
+
+
+def _truncated_summary(tagline: str, module: str) -> bool:
+    """Old add-on taglines were the module summary cut at 190 characters, often mid-word."""
+    summary = MODULES.get(module, {}).get("summary", "")
+    return bool(tagline) and len(tagline) <= 190 and summary.startswith(tagline) and tagline != summary
 
 
 def seed_catalog(db: Session) -> None:
     for p in DEFAULT_PRODUCTS:
-        if db.get(Product, p["code"]) is None:
+        row = db.get(Product, p["code"])
+        if row is None:
             db.add(Product(**p))
+            continue
+        for field, old in _OLD_DEFAULTS.get(p["code"], {}).items():
+            if getattr(row, field) == old:
+                setattr(row, field, p[field])
+        if p["kind"] == "addon" and _truncated_summary(row.tagline, p["modules"][0]):
+            row.tagline = p["tagline"]
     db.commit()
 
 

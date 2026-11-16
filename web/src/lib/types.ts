@@ -5,6 +5,8 @@ export interface User {
   onboarding: Record<string, unknown>; onboarding_completed: boolean; tour_completed: boolean;
   preferences: { units?: "mm" | "in"; theme?: "light" | "dark" | "system"; notifications_email?: boolean };
   created_at: string;
+  /** set while the email is unconfirmed: the end of the first-day grace */
+  verify_by?: string | null;
 }
 
 export interface Org {
@@ -30,7 +32,7 @@ export interface Me {
 }
 
 export interface Product {
-  code: string; kind: "plan" | "addon" | "topup"; name: string; tagline: string; description: string;
+  code: string; kind: "plan" | "addon" | "topup" | "seat"; name: string; tagline: string; description: string;
   price_cents: number; interval: "month" | "year" | null; tokens: number; seats: number; modules: string[];
   features: string[]; highlight: boolean; contact_sales: boolean; purchasable: boolean; active: boolean; sort: number;
 }
@@ -39,9 +41,18 @@ export interface Module {
   code: string; name: string; status: "live" | "preview"; icon: string; summary: string; bullets: string[];
 }
 
+export interface RunRange { typical: number; low: number; high: number }
+
 export interface Catalog {
-  plans: Product[]; addons: Product[]; topups: Product[]; modules: Module[];
+  plans: Product[]; addons: Product[]; topups: Product[]; seats?: Product[]; modules: Module[];
   token_costs: Record<string, number>; stripe_mode: string;
+  /** measured tokens per design run: a new part, a change to an existing part */
+  typical_run?: { new: RunRange; change: RunRange }; trial_tokens?: number;
+}
+
+export interface RunEstimate extends RunRange {
+  kind: "new" | "change"; basis: "typical" | "workspace"; samples: number;
+  budget: number | null; default_budget: number; budget_min: number; budget_max: number;
 }
 
 export interface CheckResult { id: string; name: string; passed: boolean; gating: boolean; detail: Record<string, unknown> }
@@ -101,8 +112,9 @@ export type AgentEvent =
   | { type: "system"; model: string; auth: string }
   | { type: "tool"; id: string; name: string; brief: string }
   | { type: "tool_result"; id: string; is_error: boolean; brief: string; revision?: number }
-  | { type: "result"; subtype: string; turns: number; duration_s: number; cost_est_usd: number | null;
-      auth: string | null; tokens_charged?: number; token_balance?: number }
+  | { type: "result"; subtype: string; turns: number | null; duration_s: number; cost_est_usd: number | null;
+      auth: string | null; tokens_charged?: number; token_balance?: number; budget_stopped?: boolean; budget_tokens?: number | null }
+  | { type: "meter"; tokens: number; budget_tokens: number | null }
   | { type: "error"; text: string }
   | { type: "busy"; value: boolean }
   | { type: "questions"; questions: AgentQuestion[] }

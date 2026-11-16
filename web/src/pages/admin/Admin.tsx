@@ -27,16 +27,19 @@ function Table({ head, children }: { head: string[]; children: React.ReactNode }
   );
 }
 
+interface Economics { runs_30d: number; median_first_part_tokens: number | null; median_change_tokens: number | null; over_estimate: number; budget_stops: number; failed: number; cost_usd_30d: number }
+
 interface OverviewData {
-  kpis: Record<string, number>; funnel: { event: string; label: string; users: number }[];
+  kpis: Record<string, number>; funnel: { event: string; label: string; users: number }[]; funnel_cohort: number; economics: Economics;
   signups_30d: { date: string; count: number }[]; plans: Record<string, number>; payments_mode: string; note: string | null;
 }
 
 function Overview() {
   const q = useAdmin<OverviewData>("overview");
   if (!q.data) return <PageLoader />;
-  const { kpis, funnel, signups_30d, plans, note } = q.data;
-  const top = Math.max(1, ...funnel.map(f => f.users));
+  const { kpis, funnel, signups_30d, plans, note, economics: ec, funnel_cohort: cohort } = q.data;
+  const top = Math.max(1, cohort, ...funnel.map(f => f.users));
+  const pct = (n: number) => (ec.runs_30d ? `${Math.round((n / ec.runs_30d) * 100)}%` : "—");
   const maxS = Math.max(1, ...signups_30d.map(s => s.count));
   return (
     <div className="space-y-6">
@@ -47,10 +50,19 @@ function Overview() {
         <Stat label="Projects" value={num(kpis.projects)} icon={<FolderKanban className="h-4 w-4" />} sub={`${num(kpis.builds)} verified builds`} />
         <Stat label="Tokens used · 30d" value={num(kpis.tokens_used_30d)} icon={<Coins className="h-4 w-4" />} sub={`Revenue to date ${money(kpis.revenue_cents ?? 0)}`} />
       </div>
+      <div>
+        <h3 className="mb-2 font-semibold">Unit economics · design-agent runs, 30 days</h3>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat label="Tokens per first verified part" value={ec.median_first_part_tokens ?? "—"} sub="Median; the estimate users see should match it" />
+          <Stat label="Tokens per change" value={ec.median_change_tokens ?? "—"} sub="Median of follow-up runs" />
+          <Stat label="Runs above the shown range" value={pct(ec.over_estimate)} sub={`${ec.over_estimate} of ${ec.runs_30d} runs · ${ec.budget_stops} stopped at budget`} />
+          <Stat label="Failed or failing checks" value={pct(ec.failed)} sub={`Estimated AI cost $${ec.cost_usd_30d.toFixed(2)}`} />
+        </div>
+      </div>
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
         <Card className="p-5">
           <h3 className="font-semibold">Customer journey funnel</h3>
-          <p className="text-xs text-muted">Distinct users reaching each step</p>
+          <p className="text-xs text-muted">{cohort} people who signed up in the last 90 days (founders, admins and demo accounts excluded); each step as a share of the cohort</p>
           <div className="mt-4 space-y-2.5">
             {funnel.map((f, i) => {
               const prev = i ? funnel[i - 1]!.users : f.users;
@@ -58,7 +70,7 @@ function Overview() {
                 <div key={f.event} className="grid grid-cols-[150px_1fr_80px] items-center gap-3 text-sm">
                   <span className="text-muted">{f.label}</span>
                   <div className="h-6 rounded bg-text/[.05]"><div className="flex h-full items-center rounded bg-primary/85 px-2 text-[11px] font-semibold text-white" style={{ width: `${Math.max(4, (f.users / top) * 100)}%` }}>{f.users}</div></div>
-                  <span className="text-right text-xs text-muted">{i && prev ? `${Math.min(100, Math.round((f.users / prev) * 100))}% step` : ""}</span>
+                  <span className="text-right text-xs text-muted" title={i && prev ? `${Math.round((f.users / prev) * 100)}% of the step before` : undefined}>{cohort ? `${Math.round((f.users / cohort) * 100)}%` : ""}</span>
                 </div>);
             })}
           </div>
@@ -91,13 +103,16 @@ function UsersTab() {
           <tr key={u.id}>
             <td className="px-4 py-2.5"><div className="font-medium">{u.name} {u.superadmin && <Badge tone="accent">super-admin</Badge>}</div><div className="text-xs text-muted">{u.email}{u.onboarding?.role ? ` · ${String(u.onboarding.role)}` : ""}</div></td>
             <td className="px-4 py-2.5 text-xs">{u.orgs.map(o => <div key={o.id}>{o.name} <span className="text-muted">({o.role}, {o.plan})</span></div>)}</td>
-            <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{u.disabled ? <Badge tone="danger">disabled</Badge> : <Badge tone="success">active</Badge>}{!u.verified && <Badge tone="warning">unverified</Badge>}{!u.onboarded && <Badge>not onboarded</Badge>}</div></td>
+            <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{u.disabled ? <Badge tone="danger">Disabled</Badge> : <Badge tone="success">Active</Badge>}{!u.verified && <Badge tone="warning">Unverified</Badge>}{!u.onboarded && <Badge>Not onboarded</Badge>}</div></td>
             <td className="px-4 py-2.5 text-muted">{date(u.created_at)}</td>
             <td className="px-4 py-2.5 text-muted">{ago(u.last_login_at)}</td>
             <td className="space-x-1 whitespace-nowrap px-4 py-2.5 text-right">
               {u.id !== me?.user?.id && !u.disabled && <Button size="sm" variant="secondary" onClick={() => act(async () => { await api.post(`/api/admin/users/${u.id}/impersonate`); await refresh(); nav("/app"); }, `Now viewing as ${u.email}`)}>View as</Button>}
               {!u.verified && <Button size="sm" variant="ghost" onClick={() => act(() => api.patch(`/api/admin/users/${u.id}`, { verify_email: true }), "Email marked verified")}>Verify</Button>}
-              {u.id !== me?.user?.id && <Button size="sm" variant="ghost" onClick={() => act(() => api.patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled }), u.disabled ? "User enabled" : "User disabled")}>{u.disabled ? "Enable" : "Disable"}</Button>}
+              {u.id !== me?.user?.id && <Button size="sm" variant="ghost" onClick={() => {
+                if (!u.disabled && !confirm(`Disable ${u.email}? They are signed out everywhere and can't sign in until enabled again.`)) return;
+                void act(() => api.patch(`/api/admin/users/${u.id}`, { disabled: !u.disabled }), u.disabled ? "User enabled" : "User disabled");
+              }}>{u.disabled ? "Enable" : "Disable"}</Button>}
             </td>
           </tr>))}
       </Table>
@@ -176,7 +191,10 @@ function CatalogTab() {
               <td className="px-4 py-2"><Badge>{p.kind}</Badge>{p.interval && <span className="ml-1 text-xs text-muted">/{p.interval}</span>}</td>
               <td className="px-4 py-2"><Input className="h-8 w-28" type="number" step="0.01" value={e.price} disabled={p.contact_sales} onChange={ev => setEdit({ ...edit, [p.code]: { ...e, price: ev.target.value } })} /></td>
               <td className="px-4 py-2"><Input className="h-8 w-28" type="number" value={e.tokens} onChange={ev => setEdit({ ...edit, [p.code]: { ...e, tokens: ev.target.value } })} /></td>
-              <td className="px-4 py-2"><Toggle checked={p.active} onChange={v => api.patch(`/api/admin/catalog/${p.code}`, { active: v }).then(() => qc.invalidateQueries())} /></td>
+              <td className="px-4 py-2"><Toggle checked={p.active} onChange={v => {
+                if (!v && !confirm(`Hide “${p.name}” from pricing and checkout? Existing customers keep what they bought.`)) return;
+                void api.patch(`/api/admin/catalog/${p.code}`, { active: v }).then(() => qc.invalidateQueries());
+              }} /></td>
               <td className="px-4 py-2 text-right">{dirty && <Button size="sm" onClick={() => save(p)}>Save</Button>}</td>
             </tr>);
         })}
