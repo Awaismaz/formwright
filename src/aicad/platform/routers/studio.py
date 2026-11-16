@@ -9,19 +9,16 @@ import pprint
 import shutil
 import uuid
 from pathlib import Path
-from statistics import median
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from aicad import materials, refplane
 from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
-from aicad.platform.models import TokenLedger
 from aicad.platform.routers.projects import (
     _project,
     _read_status,
@@ -33,7 +30,7 @@ from aicad.platform.routers.projects import (
     wait_finalized,
     workspace_for,
 )
-from aicad.platform.services import audit
+from aicad.platform.services import audit, notify_revision
 
 router = APIRouter(prefix="/api", tags=["studio"])
 
@@ -94,17 +91,16 @@ def patch_settings(project_id: str, body: SettingsIn, ctx: Ctx = Depends(verifie
 
 
 @router.get("/projects/{project_id}/estimate")
-def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    _project(ctx, project_id)
+def estimate(project_id: str, chars: int = 0, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Expected tokens for the next agent run on this part, and the budget it would run with."""
+    from aicad.platform import metering
+
+    p = _project(ctx, project_id)
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(TokenLedger).where(TokenLedger.org_id == org.id, TokenLedger.reason == "usage")
-                          .order_by(TokenLedger.created_at.desc()).limit(30)).all()
-    vals = sorted(-r.delta for r in rows if r.delta < 0)
-    if len(vals) < 3:
-        return {"basis": "default", "typical": 40, "low": 20, "high": 80, "samples": len(vals)}
-    q = lambda f: vals[min(len(vals) - 1, int(f * (len(vals) - 1)))]
-    return {"basis": "your recent runs", "typical": int(median(vals)), "low": q(0.25), "high": q(0.75),
-            "samples": len(vals)}
+    est = metering.estimate(ctx.db, org, "change" if p.builds else "new", chars)
+    budget, _ = metering.run_budget(ctx.db, org, ctx.user, None, ctx.god_on("bypass_tokens"))
+    return {**est, "budget": budget, "default_budget": metering.default_budget(ctx.db, org),
+            "budget_min": metering.BUDGET_MIN, "budget_max": metering.BUDGET_MAX}
 
 
 # ----------------------------------------------------------------------------- manual features
@@ -445,6 +441,7 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
                  or [f.get("name", f.get("op")) for f in feats if f not in new_feats])
         cause = f"Manual feature {action}" + (f": {', '.join(names)}" if names else "")
     rev = _snapshot(p, ws, cause=cause, kind="manual", by=ctx.user.name)
+    notify_revision(ctx.db, p, rev, ctx.user, cause)
     schedule_finalize(p, ws, rev)
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()

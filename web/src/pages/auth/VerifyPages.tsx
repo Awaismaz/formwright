@@ -5,8 +5,9 @@ import { CheckCircle2, Inbox, MailCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { Button, Spinner } from "@/components/ui";
+import { Button, Field, Input, Spinner } from "@/components/ui";
 import AuthLayout from "@/layouts/AuthLayout";
+import { LinkProblem } from "./AuthPages";
 
 function DevMailbox() {
   const { me } = useSession();
@@ -31,7 +32,16 @@ export function VerifyEmail() {
   const nav = useNavigate();
   const [state, setState] = useState<"idle" | "verifying" | "done" | "error">(token ? "verifying" : "idle");
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [resent, setResent] = useState(false);
   const ran = useRef(false);
+  const resend = async () => {
+    try {
+      if (me?.user) await api.post("/api/auth/resend-verification");
+      else await api.post("/api/auth/resend-verification-public", { email });
+      setResent(true); toast.success("A new link is on its way.");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not send a new link"); }
+  };
 
   useEffect(() => {
     if (!token || ran.current) return;
@@ -45,7 +55,7 @@ export function VerifyEmail() {
   if (state === "done") return (
     <AuthLayout title="Email verified" subtitle="Your account is active.">
       <div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 p-4 text-sm"><CheckCircle2 className="h-5 w-5 text-success" /> You're all set.</div>
-      <Button className="mt-6 w-full" size="lg" onClick={() => nav(me?.user ? "/onboarding" : "/login")}>{me?.user ? "Set up your workspace" : "Sign in"}</Button>
+      <Button className="mt-6 w-full" size="lg" onClick={() => nav(!me?.user ? "/login" : me.org ? "/app" : "/onboarding")}>{!me?.user ? "Sign in" : me.org ? "Continue" : "Set up your workspace"}</Button>
     </AuthLayout>
   );
   if (me?.user?.email_verified && !token) return (
@@ -53,10 +63,20 @@ export function VerifyEmail() {
       <Button className="w-full" size="lg" onClick={() => nav("/app")}>Continue</Button>
     </AuthLayout>
   );
+  if (state === "error") return (
+    <AuthLayout title="Confirm your email" footer={me?.user ? <Link to="/app" className="link">Back to Formwright</Link> : <Link to="/login" className="link">Sign in</Link>}>
+      <LinkProblem title="This link has expired or was already used" body={error && !/invalid or has expired/i.test(error) ? error : "Confirmation links work once and expire after 48 hours."}
+        action={resent ? <span className="text-sm text-success">Sent. Check your inbox.</span> : me?.user
+          ? <Button onClick={resend}>Send a new link to {me.user.email}</Button>
+          : <form className="flex flex-col gap-2 text-left sm:flex-row sm:items-end" onSubmit={e => { e.preventDefault(); if (email) resend(); }}>
+              <Field label="Your email"><Input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></Field>
+              <Button type="submit">Send a new link</Button></form>} />
+      <DevMailbox />
+    </AuthLayout>
+  );
   return (
     <AuthLayout title="Check your inbox" subtitle={me?.user ? <>We sent a verification link to <b className="text-text">{me.user.email}</b>.</> : "Open the verification link we emailed you."}
       footer={me?.user ? <button className="link" onClick={async () => { await api.post("/api/auth/logout"); location.href = "/login"; }}>Use a different account</button> : <Link to="/login" className="link">Sign in</Link>}>
-      {state === "error" && <div className="mb-4 rounded border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{error}</div>}
       <div className="flex flex-col items-center rounded-xl border border-border bg-panel2 px-6 py-8 text-center">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary-soft text-primary"><MailCheck className="h-7 w-7" /></div>
         <p className="mt-4 text-sm text-muted">Click the link in the email to activate your account. It's valid for 48 hours.</p>

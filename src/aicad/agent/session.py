@@ -27,6 +27,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
+from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
 from aicad.agent.tools import make_cad_server
 
@@ -211,6 +212,13 @@ class AgentSession:
         self.session_id: str | None = None
         self.auth: str | None = None
         self.turn_meta: dict[str, Any] = {}
+        # Run metering. The agent reports a cost that is cumulative for the connected session, so each run is
+        # charged the difference from the previous report; the live meter sums the model's per-response usage.
+        self.run_budget_usd: float | None = None  # stop the run when the live meter reaches this
+        self._cost_base = 0.0  # cumulative cost already reported on the current connection
+        self._run_costs: dict[str, float] = {}  # response id -> estimated cost, this run
+        self._budget_hit = False
+        self._result_seen = False
         self._tool_names: dict[str, str] = {}  # merged into the next result event (e.g. rev_before for undo)
         self._state_dir = self.workspace / ".fw"
         self._load()
@@ -235,7 +243,7 @@ class AgentSession:
     def _persist_event(self, ev: dict[str, Any]) -> None:
         import json
 
-        if ev.get("type") in ("busy", "hello", "reset"):
+        if ev.get("type") in ("busy", "hello", "reset", "meter"):
             return
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
@@ -274,7 +282,7 @@ class AgentSession:
         ev.setdefault("t", time.time())
         if self.on_event is not None:
             self.on_event(ev)  # may enrich ev (e.g. tokens charged) before broadcast
-        if ev.get("type") not in ("busy", "hello"):
+        if ev.get("type") not in ("busy", "hello", "meter"):
             self.history.append(ev)
         self._persist_event(ev)
         for q in list(self.subscribers):
@@ -285,7 +293,12 @@ class AgentSession:
             self.workspace.mkdir(parents=True, exist_ok=True)
             self.client = ClaudeSDKClient(options=self.options())
             await self.client.connect()
+            self._cost_base = 0.0  # a new agent process reports cost from zero
         return self.client
+
+    @property
+    def run_spent_usd(self) -> float:
+        return sum(self._run_costs.values())
 
     async def send(self, prompt: str, shown: str | None = None) -> None:
         """One agent turn. ``shown``: what the chat shows as the user's message when ``prompt`` is a structured
@@ -297,6 +310,8 @@ class AgentSession:
         self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)",
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
+        self._run_costs, self._budget_hit, self._result_seen = {}, False, False
+        started, failed = time.time(), False
         try:
             try:
                 client = await self.ensure_connected()
@@ -306,15 +321,28 @@ class AgentSession:
                 self.session_id, self.client = None, None
                 client = await self.ensure_connected()
             await client.query(prompt)
+            stopping = False
             async for msg in client.receive_response():
                 self._handle(msg)
+                if self._budget_hit and not stopping:
+                    stopping = True
+                    await client.interrupt()
         except Exception:
             import logging
 
+            failed = True
             logging.getLogger("aicad.agent").exception("agent run failed")
             self.publish({"type": "error", "text": "The design agent hit a problem and stopped. Your model and files are "
                                                    "unchanged — please try again."})
         finally:
+            if not self._result_seen and self.run_spent_usd > 0:
+                self._cost_base += self.run_spent_usd  # the next cumulative report includes it
+            if not self._result_seen and self.run_spent_usd > 0 and not failed:
+                # Stopped before the agent reported its cost: charge what the meter saw (failures are not charged).
+                self.publish({"type": "result", "subtype": "stopped", "turns": None,
+                              "duration_s": round(time.time() - started, 1), "cost_est_usd": self.run_spent_usd,
+                              "budget_stopped": self._budget_hit, **self.turn_meta})
+                self.turn_meta = {}
             self.busy = False
             self.publish({"type": "busy", "value": False})
 
@@ -323,6 +351,7 @@ class AgentSession:
             self.auth = msg.data.get("apiKeySource")
             self.publish({"type": "system", "model": "Formwright design agent"})
         elif isinstance(msg, AssistantMessage):
+            self._meter(msg)
             for b in msg.content:
                 if isinstance(b, TextBlock) and b.text.strip():
                     text, recog = extract_recognition(b.text)
@@ -352,10 +381,35 @@ class AgentSession:
         elif isinstance(msg, ResultMessage):
             self.session_id = msg.session_id
             self._persist_session()
+            self._result_seen = True
             self.publish({"type": "result", "subtype": msg.subtype, "turns": msg.num_turns,
                           "duration_s": round(msg.duration_ms / 1000, 1),
-                          "cost_est_usd": msg.total_cost_usd, **self.turn_meta})
+                          "cost_est_usd": self._run_cost(msg.total_cost_usd), "budget_stopped": self._budget_hit,
+                          **self.turn_meta})
             self.turn_meta = {}
+
+    def _run_cost(self, cumulative: float | None) -> float | None:
+        """This run's cost from the session's cumulative report (falls back to the live meter)."""
+        if cumulative is None:
+            return self.run_spent_usd or None
+        run = cumulative - self._cost_base if cumulative >= self._cost_base else cumulative
+        self._cost_base = cumulative
+        return max(run, 0.0)
+
+    def _meter(self, msg: AssistantMessage) -> None:
+        """Live cost meter: one entry per model response (a response arrives as several messages)."""
+        if not msg.usage:
+            return
+        key = msg.message_id or f"m{len(self._run_costs)}"
+        cost = usage_cost_usd(msg.model, msg.usage)
+        if cost <= self._run_costs.get(key, 0.0):
+            return
+        self._run_costs[key] = cost
+        spent = self.run_spent_usd
+        self.publish({"type": "meter", "spent_usd": round(spent, 4),
+                      "budget_usd": self.run_budget_usd})
+        if self.run_budget_usd is not None and spent >= self.run_budget_usd and not self._budget_hit:
+            self._budget_hit = True
 
     def _save_recognition(self, recog: dict[str, Any]) -> None:
         import json as _json

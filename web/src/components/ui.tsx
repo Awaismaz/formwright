@@ -92,8 +92,9 @@ export function Card({ className, children, ...rest }: { className?: string; chi
   return <div className={cx("card", className)} {...rest}>{children}</div>;
 }
 
-type Tone = "neutral" | "primary" | "success" | "warning" | "danger" | "accent" | "live" | "preview";
+type Tone = "neutral" | "primary" | "solid" | "success" | "warning" | "danger" | "accent" | "live" | "preview";
 const T: Record<Tone, string> = {
+  solid: "bg-primary text-white border-primary",
   neutral: "bg-text/[.06] text-muted border-border",
   primary: "bg-primary-soft text-primary border-primary/20",
   success: "bg-success/10 text-success border-success/25",

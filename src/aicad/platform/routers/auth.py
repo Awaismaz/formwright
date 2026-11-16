@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from aicad.platform.config import get_settings
 from aicad.platform.db import get_db, utcnow
-from aicad.platform.deps import COOKIE, Ctx, auth_ctx, client_ip, optional_ctx
+from aicad.platform.deps import COOKIE, Ctx, auth_ctx, client_ip, in_grace, optional_ctx
 from aicad.platform.models import AuthSession, EmailToken, Membership, Organization, User
 from aicad.platform.security import (
     hash_password,
@@ -117,7 +117,7 @@ def consume_email_token(db: Session, token: str, kind: str) -> User:
 
 def next_step(ctx: Ctx) -> str:
     u = ctx.user
-    if u.email_verified_at is None and not ctx.god_on("skip_verification"):
+    if u.email_verified_at is None and not ctx.god_on("skip_verification") and not in_grace(u):
         return "verify_email"
     if ctx.org is None or (u.onboarding_completed_at is None and not ctx.god_on("skip_onboarding")):
         return "onboarding"
@@ -223,6 +223,17 @@ def resend(request: Request, ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
     if ctx.user.email_verified_at is None:
         send_verification(ctx.db, ctx.user)
         ctx.db.commit()
+    return {"ok": True}
+
+
+@router.post("/resend-verification-public")
+def resend_public(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """New confirmation link for someone who is signed out (an expired link). Never reveals whether an account exists."""
+    _rate_limit(f"resend-public:{client_ip(request)}")
+    user = db.scalar(select(User).where(User.email == normalize_email(body.email)))
+    if user is not None and not user.disabled and user.email_verified_at is None:
+        send_verification(db, user)
+        db.commit()
     return {"ok": True}
 
 

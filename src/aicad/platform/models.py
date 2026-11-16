@@ -6,7 +6,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from aicad.platform.db import Base, utcnow
@@ -230,3 +240,36 @@ class Feedback(Base):
     message: Mapped[str] = mapped_column(Text, default="")
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class OrgPrefs(Base):
+    """Workspace settings that need no column of their own (run budget, extra seats, account credit)."""
+
+    __tablename__ = "org_prefs"
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True)
+    data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class AgentRun(Base):
+    """One design-agent run: what it was asked (kind, brief size), its budget, and what it actually cost.
+    The source of learned estimates and of the admin unit economics."""
+
+    __tablename__ = "agent_runs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    org_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    kind: Mapped[str] = mapped_column(String(10), default="new")  # new|change
+    template: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    brief_chars: Mapped[int] = mapped_column(Integer, default=0)
+    budget_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    est_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)  # typical shown before the run
+    est_high: Mapped[int | None] = mapped_column(Integer, nullable=True)  # top of the range shown
+    tokens: Mapped[int] = mapped_column(Integer, default=0)  # charged
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)  # estimated compute of this run
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running|ok|failed|stopped_budget|stopped
+    verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # last build passed its checks
+    turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_s: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

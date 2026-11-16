@@ -26,7 +26,7 @@ const JOURNEY: { label: string; to: string }[] = [
   { label: "Landing page", to: "/" }, { label: "Pricing", to: "/pricing" }, { label: "Sign up", to: "/signup" },
   { label: "Verify email", to: "/verify-email" }, { label: "Onboarding", to: "/onboarding" },
   { label: "Dashboard + tour", to: "/app?tour=1" }, { label: "New project", to: "/app/projects?new=1" },
-  { label: "Module roadmap", to: "/app/modules" }, { label: "Drawing Studio (preview)", to: "/app/modules/drawings" },
+  { label: "All modules", to: "/app/modules" }, { label: "Drawing Studio", to: "/app/modules/drawings" },
   { label: "Billing & tokens", to: "/app/billing" }, { label: "Team", to: "/app/team" },
   { label: "Admin console", to: "/app/admin" },
 ];

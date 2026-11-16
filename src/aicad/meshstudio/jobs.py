@@ -23,6 +23,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+LISTENERS: list[Callable[[Path, dict[str, Any]], None]] = []  # called with (job_dir, job) when a job ends
 PRIORITY = {"preview": 0, "export": 1, "final": 2, "turntable": 3}
 LANE = {"preview": "quick", "export": "quick", "final": "long", "turntable": "long"}
 MAX_PENDING_PER_ORG = 6
@@ -124,6 +125,11 @@ class RenderQueue:
             finally:
                 with self._lock:
                     self._live.pop(jid, None)
+                for fn in LISTENERS:  # e.g. the platform's "your render is ready" notification
+                    try:
+                        fn(rec["dir"], read_job(rec["dir"]) or {})
+                    except Exception:
+                        log.exception("mesh job listener failed")
 
     def cancel(self, job_id: str) -> bool:
         """Drop a queued job (running ones finish or time out). True when it was removed."""

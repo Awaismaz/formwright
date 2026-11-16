@@ -15,6 +15,7 @@ from aicad.platform.config import get_settings
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, auth_ctx, superadmin_ctx
 from aicad.platform.models import (
+    AgentRun,
     AuditLog,
     AuthSession,
     Entitlement,
@@ -80,10 +81,26 @@ def overview(ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
     def count(model: Any, *where: Any) -> int:
         return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
+    # Funnel over a real cohort: people who signed up in the last 90 days, without founders/admins or demo accounts.
+    cohort = set(db.scalars(select(User.id).where(User.is_superadmin.is_(False), User.created_at >= now - timedelta(days=90),
+                                                  ~User.email.like("%@demo.formwright.dev"))))
     funnel = []
     for ev, label in FUNNEL:
-        n = db.scalar(select(func.count(func.distinct(JourneyEvent.user_id))).where(JourneyEvent.event == ev)) or 0
+        n = db.scalar(select(func.count(func.distinct(JourneyEvent.user_id))).where(
+            JourneyEvent.event == ev, JourneyEvent.user_id.in_(cohort))) or 0 if cohort else 0
         funnel.append({"event": ev, "label": label, "users": n})
+    runs = db.scalars(select(AgentRun).where(AgentRun.created_at >= d30, AgentRun.status != "running")).all()
+    firsts = sorted(r.tokens for r in runs if r.kind == "new" and r.verified)
+    changes = sorted(r.tokens for r in runs if r.kind == "change" and r.status == "ok")
+    economics = {
+        "runs_30d": len(runs),
+        "median_first_part_tokens": firsts[len(firsts) // 2] if firsts else None,
+        "median_change_tokens": changes[len(changes) // 2] if changes else None,
+        "over_estimate": sum(1 for r in runs if r.est_high and r.tokens > r.est_high),
+        "budget_stops": sum(1 for r in runs if r.status == "stopped_budget"),
+        "failed": sum(1 for r in runs if r.status == "failed" or r.verified is False),
+        "cost_usd_30d": round(sum(r.cost_usd or 0 for r in runs), 2),
+    }
     signups: dict[str, int] = defaultdict(int)
     for (created,) in db.execute(select(User.created_at).where(User.created_at >= d30)):
         signups[created.date().isoformat()] += 1
@@ -110,7 +127,7 @@ def overview(ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
                  "mrr_cents": mrr, "revenue_cents": revenue, "tokens_used_30d": tokens_used,
                  "paid_orgs": count(Organization, Organization.plan_status == "active",
                                     Organization.plan_code != "trial")},
-        "funnel": funnel, "signups_30d": [{"date": d, "count": signups.get(d, 0)} for d in days],
+        "funnel": funnel, "funnel_cohort": len(cohort), "economics": economics, "signups_30d": [{"date": d, "count": signups.get(d, 0)} for d in days],
         "plans": dict(plans),
         "payments_mode": s.stripe_mode,
         "note": "Revenue/MRR include simulated payments when Stripe is not configured." if s.stripe_mode == "simulated"

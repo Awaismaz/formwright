@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -47,14 +48,17 @@ def similar_parts(project_id: str, limit: int = Query(8, ge=1, le=30), ctx: Ctx 
 
 @router.get("/size")
 def parts_by_size(q: str = Query(..., min_length=3, max_length=80), ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Parts whose envelope matches a size such as `120x80x10`, `120 x 80` or `Ø50 x 200`."""
-    dims = similarity.parse_size_query(q)
+    """Parts whose envelope matches a size such as `120x80x10`, `120 x 80`, `Ø50 x 200` or `4.7 x 3.1 in`."""
+    inches = bool(re.search(r'\d\s*(inches|inch|in|")(?![a-z])', q.strip().lower()))
+    dims = similarity.parse_size_query(re.sub(r'(?i)(inches|inch|in(?![a-z])|")', ' ', q) if inches else q)
     if dims is None:
-        return {"dims": None, "items": []}
+        return {"dims": None, "items": [], "unit": "in" if inches else "mm"}
+    if inches:
+        dims = [round(d * 25.4, 3) for d in dims]
     hits = []
     for p, sig in _candidates(ctx):
         m = similarity.size_match(dims, sig)
         if m["score"] >= 50:
             hits.append({"project": project_dict(p), **m})
     hits.sort(key=lambda h: -h["score"])
-    return {"dims": dims, "items": hits[:12]}
+    return {"dims": dims, "items": hits[:12], "unit": "in" if inches else "mm"}

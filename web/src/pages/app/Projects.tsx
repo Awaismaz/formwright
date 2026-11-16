@@ -1,106 +1,158 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, FolderKanban, LayoutGrid, List, MoreHorizontal, Plus, Ruler, Search, Trash2 } from "lucide-react";
+import {
+  Archive, ArchiveRestore, Copy, ExternalLink, FolderKanban, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Ruler,
+  ScanSearch, Search, Trash2, X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import type { Project } from "@/lib/types";
-import { ago } from "@/lib/format";
-import { Button, EmptyState, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader, StatusBadge } from "@/components/ui";
+import { ago, cx, PAGE, size } from "@/lib/format";
+import { Button, EmptyState, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader } from "@/components/ui";
 import ProjectCard, { ProjectStatus } from "@/components/ProjectCard";
 import NewProjectDialog from "@/components/NewProjectDialog";
-import { MatchRow, type Match } from "@/components/SimilarParts";
-import { cx } from "@/lib/format";
+import { MatchRow, SimilarPartsDialog, type Match } from "@/components/SimilarParts";
+
+type Sort = "updated" | "name" | "size" | "created";
+const SORTS: [Sort, string][] = [["updated", "Last updated"], ["name", "Name"], ["size", "Size"], ["created", "Date created"]];
+const vol = (p: Project) => p.last_status?.fingerprint?.volume ?? -1;
 
 export default function Projects() {
+  const { me } = useSession();
+  const units = me?.user?.preferences?.units;
+  const viewer = me?.org?.role === "viewer";
+  const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
   const [archived, setArchived] = useState(false);
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<Sort>(() => { try { return (localStorage.getItem("fw_psort") as Sort) || "updated"; } catch { return "updated"; } });
   const [view, setView] = useState<"grid" | "list">(() => { try { return (localStorage.getItem("fw_pview") as "grid" | "list") || "grid"; } catch { return "grid"; } });
   const [newOpen, setNewOpen] = useState(params.get("new") === "1");
   const [confirm, setConfirm] = useState<Project | null>(null);
+  const [renaming, setRenaming] = useState<{ p: Project; name: string } | null>(null);
+  const [similar, setSimilar] = useState<string | null>(null);
   const list = useQuery({ queryKey: ["projects", archived], queryFn: () => api.get<{ items: Project[] }>(`/api/projects?archived=${archived}`) });
 
   useEffect(() => { if (params.get("new") === "1") { setNewOpen(true); params.delete("new"); setParams(params, { replace: true }); } }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { try { localStorage.setItem("fw_pview", view); } catch { /* ignore */ } }, [view]);
+  useEffect(() => { const s = params.get("q"); if (s) { setQ(s); params.delete("q"); setParams(params, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { try { localStorage.setItem("fw_pview", view); localStorage.setItem("fw_psort", sort); } catch { /* ignore */ } }, [view, sort]);
 
-  const sizeQuery = /\d\s*(mm)?\s*[x×*]\s*\d/i.test(q);
+  const sizeQuery = /\d\s*(mm|in|")?\s*[x×*]\s*\d/i.test(q);
   const [debounced, setDebounced] = useState(q);
   useEffect(() => { const t = setTimeout(() => setDebounced(q), 250); return () => clearTimeout(t); }, [q]);
   const bySize = useQuery({ queryKey: ["search-size", debounced], enabled: sizeQuery && debounced === q,
-    queryFn: () => api.get<{ dims: number[] | null; items: Match[] }>(`/api/search/size?q=${encodeURIComponent(debounced)}`) });
-  const items = useMemo(() => (list.data?.items ?? []).filter(p => sizeQuery || !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.description.toLowerCase().includes(q.toLowerCase())), [list.data, q, sizeQuery]);
+    queryFn: () => api.get<{ dims: number[] | null; items: Match[]; unit?: "mm" | "in" }>(`/api/search/size?q=${encodeURIComponent(debounced)}`) });
+  const items = useMemo(() => {
+    const s = q.toLowerCase();
+    const rows = (list.data?.items ?? []).filter(p => sizeQuery || !q || p.name.toLowerCase().includes(s) || p.description.toLowerCase().includes(s)
+      || (p.last_status?.material ?? "").toLowerCase().includes(s));
+    const by: Record<Sort, (a: Project, b: Project) => number> = {
+      updated: (a, b) => b.updated_at.localeCompare(a.updated_at), created: (a, b) => b.created_at.localeCompare(a.created_at),
+      name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }), size: (a, b) => vol(b) - vol(a),
+    };
+    return [...rows].sort(by[sort]);
+  }, [list.data, q, sizeQuery, sort]);
   const refresh = () => qc.invalidateQueries({ queryKey: ["projects"] });
-  const setArch = async (p: Project, v: boolean) => {
-    try { await api.patch(`/api/projects/${p.id}`, { archived: v }); toast.success(v ? "Project archived" : "Project restored"); refresh(); }
-    catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
+  const call = async (fn: () => Promise<unknown>, ok: string) => {
+    try { await fn(); toast.success(ok); refresh(); } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
   };
   const del = async () => {
     if (!confirm) return;
-    try { await api.del(`/api/projects/${confirm.id}`); toast.success("Project deleted"); setConfirm(null); refresh(); }
-    catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
+    await call(() => api.del(`/api/projects/${confirm.id}`), "Project deleted");
+    setConfirm(null);
+  };
+  const duplicate = async (p: Project) => {
+    try { const d = await api.post<Project>(`/api/projects/${p.id}/duplicate`); toast.success(`Saved as “${d.name}”`, { action: { label: "Open", onClick: () => nav(`/app/projects/${d.id}`) } }); refresh(); }
+    catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not duplicate"); }
+  };
+  const rename = async () => {
+    if (!renaming?.name.trim()) return;
+    await call(() => api.patch(`/api/projects/${renaming.p.id}`, { name: renaming.name.trim() }), "Project renamed");
+    setRenaming(null);
   };
   const rowMenu = (p: Project) => (
     <Menu>
-      <MenuTrigger asChild><button className="rounded p-1.5 text-muted hover:bg-text/5" aria-label="Project actions" onClick={e => e.preventDefault()}><MoreHorizontal className="h-4 w-4" /></button></MenuTrigger>
+      <MenuTrigger asChild><button className="rounded p-1.5 text-muted hover:bg-text/5" aria-label={`Actions for ${p.name}`} onClick={e => e.preventDefault()}><MoreHorizontal className="h-4 w-4" /></button></MenuTrigger>
       <MenuContent>
-        {archived ? <MenuItem icon={<ArchiveRestore />} onSelect={() => setArch(p, false)}>Restore</MenuItem> : <MenuItem icon={<Archive />} onSelect={() => setArch(p, true)}>Archive</MenuItem>}
-        <MenuSeparator />
-        <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirm(p)}>Delete…</MenuItem>
+        <MenuItem icon={<ExternalLink />} onSelect={() => window.open(`/app/projects/${p.id}`, "_blank", "noopener")}>Open in new tab</MenuItem>
+        {!viewer && <MenuItem icon={<Pencil />} onSelect={() => setRenaming({ p, name: p.name })}>Rename…</MenuItem>}
+        {!viewer && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
+        {p.builds > 0 && <MenuItem icon={<ScanSearch />} onSelect={() => setSimilar(p.id)}>Find similar parts</MenuItem>}
+        {!viewer && <><MenuSeparator />
+          {archived ? <MenuItem icon={<ArchiveRestore />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: false }), "Project restored")}>Restore</MenuItem>
+            : <MenuItem icon={<Archive />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: true }), "Project archived")}>Archive</MenuItem>}
+          <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirm(p)}>Delete…</MenuItem></>}
       </MenuContent>
     </Menu>
   );
+  const unitLabel = units === "in" ? "in" : "mm";
+  const dims = bySize.data?.dims;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <PageHeader title="Projects" eyebrow={<StatusBadge status="live" />} subtitle="Each project holds a design conversation, its parametric model, checks, revisions and exports."
-        actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
+    <div className={PAGE}>
+      <PageHeader title="Projects" subtitle="Each project holds a part: its model, checks, revisions, exports and design conversation."
+        actions={!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="relative w-full max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, or by size: 120x80x10" className="pl-9" aria-label="Search projects by name or size" /></div>
+        <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search by name, or by size: ${units === "in" ? "4.7 x 3.1 in" : "120x80x10"}`} className="px-9" aria-label="Search projects by name or size" />
+          {q && <button onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted hover:text-text" aria-label="Clear search"><X className="h-3.5 w-3.5" /></button>}</div>
         <div className="inline-flex rounded-lg border border-border bg-panel p-0.5 text-sm">
           {[["Active", false], ["Archived", true]].map(([l, v]) => (
             <button key={l as string} onClick={() => setArchived(v as boolean)} className={cx("rounded px-3 py-1", archived === v ? "bg-primary text-white" : "text-muted")}>{l as string}</button>))}
         </div>
-        <div className="ml-auto inline-flex rounded-lg border border-border bg-panel p-0.5">
+        <label className="ml-auto flex items-center gap-2 text-[13px] text-muted">Sort
+          <select value={sort} onChange={e => setSort(e.target.value as Sort)} className="input h-8 w-auto py-0 pr-8 text-[13px]" aria-label="Sort projects">
+            {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select></label>
+        <div className="inline-flex rounded-lg border border-border bg-panel p-0.5">
           <button onClick={() => setView("grid")} className={cx("rounded p-1.5", view === "grid" ? "bg-panel2 text-text" : "text-muted")} aria-label="Grid view"><LayoutGrid className="h-4 w-4" /></button>
-          <button onClick={() => setView("list")} className={cx("rounded p-1.5", view === "list" ? "bg-panel2 text-text" : "text-muted")} aria-label="List view"><List className="h-4 w-4" /></button>
+          <button onClick={() => setView("list")} className={cx("rounded p-1.5", view === "list" ? "bg-panel2 text-text" : "text-muted")} aria-label="Catalogue view"><List className="h-4 w-4" /></button>
         </div>
       </div>
       {sizeQuery && (
         <section className="mb-6 rounded-xl border border-border bg-panel2/60 p-4">
-          <div className="mb-3 flex items-baseline gap-2">
+          <div className="mb-3 flex flex-wrap items-baseline gap-2">
             <Ruler className="h-4 w-4 self-center text-primary" />
-            <h2 className="text-[14px] font-semibold">Parts sized like {bySize.data?.dims ? bySize.data.dims.map(d => +d.toFixed(2)).join(" × ") : "…"} mm</h2>
+            <h2 className="text-[14px] font-semibold">Parts sized like {dims ? size(dims, bySize.data?.unit === "in" ? "in" : units) : "…"}</h2>
             <span className="text-[12px] text-muted">any orientation · matched on the verified model's envelope</span>
           </div>
           {bySize.isLoading || debounced !== q ? <div className="py-3 text-sm text-muted">Searching…</div>
-            : !bySize.data?.items.length ? <p className="text-sm text-muted">No part in this workspace has that envelope yet.</p>
+            : !bySize.data?.items.length ? <p className="text-sm text-muted">No part in this workspace has that envelope yet. <button className="link" onClick={() => setQ("")}>Clear search</button></p>
             : <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{bySize.data.items.map(m => <MatchRow key={m.project.id} m={m} />)}</div>}
         </section>)}
       {list.isLoading ? <PageLoader /> : items.length === 0 ? (
         <EmptyState icon={<FolderKanban className="h-6 w-6" />} title={q ? "No matching projects" : archived ? "No archived projects" : "No projects yet"}
-          body={!q && !archived ? "Start with a template or a blank brief. The design agent will model, verify and show your part live." : undefined}
-          action={!archived && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
+          body={q ? <>Nothing is named like “{q}”. Try part of the name, or a size such as {units === "in" ? "4.7 x 3.1 in" : "120x80x10"}.</> : !archived ? "Describe a part from Home, or start from a template, a STEP file or a drawing." : undefined}
+          action={q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button> : !archived && !viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
       ) : view === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map(p => <div key={p.id} className="relative"><ProjectCard p={p} /><div className="absolute right-2 top-2 rounded bg-panel/90">{rowMenu(p)}</div></div>)}
+          {items.map(p => <div key={p.id} className="relative"><ProjectCard p={p} units={units} /><div className="absolute right-2 top-2 rounded bg-panel/90">{rowMenu(p)}</div></div>)}
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-panel2 text-left text-xs text-muted"><tr><th className="px-4 py-2.5 font-medium">Name</th><th className="px-4 py-2.5 font-medium">Status</th><th className="px-4 py-2.5 font-medium">Size (mm)</th><th className="px-4 py-2.5 font-medium">Builds</th><th className="px-4 py-2.5 font-medium">Updated</th><th /></tr></thead>
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-panel2 text-left text-xs text-muted"><tr>
+              <th className="px-4 py-2.5 font-medium">Part</th><th className="px-4 py-2.5 font-medium">Status</th><th className="px-4 py-2.5 font-medium">Material</th>
+              <th className="px-4 py-2.5 font-medium">Envelope ({unitLabel})</th><th className="px-4 py-2.5 font-medium">Volume</th>
+              <th className="px-4 py-2.5 font-medium">Builds</th><th className="px-4 py-2.5 font-medium">Updated</th><th /></tr></thead>
             <tbody className="divide-y divide-border">
-              {items.map(p => (
-                <tr key={p.id} className="hover:bg-panel2/60">
-                  <td className="px-4 py-2.5"><Link to={`/app/projects/${p.id}`} className="font-medium hover:text-primary">{p.name}</Link><div className="text-xs text-muted">{p.created_by ? `by ${p.created_by}` : ""}</div></td>
-                  <td className="px-4 py-2.5"><ProjectStatus p={p} /></td>
-                  <td className="px-4 py-2.5 tabular-nums text-muted">{p.last_status?.fingerprint?.bbox?.map(n => Math.round(n)).join(" × ") ?? "—"}</td>
-                  <td className="px-4 py-2.5 tabular-nums">{p.builds}</td>
-                  <td className="px-4 py-2.5 text-muted">{ago(p.updated_at)}</td>
-                  <td className="px-4 py-2.5 text-right">{rowMenu(p)}</td>
-                </tr>
-              ))}
+              {items.map(p => {
+                const v = p.last_status?.fingerprint?.volume;
+                return (
+                  <tr key={p.id} className="hover:bg-panel2/60">
+                    <td className="px-4 py-2.5"><Link to={`/app/projects/${p.id}`} className="font-medium hover:text-primary">{p.name}</Link><div className="text-xs text-muted">{p.created_by ? `by ${p.created_by}` : ""}</div></td>
+                    <td className="px-4 py-2.5"><ProjectStatus p={p} /></td>
+                    <td className="max-w-[180px] truncate px-4 py-2.5 text-muted">{p.last_status?.material ?? "—"}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted">{size(p.last_status?.fingerprint?.bbox, units).replace(/ (mm|in)$/, "") || "—"}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted">{v ? (units === "in" ? `${(v / 16387.064).toFixed(2)} in³` : `${(v / 1000).toFixed(1)} cm³`) : "—"}</td>
+                    <td className="px-4 py-2.5 tabular-nums">{p.builds}</td>
+                    <td className="px-4 py-2.5 text-muted">{ago(p.updated_at)}</td>
+                    <td className="px-4 py-2.5 text-right">{rowMenu(p)}</td>
+                  </tr>);
+              })}
             </tbody>
           </table>
         </div>
@@ -109,6 +161,11 @@ export default function Projects() {
       <Modal open={!!confirm} onOpenChange={o => !o && setConfirm(null)} title="Delete project?"
         description={<>“{confirm?.name}”, its model files, revisions and conversation will be permanently deleted.</>}
         footer={<><Button variant="secondary" onClick={() => setConfirm(null)}>Cancel</Button><Button variant="danger" onClick={del}>Delete project</Button></>} />
+      <Modal open={!!renaming} onOpenChange={o => !o && setRenaming(null)} title="Rename project"
+        footer={<><Button variant="secondary" onClick={() => setRenaming(null)}>Cancel</Button><Button onClick={rename} disabled={!renaming?.name.trim()}>Rename</Button></>}>
+        <Input autoFocus value={renaming?.name ?? ""} maxLength={120} onChange={e => renaming && setRenaming({ ...renaming, name: e.target.value })} onKeyDown={e => e.key === "Enter" && rename()} aria-label="Project name" />
+      </Modal>
+      {similar && <SimilarPartsDialog projectId={similar} open onClose={() => setSimilar(null)} />}
     </div>
   );
 }

@@ -42,10 +42,10 @@ from aicad.image2cad.sniff import MAX_PDF_BYTES, TYPES, validate
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
 from aicad.platform.deps import Ctx, verified_ctx
-from aicad.platform.models import Organization, Project, User
+from aicad.platform.models import AgentRun, Organization, Project, User
 from aicad.platform.routers import projects as proj
 from aicad.platform.routers.billing import tokens_for_cost
-from aicad.platform.services import audit, debit, org_modules, track
+from aicad.platform.services import audit, debit, notify, org_modules, track
 
 router = APIRouter(prefix="/api/m/image2cad", tags=["image2cad"])
 log = logging.getLogger("aicad.image2cad")
@@ -137,10 +137,15 @@ def _settle_builds(ctx: Ctx) -> None:
         if not isinstance(pend, dict):
             continue
         p = ctx.db.get(Project, pend.get("project_id"))
-        state, usd = ("failed", None) if p is None else \
-            cost.first_result_tokens(proj.workspace_for(p) / ".fw" / "chat.jsonl", int(pend.get("line") or 0))
+        run = ctx.db.get(AgentRun, pend["run_id"]) if pend.get("run_id") else None
+        if run is not None:  # the platform's own record of this run (per-run cost, also kept under God mode)
+            state = "pending" if run.status == "running" else "done" if run.status in ("ok", "failed") else "failed"
+            usd = run.cost_usd
+        else:
+            state, usd = ("failed", None) if p is None else \
+                cost.first_result_tokens(proj.workspace_for(p) / ".fw" / "chat.jsonl", int(pend.get("line") or 0))
         if state == "done":
-            tokens = tokens_for_cost(usd) if usd else None
+            tokens = run.tokens if run is not None and run.tokens else (tokens_for_cost(usd) if usd else None)
             if tokens:
                 cost.record(data, "build", tokens, ref=meta.get("id"))
             store.update_meta(d, build_pending=None, build_tokens=tokens)
@@ -217,9 +222,23 @@ async def _read_task(d: Path, org_id: str, user_id: str, god_tokens: bool) -> No
         if store.read_json(d, "review.json") is None:
             store.write_json(d, "review.json", review.empty_review())
         store.update_meta(d, status="review", step=None, error=None)
+        if res.get("needs_vision"):
+            _notify_read(user_id, d)
     except Exception:
         log.exception("image2cad read failed")
         store.update_meta(d, status="failed", step=None, error="The file could not be read.")
+
+
+def _notify_read(user_id: str, d: Path) -> None:
+    """An image read takes a minute or two: tell the user when the values are ready to review."""
+    db = session_factory()()
+    try:
+        meta = store.read_json(d, "meta.json") or {}
+        notify(db, user_id, f"{meta.get('name', 'Your image')} is read",
+               "The values are ready to review before modelling.", f"/app/modules/image2cad?upload={meta.get('id', '')}")
+        db.commit()
+    finally:
+        db.close()
 
 
 def _meter(org_id: str, user_id: str, god_tokens: bool, usd: float | None, d: Path) -> None:
@@ -241,6 +260,11 @@ def _meter(org_id: str, user_id: str, god_tokens: bool, usd: float | None, d: Pa
 
 
 def _start(d: Path, ctx: Ctx) -> None:
+    from aicad.platform import metering
+
+    if (ctx.user.email_verified_at is None and not ctx.god_on("skip_verification") and not ctx.god_on("bypass_tokens")
+            and metering.unverified_spent(ctx.db, ctx.user) >= metering.UNVERIFIED_TOKEN_CAP - metering.MIN_RUN_TOKENS):
+        raise HTTPException(403, "Verify your email to keep using AI reads. We sent you a link.")
     t = asyncio.create_task(_read_task(d, ctx.require_org().id, ctx.user.id, ctx.god_on("bypass_tokens")))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
@@ -380,8 +404,11 @@ async def create_model(uid: str, body: CreateIn, ctx: Ctx = Depends(verified_ctx
         line = 0
     await proj.agent_chat(p.id, _HandoffIn(prompt=prompt, attachments=[_attachment(d)],
                                            shown=review.handoff_summary(meta, st, rv)), ctx)
+    from sqlalchemy import select
+
+    run_id = ctx.db.scalar(select(AgentRun.id).where(AgentRun.project_id == p.id).order_by(AgentRun.created_at.desc()))
     store.update_meta(d, status="created", project_id=p.id,
-                      build_pending={"project_id": p.id, "line": line, "at": time.time()})
+                      build_pending={"project_id": p.id, "line": line, "at": time.time(), "run_id": run_id})
     store.write_json(d, "handoff.json", {"project_id": p.id, "unit": (st["scale"]["reference"] or {}).get("unit"),
                                          "dims": [{k: x.get(k) for k in ("id", "label", "describes")}
                                                   for x in st["dims"] if not x["excluded"]]})

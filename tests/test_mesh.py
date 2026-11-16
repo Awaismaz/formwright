@@ -19,6 +19,7 @@ from build123d import Box, export_step
 from fastapi.testclient import TestClient
 from PIL import Image
 from test_platform import admin, app_client, signup  # noqa: F401  (fixture re-export)
+from trial_helpers import set_trial_ended
 
 from aicad.meshstudio import (
     DISCLOSURE,
@@ -635,8 +636,10 @@ def test_api_auth_scoping_paywall_and_flow(app_client: TestClient, tmp_path: Pat
     assert c.get("/api/m/mesh/presets").status_code == 401
     signup(c, "mesh@x.com")
     pid = c.post("/api/projects", json={"name": "Flange"}).json()["id"]
+    set_trial_ended("mesh@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.get(f"/api/m/mesh/projects/{pid}")
     assert r.status_code == 402 and "Mesh Studio" in r.json()["detail"]["message"]
+    set_trial_ended("mesh@x.com", False)
     _grant(c)
     pre = c.get("/api/m/mesh/presets").json()
     assert {f["id"] for f in pre["finishes"]} >= {"anodised", "machined_steel", "abs", "rubber"}

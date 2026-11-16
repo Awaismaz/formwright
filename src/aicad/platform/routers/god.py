@@ -22,10 +22,11 @@ from aicad.platform.services import audit, credit, debit, notify
 router = APIRouter(prefix="/api/god", tags=["god"])
 
 SCENARIOS = {
-    "fresh_signup": "Brand-new account: email unverified, onboarding and tour not done",
+    "fresh_signup": "Brand-new account: email unverified (first-day grace), onboarding and tour not done",
+    "verify_overdue": "Signed up over a day ago and email still unverified (verification wall)",
     "needs_onboarding": "Verified, but onboarding not completed",
     "first_tour": "Onboarded, guided tour not yet taken",
-    "trial_active": "Trial with 300 tokens and 14 days left",
+    "trial_active": "Trial with the full trial tokens and 14 days left",
     "trial_low_tokens": "Trial with 12 tokens left (paywall on next run)",
     "trial_expired": "Trial ended yesterday",
     "pro_active": "Pro subscriber with 1,500 tokens",
@@ -95,8 +96,12 @@ def scenario(body: ScenarioIn, ctx: Ctx = Depends(god_ctx)) -> dict[str, Any]:
 
     if sc == "fresh_signup":
         u.email_verified_at = None
+        u.created_at = now
         u.onboarding_completed_at = None
         u.tour_completed_at = None
+    elif sc == "verify_overdue":
+        u.email_verified_at = None
+        u.created_at = now - timedelta(days=2)
     elif sc == "needs_onboarding":
         u.email_verified_at = u.email_verified_at or now
         u.onboarding_completed_at = None
@@ -109,7 +114,7 @@ def scenario(body: ScenarioIn, ctx: Ctx = Depends(god_ctx)) -> dict[str, Any]:
     elif sc in ("trial_active", "trial_low_tokens", "trial_expired"):
         org.plan_code, org.plan_status = "trial", "trialing"
         org.trial_ends_at = now - timedelta(days=1) if sc == "trial_expired" else now + timedelta(days=14)
-        set_tokens({"trial_active": 300, "trial_low_tokens": 12, "trial_expired": 140}[sc])
+        set_tokens({"trial_active": get_settings().trial_tokens, "trial_low_tokens": 12, "trial_expired": 140}[sc])
     elif sc in ("pro_active", "team_active"):
         plan = sc.split("_")[0]
         org.plan_code, org.plan_status = plan, "active"

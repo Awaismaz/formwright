@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from aicad.platform.config import get_settings
 from aicad.platform.db import utcnow
-from aicad.platform.deps import Ctx, auth_ctx, verified_ctx
+from aicad.platform.deps import Ctx, auth_ctx, confirmed_ctx, verified_ctx
 from aicad.platform.models import Invite, Membership, User
 from aicad.platform.security import hash_token, new_token, normalize_email, valid_email
 from aicad.platform.services import (
@@ -62,7 +62,7 @@ def team(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
 
 
 @router.post("/invites")
-def invite(body: InviteIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+def invite(body: InviteIn, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     ctx.require_role("admin")
     org = ctx.require_org()
     email = normalize_email(body.email)
@@ -73,7 +73,9 @@ def invite(body: InviteIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     pending = len(ctx.db.scalars(select(Invite).where(Invite.org_id == org.id, Invite.accepted_at.is_(None),
                                                       Invite.revoked.is_(False))).all())
     if seats_used(ctx.db, org) + pending >= seat_limit(ctx.db, org) and not ctx.god_on("bypass_paywall"):
-        raise HTTPException(402, "All seats are in use. Upgrade to the Team plan to add teammates.")
+        raise HTTPException(402, "All seats are in use. Add a seat in Billing to invite more teammates."
+                            if org.plan_code == "team" else
+                            "All seats are in use. Upgrade to the Team plan to add teammates.")
     existing = ctx.db.scalar(select(User).where(User.email == email))
     if existing and ctx.db.scalar(select(Membership).where(Membership.user_id == existing.id,
                                                            Membership.org_id == org.id)):
