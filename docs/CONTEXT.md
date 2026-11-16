@@ -59,5 +59,11 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Workflow recipes live in project skills (`.claude/skills/`, listed in `CLAUDE.md`); `.gitignore` tracks only
   `.claude/skills/` (local settings stay ignored).
 
+## Module status (2026-11-17)
+All eight modules are Live: Design Studio, Drawing Studio, Image & Drawing to CAD, Assembly Studio, Manufacturing
+Advisor, Engineering Advisor, 3D Print Prep, Mesh Studio (Blender render studio). Downstream modules open on the
+current part from the Studio's **Make** tab; input modules (From Drawing) from the **Library** tab. Platform
+differentiators: similar-part search, change notices, design variants, shop handoff pack (see docs/OPPORTUNITIES.md).
+
 ## Where things stand
 See `docs/PUNCH_LIST.md` (DS-* rows for the Studio) and the latest `docs/SESSION_LOG.md` entry.

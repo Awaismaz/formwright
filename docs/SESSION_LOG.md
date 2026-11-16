@@ -4,6 +4,38 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-17 (m): All eight modules Live; design variants; image-read fix
+
+### Done
+- **Merged and Live** (each report read, Make/Library entry added, punch list updated):
+  - Design Studio DS-026: sketch tools, feature mirror, reference planes, draft/rib, sweep/loft, tree polish.
+  - Image & Drawing to CAD (CAD-020..022): read before modelling, scale never guessed. The Library tab gets
+    "From Drawing", and the Preview sample that estimated scale was removed.
+  - Assembly Studio (ASM-001..008, IO-006, ASM-013 fastener auto-fit).
+  - Mesh Studio (MSH-001/004/007/008/009/012: Blender product render studio, visualisation-labelled).
+- **Design variants (DS-030 / O-3)**: named pinned revisions; compare modal with deltas vs current; switch without AI.
+- **Founder-reported bug**: an Image & Drawing to CAD upload of a phone photo failed. Cause: the lossless PNG preview
+  went to the agent, whose stream carries the image more than once per message and hit the SDK's 1 MB limit. Fix:
+  the vision step gets a compact copy (≤1568 px, smaller of JPEG/PNG), and the SDK buffer is raised to 32 MB for
+  vision and Studio chat (6 MB attachments had the same latent failure). Verified with the founder's own drawing:
+  19 dimensions, views detected, 10 questions, scale held Undefined.
+
+### Evidence
+- Full suite on main with all modules: 352 passed + 1 stale assertion fixed (image2cad now 66/66); vitest 19/19;
+  ruff, tsc and vite clean.
+- Browser:
+  - variants flange 6×M12 vs 8×M10, compare + switch, 0 errors;
+  - the founder's JPG read on the isolated server;
+  - catalog on 8765 lists all 8 modules Live.
+
+### Parked
+PD-22 (Studio modelling defaults), PD-23 (image2cad defaults), PD-24 (assembly defaults), PD-25 (Blender GPL
+isolation for counsel; sandbox).
+
+### Next
+O-5 drawing check refinements; review per-module "Not done" lists for the highest-value gaps; agent-driven
+variants ("explore 3 alternatives").
+
 ## 2026-11-16 (l): Wave 1 merged (Drawing, Manufacturing, Engineering Live), change notice, handoff pack, wave 2 launched
 
 ### Done
