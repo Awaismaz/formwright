@@ -18,6 +18,20 @@ the founder's call: pick a sensible default and list it under "Parked decisions"
 - New Python dependencies: allowed if permissively licensed (MIT/BSD/Apache). Add with `uv add <pkg>`, and note the
   license in your report. No GPL.
 
+## Shared machine rules (learned the hard way)
+- The scratch directory is shared by every agent and the master. Use ONLY `$SCRATCH/fw-e2e-<yourport>` for your
+  test data, puppeteer install and screenshots. Never `rm` anything else there.
+- Pass `FW_DATA_DIR` as a Windows path: `$(cygpath -w "$E2E")\data`. Native Python misreads `/c/Users/...`.
+- Stop only your own server: stop the background task you started, or the process whose command line contains
+  `--port <yourport>`. Never kill by image name (python.exe, node.exe). Port 8765 is the founder's own app; never
+  touch it.
+- The machine has 12 threads and 32 GB, shared by about 5 agents. Run your module's tests while iterating; run the full
+  suite once before your final commit.
+- Already Live on main: Design Studio, Drawing Studio, Manufacturing Advisor, Engineering Advisor, 3D Print Prep.
+  The Studio's **Make** tab opens Live modules on the current part (`/app/modules/<code>?project=<id>`). Map your module
+  there by telling the master its code. Reuse `@/components/Viewer3D`, `IsoThumb` (`@/components/ProjectCard`) and
+  `MatchRow` where they fit.
+
 ## Boundaries (so parallel merges stay clean)
 - Work only inside your worktree. Commit to your branch. **Do not push and do not merge to main.**
 - Never touch `D:\AI CAD\formwright\data` (the founder's data) or the apps on ports 8765/8766.
