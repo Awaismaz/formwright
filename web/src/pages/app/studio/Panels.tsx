@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, Sparkles, Square, TextCursorInput, Trash2, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
@@ -170,8 +170,19 @@ export interface Recognition {
 const fmtParams = (p: Record<string, unknown>) => Object.entries(p).filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
   .slice(0, 4).map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? +v.toFixed(3) : String(v)}`).join(" · ");
 
+/** SOLIDWORKS-style rollback bar: the features below it stay in the tree but are not built; new features go in here. */
+function RollbackBar({ busy, hidden, canUp, onUp, onDown, onEnd }: { busy: boolean; hidden: number; canUp: boolean; onUp: () => void; onDown: () => void; onEnd: () => void }) {
+  return (
+    <li className="my-1 flex items-center gap-1 rounded border-y-2 border-primary bg-primary-soft/60 px-2 py-0.5 text-[11.5px] text-primary" data-rollback-bar>
+      <Undo2 className="h-3.5 w-3.5 shrink-0" /><span className="flex-1 truncate">Rolled back · {hidden} feature{hidden === 1 ? "" : "s"} below not built</span>
+      <Tip content="Move the bar up one feature" side="top"><button disabled={busy || !canUp} onClick={onUp} className="rounded p-0.5 hover:bg-primary/10 disabled:opacity-30" aria-label="Roll back one more"><ArrowUp className="h-3.5 w-3.5" /></button></Tip>
+      <Tip content="Move the bar down one feature" side="top"><button disabled={busy} onClick={onDown} className="rounded p-0.5 hover:bg-primary/10 disabled:opacity-30" aria-label="Roll forward one"><ArrowDown className="h-3.5 w-3.5" /></button></Tip>
+      <Tip content="Roll forward to the end (build every feature)" side="top"><button disabled={busy} onClick={onEnd} className="rounded p-0.5 hover:bg-primary/10 disabled:opacity-30" aria-label="Roll to end"><ChevronsDown className="h-3.5 w-3.5" /></button></Tip>
+    </li>);
+}
+
 export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane,
-  selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false, onSketchOn, onPreviewPlane }: {
+  selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false, onSketchOn, onPreviewPlane, onRename, onRollback }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
   onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
@@ -181,7 +192,17 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
   onSuppressDesign?: (name: string, suppressed: boolean) => void; onDeleteDesign?: (name: string) => void; agentBusy?: boolean;
   /** Reference planes and sketch nodes: open a sketch on a plane; show either in the viewer while hovered. */
   onSketchOn?: (f: ManualFeature) => void; onPreviewPlane?: (f: ManualFeature | null) => void;
+  /** Manual features: rename (double-click) and move the rollback bar (null = roll forward to the end). */
+  onRename?: (f: ManualFeature, name: string) => void; onRollback?: (beforeId: string | null) => void;
 }) {
+  const [openMenu, setOpenMenu] = useState<string | null>(null); // right-click opens the row's menu
+  const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rb = manual.findIndex(f => f.rolled_back); // rollback bar sits just above this row (-1: at the end)
+  const commitRename = (f: ManualFeature) => {
+    const t = renaming?.text.trim(); setRenaming(null);
+    if (t && t !== f.name) onRename?.(f, t);
+  };
   const modelFeats = (status?.features ?? []).filter(f => f.kind !== "manual" && f.kind !== "edit");
   const facesOf = (name: string) => topo ? topo.faces.filter(f => f.feature === name).map(f => f.id) : [];
   const ai = recognition?.ai;
@@ -213,7 +234,7 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
           const picked = selectedFeatures.includes(f.name);
           const label = aiName(f.name)?.name ?? f.name;
           return (
-            <li key={i} onMouseEnter={() => onHover(sup ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])}
+            <li key={i} onMouseEnter={() => onHover(sup ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])} onContextMenu={ev => { ev.preventDefault(); setOpenMenu(`d:${f.name}`); }}
               className={cx("group flex items-center gap-1.5 rounded px-2 py-1 hover:bg-primary-soft", picked && "bg-accent/10 ring-1 ring-accent/40", sup && "opacity-55")}>
               {blank ? <Box className="h-3.5 w-3.5 shrink-0 text-muted" /> : imported ? <ScanSearch className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Bot className="h-3.5 w-3.5 shrink-0 text-muted" />}
               <button onClick={() => onPickFeature?.(f.name)} disabled={!onPickFeature}
@@ -225,7 +246,7 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
               {canSup && <Tip content={sup ? "Unsuppress (no AI)" : "Suppress (no AI)"} side="left">
                 <button disabled={busy || agentBusy} onClick={() => onSuppressDesign?.(f.name, !sup)} className={cx("rounded p-0.5 text-muted hover:text-text disabled:opacity-30", !sup && "hidden group-hover:block")} aria-label={sup ? `Unsuppress ${f.name}` : `Suppress ${f.name}`}>
                   {sup ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>}
-              <Menu>
+              <Menu open={openMenu === `d:${f.name}`} onOpenChange={o => setOpenMenu(o ? `d:${f.name}` : null)}>
                 <MenuTrigger asChild><button className="hidden rounded p-0.5 text-muted hover:text-text group-hover:block data-[state=open]:block" aria-label={`Actions for ${f.name}`}><MoreHorizontal className="h-3.5 w-3.5" /></button></MenuTrigger>
                 <MenuContent>
                   <MenuLabel>{label}</MenuLabel>
@@ -267,18 +288,45 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
 
       <div className="label mb-1 mt-4 flex items-center gap-1"><Pencil className="h-3.5 w-3.5" />Manual features</div>
       {manual.length === 0 ? <p className="text-[12px] text-muted">{status?.fingerprint ? "Use the command bar (Features / Sketch) to add features by hand. They stay editable here." : "Start a part by hand: click a plane above (or Extruded / Revolved Boss in the command bar), sketch a closed profile and extrude or revolve it."}</p> :
-        <ul className="space-y-0.5">{manual.map((f, i) => (
-          <li key={f.id} onMouseEnter={() => (f.op === "plane" || f.op === "sketch2d" ? onPreviewPlane?.(f) : onHover(f.suppressed ? [] : facesOf(f.name)))} onMouseLeave={() => (f.op === "plane" || f.op === "sketch2d" ? onPreviewPlane?.(null) : onHover([]))}
-            className={cx("group flex items-center gap-1 rounded px-2 py-1 hover:bg-primary-soft", f.suppressed && "opacity-50")}>
+        <ul className="space-y-0.5">{manual.map((f, i) => {
+          const key = `m:${f.id}`; const rolled = !!f.rolled_back;
+          return (<Fragment key={f.id}>
+          {i === rb && onRollback && <RollbackBar busy={busy} hidden={manual.length - rb} onUp={() => onRollback(manual[rb - 1]?.id ?? manual[0]!.id)} canUp={rb > 0}
+            onDown={() => onRollback(manual[rb + 1]?.id ?? null)} onEnd={() => onRollback(null)} />}
+          <li onMouseEnter={() => (rolled ? undefined : f.op === "plane" || f.op === "sketch2d" ? onPreviewPlane?.(f) : onHover(f.suppressed ? [] : facesOf(f.name)))} onMouseLeave={() => (f.op === "plane" || f.op === "sketch2d" ? onPreviewPlane?.(null) : onHover([]))}
+            onContextMenu={ev => { ev.preventDefault(); setOpenMenu(key); }}
+            className={cx("group flex items-center gap-1 rounded px-2 py-1 hover:bg-primary-soft", f.suppressed && "opacity-50", rolled && "opacity-45")}>
             {f.op === "plane" && <Square className="h-3.5 w-3.5 shrink-0 -skew-x-12 text-primary/70" />}
             {f.op === "sketch2d" && <PenLine className="h-3.5 w-3.5 shrink-0 text-primary/70" />}
-            <button className="flex-1 truncate text-left" onClick={() => onEdit(f)} disabled={busy}>{f.name} <Badge className="ml-1">{f.op === "sketch" && f.mode === "cut" ? "Cut" : FEATURE_LABEL[f.op] ?? f.op}</Badge></button>
+            {renaming?.id === f.id
+              ? <Input autoFocus value={renaming.text} onChange={ev => setRenaming({ id: f.id, text: ev.target.value })} onBlur={() => commitRename(f)} aria-label="Feature name"
+                  onKeyDown={ev => { if (ev.key === "Enter") commitRename(f); if (ev.key === "Escape") setRenaming(null); }} className="h-6 flex-1 px-1.5 text-[13px]" />
+              : <button className={cx("flex-1 truncate text-left", rolled && "italic")} disabled={busy} title="Click to edit · double-click to rename · right-click for more"
+                  onClick={() => { if (clickTimer.current) clearTimeout(clickTimer.current); clickTimer.current = setTimeout(() => onEdit(f), 230); }}
+                  onDoubleClick={() => { if (clickTimer.current) clearTimeout(clickTimer.current); if (onRename) setRenaming({ id: f.id, text: f.name }); }}>
+                  {f.name} <Badge className="ml-1">{f.op === "sketch" && f.mode === "cut" ? "Cut" : FEATURE_LABEL[f.op] ?? f.op}</Badge></button>}
             {f.op === "plane" && onSketchOn && <Tip content={`Sketch on ${f.name}`} side="left"><button disabled={busy} onClick={() => onSketchOn(f)} className="rounded p-0.5 text-muted hover:text-primary" aria-label={`Sketch on ${f.name}`}><PenLine className="h-3.5 w-3.5" /></button></Tip>}
-            <Tip content={f.suppressed ? "Unsuppress" : "Suppress"} side="left"><button disabled={busy} onClick={() => onToggle(f)} className="rounded p-0.5 text-muted hover:text-text">{f.suppressed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>
-            <button disabled={busy || i === 0} onClick={() => onMove(f, -1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" /></button>
-            <button disabled={busy || i === manual.length - 1} onClick={() => onMove(f, 1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" /></button>
-            <button disabled={busy} onClick={() => onDelete(f)} className="rounded p-0.5 text-muted hover:text-danger" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
-          </li>))}</ul>}
+            <Tip content={f.suppressed ? "Unsuppress" : "Suppress"} side="left"><button disabled={busy} onClick={() => onToggle(f)} className="rounded p-0.5 text-muted hover:text-text" aria-label={f.suppressed ? `Unsuppress ${f.name}` : `Suppress ${f.name}`}>{f.suppressed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>
+            <button disabled={busy || i === 0} onClick={() => onMove(f, -1)} className="hidden rounded p-0.5 text-muted hover:text-text disabled:opacity-30 group-hover:block" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" /></button>
+            <button disabled={busy || i === manual.length - 1} onClick={() => onMove(f, 1)} className="hidden rounded p-0.5 text-muted hover:text-text disabled:opacity-30 group-hover:block" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" /></button>
+            <Menu open={openMenu === key} onOpenChange={o => setOpenMenu(o ? key : null)}>
+              <MenuTrigger asChild><button className="hidden rounded p-0.5 text-muted hover:text-text group-hover:block data-[state=open]:block" aria-label={`Actions for ${f.name}`}><MoreHorizontal className="h-3.5 w-3.5" /></button></MenuTrigger>
+              <MenuContent>
+                <MenuLabel>{f.name}</MenuLabel>
+                <MenuItem icon={<Pencil className="h-4 w-4" />} onSelect={() => onEdit(f)}>Edit feature</MenuItem>
+                {onRename && <MenuItem icon={<TextCursorInput className="h-4 w-4" />} onSelect={() => setTimeout(() => setRenaming({ id: f.id, text: f.name }), 0)}>Rename</MenuItem>}
+                {f.op === "plane" && onSketchOn && <MenuItem icon={<PenLine className="h-4 w-4" />} onSelect={() => onSketchOn(f)}>Sketch on this plane</MenuItem>}
+                <MenuItem icon={f.suppressed ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} onSelect={() => onToggle(f)}>{f.suppressed ? "Unsuppress" : "Suppress"}</MenuItem>
+                {onRollback && (rolled ? <MenuItem icon={<ChevronsDown className="h-4 w-4" />} onSelect={() => onRollback(manual[i + 1]?.id ?? null)}>Roll forward to after this</MenuItem>
+                  : <MenuItem icon={<Undo2 className="h-4 w-4" />} onSelect={() => onRollback(f.id)}>Roll back to before this</MenuItem>)}
+                {onRollback && rb >= 0 && <MenuItem icon={<ChevronsDown className="h-4 w-4" />} onSelect={() => onRollback(null)}>Roll to end</MenuItem>}
+                <MenuSeparator />
+                <MenuItem danger icon={<Trash2 className="h-4 w-4" />} onSelect={() => onDelete(f)}>Delete</MenuItem>
+              </MenuContent>
+            </Menu>
+            <button disabled={busy} onClick={() => onDelete(f)} className="hidden rounded p-0.5 text-muted hover:text-danger group-hover:block" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+          </li></Fragment>);
+        })}</ul>}
       {(status?.manual_features ?? 0) > 0 && status?.checks?.some(c => c.id === "CHK-05" && (c.detail as Record<string, unknown>)?.expected_mm3 !== undefined) && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With manual features, the size and volume checks are informational: they compare against the original expectation, which doesn't include your manual edits.</p>}
     </div>
   );

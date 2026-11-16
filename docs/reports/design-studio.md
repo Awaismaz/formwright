@@ -13,7 +13,7 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
 | 3 | Reference plane features | Done | see git log "DS-026 (3)" |
 | 4 | Draft and Rib | Done | see git log "DS-026 (4)" |
 | 5 | Sweep and Loft (sketch-only tree nodes) | Done | see git log "DS-026 (5)" |
-| 6 | Feature tree polish (rollback, rename, context menu) | Not started | |
+| 6 | Feature tree polish (rollback, rename, context menu) | Done | see git log "DS-026 (6)" |
 
 ## 1. Sketcher tools (Done)
 
@@ -237,11 +237,48 @@ None), then a 20×10×10 boss on it: volume 2000, bbox z 5..15.
 - Screenshots reviewed: sketch-only exit, tree with sketch nodes, sweep PM with the 3D preview, swept elbow with the hovered path,
   loft PM with ordered sections, lofted frustum.
 
+## 6. Feature tree polish (Done)
+
+**What was built**
+- **Right-click menu** on every tree row: agent-built features open main's existing ⋯ menu (Ask the design agent, Suppress
+  or Delete with no AI). Manual features get the same Menu component with **Edit feature, Rename, Sketch on this plane** (planes),
+  **Suppress/Unsuppress, Roll back to before this / Roll forward to after this, Roll to end, Delete**. One Menu per row,
+  opened either by the ⋯ button or by right-click (a controlled Radix menu), not a second menu.
+- **Rename by double-click** on a manual feature (inline field; Enter saves, Esc cancels). A single click still opens the
+  editor (after a 230 ms wait so a double-click doesn't open it). Names stay unique (422 "A feature named … already exists").
+  Agent-built feature names live in the design code; ask the agent to rename those.
+- **Rollback bar** (SOLIDWORKS "roll back"): features below the bar stay in the tree, greyed and italic, but are not built.
+  New features are inserted at the bar. The bar shows "Rolled back · n features below not built" with step up, step down
+  and roll-to-end controls. It is stored as a `rolled_back` flag on the features below the bar, so the build runner needs
+  no change, and `apply_manual` skips them like suppressed ones. The server keeps everything below the first flagged feature
+  flagged. A hand-modelled part must keep its first boss above the bar (clear 422 rather than an empty build). The revision
+  cause reads "Moved the rollback bar (no AI)", and the chat says "Feature tree rolled back without AI".
+- Manual rows are less cluttered: the eye (and the plane sketch pencil) stays visible, while the arrows, ⋯ and delete appear on hover.
+
+**Tests**: `test_rollback_bar_and_rename`. 60×40×10 block, Hole and Lug:
+- rolling back before Hole gives 24000;
+- a Pin cut added while rolled back is inserted at the bar (order Base, Pin, Hole, Lug), giving 24000 − 40π;
+- rolling forward gives 24000 − 90π + 400 − 40π;
+- rename to Bore works, a duplicate name gives 422;
+- rolling back above the first boss of a hand-modelled part gives 422; an unknown feature gives 404.
+
+**Browser walkthrough** (`tree.mjs`, 0 console/page errors):
+- Right-click Hole → menu (Edit, Rename, Suppress, Roll back to before this, Delete) → Roll back: **24000.000000** mm³;
+  tree Base, Hole\*, Lug\* (\* = rolled back) with the bar drawn above Hole.
+- Pin added while rolled back → inserted at the bar: **23874.336294** (24000 − 40π = 23874.336294).
+- Bar → Roll to end: **23991.592955** (24000 − 90π + 400 − 40π = 23991.592955).
+- Double-click Hole → "Bore Ø6" + Enter → renamed, and no editor opened.
+- Seeded demo plate: right-click "Centre pocket" (an agent feature) → main's menu: Ask the design agent about it /
+  Suppress (no AI) / Delete… (no AI).
+- Screenshots reviewed: manual context menu, rollback bar, inserted at the bar, renamed, agent context menu.
+
 ## Parked decisions
 - PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),
   not "YZ through the model centre" as before. Existing features keep their stored plane.
 - PD (draft pull default): the default pull direction points into the part from the neutral face (a positive angle narrows
   the part away from it), with Reverse available. SOLIDWORKS shows a pull arrow instead; we use a fixed default plus Reverse.
+- PD (rollback storage): the bar is a `rolled_back` flag on manual features (no runner change). Agent-built features
+  above the manual block can't be rolled back individually (use Suppress); the bar applies to manual features.
 - PD (Sketch button default): the ribbon **Sketch** button now opens a sketch that defaults to "Sketch only" (a tree
   node), as in SOLIDWORKS. Extruded/Revolved Boss and Cut still default to their feature. The sketch exit bar lets you switch.
 - PD (sweep options): mitred corners, no twist/guide curves, and the profile is swept as placed (the user puts it at the

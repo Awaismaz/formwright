@@ -654,7 +654,7 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
     sketches = {str(f.get("id", "")): ({**f, "plane": planes[str(f["plane_ref"])]} if f.get("plane_ref") in planes else f)
                 for f in features if f["op"] == "sketch2d"}
     for f in features:
-        if f.get("suppressed"):
+        if f.get("suppressed") or f.get("rolled_back"):  # rolled back: below the rollback bar
             continue
         if f["op"] in NON_GEOMETRIC:
             continue

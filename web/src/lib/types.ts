@@ -59,6 +59,8 @@ export interface BuildStatus {
 
 export interface ManualFeature {
   id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft"; name: string; suppressed: boolean;
+  /** below the rollback bar: kept in the tree, not built */
+  rolled_back?: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
   axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
   source?: string[]; kind?: "linear" | "circular";

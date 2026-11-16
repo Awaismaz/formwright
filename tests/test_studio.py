@@ -627,3 +627,39 @@ def test_loft_between_sketch_nodes(app_client: TestClient) -> None:  # noqa: F81
     assert r.status_code == 422 and "one closed profile" in r.json()["detail"]
     for bad in ({**lo, "sections": [c1]}, {**lo, "sections": [c1, c1]}):
         assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def test_rollback_bar_and_rename(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "rollback@x.com", "Rollback")
+    hole = {"op": "sketch", "name": "Hole", "plane": TOP10, "profiles": [{"kind": "circle", "cx": 15, "cy": 5, "r": 3}], "mode": "cut", "end": "through"}
+    lug = {"op": "sketch", "name": "Lug", "plane": TOP10, "profiles": [_rect(18, -15, 26, -5)], "distance": 5, "mode": "add"}
+    for f in (hole, lug):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": f}).status_code == 200
+    ids = [f["id"] for f in c.get(f"/api/projects/{pid}/manual").json()["features"]]
+    full = 24000 - math.pi * 9 * 10 + 400
+    assert _vol(c, pid) == pytest.approx(full, rel=1e-9)
+    # roll back to before the hole: hole and lug stay in the tree but aren't built
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": ids[1]})
+    assert r.status_code == 200, r.text
+    assert [bool(f.get("rolled_back")) for f in r.json()["features"]] == [False, True, True]
+    assert _vol(c, pid) == pytest.approx(24000, rel=1e-12)
+    # a feature added while rolled back goes in at the bar
+    pin = {"op": "sketch", "name": "Pin", "plane": TOP10, "profiles": [{"kind": "circle", "cx": -15, "cy": 5, "r": 2}], "mode": "cut", "end": "through"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pin})
+    assert r.status_code == 200, r.text
+    assert [f["name"] for f in r.json()["features"]] == ["Base", "Pin", "Hole", "Lug"]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 4 * 10, rel=1e-9)
+    # roll forward to the end
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": None})
+    assert r.status_code == 200 and not any(f.get("rolled_back") for f in r.json()["features"])
+    assert _vol(c, pid) == pytest.approx(full - math.pi * 4 * 10, rel=1e-9)
+    # rename (unique names only)
+    assert c.patch(f"/api/projects/{pid}/manual/{ids[1]}", json={"feature": {"name": "Bore"}}).status_code == 200
+    assert [f["name"] for f in c.get(f"/api/projects/{pid}/manual").json()["features"]] == ["Base", "Pin", "Bore", "Lug"]
+    r = c.patch(f"/api/projects/{pid}/manual/{ids[1]}", json={"feature": {"name": "Lug"}})
+    assert r.status_code == 422 and "already exists" in r.json()["detail"]
+    # a hand-modelled part keeps its first boss above the bar
+    r = c.post(f"/api/projects/{pid}/manual/rollback", json={"before": ids[0]})
+    assert r.status_code == 422 and "first boss" in r.json()["detail"]
+    assert c.post(f"/api/projects/{pid}/manual/rollback", json={"before": "nope"}).status_code == 404

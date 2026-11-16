@@ -202,6 +202,9 @@ export default function ProjectStudio() {
                   onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`)}
                   onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onSketchOn={f => openSketchOnRef(f, sk?.phase === "pick" ? sk.preset : undefined)}
+                  onRename={(f, name) => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { name } }), `Renamed to ${name}`, l => l.map(x => (x.id === f.id ? { ...x, name } : x)))}
+                  onRollback={before => manualCall(() => api.post(`/api/projects/${id}/manual/rollback`, { before }), before ? "Rolled back" : "Rolled forward to the end",
+                    l => { const k = before ? l.findIndex(x => x.id === before) : l.length; return l.map((x, j) => ({ ...x, rolled_back: j >= k })); })}
                   onPreviewPlane={f => { if (pm || sk) return;
                     if (!f?.plane) { setSketch(null); return; }
                     const pl = { origin: f.plane.origin, normal: f.plane.normal, x_dir: f.plane.x_dir ?? xDirFor(f.plane.normal) };

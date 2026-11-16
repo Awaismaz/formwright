@@ -236,6 +236,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(422, f"Unsupported operation {op!r}")
     out: dict[str, Any] = {"id": str(f.get("id") or uuid.uuid4().hex[:8]), "op": op,
                            "name": str(f.get("name") or op.title())[:60], "suppressed": bool(f.get("suppressed"))}
+    if f.get("rolled_back"):  # below the rollback bar: kept in the tree, not built
+        out["rolled_back"] = True
     if op in ("fillet", "chamfer"):
         edges = f.get("edges") or []
         if not edges or len(edges) > 200:
@@ -402,7 +404,7 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
         f.write_text(BLANK_MODEL.format(name=p.name), encoding="utf-8")
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
-    new_feats = sync_planes(mutate([dict(x) for x in feats]))
+    new_feats = normalize_rollback(sync_planes(mutate([dict(x) for x in feats])))
     if transform is not None and fresh:
         f.unlink()
         raise HTTPException(404, "There is no design to change yet")
@@ -447,7 +449,9 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
     if s:
-        s.publish({"type": "text", "text": f"{'Feature' if transform is not None else 'Manual feature'} {action} without AI (revision {rev})."})
+        what = (f"Feature tree {action[5:].replace('_', ' ')}" if action.startswith("tree_")
+                else f"{'Feature' if transform is not None else 'Manual feature'} {action}")
+        s.publish({"type": "text", "text": f"{what} without AI (revision {rev})."})
     return {"ok": True, "features": new_feats, "revision": rev, "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
@@ -578,6 +582,15 @@ def _blank(src: str) -> bool:
     return "result = None  # the first boss or revolve" in head and "fw.feature(" not in head
 
 
+def normalize_rollback(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Everything below the rollback bar (the first rolled-back feature) is rolled back."""
+    bar = next((i for i, x in enumerate(fs) if x.get("rolled_back")), None)
+    if bar is not None:
+        for x in fs[bar:]:
+            x["rolled_back"] = True
+    return fs
+
+
 def sync_planes(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep each attached sketch's stored placement equal to its reference plane's. A sketch whose plane was
     deleted keeps the last placement and is detached."""
@@ -609,8 +622,41 @@ def list_manual(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, 
 
 @router.post("/projects/{project_id}/manual")
 async def add_manual(project_id: str, body: FeatureIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    feat = validate_feature(body.feature)
-    return await _apply_manual(ctx, project_id, lambda fs: [*fs, feat], "added")
+    feat = validate_feature({**body.feature, "rolled_back": False})
+
+    def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        bar = next((i for i, x in enumerate(fs) if x.get("rolled_back")), len(fs))
+        return [*fs[:bar], feat, *fs[bar:]]  # a new feature goes in at the rollback bar
+    return await _apply_manual(ctx, project_id, mutate, "added")
+
+
+class RollbackIn(BaseModel):
+    before: str | None = None  # roll back to just before this feature; None = roll forward to the end
+
+
+@router.post("/projects/{project_id}/manual/rollback")
+async def rollback_manual(project_id: str, body: RollbackIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Move the rollback bar: features from `before` down stay in the tree but are not built (as in SOLIDWORKS).
+    New features are inserted at the bar. `before = None` rolls forward to the end."""
+    model = workspace_for(_project(ctx, project_id)) / "model.py"
+    blank = model.is_file() and _blank(model.read_text(encoding="utf-8"))
+
+    def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ids = [x["id"] for x in fs]
+        if body.before is not None and body.before not in ids:
+            raise HTTPException(404, "Feature not found")
+        bar = ids.index(body.before) if body.before is not None else len(fs)
+        if blank and not any(x["op"] not in refplane.NON_GEOMETRIC and not x.get("suppressed") for x in fs[:bar]):
+            raise HTTPException(422, "This part is modelled by hand: keep its first boss above the rollback bar")
+        for i, x in enumerate(fs):
+            if i >= bar:
+                x["rolled_back"] = True
+            else:
+                x.pop("rolled_back", None)
+        return fs
+    rolled = body.before is not None
+    return await _apply_manual(ctx, project_id, mutate, "tree_rolled_back" if rolled else "tree_rolled_forward",
+                               cause="Moved the rollback bar (no AI)" if rolled else "Rolled the feature tree forward to the end (no AI)")
 
 
 @router.patch("/projects/{project_id}/manual/{fid}")
@@ -618,7 +664,10 @@ async def edit_manual(project_id: str, fid: str, body: FeatureIn, ctx: Ctx = Dep
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for i, f in enumerate(fs):
             if f["id"] == fid:
-                fs[i] = validate_feature({**f, **body.feature, "id": fid})
+                new = validate_feature({**f, **body.feature, "id": fid})
+                if new["name"] != f["name"] and any(x["name"] == new["name"] for x in fs if x["id"] != fid):
+                    raise HTTPException(422, f"A feature named “{new['name']}” already exists")
+                fs[i] = new
                 return fs
         raise HTTPException(404, "Feature not found")
     return await _apply_manual(ctx, project_id, mutate, "edited")
