@@ -71,11 +71,13 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Mesh repair, oriented STL / 3MF export (mm)"],
     },
     "mesh": {
-        "name": "Mesh Studio", "status": "preview", "icon": "shapes",
-        "summary": "Procedural and AI-generated meshes for visualisation and concept art, clearly separated "
-                   "from precision CAD.",
-        "bullets": ["Text / image → scene", "Materials & lighting", "GLB / OBJ / FBX export",
-                    "Render–critique loop"],
+        "name": "Mesh Studio", "status": "live", "icon": "shapes",
+        "summary": "Product renders of your verified parts: finishes mapped from the material, studio lighting, "
+                   "turntables and visualisation meshes. For presentation, not engineering geometry.",
+        "bullets": ["Photoreal renders in anodised, steel, brass, plastic and rubber finishes",
+                    "Studio, dark and technical-white lighting; hero, iso, front and top views",
+                    "Turntable GIF / MP4 and transparent PNGs",
+                    "Editable .blend plus GLB / OBJ / STL visualisation meshes"],
     },
 }
 
