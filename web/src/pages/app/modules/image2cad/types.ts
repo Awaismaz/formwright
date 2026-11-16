@@ -7,6 +7,20 @@ export interface UploadSummary {
   status: UploadStatus; error: string | null; project_id: string | null; method: "vector" | "vision" | null;
   pages?: number | null; step?: string | null; preview: string | null;
   counts?: { dims: number; open: number };
+  roundtrip?: { matched: number; checked: number } | null;
+}
+
+/** Measured token estimates: typical run and the upper figure a run needs in the balance before it starts. */
+export interface CostLine { tokens: number; high: number; runs: number; basis: "measured" | "seed" }
+export interface Estimate { read: CostLine; build: CostLine; balance: number | null; unlimited: boolean }
+
+export interface RoundTripRow {
+  id: string; label: string; describes?: string | null; status: "match" | "count" | "missing" | "skipped";
+  found: string | null; note: string | null;
+}
+export interface RoundTrip {
+  rows: RoundTripRow[]; matched: number; checked: number; skipped: number; ok: boolean; at: string;
+  build_id: string | null; stale?: boolean;
 }
 
 export interface Tol { plus: number; minus: number }
@@ -51,6 +65,7 @@ export interface Read {
   unparsed: { text: string; x: number | null; y: number | null }[];
   unreadable?: { note: string; x: number | null; y: number | null }[];
   checks: Check[]; pages?: number; paper_mm?: number[]; preview_px?: { w: number; h: number };
+  projection?: { value: string; evidence: string } | null; title_text?: string | null;
 }
 
 export interface Review {
@@ -63,6 +78,7 @@ export interface Review {
 
 export interface ReviewState {
   dims: Dim[]; needs: Need[]; open: number; ready: boolean; assumptions: string[];
+  documentation: { what: string; why?: string | null }[]; name: string | null; drawing_no: string | null;
   scale: {
     status: "undefined" | "confirmed" | "corrected"; summary: string; evidence: string[]; warning?: string;
     stated: Read["scale"]; units: Read["units"];
@@ -72,7 +88,8 @@ export interface ReviewState {
 
 export interface Full {
   upload: UploadSummary; read: Read | null; review: Review; state: ReviewState | null;
-  project: { id: string; name: string } | null; can_edit: boolean;
+  project: { id: string; name: string; built: boolean; build_id: string | null } | null; can_edit: boolean;
+  estimate: Estimate; roundtrip: RoundTrip | null;
 }
 
 export const KIND_LABEL: Record<string, string> = {

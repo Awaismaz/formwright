@@ -260,6 +260,8 @@ export default function ProjectStudio() {
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
             empty={mf.length ? <div className="absolute bottom-10 rounded bg-panel/90 px-3 py-1.5 text-[12.5px] text-muted shadow-card">No solid yet: {mf.length} reference feature(s) in the tree. Add a boss, revolve, sweep or loft to create the body.</div>
+              : p.agent?.busy && /^From .+ \(Image & Drawing to CAD\)/.test(p.description) /* AMI-26: first build from a drawing */
+              ? <div className="text-center text-sm text-muted"><Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />Building from {/^From (.+?) \(Image/.exec(p.description)?.[1]}…<div className="mt-1 text-[12.5px]">The design agent is modelling from your confirmed values.</div></div>
               : <div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 <button onClick={() => openPm("sketch", null, { feature: "extrude", mode: "add" })} className="pointer-events-auto rounded-md border border-primary/50 bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary hover:border-primary">Sketch on a plane</button>

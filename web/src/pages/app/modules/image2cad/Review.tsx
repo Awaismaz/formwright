@@ -10,6 +10,8 @@ import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Badge, Button, Input, PageLoader, Tip } from "@/components/ui";
 import SourcePane, { type Pin } from "./SourcePane";
+import RoundTripCard from "./RoundTrip";
+import { about, covers } from "./Cost";
 import { BASE, KIND_LABEL, type Answer, type Dim, type Full, type Need, type RefAnswer, type Review, type ReviewState, type View } from "./types";
 
 const fmt = (v: number | null | undefined) => (v == null ? "?" : String(Math.round(v * 10000) / 10000));
@@ -38,7 +40,15 @@ function Pending({ f, onBack, onRetry }: { f: Full; onBack: () => void; onRetry:
   return (
     <div className="flex h-full flex-col">
       <Toolbar name={f.upload.name} onBack={onBack} />
-      <div className="flex flex-1 items-center justify-center bg-[#e9edf2] p-6 dark:bg-[#1b2027]">
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-[#e9edf2] p-6 dark:bg-[#1b2027]">
+        {f.upload.preview && !failed && (
+          <div className="relative max-h-[52vh] max-w-[min(720px,90%)] overflow-hidden rounded border border-border bg-white shadow-card" data-testid="reading-preview">
+            <img src={f.upload.preview} alt="Uploaded drawing" className="block max-h-[52vh] w-auto object-contain opacity-90" />
+            <style>{"@keyframes i2c-scan{0%{top:-12%}100%{top:100%}}"}</style>
+            <div className="pointer-events-none absolute inset-x-0 h-[12%] bg-gradient-to-b from-transparent via-primary/20 to-transparent"
+              style={{ animation: "i2c-scan 2.2s ease-in-out infinite alternate" }} />
+          </div>
+        )}
         <div className="w-full max-w-md rounded-xl border border-border bg-panel p-6 text-center shadow-card">
           {failed ? <AlertTriangle className="mx-auto h-8 w-8 text-danger" /> : <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />}
           <div className="mt-3 text-[15px] font-semibold">{failed ? "We couldn't read this file" : (f.upload.step ?? "Reading the drawing")}</div>
@@ -156,6 +166,7 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
         </div>
         <aside className="flex w-[460px] shrink-0 flex-col border-l border-border bg-panel">
           <div className="min-h-0 flex-1 overflow-y-auto" data-testid="checklist">
+            {f.upload.status === "created" && f.project && <RoundTripCard f={f} uid={uid} />}
             <ScaleCard st={st} read={read} />
             <Section title="What we need" count={openNeeds.length} tone={openNeeds.length ? "warning" : "success"}
               empty={openNeeds.length === 0 ? "Nothing open. Every value is read or answered." : undefined}
@@ -194,6 +205,14 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
               <Section title="Will be stated as assumptions">
                 <ul className="space-y-1.5 text-[12.5px] text-muted">
                   {st.assumptions.map(a => <li key={a} className="flex gap-2"><span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted" />{a}</li>)}
+                </ul>
+              </Section>
+            )}
+            {st.documentation.length > 0 && (
+              <Section title="Not needed for the model">
+                <p className="text-[12px] text-muted">Not on the drawing, but documentation rather than shape. Add them in the project or the Drawing Studio.</p>
+                <ul className="space-y-1 text-[12.5px] text-muted" data-testid="documentation">
+                  {st.documentation.map(m => <li key={m.what} className="flex gap-2"><span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-muted" />{m.what}</li>)}
                 </ul>
               </Section>
             )}
@@ -246,6 +265,7 @@ function ScaleCard({ st, read }: { st: ReviewState; read: Full["read"] }) {
           <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Units</span>{s.units ? <span><b className="text-text">{s.units.value}</b> · {s.units.evidence}</span>
             : s.reference ? <span><b className="text-text">{s.reference.unit}</b> · set by your reference</span> : "Not stated: set them with the reference"}</li>
           {s.evidence.map(e => <li key={e} className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Geometry</span><span className="flex gap-1"><Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />{e}</span></li>)}
+          {read?.projection && <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Projection</span><span><b className="text-text">{read.projection.value === "first" ? "First" : "Third"} angle</b> · {read.projection.evidence}</span></li>}
           {read?.method === "vision" && <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Image</span>Not to scale. Sizes are never measured from it.</li>}
         </ul>
         {s.warning && <p className="relative mt-2 flex gap-1.5 text-[12px] text-warning"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{s.warning}</p>}
@@ -514,9 +534,11 @@ function CreateBar({ f, st, uid, targetProject, disabled, onCreated }: {
 }) {
   const projects = useQuery({ queryKey: ["projects-min"], queryFn: () => api.get<{ items: { id: string; name: string }[] }>("/api/projects") });
   const [target, setTarget] = useState<string>(targetProject ?? "new");
-  const [name, setName] = useState(f.upload.name.replace(/\.[^.]+$/, "").slice(0, 80));
+  const [name, setName] = useState((st.name ?? f.upload.name.replace(/\.[^.]+$/, "")).slice(0, 80));
   const [busy, setBusy] = useState(false);
-  const can = st.ready && !disabled && (target !== "new" || name.trim().length > 0);
+  const e = f.estimate;
+  const enough = covers(e, "build");
+  const can = st.ready && !disabled && enough && (target !== "new" || name.trim().length > 0);
   const create = async () => {
     setBusy(true);
     try {
@@ -540,11 +562,14 @@ function CreateBar({ f, st, uid, targetProject, disabled, onCreated }: {
         {target === "new" && <Input value={name} onChange={e => setName(e.target.value)} placeholder="Project name" className="h-8 flex-1 text-[13px]" aria-label="Project name" />}
       </div>
       <div className="flex items-center gap-3">
-        <span className="flex-1 text-[12px] leading-snug text-muted">
-          {st.ready ? "The design agent gets exactly the confirmed values and the drawing as a reference."
-            : `${st.open} open item${st.open === 1 ? "" : "s"} to answer before modelling.`}
+        <span className="flex-1 text-[12px] leading-snug text-muted" data-testid="create-note">
+          {!st.ready ? `${st.open} open item${st.open === 1 ? "" : "s"} to answer before modelling.`
+            : !enough ? <span className="text-warning">Building takes {about(e.build)}. Your workspace has {e.balance ?? 0}. <Link className="underline" to="/app/billing#tokens">Top up</Link></span>
+            : <>The design agent gets exactly the confirmed values and the drawing as a reference.{e && !e.unlimited && <> Build {about(e.build)}; you have {e.balance}.</>}</>}
         </span>
-        <Button disabled={!can} loading={busy} onClick={() => void create()} data-testid="create-model" icon={<Sparkles className="h-4 w-4" />}>Create model</Button>
+        <Button disabled={!can} loading={busy} onClick={() => void create()} data-testid="create-model" icon={<Sparkles className="h-4 w-4" />}
+          title={e && !e.unlimited ? `Measured on recent builds: ${about(e.build)}` : undefined}>
+          Create model{e && !e.unlimited && <span className="ml-1 font-normal tabular-nums opacity-80">· ≈ {e.build.tokens}</span>}</Button>
       </div>
     </div>
   );
