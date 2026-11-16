@@ -144,7 +144,7 @@ def test_settings_materials_estimate(app_client: TestClient) -> None:  # noqa: F
     assert c.get(f"/api/projects/{pid}/settings").json()["material_guess"] == "al_6061"
     assert c.patch(f"/api/projects/{pid}/settings", json={"material": "ss_304"}).json()["material"] == "ss_304"
     assert c.patch(f"/api/projects/{pid}/settings", json={"material": "unobtanium"}).status_code == 422
-    assert c.get(f"/api/projects/{pid}/estimate").json()["basis"] == "default"
+    assert c.get(f"/api/projects/{pid}/estimate").json()["basis"] == "typical"
 
 
 def test_attachment_validation(app_client: TestClient) -> None:  # noqa: F811

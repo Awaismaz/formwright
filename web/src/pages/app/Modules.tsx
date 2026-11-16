@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { canManage, useSession } from "@/lib/session";
 import type { Catalog } from "@/lib/types";
-import { money } from "@/lib/format";
+import { money, PAGE } from "@/lib/format";
+import NotFoundPanel from "@/components/NotFoundPanel";
 import { Badge, Button, Card, PageHeader, PageLoader, StatusBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import ModuleSample from "@/components/ModuleSamples";
@@ -32,8 +33,10 @@ export default function Modules() {
   const org = me?.org;
   const owned = new Set(org?.modules);
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <PageHeader title="Modules" subtitle="Formwright grows with your workflow. Live modules are ready today; Preview modules show what's coming — join early access to shape them." />
+    <div className={PAGE}>
+      <PageHeader title="Modules" subtitle={org?.on_trial && !org.expired
+        ? "Every module opens straight on a part from your projects. Your trial includes all of them."
+        : "Every module opens straight on a part from your projects. Unlocked modules show no lock."} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {cat.data.modules.map(m => {
           const addon = cat.data.addons.find(a => a.modules.includes(m.code));
@@ -50,7 +53,7 @@ export default function Modules() {
               <h3 className="mt-4 text-[15px] font-semibold">{m.name}</h3>
               <p className="mt-1.5 flex-1 text-[13px] leading-relaxed text-muted">{m.summary}</p>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-[12px]">
-                {has ? <span className="inline-flex items-center gap-1 font-medium text-success"><Check className="h-3.5 w-3.5" />In your plan</span>
+                {has ? <span className="inline-flex items-center gap-1 font-medium text-success"><Check className="h-3.5 w-3.5" />{org?.on_trial && !org.expired ? "In your trial" : "In your plan"}</span>
                   : <span className="inline-flex items-center gap-1 text-muted"><Lock className="h-3.5 w-3.5" />{addon ? `Add-on ${money(addon.price_cents, addon.interval)}` : "Not in plan"}</span>}
                 <span className="font-medium text-primary group-hover:underline">{m.status === "live" ? "Open" : "Preview"} →</span>
               </div>
@@ -75,7 +78,7 @@ export function ModulePage() {
   if (code === "design") return <Navigate to="/app/projects" replace />;
   if (!cat.data) return <PageLoader />;
   const m = cat.data.modules.find(x => x.code === code);
-  if (!m) return <div className="p-10 text-center text-muted">Unknown module. <Link to="/app/modules" className="link">All modules</Link></div>;
+  if (!m) return <NotFoundPanel title="Module not found" body="There is no module at this address." action={<Link to="/app/modules"><Button>All modules</Button></Link>} />;
   const org = me?.org;
   const owned = org?.modules.includes(code) || org?.god_unlock;
   const addon = cat.data.addons.find(a => a.modules.includes(code));
@@ -99,7 +102,7 @@ export function ModulePage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
+    <div className={PAGE}>
       {fromProject ? <Link to={`/app/projects/${fromProject}`} className="mb-4 inline-flex items-center gap-1 text-sm text-muted hover:text-text"><ArrowLeft className="h-4 w-4" />Back to project</Link>
         : <Link to="/app/modules" className="mb-4 inline-flex items-center gap-1 text-sm text-muted hover:text-text"><ArrowLeft className="h-4 w-4" />All modules</Link>}
       <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
@@ -118,7 +121,7 @@ export function ModulePage() {
           {m.status === "live" && (
             <div className="mt-5 flex items-start gap-3 rounded-lg border border-success/30 bg-success/5 p-4 text-sm">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-              <div><b>This module is live.</b> Unlock it for {org?.name ?? "your workspace"} to run it on your own parts. It opens straight on a project from the Design Studio's <b>Make</b> tab. The screens below are illustrative samples.</div>
+              <div><b>This module is live.</b> {org?.on_trial && org.expired ? "Your trial has ended. " : ""}Unlock it for {org?.name ?? "your workspace"} to run it on your own parts. It opens straight on a project from the Design Studio's <b>Make</b> tab. The screens below are illustrative samples.</div>
             </div>
           )}
           <div className="mt-6"><ModuleSample code={code} /></div>

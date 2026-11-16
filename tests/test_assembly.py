@@ -19,6 +19,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from trial_helpers import set_trial_ended
 
 from aicad.assembly import fasteners, solver, xform
 
@@ -333,8 +334,12 @@ def test_api_full_flow(app_client: Any, tmp_path: Path) -> None:
     c = app_client
     assert c.get("/api/m/assembly/assemblies").status_code == 401
     signup(c, "asm@x.com")
+    assert c.get("/api/m/assembly/assemblies").status_code == 200  # a running trial may use every live module
+    set_trial_ended("asm@x.com")
     r = c.get("/api/m/assembly/assemblies")
     assert r.status_code == 402 and "add-on" in r.json()["detail"]["message"]
+    set_trial_ended("asm@x.com", False)
+    # the rest of the flow runs with the add-on bought below, on a running trial
     plate_id = c.post("/api/projects", json={"name": "Plate"}).json()["id"]
     block_id = c.post("/api/projects", json={"name": "Block"}).json()["id"]
     db = session_factory()()

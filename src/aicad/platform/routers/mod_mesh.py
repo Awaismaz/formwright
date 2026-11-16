@@ -7,6 +7,7 @@ caller's organisation. Viewers may browse the gallery and download; rendering an
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,11 +15,41 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from aicad.meshstudio import DISCLOSURE, jobs, presets, runner, scene, service
+from aicad.platform.db import session_factory
 from aicad.platform.deps import Ctx, verified_ctx
+from aicad.platform.models import Project
 from aicad.platform.routers.projects import _project, workspace_for
-from aicad.platform.services import audit, org_modules, track
+from aicad.platform.services import audit, notify, org_modules, track
 
 router = APIRouter(prefix="/api/m/mesh", tags=["mesh"])
+
+
+def _job_finished(job_dir: Path, job: dict[str, Any]) -> None:
+    """Final renders and turntables take minutes: notify whoever asked when one is ready (or failed)."""
+    if job.get("kind") not in ("final", "turntable") or job.get("state") not in ("done", "failed"):
+        return
+    pid = next((d.name for d in job_dir.parents if d.parent.name == job.get("org")), None)
+    if not pid or not job.get("created_by"):
+        return
+    db = session_factory()()
+    try:
+        p = db.get(Project, pid)
+        if p is None:
+            return
+        what = "Turntable" if job["kind"] == "turntable" else "Render"
+        if job["state"] == "done":
+            notify(db, job["created_by"], f"{what} of {p.name} is ready", job.get("label") or "",
+                   f"/app/modules/mesh?project={p.id}")
+        else:
+            notify(db, job["created_by"], f"{what} of {p.name} failed", "Open Mesh Studio to try again.",
+                   f"/app/modules/mesh?project={p.id}")
+        db.commit()
+    finally:
+        db.close()
+
+
+if _job_finished not in jobs.LISTENERS:
+    jobs.LISTENERS.append(_job_finished)
 
 
 def mesh_ctx(ctx: Ctx = Depends(verified_ctx)) -> Ctx:

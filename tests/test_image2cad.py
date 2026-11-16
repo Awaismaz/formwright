@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from trial_helpers import set_trial_ended
 
 from aicad.image2cad import InputError, review, sniff, tokens, vision
 from aicad.image2cad.vector import read_pdf
@@ -413,12 +414,14 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     c = app_client
     assert c.get("/api/m/image2cad/uploads").status_code == 401
     signup(c, "i2c@x.com")
+    set_trial_ended("i2c@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.get("/api/m/image2cad/uploads")
     assert r.status_code == 402 and "add-on" in r.json()["detail"]["message"]
     pdf = tmp_path / "plate.pdf"
     make_pdf(pdf)
     b64 = base64.b64encode(pdf.read_bytes()).decode()
     assert c.post("/api/m/image2cad/uploads", json={"filename": "plate.pdf", "data_b64": b64}).status_code == 402
+    set_trial_ended("i2c@x.com", False)
     _unlock(c)
     # validation
     bad = c.post("/api/m/image2cad/uploads", json={"filename": "x.gif", "data_b64": base64.b64encode(b"GIF89a..").decode()})

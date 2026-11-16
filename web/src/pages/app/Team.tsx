@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { canManage, useSession } from "@/lib/session";
 import type { Org, Role } from "@/lib/types";
-import { ago, date } from "@/lib/format";
+import { ago, date, money, PAGE } from "@/lib/format";
+import type { Catalog } from "@/lib/types";
 import { Avatar, Badge, Button, Card, Field, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader, Progress } from "@/components/ui";
 
 interface TeamData {
@@ -31,6 +32,8 @@ export default function Team() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>("engineer");
   const [busy, setBusy] = useState(false);
+  const [ask, setAsk] = useState<{ title: string; body: string; cta: string; danger?: boolean; run: () => Promise<unknown>; ok: string } | null>(null);
+  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
   if (!q.data) return <PageLoader />;
   const { org, members, invites, my_role } = q.data;
   const manage = canManage(my_role);
@@ -48,13 +51,15 @@ export default function Team() {
     } finally { setBusy(false); }
   };
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className={PAGE}>
       <PageHeader title="Team" subtitle={`Members and roles for ${org.name}.`}
         actions={manage && <Button icon={<MailPlus className="h-4 w-4" />} onClick={() => setOpen(true)}>Invite teammate</Button>} />
       <Card className="mb-6 flex flex-wrap items-center gap-6 p-5">
         <div className="flex items-center gap-3"><Users className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Seats</div><div className="text-xs text-muted">{org.seats_used} used{invites.length ? ` · ${invites.length} pending` : ""} of {org.seat_limit >= 1000 ? "unlimited" : org.seat_limit}</div></div></div>
         {org.seat_limit < 1000 && <Progress className="max-w-xs flex-1" value={org.seats_used + invites.length} max={org.seat_limit} tone={full ? "warning" : "primary"} />}
-        {full && manage && <Button size="sm" variant="secondary" onClick={() => nav("/app/billing")}>Get more seats</Button>}
+        {full && manage && (org.plan_code === "team"
+          ? <Button size="sm" variant="secondary" onClick={() => nav("/app/billing")}>Add a seat{catalog.data?.seats?.[0] ? ` · ${money(catalog.data.seats[0].price_cents, catalog.data.seats[0].interval)}` : ""}</Button>
+          : <Button size="sm" variant="secondary" onClick={() => nav("/app/billing")}>Upgrade to Team for 5 seats</Button>)}
       </Card>
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
@@ -63,7 +68,7 @@ export default function Team() {
             {members.map(m => (
               <tr key={m.id}>
                 <td className="px-4 py-3"><div className="flex items-center gap-3"><Avatar name={m.name} size={32} /><div><div className="font-medium">{m.name}{m.user_id === me?.user?.id && <span className="ml-1.5 text-xs text-muted">(you)</span>}</div><div className="text-xs text-muted">{m.email}</div></div></div></td>
-                <td className="px-4 py-3"><Badge tone={m.role === "owner" ? "accent" : m.role === "admin" ? "primary" : "neutral"}>{m.role}</Badge></td>
+                <td className="px-4 py-3"><Badge tone={m.role === "owner" ? "accent" : m.role === "admin" ? "primary" : "neutral"} className="capitalize">{m.role}</Badge></td>
                 <td className="px-4 py-3 text-muted">{ago(m.last_login_at)}</td>
                 <td className="px-4 py-3 text-muted">{date(m.joined_at)}</td>
                 <td className="px-4 py-3 text-right">
@@ -73,9 +78,14 @@ export default function Team() {
                       <MenuContent>
                         {manage && <><MenuLabel>Change role</MenuLabel>
                           {(["owner", "admin", "engineer", "viewer"] as Role[]).filter(r => r !== m.role && (r !== "owner" || my_role === "owner")).map(r =>
-                            <MenuItem key={r} onSelect={() => call(() => api.patch(`/api/team/members/${m.id}`, { role: r }), `Role changed to ${r}`)}>{r}</MenuItem>)}
+                            <MenuItem key={r} onSelect={() => setAsk(r === "owner"
+                              ? { title: `Make ${m.name} an owner?`, body: `${m.name} will get full control of ${org.name}, including billing, members and deleting the workspace. You stay an owner until you change your own role.`, cta: "Make owner", run: () => api.patch(`/api/team/members/${m.id}`, { role: r }), ok: `${m.name} is now an owner` }
+                              : { title: `Change ${m.name} to ${r}?`, body: `${ROLE_HELP[r]}.${m.role === "owner" || m.role === "admin" ? ` ${m.name} loses ${m.role} rights.` : ""}`, cta: `Change to ${r}`, run: () => api.patch(`/api/team/members/${m.id}`, { role: r }), ok: `${m.name} is now ${r === "admin" || r === "engineer" ? "an" : "a"} ${r}` })}>
+                              <span className="capitalize">{r}</span></MenuItem>)}
                           <MenuSeparator /></>}
-                        <MenuItem icon={<UserMinus />} danger onSelect={() => call(() => api.del(`/api/team/members/${m.id}`), m.user_id === me?.user?.id ? "You left the workspace" : "Member removed")}>
+                        <MenuItem icon={<UserMinus />} danger onSelect={() => setAsk(m.user_id === me?.user?.id
+                          ? { title: `Leave ${org.name}?`, body: "You lose access to its projects, tokens and billing straight away. An admin has to invite you to come back.", cta: "Leave workspace", danger: true, run: () => api.del(`/api/team/members/${m.id}`), ok: "You left the workspace" }
+                          : { title: `Remove ${m.name}?`, body: `${m.name} (${m.email}) loses access to ${org.name} and its projects straight away. Their past revisions and ledger entries stay. You can invite them again later.`, cta: "Remove member", danger: true, run: () => api.del(`/api/team/members/${m.id}`), ok: `${m.name} was removed` })}>
                           {m.user_id === me?.user?.id ? "Leave workspace" : "Remove from workspace"}</MenuItem>
                       </MenuContent>
                     </Menu>
@@ -86,7 +96,7 @@ export default function Team() {
             {invites.map(i => (
               <tr key={i.id} className="bg-panel2/40">
                 <td className="px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-border"><MailPlus className="h-4 w-4 text-muted" /></span><div><div className="font-medium">{i.email}</div><div className="text-xs text-muted">Invitation pending · expires {date(i.expires_at)}</div></div></div></td>
-                <td className="px-4 py-3"><Badge>{i.role}</Badge></td><td className="px-4 py-3 text-muted">—</td><td className="px-4 py-3 text-muted">{date(i.created_at)}</td>
+                <td className="px-4 py-3"><Badge className="capitalize">{i.role}</Badge></td><td className="px-4 py-3 text-muted">—</td><td className="px-4 py-3 text-muted">{date(i.created_at)}</td>
                 <td className="px-4 py-3 text-right">{manage && <button className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-danger" aria-label="Revoke invitation" onClick={() => call(() => api.del(`/api/team/invites/${i.id}`), "Invitation revoked")}><Trash2 className="h-4 w-4" /></button>}</td>
               </tr>
             ))}
@@ -96,6 +106,14 @@ export default function Team() {
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {(Object.keys(ROLE_HELP) as Role[]).map(r => <div key={r} className="rounded-lg border border-border bg-panel p-3"><div className="text-sm font-medium capitalize">{r}</div><div className="mt-0.5 text-xs text-muted">{ROLE_HELP[r]}</div></div>)}
       </div>
+      {ask && <Modal open onOpenChange={o => !o && setAsk(null)} title={ask.title} description={ask.body}
+        footer={<><Button variant="secondary" onClick={() => setAsk(null)}>Cancel</Button>
+          <Button variant={ask.danger ? "danger" : "primary"} loading={busy} onClick={async () => {
+            setBusy(true);
+            try { await ask.run(); toast.success(ask.ok); setAsk(null); refresh(); if (ask.cta === "Leave workspace") { await qc.invalidateQueries(); nav("/app"); } }
+            catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
+          }}>{ask.cta}</Button></>} />}
+
       <Modal open={open} onOpenChange={setOpen} title="Invite a teammate" description="They'll get an email with a link to join this workspace."
         footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={invite} loading={busy} disabled={!email}>Send invitation</Button></>}>
         <div className="space-y-4">
@@ -105,7 +123,7 @@ export default function Team() {
               {(["admin", "engineer", "viewer"] as Role[]).map(r => <option key={r} value={r}>{r[0]!.toUpperCase() + r.slice(1)}</option>)}
             </select>
           </Field>
-          {full && <p className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs">All seats are in use on your plan. Upgrade to Team for 5 seats.</p>}
+          {full && <p className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs">All seats are in use on your plan. {org.plan_code === "team" ? "Add a seat in Billing first." : "Upgrade to Team for 5 seats."}</p>}
         </div>
       </Modal>
     </div>
