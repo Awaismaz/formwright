@@ -210,9 +210,9 @@ def _wire_points(wire: Any, face: Any) -> list[tuple[float, float, float]]:
     return pts
 
 
-def section(shape: Any, axis: str) -> dict[str, Any]:
-    """Cut through the bounding-box centre normal to ``axis``; keep the half away from the viewer, project it
-    (visible lines only, as section views are drawn) and return the cut faces as hatch loops."""
+def section(shape: Any, axis: str, at: float | None = None) -> dict[str, Any]:
+    """Cut normal to ``axis`` at ``at`` (default: the bounding-box centre); keep the part away from the viewer,
+    project it (visible lines only, as section views are drawn) and return the cut faces as hatch loops."""
     from build123d import Box, Pos
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.GeomAbs import GeomAbs_Plane
@@ -222,9 +222,11 @@ def section(shape: Any, axis: str) -> dict[str, Any]:
     bb = bbox(shape)
     lo, hi = bb[:3], bb[3:]
     c = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    if at is not None:
+        c[k] = float(at)
     size = [hi[i] - lo[i] + 2.0 for i in range(3)]
     centre = list(c)
-    size[k] = (hi[k] - lo[k]) / 2 + 1.0
+    size[k] = hi[k] - lo[k] + 2.0
     centre[k] = c[k] + keep * size[k] / 2
     cutter = Pos(*centre) * Box(*size)
     half = shape & cutter
@@ -289,6 +291,8 @@ def census(shape: Any) -> dict[str, Any]:
     bb = bbox(shape)
     levels: dict[str, set[float]] = {a: set() for a in AXIS_INDEX}
     groups: dict[tuple[Any, ...], list[tuple[float, float, float]]] = {}
+    mids: dict[tuple[Any, ...], list[float]] = {}
+    chamfers: list[dict[str, Any]] = []
     unsupported = 0
     for f in shape.faces():
         ad = BRepAdaptor_Surface(f.wrapped)
@@ -296,10 +300,15 @@ def census(shape: Any) -> dict[str, Any]:
         if t == GeomAbs_Plane:
             pl = ad.Plane()
             n = pl.Axis().Direction()
-            ax = _principal((n.X(), n.Y(), n.Z()))
+            nv = (n.X(), n.Y(), n.Z())
+            ax = _principal(nv)
             if ax:
                 loc = pl.Location()
                 levels[ax].add(r6((loc.X(), loc.Y(), loc.Z())[AXIS_INDEX[ax]]))
+            else:
+                ch = _chamfer(f, nv)
+                if ch is not None:
+                    chamfers.append(ch)
             continue
         if t != GeomAbs_Cylinder:
             continue
@@ -329,6 +338,7 @@ def census(shape: Any) -> dict[str, Any]:
         perp = tuple(r6(loc[j]) for j in range(3) if j != i)
         key = (concave, ax, perp, r6(cyl.Radius()))
         groups.setdefault(key, []).append((ta, tb, u1 - u0))
+        mids.setdefault(key, [r6(v) for v in pv])
 
     solid_cls = BRepClass3d_SolidClassifier()
     solid_cls.Load(shape.wrapped)
@@ -339,12 +349,17 @@ def census(shape: Any) -> dict[str, Any]:
 
     holes: list[dict[str, Any]] = []
     outer: list[dict[str, Any]] = []
+    arcs: list[dict[str, Any]] = []
     for (concave, ax, perp, r), ivs in sorted(groups.items(), key=lambda kv: str(kv[0])):
         i = AXIS_INDEX[ax]
         others = [j for j in range(3) if j != i]
         for ta, tb, span in _merge(ivs):
             if span < 2 * math.pi - 1e-6:
-                continue  # fillets, slots and partial cylinders are not holes / turned diameters
+                # fillets, rounds and partial cylinders: radius callouts (never holes / turned diameters)
+                if span < math.pi + 1e-6:
+                    arcs.append({"axis": ax, "centre": list(perp), "r": r6(r), "t0": r6(ta), "t1": r6(tb),
+                                 "concave": concave, "mid": mids[(concave, ax, perp, r6(r))]})
+                continue
             rec = {"axis": ax, "centre": list(perp), "dia": r6(2 * r), "t0": r6(ta), "t1": r6(tb)}
             if not concave:
                 outer.append(rec)
@@ -366,16 +381,158 @@ def census(shape: Any) -> dict[str, Any]:
             rec.update({"thru": thru, "depth": r6(tb - ta),
                         "open": 0 if thru else (-1 if not ends[0] else 1)})
             holes.append(rec)
+    chamfers.sort(key=lambda c: (c["edge"], c["legs"], c["mid"]))
     return {"bbox": bb, "holes": holes, "outer": outer, "unsupported_holes": unsupported,
-            "levels": {a: sorted(v) for a, v in levels.items()}}
+            "levels": {a: sorted(v) for a, v in levels.items()}, "arcs": arcs, "chamfers": chamfers}
 
 
-def analyse(step_path: str, views: list[str], section_axis: str | None) -> dict[str, Any]:
-    """Everything the layout needs from the kernel, as plain data."""
+def _chamfer(face: Any, n: Vec) -> dict[str, Any] | None:
+    """A flat chamfer: a planar face whose normal lies in a principal plane (one zero component), running along a
+    principal axis. Its legs are the face extents along the two axes of the normal (exact for a straight chamfer)."""
+    zero = [i for i in range(3) if abs(n[i]) < 1e-9]
+    if len(zero) != 1:
+        return None
+    e = zero[0]
+    b = face.bounding_box(optimal=True)
+    ext = [b.max.X - b.min.X, b.max.Y - b.min.Y, b.max.Z - b.min.Z]
+    legs = [r6(ext[i]) for i in range(3) if i != e]
+    if min(legs) <= 1e-6 or max(legs) > 25.0 or ext[e] < 2 * max(legs):  # a sloped wall, not an edge break
+        return None
+    c = b.center()
+    names = ["x", "y", "z"]
+    return {"edge": names[e], "legs": legs, "normal": [r6(v) for v in n], "length": r6(ext[e]),
+            "mid": [r6(c.X), r6(c.Y), r6(c.Z)]}
+
+
+# ----------------------------------------------------------------------------- part type and orientation
+def turned(cen: dict[str, Any]) -> tuple[str, list[float], float] | None:
+    """Axis, centre and envelope diameter when the outer envelope is a turned (coaxial cylinder) body."""
+    bb = cen["bbox"]
+    for ax in ("x", "z", "y"):
+        i = AXIS_INDEX[ax]
+        others = [j for j in range(3) if j != i]
+        centre = [round((bb[j] + bb[j + 3]) / 2, 6) for j in others]
+        ext = [bb[j + 3] - bb[j] for j in others]
+        cyl = [c for c in cen["outer"]
+               if c["axis"] == ax and all(abs(c["centre"][k] - centre[k]) < EPS for k in (0, 1))]
+        if cyl:
+            d = max(c["dia"] for c in cyl)
+            if all(abs(d - e) < EPS for e in ext):
+                return ax, centre, d
+    return None
+
+
+def _feature_dir(cen: dict[str, Any], ax: str, centre: list[float]) -> tuple[float, float, float] | None:
+    """Direction (perpendicular to the turning axis) of a one-sided flat feature such as a keyway floor."""
+    others = [a for a in ("x", "y", "z") if a != ax]
+    best: tuple[str, float] | None = None
+    for k, a in enumerate(others):
+        c0 = centre[k]
+        offs = [v - c0 for v in cen["levels"][a]]
+        for o in offs:
+            if abs(o) < EPS or any(abs(o + q) < EPS for q in offs):
+                continue  # on the axis, or mirrored (keyway side walls): not one-sided
+            if best is None or abs(o) > abs(best[1]):
+                best = (a, o)
+    if best is None:
+        return None
+    v = [0.0, 0.0, 0.0]
+    v[AXIS_INDEX[best[0]]] = 1.0 if best[1] > 0 else -1.0
+    return (v[0], v[1], v[2])
+
+
+def orient(shape: Any, cen: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """Drawing orientation (MAKE-07): a turned part is drawn with its axis horizontal (along drawing X) and a
+    one-sided feature (keyway) facing up; prismatic parts keep the model orientation. Returns the shape to draw
+    and the rotation rows (drawing X, Y, Z expressed in model coordinates)."""
+    tr = turned(cen)
+    if tr is None:
+        return shape, {"turned": False, "hollow": False, "rows": None}
+    ax, centre, dia = tr
+    a = [0.0, 0.0, 0.0]
+    a[AXIS_INDEX[ax]] = 1.0
+    av = (a[0], a[1], a[2])
+    f = _feature_dir(cen, ax, centre)
+    if f is None:
+        f = {"x": (0.0, 0.0, 1.0), "y": (0.0, 0.0, 1.0), "z": (-1.0, 0.0, 0.0)}[ax]
+    yv = _cross(f, av)
+    rows = [av, yv, f]
+    hollow = any(h["axis"] == ax and h["thru"] and all(abs(h["centre"][k] - centre[k]) < EPS for k in (0, 1))
+                 for h in cen["holes"])
+    ident = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+    info = {"turned": True, "hollow": hollow, "axis_model": ax, "dia": dia,
+            "rows": None if [tuple(r) for r in rows] == ident else [[r6(v) for v in r] for r in rows]}
+    if info["rows"] is None:
+        return shape, info
+    from build123d import Location
+    from OCP.gp import gp_Trsf
+
+    t = gp_Trsf()
+    t.SetValues(*rows[0], 0.0, *rows[1], 0.0, *rows[2], 0.0)
+    return shape.moved(Location(t)), info
+
+
+def _feature_span(cen: dict[str, Any]) -> tuple[float, float] | None:
+    """Axial span of the first non-turned feature (keyway) of a part drawn axis-along-X."""
+    steps = {cen["bbox"][0], cen["bbox"][3]}
+    for c in cen["outer"]:
+        if c["axis"] == "x":
+            steps |= {c["t0"], c["t1"]}
+    feat = sorted(v for v in cen["levels"]["x"] if all(abs(v - s) > EPS for s in steps))
+    return (feat[0], feat[1]) if len(feat) >= 2 else None
+
+
+def plan(cen: dict[str, Any], info: dict[str, Any], opts: dict[str, Any]) -> dict[str, Any]:
+    """Views and section from the part type and the user's options (``views`` None = automatic,
+    ``section`` "auto" | None | "x" | "y" | "z" | "axial" | "cross")."""
+    turned_part = info["turned"]
+    views = opts.get("views")
+    if views is None:
+        # a turned part looks the same from the top as from the front: one elevation and the end view
+        views = ["front", "right", "iso"] if turned_part else ["front", "top", "right", "iso"]
+    sec = opts.get("section", "auto")
+    note = None
+    out: dict[str, Any] = {"views": list(views), "section": None, "at": None, "front_section": False,
+                           "turned": turned_part, "hollow": info["hollow"]}
+    if turned_part:
+        if sec in ("x", "cross"):
+            kind = "cross"
+        elif sec in ("y", "z", "axial"):
+            kind = "axial"
+        elif sec == "auto":
+            kind = "axial" if info["hollow"] else ("cross" if _feature_span(cen) else None)
+        else:
+            kind = None
+        if kind == "axial" and not info["hollow"]:
+            # ISO 128-50: solid shafts, pins and keys are not sectioned lengthwise
+            kind = "cross" if _feature_span(cen) else None
+            note = ("Solid turned parts are not sectioned lengthwise (ISO 128-50): a cross-section at the feature is "
+                    "shown instead.") if kind else "Solid turned parts are not sectioned lengthwise (ISO 128-50)."
+        if kind == "axial":
+            out.update(section="y", front_section="front" in views, kind="axial")
+        elif kind == "cross":
+            span = _feature_span(cen)
+            out.update(section="x", at=r6((span[0] + span[1]) / 2) if span else None, kind="cross")
+    elif sec in ("x", "y", "z"):
+        out["section"] = sec
+    out["note"] = note
+    return out
+
+
+def analyse(step_path: str, opts: dict[str, Any]) -> dict[str, Any]:
+    """Everything the layout needs from the kernel, as plain data (in drawing orientation)."""
     shape = load_solid(step_path)
-    out: dict[str, Any] = {"census": census(shape), "views": {}}
-    for v in views:
+    cen0 = census(shape)
+    shape, info = orient(shape, cen0)
+    cen = census(shape) if info["rows"] else cen0
+    pl = plan(cen, info, opts)
+    out: dict[str, Any] = {"census": cen, "views": {}, "part": info, "plan": pl}
+    for v in pl["views"]:
+        if v == "front" and pl["front_section"]:
+            continue
         out["views"][v] = project(shape, v)
-    if section_axis:
-        out["section"] = section(shape, section_axis)
+    if pl["section"]:
+        out["section"] = section(shape, pl["section"], pl["at"])
+        if pl["front_section"]:
+            out["views"]["front"] = {**out["section"], "view": "front", "is_section": True}
     return out

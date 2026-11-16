@@ -6,7 +6,12 @@ Rules (deterministic, documented in docs/reports/drawings.md):
   unambiguous: no other compatible parameter has the same value, and the parameter does not match two
   dimensions of the same family (e.g. two segments of one chain). Otherwise it is ``inferred``.
 - Each measurement is dimensioned once (ISO 129-1): overall extents, turned diameters, hole callouts with
-  quantity / diameter / THRU or depth, hole locations from the nearest edge, step chains between planar levels.
+  quantity / diameter / THRU or depth, hole locations from the nearest edge, step chains between planar levels,
+  radius callouts for fillets and rounds ("4X R3") and chamfer callouts ("4X 1 × 45°") from the exact faces.
+- Turned parts (drawn axis-horizontal): the axial chain runs between diameter steps only; a flat feature such as a
+  keyway gets its own chain from the nearest shoulder; widths across the axis that are symmetric about it are
+  dimensioned as one width (the centre line carries the symmetry), on the cross-section when there is one.
+- A count parameter (N_BOLTS) is shown by the quantity of a callout ("6X") and counts as mapped.
 - One segment of a chain is shown as an auxiliary (reference) dimension in parentheses so that a chain plus the
   overall size is not over-dimensioned.
 - Tolerances and GD&T are never generated here.
@@ -19,7 +24,7 @@ import math
 import re
 from typing import Any
 
-from aicad.drawing.geometry import AXIS_INDEX
+from aicad.drawing.geometry import AXIS_INDEX, turned
 
 #: Where each model axis appears in the principal views (U is paper-right, V is paper-up).
 COORD = {"front": {"x": "u", "z": "v"}, "top": {"x": "u", "y": "v"}, "right": {"y": "u", "z": "v"}}
@@ -28,9 +33,10 @@ CHAIN_VIEWS = {"x": ["top", "front"], "y": ["top", "right"], "z": ["front", "rig
 CIRCLE_VIEW = {"x": "right", "y": "front", "z": "top"}  # the view that looks along a hole axis
 DIA_VIEWS = {"z": [("front", "x"), ("right", "y")], "x": [("front", "z"), ("top", "y")],
              "y": [("top", "x"), ("right", "z")]}
+SECTION_LIKE_VIEW = {"x": "right", "y": "front", "z": "top"}
 COMPATIBLE = {"extent": {"linear", "any"}, "step": {"linear", "any"}, "depth": {"linear", "any"},
               "diameter": {"dia", "any"}, "hole": {"dia", "any"}, "pcd": {"pcd", "any"},
-              "position": {"position", "any"}}
+              "position": {"position", "any"}, "radius": {"radius", "any"}, "chamfer": {"chamfer", "any"}}
 TOL = 1e-6
 
 
@@ -51,8 +57,10 @@ def param_kind(name: str, meta: dict[str, Any] | None = None) -> str:
         return "angle"
     if {"n", "count", "num", "qty", "number"} & toks or name.lower().startswith("n_"):
         return "count"
-    if {"r", "rad", "radius", "fillet", "round", "chamfer", "ch"} & toks:
-        return "other"
+    if {"chamfer", "ch", "bevel"} & toks:
+        return "chamfer"
+    if {"r", "rad", "radius", "fillet", "round", "corner"} & toks or any(re.fullmatch(r"r\d+", t) for t in toks):
+        return "radius"
     if {"d", "dia", "diameter", "bore", "od", "id"} & toks or "ø" in s or any(re.fullmatch(r"d\d+", t) for t in toks):
         return "dia"
     if {"edge", "offset", "inset", "spacing", "pitch", "pos", "position", "from", "dist", "distance", "margin",
@@ -82,23 +90,23 @@ def _first(views: list[str], enabled: set[str]) -> str | None:
 
 
 def _revolve(cen: dict[str, Any]) -> tuple[str, list[float], float] | None:
-    """Axis, centre and envelope diameter when the outer envelope is a turned (coaxial cylinder) body."""
-    bb = cen["bbox"]
-    for ax in ("z", "x", "y"):
-        i = AXIS_INDEX[ax]
-        others = [j for j in range(3) if j != i]
-        centre = [round((bb[j] + bb[j + 3]) / 2, 6) for j in others]
-        ext = [bb[j + 3] - bb[j] for j in others]
-        cyl = [c for c in cen["outer"] if c["axis"] == ax and all(abs(c["centre"][k] - centre[k]) < TOL for k in (0, 1))]
-        if cyl:
-            d = max(c["dia"] for c in cyl)
-            if all(abs(d - e) < TOL for e in ext):
-                return ax, centre, d
-    return None
+    return turned(cen)
 
 
-def candidates(cen: dict[str, Any], enabled: set[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    """All dimensions and callouts the sheet will show (before tagging and placement)."""
+def _uv(view: str, p: list[float], coord: dict[str, dict[str, str]]) -> tuple[float, float]:
+    """A model point in a principal view's (U, V)."""
+    cm = coord[view]
+    u = next(p[AXIS_INDEX[a]] for a, c in cm.items() if c == "u")
+    v = next(p[AXIS_INDEX[a]] for a, c in cm.items() if c == "v")
+    return u, v
+
+
+def candidates(cen: dict[str, Any], enabled: set[str], section: dict[str, Any] | None = None
+               ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    """All dimensions and callouts the sheet will show (before tagging and placement).
+
+    ``section``: ``{"axis", "at"}`` of a cross-section drawn as its own view ("section"), which then carries the
+    dimensions across a turned part's axis."""
     bb = cen["bbox"]
     lo = {a: bb[i] for a, i in AXIS_INDEX.items()}
     hi = {a: bb[i + 3] for a, i in AXIS_INDEX.items()}
@@ -106,6 +114,9 @@ def candidates(cen: dict[str, Any], enabled: set[str]) -> tuple[list[dict[str, A
     callouts: list[dict[str, Any]] = []
     notes: list[str] = []
     rev = _revolve(cen)
+    coord = dict(COORD)
+    if section:
+        coord["section"] = COORD[SECTION_LIKE_VIEW[section["axis"]]]
 
     # turned envelope: diameters replace the two extents across the axis
     covered: set[str] = set()
@@ -143,22 +154,34 @@ def candidates(cen: dict[str, Any], enabled: set[str]) -> tuple[list[dict[str, A
 
     # step chains between planar levels along each axis
     for ax in ("x", "y", "z"):
-        if rev and ax != rev[0] and not cen["levels"][ax]:
+        if rev and ax != rev[0]:
+            dims += _across_turned(cen, rev, ax, enabled, coord, section)
             continue
-        vals = sorted({v for v in cen["levels"][ax] if lo[ax] - TOL <= v <= hi[ax] + TOL} | {lo[ax], hi[ax]})
-        dedup: list[float] = []
-        for v in vals:
-            if not dedup or v - dedup[-1] > TOL:
-                dedup.append(v)
-        if not 3 <= len(dedup) <= 7 or min(b - a for a, b in itertools.pairwise(dedup)) < 0.2:
-            continue
+        levels = [v for v in cen["levels"][ax] if lo[ax] - TOL <= v <= hi[ax] + TOL]
+        feat: list[float] = []
+        if rev:  # turned: the chain runs between diameter steps; other levels belong to flat features
+            steps = {lo[ax], hi[ax]} | {t for c in cen["outer"] if c["axis"] == ax for t in (c["t0"], c["t1"])}
+            feat = sorted(v for v in levels if all(abs(v - q) > TOL for q in steps))
+            levels = sorted(steps)
+        dedup = _dedup_levels(sorted(set(levels) | {lo[ax], hi[ax]}))
         view = _first(CHAIN_VIEWS[ax], enabled)
         if view is None:
             continue
         o = COORD[view][ax]
-        for n, (a, b) in enumerate(itertools.pairwise(dedup)):
-            dims.append(_dim(f"step-{ax}-{n}", "step", view, "h" if o == "u" else "v", a, b,
-                             family=f"step-{ax}", order=3))
+        if 3 <= len(dedup) <= 7 and min(b - a for a, b in itertools.pairwise(dedup)) >= 0.2:
+            for n, (a, b) in enumerate(itertools.pairwise(dedup)):
+                dims.append(_dim(f"step-{ax}-{n}", "step", view, "h" if o == "u" else "v", a, b,
+                                 family=f"step-{ax}", order=3))
+        if feat:  # a keyway or flat: located from the nearest shoulder, then its length
+            below = [q for q in dedup if q <= feat[0] + TOL]
+            above = [q for q in dedup if q >= feat[-1] - TOL]
+            if below and (not above or feat[0] - below[-1] <= above[0] - feat[-1] + TOL):
+                chain = _dedup_levels([below[-1], *feat[:5]])
+            else:
+                chain = _dedup_levels([*feat[:5], above[0]])
+            for n, (a, b) in enumerate(itertools.pairwise(chain)):
+                dims.append(_dim(f"feat-{ax}-{n}", "step", view, "h" if o == "u" else "v", a, b,
+                                 family=f"feat-{ax}", order=4))
 
     # holes: callout in the view that looks along the axis, locations from the nearest edge
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
@@ -176,7 +199,8 @@ def candidates(cen: dict[str, Any], enabled: set[str]) -> tuple[list[dict[str, A
             p = {others[0]: h["centre"][0], others[1]: h["centre"][1]}
             pts.append((p[next(a for a in others if cmap[a] == "u")], p[next(a for a in others if cmap[a] == "v")]))
         pts.sort()
-        callout = {"id": f"hole-{gi}", "view": view, "axis": ax, "holes": [[u, v, dia / 2] for u, v in pts],
+        callout = {"id": f"hole-{gi}", "type": "hole", "view": view, "axis": ax,
+                   "holes": [[u, v, dia / 2] for u, v in pts],
                    "qty": len(hs), "dia": dia, "thru": thru, "depth": depth, "lines": [], "pcd": None}
         qty = f"{len(hs)}X " if len(hs) > 1 else ""
         callout["lines"].append({"text": f"{qty}Ø{fmt(dia)} " + ("THRU" if thru else f"DEEP {fmt(depth)}"),
@@ -221,9 +245,104 @@ def candidates(cen: dict[str, Any], enabled: set[str]) -> tuple[list[dict[str, A
                 eb = ext.get(b)
                 dims.append(_dim(f"pos-{gi}-{axis_name}-{n}", "position", view, "h" if o == "u" else "v", a, b,
                                  ext_a=ea, ext_b=eb, family=f"pos-{gi}-{axis_name}", order=2))
+    callouts += _radius_callouts(cen, enabled, coord)
+    callouts += _chamfer_callouts(cen, enabled, coord)
     if cen.get("unsupported_holes"):
         notes.append(f"{cen['unsupported_holes']} hole(s) not on a principal axis or fully internal: not called out.")
     return _dedupe(dims), callouts, notes
+
+
+def _dedup_levels(vals: list[float]) -> list[float]:
+    out: list[float] = []
+    for v in vals:
+        if not out or v - out[-1] > TOL:
+            out.append(v)
+    return out
+
+
+def _across_turned(cen: dict[str, Any], rev: tuple[str, list[float], float], ax: str, enabled: set[str],
+                   coord: dict[str, dict[str, str]], section: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Flat features across a turned part's axis (keyway floor, keyway width), on the cross-section if drawn."""
+    levels = cen["levels"][ax]
+    if not levels:
+        return []
+    axis, centre, env = rev
+    k = [a for a in ("x", "y", "z") if a != axis].index(ax)
+    c0 = centre[k]
+    r = env / 2
+    if section and section.get("at") is not None:  # the outside diameter at the cut
+        at = section["at"]
+        cyl = [c for c in cen["outer"] if c["axis"] == axis and c["t0"] - TOL <= at <= c["t1"] + TOL]
+        if cyl:
+            r = max(c["dia"] for c in cyl) / 2
+    if section and "section" in enabled:
+        view = "section"
+    else:
+        view = next((v for v in ("right", "front", "top") if v in enabled and ax in coord[v]), None)
+    if view is None or ax not in coord[view]:
+        return []
+    o = "h" if coord[view][ax] == "u" else "v"
+    offs = [v - c0 for v in levels if abs(v - c0) < r - TOL]
+    sym = [q for q in offs if q > TOL and any(abs(q + w) < TOL for w in offs)]
+    out = []
+    if sym and len(sym) * 2 == len(offs):  # widths symmetric about the axis: one dimension per width
+        for n, q in enumerate(sorted(sym)):
+            out.append(_dim(f"w-{ax}-{n}", "step", view, o, c0 - q, c0 + q, family=f"w-{ax}-{n}", order=3))
+        return out
+    vals = _dedup_levels(sorted({c0 - r, c0 + r, *(c0 + q for q in offs)}))
+    if 3 <= len(vals) <= 6:
+        for n, (a, b) in enumerate(itertools.pairwise(vals)):
+            out.append(_dim(f"step-{ax}-{n}", "step", view, o, a, b, family=f"step-{ax}", order=3))
+    return out
+
+
+def _radius_callouts(cen: dict[str, Any], enabled: set[str], coord: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    """Fillets and rounds on principal axes: "4X R3" with a leader to one arc, in the view looking along the axis."""
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for a in cen.get("arcs", []):
+        groups.setdefault((a["axis"], a["r"], a["concave"]), []).append(a)
+    out = []
+    for gi, ((ax, r, _concave), arcs) in enumerate(sorted(groups.items(), key=lambda kv: (kv[0][0], -kv[0][1], not kv[0][2]))):
+        view = CIRCLE_VIEW[ax]
+        if view not in enabled:
+            continue
+        pts = sorted((_uv(view, a["mid"], coord) for a in arcs), key=lambda p: (-p[1], -p[0]))
+        qty = len({(round(a["centre"][0], 4), round(a["centre"][1], 4)) for a in arcs})
+        text = (f"{qty}X " if qty > 1 else "") + f"R{fmt(r)}"
+        out.append({"id": f"rad-{gi}", "type": "radius", "view": view, "axis": ax, "holes": [], "tip": list(pts[0]),
+                    "tips": [list(q) for q in pts],
+                    "qty": qty, "dia": None, "thru": None, "depth": None, "pcd": None,
+                    "lines": [{"text": text, "kind": "radius", "value": r, "depth": None, "tag": "inferred",
+                               "param": None}]})
+    return out
+
+
+def _chamfer_callouts(cen: dict[str, Any], enabled: set[str], coord: dict[str, dict[str, str]]) -> list[dict[str, Any]]:
+    """Flat edge chamfers: "4X 1 × 45°" with a leader to a chamfer seen edge-on (along its edge)."""
+    groups: dict[tuple[float, ...], list[dict[str, Any]]] = {}
+    for c in cen.get("chamfers", []):
+        groups.setdefault(tuple(sorted(c["legs"])), []).append(c)
+    out = []
+    for gi, (legs, chs) in enumerate(sorted(groups.items())):
+        rep_ = None
+        for view in ("front", "right", "top"):
+            if view not in enabled:
+                continue
+            ok = [c for c in chs if CIRCLE_VIEW[c["edge"]] == view]
+            if ok:
+                rep_ = (view, min((_uv(view, c["mid"], coord) for c in ok), key=lambda p: (-p[1], -p[0])))
+                break
+        if rep_ is None:
+            continue
+        view, tip = rep_
+        qty = len(chs)
+        a, b = legs
+        size = f"{fmt(a)} × 45°" if abs(a - b) < 1e-6 else f"{fmt(a)} × {fmt(b)}"
+        out.append({"id": f"chf-{gi}", "type": "chamfer", "view": view, "axis": None, "holes": [], "tip": list(tip),
+                    "qty": qty, "dia": None, "thru": None, "depth": None, "pcd": None,
+                    "lines": [{"text": (f"{qty}X " if qty > 1 else "") + size, "kind": "chamfer", "value": a,
+                               "depth": None, "tag": "inferred", "param": None}]})
+    return out
 
 
 def _dedupe(dims: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -263,10 +382,11 @@ def tag(dims: list[dict[str, Any]], callouts: list[dict[str, Any]], params: dict
         for ln in c["lines"]:
             items.append((ln, ln["kind"], ln["value"], f"{ln['kind']}-callout-{c['id']}"))
 
-    # auxiliary segment per chain (pass 1 ignores aux)
+    # auxiliary segment per chain that adds up to an overall size (pass 1 ignores aux). A feature's location chain
+    # (keyway from the shoulder) and a symmetric width are not closed by an overall size: every value is needed.
     fam_of: dict[str, list[dict[str, Any]]] = {}
     for d in dims:
-        if d["kind"] == "step":
+        if d["kind"] == "step" and d["family"].startswith("step-"):
             fam_of.setdefault(d["family"], []).append(d)
 
     def unique(d: dict[str, Any], pool: list[dict[str, Any]]) -> bool:
@@ -314,5 +434,14 @@ def tag(dims: list[dict[str, Any]], callouts: list[dict[str, Any]], params: dict
         txt = (rec.get("prefix") or "") + fmt(val) if "lines" not in rec and "text" not in rec else None
         if txt is not None:
             rec["text"] = f"({txt})" if rec.get("aux") else txt
+    # a count parameter is shown by a callout's quantity ("6X Ø14 THRU" carries N_BOLTS = 6)
+    for p, v in sorted(nump.items()):
+        if kinds[p] != "count" or p in mapped or not float(v).is_integer():
+            continue
+        hits = [c for c in callouts if c.get("type", "hole") == "hole" and c["qty"] == int(v) and c["qty"] > 1]
+        if len(hits) == 1:
+            hits[0]["lines"][0].setdefault("params", []).append(p)
+            hits[0]["count_param"] = p
+            mapped[p] = mapped.get(p, 0) + 1
     unmapped = sorted(p for p in nump if p not in mapped)
     return {"mapped": {p: mapped[p] for p in sorted(mapped)}, "unmapped": unmapped, "kinds": kinds}

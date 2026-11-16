@@ -9,7 +9,14 @@ Every primitive is a plain dict so the SVG, PDF and DXF renderers draw exactly t
   {"t": "arc", "l": layer, "p": [cx, cy, r, a0, a1]}      degrees, counter-clockwise as seen on paper
   {"t": "fill", "l": layer, "p": [[x, y], ...]}            filled polygon (arrowheads)
   {"t": "text", "l": layer, "x", "y" (baseline), "s" (cap size), "txt", "anchor", "rot" (0 or 90),
-   "font" ("regular" | "bold" | "italic"), "tag", "param", "kind", "box" [x0, y0, x1, y1]}
+   "font" ("regular" | "bold" | "italic"), "tag", "param", "kind", "box" [x0, y0, x1, y1],
+   "dl" (dimension texts only): {"o": "h" | "v", "line": [a, b] between the extension lines, "at": dimension-line
+   coordinate, "drawn": [a, b] extent of the drawn dimension line (a leader under an outside text)}}
+
+Dimension text placement (MAKE-01, ISO 129-1): a value sits inside its own span when it fits. Otherwise it sits
+outside, on the dimension line extended under it as a leader, and never over the span of another dimension on the
+same dimension line (a chain): the first and last members of a chain go beyond the chain's ends, inner members move
+to a row of their own. CHK-12 checks exactly this rule on the finished sheet.
 """
 
 from __future__ import annotations
@@ -68,6 +75,37 @@ def boxes_overlap(a: list[float], b: list[float], pad: float = 0.0) -> bool:
     return a[0] < b[2] + pad and b[0] < a[2] + pad and a[1] < b[3] + pad and b[1] < a[3] + pad
 
 
+def _seg_hits_box(p: tuple[float, float], q: tuple[float, float], b: list[float], pad: float = 0.0) -> bool:
+    """Does the segment p-q pass through the (padded) box? Liang-Barsky clipping."""
+    x0, y0, x1, y1 = b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad
+    dx, dy = q[0] - p[0], q[1] - p[1]
+    t0, t1 = 0.0, 1.0
+    for pp, qq in ((-dx, p[0] - x0), (dx, x1 - p[0]), (-dy, p[1] - y0), (dy, y1 - p[1])):
+        if abs(pp) < 1e-12:
+            if qq < 0:
+                return False
+            continue
+        r = qq / pp
+        if pp < 0:
+            t0 = max(t0, r)
+        else:
+            t1 = min(t1, r)
+        if t0 > t1:
+            return False
+    return True
+
+
+def _segs_cross(p1: tuple[float, float], p2: tuple[float, float], q1: tuple[float, float],
+                q2: tuple[float, float]) -> bool:
+    """Proper crossing of two segments (touching end points do not count)."""
+    def orient(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> float:
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+    d1, d2 = orient(q1, q2, p1), orient(q1, q2, p2)
+    d3, d4 = orient(p1, p2, q1), orient(p1, p2, q2)
+    return d1 * d2 < -1e-9 and d3 * d4 < -1e-9
+
+
 class Group:
     """Primitives in a local frame; ``place`` translates them onto the sheet."""
 
@@ -94,10 +132,15 @@ class Group:
 
     def text(self, x: float, y: float, size: float, txt: str, *, anchor: str = "start", rot: int = 0,
              font: str = "regular", color: str = "normal", kind: str = "label", tag: str | None = None,
-             param: str | None = None, ref: str | None = None) -> dict[str, Any]:
+             param: str | None = None, ref: str | None = None, dl: dict[str, Any] | None = None,
+             params: list[str] | None = None) -> dict[str, Any]:
         t = {"t": "text", "l": "text", "x": x, "y": y, "s": size, "txt": txt, "anchor": anchor, "rot": rot,
              "font": font, "color": color, "kind": kind, "tag": tag, "param": param, "ref": ref,
              "box": text_box(x, y, size, txt, anchor, rot, font)}
+        if dl is not None:
+            t["dl"] = dl
+        if params:
+            t["params"] = params
         self.prims.append(t)
         return t
 
@@ -146,6 +189,11 @@ class Group:
                 q["x"], q["y"] = p["x"] + dx, p["y"] + dy
                 b = p["box"]
                 q["box"] = [b[0] + dx, b[1] + dy, b[2] + dx, b[3] + dy]
+                if "dl" in p:
+                    d = p["dl"]
+                    along, across = (dx, dy) if d["o"] == "h" else (dy, dx)
+                    q["dl"] = {**d, "line": [d["line"][0] + along, d["line"][1] + along], "at": d["at"] + across,
+                               "drawn": [d["drawn"][0] + along, d["drawn"][1] + along]}
             out.append(q)
         return out
 
@@ -315,16 +363,17 @@ class ViewLayout:
             by_side.setdefault(sides[d["orient"]], []).append(d)
         for side, ds in sorted(by_side.items()):
             ds.sort(key=lambda d: (d["order"], round(d["b"] - d["a"], 6), d["a"], d["id"]))
+            hull: dict[str, tuple[float, float]] = {}
+            for d in ds:
+                lo_, hi_ = hull.get(d["family"], (d["a"], d["b"]))
+                hull[d["family"]] = (min(lo_, d["a"]), max(hi_, d["b"]))
             rows: list[list[dict[str, Any]]] = []
             fam_row: dict[str, int] = {}
             for d in ds:
                 placed = False
                 start = fam_row.get(d["family"], 0)
-                for r in [start, *range(len(rows) + 1)]:
-                    if r < start and d["family"] in fam_row:
-                        continue
-                    cand = self._dim_geometry(d, side, r, size)
-                    for c in cand:
+                for r in range(start, len(rows) + 1):
+                    for c in self._dim_geometry(d, side, r, size, hull[d["family"]]):
                         if r >= len(rows) or self._fits(c, rows[r]):
                             while len(rows) <= r:
                                 rows.append([])
@@ -334,36 +383,52 @@ class ViewLayout:
                             break
                     if placed:
                         break
-                if not placed:  # cannot happen (a new row is always free) but keep the dimension anyway
-                    c = self._dim_geometry(d, side, len(rows), size)[0]
-                    rows.append([c])
             self.rows[side] = [c for row in rows for c in row]
             self.reserved += [c["tbox"] for row in rows for c in row]  # later sides avoid these texts
             for row in rows:
                 for c in row:
                     self._emit(c)
 
+    @staticmethod
+    def _proj(c: dict[str, Any]) -> tuple[float, float]:
+        """The text's extent along the dimension's measuring direction (paper)."""
+        b = c["tbox"]
+        return (b[0], b[2]) if c["orient"] == "h" else (b[1], b[3])
+
     def _fits(self, c: dict[str, Any], row: list[dict[str, Any]]) -> bool:
+        def over(p: tuple[float, float] | list[float], q: tuple[float, float] | list[float]) -> bool:
+            return p[0] < q[1] - 0.05 and q[0] + 0.05 < p[1]
+
         for o in row:
             if boxes_overlap(c["tbox"], o["tbox"], 0.8):
                 return False
-            if c["family"] != o["family"] and c["span"][0] < o["span"][1] - 0.01 and o["span"][0] < c["span"][1] - 0.01:
+            if c["family"] != o["family"] and over(c["span"], o["span"]):
+                return False
+            # one dimension line: an outside value must never sit over a neighbour's span (MAKE-01)
+            if c["outside"] and over(self._proj(c), o["line"]):
+                return False
+            if o["outside"] and over(self._proj(o), c["line"]):
+                return False
+            if over(c["drawn"], self._proj(o)) or over(o["drawn"], self._proj(c)):
                 return False
         return not any(boxes_overlap(c["tbox"], r, 0.5) for r in self.reserved)
 
-    def _dim_geometry(self, d: dict[str, Any], side: str, row: int, size: float) -> list[dict[str, Any]]:
-        """Candidate drawings of one dimension in a row: text inside, then outside right / left."""
+    def _dim_geometry(self, d: dict[str, Any], side: str, row: int, size: float,
+                      hull: tuple[float, float]) -> list[dict[str, Any]]:
+        """Candidate drawings of one dimension in a row: the value inside its span when it fits, else outside
+        (beyond the chain's end first) on a leader."""
         sign = {"top": 1, "right": 1, "bottom": -1, "left": -1}[side]
         off = FIRST_ROW + ROW * row
         txt = d["text"]
         font = "italic" if d["tag"] == "inferred" else "regular"
         tw = text_width(txt, size, font)
+        at_lo, at_hi = abs(d["a"] - hull[0]) < 1e-6, abs(d["b"] - hull[1]) < 1e-6
         out = []
         if d["orient"] == "h":
             xa, xb = self.xy(d["a"], 0)[0], self.xy(d["b"], 0)[0]
             yd = -off if sign > 0 else self.h + off
             fits = xb - xa >= tw + 2 * ARROW + 1.5
-            places = (["in"] if fits else []) + ["right", "left"]
+            places = ["in"] if fits else (["left", "right"] if at_lo and not at_hi else ["right", "left"])
             for pl in places:
                 if pl == "in":
                     tx, anchor = (xa + xb) / 2, "middle"
@@ -373,16 +438,19 @@ class ViewLayout:
                     tx, anchor = xa - ARROW - 1.2, "end"
                 ty = yd - 1.0
                 tb = text_box(tx, ty, size, txt, anchor, 0, font)
-                span = [xa - (0 if fits else ARROW + 1), xb + (0 if fits else ARROW + 1)]
+                if pl == "in":
+                    drawn = [xa, xb]
+                else:
+                    drawn = [min(xa - ARROW - 2.5, tb[0] - 0.3), max(xb + ARROW + 2.5, tb[2] + 0.3)]
                 out.append({**d, "side": side, "sign": sign, "row": row, "yd": yd, "xa": xa, "xb": xb,
                             "tx": tx, "ty": ty, "anchor": anchor, "font": font, "size": size, "tbox": tb,
-                            "span": [min(span[0], tb[0]), max(span[1], tb[2])], "inside": fits,
-                            "family": d["family"]})
+                            "span": [min(drawn[0], tb[0]), max(drawn[1], tb[2])], "inside": pl == "in",
+                            "outside": pl != "in", "line": [xa, xb], "drawn": drawn, "family": d["family"]})
         else:
             ya, yb = self.xy(0, d["a"])[1], self.xy(0, d["b"])[1]  # ya > yb on paper (V up)
             xd = self.w + off if sign > 0 else -off
             fits = ya - yb >= tw + 2 * ARROW + 1.5
-            places = (["in"] if fits else []) + ["up", "down"]
+            places = ["in"] if fits else (["down", "up"] if at_lo and not at_hi else ["up", "down"])
             for pl in places:
                 if pl == "in":
                     ty, anchor = (ya + yb) / 2, "middle"
@@ -392,16 +460,21 @@ class ViewLayout:
                     ty, anchor = ya + ARROW + 1.2, "end"
                 tx = xd - 1.0
                 tb = text_box(tx, ty, size, txt, anchor, 90, font)
-                span = [yb - (0 if fits else ARROW + 1), ya + (0 if fits else ARROW + 1)]
+                if pl == "in":
+                    drawn = [yb, ya]
+                else:
+                    drawn = [min(yb - ARROW - 2.5, tb[1] - 0.3), max(ya + ARROW + 2.5, tb[3] + 0.3)]
                 out.append({**d, "side": side, "sign": sign, "row": row, "xd": xd, "ya": ya, "yb": yb,
                             "tx": tx, "ty": ty, "anchor": anchor, "font": font, "size": size, "tbox": tb,
-                            "span": [min(span[0], tb[1]), max(span[1], tb[3])], "inside": fits,
-                            "family": d["family"]})
+                            "span": [min(drawn[0], tb[1]), max(drawn[1], tb[3])], "inside": pl == "in",
+                            "outside": pl != "in", "line": [yb, ya], "drawn": drawn, "family": d["family"]})
         return out
 
     def _emit(self, c: dict[str, Any]) -> None:
         g = self.g
         color = "aux" if c.get("aux") else c["tag"]
+        dl = {"o": c["orient"], "line": list(c["line"]), "drawn": list(c["drawn"]),
+              "at": c["yd"] if c["orient"] == "h" else c["xd"]}
         if c["orient"] == "h":
             yd = c["yd"]
             for end, x in (("a", c["xa"]), ("b", c["xb"])):
@@ -412,16 +485,15 @@ class ViewLayout:
                 else:
                     g.line("dim", x, y0 + GAP, x, yd + OVERSHOOT)
             xa, xb = c["xa"], c["xb"]
+            g.line("dim", c["drawn"][0], yd, c["drawn"][1], yd)
             if c["inside"]:
-                g.line("dim", xa, yd, xb, yd)
                 g.arrow((xa, yd), (xb, yd))
                 g.arrow((xb, yd), (xa, yd))
             else:
-                g.line("dim", xa - ARROW - 2.5, yd, xb + ARROW + 2.5, yd)
                 g.arrow((xa, yd), (xa - 5, yd))
                 g.arrow((xb, yd), (xb + 5, yd))
             g.text(c["tx"], c["ty"], c["size"], c["text"], anchor=c["anchor"], font=c["font"], color=color,
-                   kind="dim", tag=c["tag"], param=c["param"], ref=c["id"])
+                   kind="dim", tag=c["tag"], param=c["param"], ref=c["id"], dl=dl)
         else:
             xd = c["xd"]
             for end, y in (("a", c["ya"]), ("b", c["yb"])):
@@ -432,16 +504,15 @@ class ViewLayout:
                 else:
                     g.line("dim", x0 - GAP, y, xd - OVERSHOOT, y)
             ya, yb = c["ya"], c["yb"]
+            g.line("dim", xd, c["drawn"][0], xd, c["drawn"][1])
             if c["inside"]:
-                g.line("dim", xd, ya, xd, yb)
                 g.arrow((xd, ya), (xd, yb))
                 g.arrow((xd, yb), (xd, ya))
             else:
-                g.line("dim", xd, ya + ARROW + 2.5, xd, yb - ARROW - 2.5)
                 g.arrow((xd, ya), (xd, ya + 5))
                 g.arrow((xd, yb), (xd, yb - 5))
             g.text(c["tx"], c["ty"], c["size"], c["text"], anchor=c["anchor"], rot=90, font=c["font"],
-                   color=color, kind="dim", tag=c["tag"], param=c["param"], ref=c["id"])
+                   color=color, kind="dim", tag=c["tag"], param=c["param"], ref=c["id"], dl=dl)
 
     def side_extent(self, side: str) -> float:
         """How far (mm) the dimension rows on a side reach beyond the geometry."""
@@ -453,39 +524,64 @@ class ViewLayout:
         sign = 1 if side == "top" else -1
         base = self.side_extent(side) + (4.0 if self.rows.get(side) else 6.0)
         placed: list[list[float]] = [c["tbox"] for c in self.rows.get(side, [])] + list(self.reserved)
+        leaders: list[tuple[tuple[float, float], tuple[float, float]]] = []
         row_y = base
         for c in sorted(callouts, key=lambda c: c["id"]):
-            # representative hole: the one nearest the annotation side, then the right-most
-            holes = sorted(c["holes"], key=lambda h: (-sign * h[1], -h[0]))
-            u, v, r = holes[0]
-            px, py = self.xy(u, v)
-            rp = r * self.s
-            ang = math.radians(45.0)
-            tip = (px + rp * math.cos(ang), py - sign * rp * math.sin(ang))
+            if c.get("tip") is not None:  # radius / chamfer: any of the arcs, nearest the text side first
+                tips = [self.xy(u, v) for u, v in sorted(c.get("tips") or [c["tip"]], key=lambda q: (-sign * q[1], -q[0]))]
+            else:  # representative hole: the one nearest the annotation side, then the right-most
+                holes = sorted(c["holes"], key=lambda h: (-sign * h[1], -h[0]))
+                u, v, r = holes[0]
+                px, py = self.xy(u, v)
+                rp = r * self.s
+                ang = math.radians(45.0)
+                tips = [(px + rp * math.cos(ang), py - sign * rp * math.sin(ang))]
             lines = c["lines"]
             lh = size * 1.45
-            for _ in range(12):
+            chosen = None
+            start_y = row_y
+            for attempt in range(24):  # first 12 rows avoid crossing other leaders; then accept a crossing
+                strict = attempt < 12
+                if attempt == 12:
+                    row_y = start_y
                 ky = -row_y if sign > 0 else self.h + row_y
-                if sign < 0:
-                    ky_first = ky
-                else:
-                    ky_first = ky - lh * (len(lines) - 1)
-                kx = tip[0] + abs(tip[1] - ky)
-                boxes = []
-                for i, ln in enumerate(lines):
-                    font = "italic" if ln["tag"] == "inferred" else "regular"
-                    boxes.append(text_box(kx + 4.0, ky_first + i * lh + 0.26 * size, size, ln["text"], "start", 0, font))
-                if not any(boxes_overlap(b, p, 0.8) for b in boxes for p in placed):
+                ky_first = ky if sign < 0 else ky - lh * (len(lines) - 1)
+                for tip in tips:
+                    for dirn in (1, -1):  # leader to the right, else to the left, never across another value
+                        kx = tip[0] + dirn * abs(tip[1] - ky)
+                        tx, anchor = (kx + 4.0, "start") if dirn > 0 else (kx - 4.0, "end")
+                        boxes = []
+                        for i, ln in enumerate(lines):
+                            font = "italic" if ln["tag"] == "inferred" else "regular"
+                            boxes.append(text_box(tx, ky_first + i * lh + 0.26 * size, size, ln["text"], anchor, 0, font))
+                        if any(boxes_overlap(bx, q, 0.8) for bx in boxes for q in placed):
+                            continue
+                        if any(_seg_hits_box(tip, (kx, ky), q, 0.4) for q in placed):
+                            continue
+                        if strict and any(_segs_cross(tip, (kx, ky), a0, b0) for a0, b0 in leaders):
+                            continue
+                        chosen = (tip, kx, ky, ky_first, dirn, tx, anchor)
+                        break
+                    if chosen:
+                        break
+                if chosen:
                     break
                 row_y += lh * len(lines) + 1.5
+            if chosen is None:
+                tip = tips[0]
+                kx = tip[0] + abs(tip[1] - ky)
+                chosen = (tip, kx, ky, ky_first, 1, kx + 4.0, "start")
+            tip, kx, ky, ky_first, dirn, tx, anchor = chosen
+            leaders.append((tip, (kx, ky)))
             g = self.g
             g.line("dim", tip[0], tip[1], kx, ky)
-            g.line("dim", kx, ky, kx + 3.0, ky)
+            g.line("dim", kx, ky, kx + 3.0 * dirn, ky)
             g.arrow(tip, (kx, ky))
             for i, ln in enumerate(lines):
                 font = "italic" if ln["tag"] == "inferred" else "regular"
-                t = g.text(kx + 4.0, ky_first + i * lh + 0.26 * size, size, ln["text"], font=font, color=ln["tag"],
-                           kind="callout", tag=ln["tag"], param=ln["param"], ref=c["id"])
+                t = g.text(tx, ky_first + i * lh + 0.26 * size, size, ln["text"], anchor=anchor, font=font,
+                           color=ln["tag"], kind="callout", tag=ln["tag"], param=ln["param"], ref=c["id"],
+                           params=ln.get("params"))
                 placed.append(t["box"])
             row_y += lh * len(lines) + 1.5
 
@@ -575,83 +671,77 @@ def _projection_symbol(g: Group, x: float, y: float, first_angle: bool) -> None:
 
 
 def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first_angle: bool,
-                 history: list[dict[str, Any]], size: str, legend: bool = False) -> tuple[Group, list[float]]:
-    """Title block, tag legend and revision table stacked in the bottom-right corner."""
+                 revisions: list[dict[str, Any]], size: str) -> tuple[Group, list[float]]:
+    """Title block (ISO 7200 fields) and the revision table of issued revisions, in the bottom-right corner.
+    A4 uses a compact block so the views keep a sensible scale (MAKE-07)."""
     g = Group()
+    compact = size == "A4"
     x0 = W - FRAME["right"] - TB_W
     yb = H - FRAME["bottom"]
-    tb_h = 46.0
+    hb, h1, h2, h3, h4 = (6.0, 9.5, 7.5, 7.5, 6.5) if compact else (8.0, 12.0, 9.0, 9.0, 8.0)
+    lab, val, tsz = (1.6, 2.8, 3.9) if compact else (1.8, 3.2, 4.6)
+    tb_h = hb + h1 + h2 + h3 + h4
     y0 = yb - tb_h
     # banner
-    g.fill("bannerfill", [[x0, y0], [x0 + TB_W, y0], [x0 + TB_W, y0 + 8], [x0, y0 + 8]])
-    g.rect("banner", x0, y0, TB_W, 8.0)
-    g.text(x0 + TB_W / 2, y0 + 5.6, 4.2, "NOT APPROVED FOR MANUFACTURE", anchor="middle", font="bold",
-           color="banner", kind="banner")
+    g.fill("bannerfill", [[x0, y0], [x0 + TB_W, y0], [x0 + TB_W, y0 + hb], [x0, y0 + hb]])
+    g.rect("banner", x0, y0, TB_W, hb)
+    bsz = 3.4 if compact else 4.2
+    g.text(x0 + TB_W / 2, y0 + hb / 2 + bsz * 0.36, bsz, "NOT APPROVED FOR MANUFACTURE", anchor="middle",
+           font="bold", color="banner", kind="banner")
     g.rect("tb", x0, y0, TB_W, tb_h)
-    rows = [(y0 + 8, 12.0), (y0 + 20, 9.0), (y0 + 29, 9.0), (y0 + 38, 8.0)]
-    for ry, _rh in rows:
+    r1 = y0 + hb
+    r2, r3, r4 = r1 + h1, r1 + h1 + h2, r1 + h1 + h2 + h3
+    for ry in (r1, r2, r3, r4):
         g.line("tb", x0, ry, x0 + TB_W, ry)
 
-    def cell(cx: float, cy: float, w: float, h: float, label: str, value: str, vsize: float = 3.2,
-             font: str = "regular") -> None:
+    def cell(cx: float, cy: float, w: float, h: float, label: str, value: str, vsize: float = val,
+             font: str = "regular", kind: str = "title") -> None:
         g.line("tbthin", cx, cy, cx, cy + h)
-        g.text(cx + 1.2, cy + 2.5, 1.8, label, color="label", kind="title")
+        g.text(cx + 1.2, cy + lab + 0.7, lab, label, color="label", kind="title")
         avail = w - 3.0
         v = value
         while v and text_width(v, vsize, font) > avail:
             v = v[:-2] + "…" if len(v) > 2 else ""
         if v:
-            g.text(cx + 1.5, cy + h - 2.0, vsize, v, font=font, kind="title")
+            g.text(cx + 1.5, cy + h - (1.6 if compact else 2.0), vsize, v, font=font, kind=kind)
 
-    r1, r2, r3, r4 = rows
-    cell(x0, r1[0], 120, 12, "TITLE", meta.get("title", ""), 4.6, "bold")
-    cell(x0 + 120, r1[0], 60, 12, "DRAWING NO.", meta.get("drawing_no", ""), 3.4)
-    cell(x0, r2[0], 62, 9, "MATERIAL", meta.get("material") or "Not specified")
-    cell(x0 + 62, r2[0], 20, 9, "UNITS", "mm")
-    cell(x0 + 82, r2[0], 22, 9, "SCALE", scale_txt)
-    g.line("tbthin", x0 + 104, r2[0], x0 + 104, r2[0] + 9)
-    g.text(x0 + 105.2, r2[0] + 2.5, 1.8, "PROJECTION", color="label", kind="title")
-    _projection_symbol(g, x0 + 119, r2[0] + 2.2, first_angle)
-    cell(x0 + 140, r2[0], 40, 9, "SHEET", f"{size}   1 / 1")
-    cell(x0, r3[0], 48, 9, "DRAWN BY", meta.get("drawn_by", ""))
-    cell(x0 + 48, r3[0], 30, 9, "DATE", meta.get("date", ""))
-    cell(x0 + 78, r3[0], 18, 9, "REV", meta.get("rev", "—"))
-    cell(x0 + 96, r3[0], 84, 9, "GENERAL TOLERANCES", meta.get("tolerance", "Not specified"), 2.8)
-    cell(x0, r4[0], 48, 8, "CHECKED", "—", 2.8)
-    cell(x0 + 48, r4[0], 48, 8, "APPROVED", "— (not approved)", 2.8)
-    g.line("tbthin", x0 + 96, r4[0], x0 + 96, r4[0] + 8)
-    g.text(x0 + 97.2, r4[0] + 3.2, 2.0, meta.get("source", ""), color="label", kind="title")
-    g.text(x0 + 97.2, r4[0] + 6.4, 2.0, "Formwright Drawing Studio", color="label", kind="title")
+    cell(x0, r1, 120, h1, "TITLE", meta.get("title", ""), tsz, "bold")
+    cell(x0 + 120, r1, 60, h1, "DRAWING NO.", meta.get("drawing_no", ""), val + 0.2)
+    src = meta.get("source", "")
+    if src:
+        g.text(x0 + TB_W - 1.2, r1 + lab + 0.7, lab, src, anchor="end", color="label", kind="title")
+    cell(x0, r2, 62, h2, "MATERIAL", meta.get("material") or "Not specified")
+    cell(x0 + 62, r2, 20, h2, "UNITS", "mm")
+    cell(x0 + 82, r2, 22, h2, "SCALE", scale_txt)
+    g.line("tbthin", x0 + 104, r2, x0 + 104, r2 + h2)
+    g.text(x0 + 105.2, r2 + lab + 0.7, lab, "PROJECTION", color="label", kind="title")
+    _projection_symbol(g, x0 + 119, r2 + h2 / 2 - 3.5 + (0.6 if compact else 1.0), first_angle)
+    cell(x0 + 140, r2, 40, h2, "SHEET", f"{size}   1 / 1")
+    cell(x0, r3, 48, h3, "DRAWN BY", meta.get("drawn_by", ""))
+    cell(x0 + 48, r3, 30, h3, "DATE", meta.get("date", ""))
+    cell(x0 + 78, r3, 18, h3, "REV", meta.get("rev", "—"), font="bold")
+    cell(x0 + 96, r3, 84, h3, "GENERAL TOLERANCES", meta.get("tolerance", "Not specified"), val - 0.4)
+    cell(x0, r4, 48, h4, "CHECKED", meta.get("checked_by") or "—", val - 0.4)
+    cell(x0 + 48, r4, 48, h4, "APPROVED", "— (not approved)", val - 0.4)
+    cell(x0 + 96, r4, 84, h4, "COMPANY", meta.get("company") or "—", val - 0.4)
 
-    ly = y0
-    if legend:  # one-row tag legend above the title block (A4: the notes column is too narrow for it)
-        lg_h = 9.0
-        ly = y0 - 2.0 - lg_h
-        g.rect("tbthin", x0, ly, TB_W, lg_h)
-        x = x0 + 2.0
-        for txt, font, color, label in LEGEND:
-            g.text(x, ly + 6.0, 3.2, txt, font=font, color=color, kind="legend",
-                   tag=color if color in ("spec", "inferred") else None)
-            x += text_width(txt, 3.2, font) + 1.5
-            g.text(x, ly + 6.0, 2.1, label, kind="legend")
-            x += text_width(label, 2.1) + 5.0
-    top = ly
-    # revision table (last 3 drawing revisions)
-    rows_h = history[-3:]
+    top = y0
+    # revision table: issued revisions only (ISO 7200 / ASME Y14.35), newest last, at most 3 rows
+    rows_h = revisions[-3:]
     if rows_h:
         rt_h = 5.0 + 4.6 * len(rows_h)
-        ry = ly - 2.0 - rt_h
+        ry = y0 - 2.0 - rt_h
         g.rect("tbthin", x0, ry, TB_W, rt_h)
         cols = [(0, 14, "REV"), (14, 104, "DESCRIPTION"), (118, 26, "DATE"), (144, 36, "BY")]
-        for cx, _w, lab in cols:
+        for cx, _w, lab_ in cols:
             if cx:
                 g.line("tbthin", x0 + cx, ry, x0 + cx, ry + rt_h)
-            g.text(x0 + cx + 1.2, ry + 3.6, 2.0, lab, font="bold", color="label", kind="rev")
+            g.text(x0 + cx + 1.2, ry + 3.6, 2.0, lab_, font="bold", color="label", kind="rev")
         g.line("tbthin", x0, ry + 5.0, x0 + TB_W, ry + 5.0)
         for i, h in enumerate(rows_h):
             yy = ry + 5.0 + 4.6 * i + 3.4
             vals = [str(h.get("rev", "")), str(h.get("change", "")), str(h.get("date", "")), str(h.get("by", ""))]
-            for (cx, w, _lab), v in zip(cols, vals):
+            for (cx, w, _lab), v in zip(cols, vals, strict=True):
                 while v and text_width(v, 2.3) > w - 2.4:
                     v = v[:-2] + "…"
                 g.text(x0 + cx + 1.2, yy, 2.3, v, kind="rev")
@@ -659,17 +749,16 @@ def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first
     return g, [x0, top, x0 + TB_W, yb]
 
 
-def _notes_block(W: float, H: float, notes: list[str], right: float,
-                 legend: bool = True) -> tuple[Group, list[float] | None]:
-    """Dimension-tag legend and numbered notes, bottom-left of the frame (left of the title block)."""
+def _notes_block(W: float, H: float, notes: list[str], right: float) -> tuple[Group, list[float] | None]:
+    """Dimension-tag legend (review copy only: its prims are ``kind == "legend"``) and numbered notes, bottom-left
+    of the frame. The legend's space is reserved in both copies so they share one layout and scale."""
     g = Group()
     x0 = FRAME["left"] + 4.0
     width = right - x0 - 6.0
-    # legend entries flow left to right, wrapping to the available width
-    entries: list[list[tuple[float, tuple[str, str, str, str]]]] = [[]] if legend else []
+    entries: list[list[tuple[float, tuple[str, str, str, str]]]] = [[]]
     x = 0.0
-    for e in LEGEND if legend else []:
-        w = text_width(e[0], 3.2, e[1]) + 1.8 + text_width(e[3], 2.3) + 6.0
+    for e in LEGEND:
+        w = text_width(e[0], 3.0, e[1]) + 1.6 + text_width(e[3], 2.1) + 5.0
         if x and x + w > width:
             entries.append([])
             x = 0.0
@@ -681,18 +770,16 @@ def _notes_block(W: float, H: float, notes: list[str], right: float,
         for j, w in enumerate(wrapped):
             lines.append((f"{i}." if j == 0 else "", w))
     lh = 3.6
-    leg_h = 5.0 + 4.6 * len(entries) + 2.0 if entries else 0.0
+    leg_h = 4.4 * len(entries) + 2.5
     h = leg_h + 5.5 + lh * len(lines) + 1.5
     yb = H - FRAME["bottom"] - 3.0
     y0 = yb - h
-    if entries:
-        g.text(x0, y0 + 3.6, 2.6, "DIMENSION TAGS", font="bold", kind="legend")
     for r, row in enumerate(entries):
-        yy = y0 + 5.0 + 4.6 * (r + 1) - 0.6
+        yy = y0 + 4.4 * (r + 1) - 0.6
         for ex, (txt, font, color, label) in row:
-            g.text(x0 + ex, yy, 3.2, txt, font=font, color=color, kind="legend",
+            g.text(x0 + ex, yy, 3.0, txt, font=font, color=color, kind="legend",
                    tag=color if color in ("spec", "inferred") else None)
-            g.text(x0 + ex + text_width(txt, 3.2, font) + 1.8, yy, 2.3, label, kind="legend")
+            g.text(x0 + ex + text_width(txt, 3.0, font) + 1.6, yy, 2.1, label, kind="legend")
     ny = y0 + leg_h
     g.text(x0, ny + 3.6, 2.6, "NOTES", font="bold", kind="note")
     for i, (num, ln) in enumerate(lines):
@@ -703,50 +790,62 @@ def _notes_block(W: float, H: float, notes: list[str], right: float,
     return g, [x0 - 1.0, y0, x0 + width, yb]
 
 
+SECTION_SIDES = {"h": "top", "v": "right"}
+
+
 def compose(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str, Any]], notes: list[str],
-            opts: dict[str, Any], meta: dict[str, Any], history: list[dict[str, Any]]) -> dict[str, Any]:
-    """Choose the largest standard scale at which everything fits, and build the sheet."""
+            opts: dict[str, Any], meta: dict[str, Any], revisions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Choose the largest standard scale at which everything fits, and build the sheet. At each scale the
+    isometric view may shrink (up to three steps) before the principal views are drawn smaller; as a last resort at
+    a scale the isometric view is left out rather than shrinking the views that carry the dimensions."""
     size = opts.get("sheet", "A3")
     W, H = SHEETS[size]
-    best = None
+    has_iso = "iso" in an["views"]
     for sc in SCALES:
-        for iso_step in (0, 1, 2):
-            sheet = _try(an, dims, callouts, notes, opts, meta, history, sc, iso_step, W, H, size)
+        for iso_step in ((0, 1, 2, 3) if has_iso else (0,)):
+            sheet = _try(an, dims, callouts, notes, opts, meta, revisions, sc, iso_step, W, H, size)
             if sheet is not None:
-                best = sheet
-                break
-        if best is not None:
-            break
-    if best is None:  # nothing fits: smallest scale, report through CHK-12
-        best = _try(an, dims, callouts, notes, opts, meta, history, SCALES[-1], 2, W, H, size, force=True)
+                return sheet
+        if has_iso and sc[1] > 1:  # below 1:1: rather drop the iso than shrink the dimensioned views
+            sheet = _try(an, dims, callouts, notes, opts, meta, revisions, sc, None, W, H, size)
+            if sheet is not None:
+                sheet["iso_dropped"] = True
+                return sheet
+    best = _try(an, dims, callouts, notes, opts, meta, revisions, SCALES[-1], None, W, H, size, force=True)
     assert best is not None
     return best
 
 
 def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str, Any]], notes: list[str],
-         opts: dict[str, Any], meta: dict[str, Any], history: list[dict[str, Any]], sc: tuple[int, int],
-         iso_step: int, W: float, H: float, size: str, force: bool = False) -> dict[str, Any] | None:
+         opts: dict[str, Any], meta: dict[str, Any], revisions: list[dict[str, Any]], sc: tuple[int, int],
+         iso_step: int | None, W: float, H: float, size: str, force: bool = False) -> dict[str, Any] | None:
+    from aicad.drawing.dims import COORD
+
     s = sc[0] / sc[1]
     proj = opts.get("projection", "first")
     views_on = [v for v in ("front", "top", "right") if v in an["views"]]
     dim_size = 3.5 if size == "A3" else 3.0
     vls: dict[str, ViewLayout] = {}
     sec_opt = an.get("section")
+    front_section = bool(an["views"].get("front", {}).get("is_section"))
     sec_ref = None
     if sec_opt:
         prefs = {"y": ["top", "right"], "x": ["top", "front"], "z": ["front", "right"]}[sec_opt["axis"]]
         sec_ref = next((v for v in prefs if v in views_on), None)
     for v in views_on:
-        vl = ViewLayout(v, an["views"][v], s, hidden=opts.get("hidden", True))
+        geom = an["views"][v]
+        if v == "front" and front_section:
+            vl = ViewLayout(v, geom, s, hidden=False, label="SECTION A-A")
+            vl.hatch(geom["loops"], 2.5 if size == "A3" else 2.0)
+        else:
+            vl = ViewLayout(v, geom, s, hidden=opts.get("hidden", True))
         vls[v] = vl
     # centre lines for holes and cylinder axes
     for v, vl in vls.items():
         cos = [c for c in callouts if c["view"] == v]
-        axes = []
+        axes: list[tuple[str, float, float, float]] = []
         for h in an["census"]["holes"] + an["census"]["outer"]:
             ax = h["axis"]
-            from aicad.drawing.dims import COORD
-
             cm = COORD[v]
             if ax not in cm:
                 continue
@@ -767,7 +866,7 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         o = cm[sec_opt["axis"]]
         # arrows show the direction of sight of the section view
         look = {"y": (0, 1, 0), "x": (-1, 0, 0), "z": (0, 0, -1)}[sec_opt["axis"]]
-        axis_vec = {"u": None, "v": None}
+        axis_vec: dict[str, str] = {}
         for a, c in cm.items():
             axis_vec[c] = a
         ai = {"x": 0, "y": 1, "z": 2}
@@ -778,9 +877,11 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         sides = SIDES[proj][v]
         vl.place_dims([d for d in dims if d["view"] == v], sides, dim_size)
         vl.place_callouts([c for c in callouts if c["view"] == v], sides["h"], dim_size)
+        if vl.label:
+            vl.caption(3.5)
     extras: list[ViewLayout] = []
     iso_scale = s
-    if "iso" in an["views"]:
+    if "iso" in an["views"] and iso_step is not None:
         idx = SCALES.index(sc) + iso_step
         if idx >= len(SCALES):
             return None
@@ -792,14 +893,15 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         extras.append(iso)
     elif iso_step:
         return None
-    if sec_opt:
+    if sec_opt and not front_section:
         sv = ViewLayout("section", sec_opt, s, hidden=False, label="SECTION A-A")
         sv.hatch(sec_opt["loops"], 2.5 if size == "A3" else 2.0)
+        sv.place_dims([d for d in dims if d["view"] == "section"], SECTION_SIDES, dim_size)
         sv.caption(3.5)
         extras.insert(0, sv)
 
-    info, info_box = _info_blocks(W, H, meta, scale_label(sc), proj == "first", history, size, legend=size != "A3")
-    notes_g, notes_box = _notes_block(W, H, notes, info_box[0], legend=size == "A3")
+    info, info_box = _info_blocks(W, H, meta, scale_label(sc), proj == "first", revisions, size)
+    notes_g, notes_box = _notes_block(W, H, notes, info_box[0])
     frame = [FRAME["left"], FRAME["top"], W - FRAME["right"], H - FRAME["bottom"]]
     blocked = [info_box] + ([notes_box] if notes_box else [])
 
@@ -828,7 +930,7 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         if r in row_t:
             row_cy[r] = y + row_t[r]
             y = row_cy[r] + row_b[r] + VIEW_GAP
-    pos: dict[str, tuple[float, float]] = {}
+    pos: dict[Any, tuple[float, float]] = {}
     for v, vl in vls.items():
         r, c = cells[v]
         pos[v] = (col_cx[c] - vl.w / 2, row_cy[r] - vl.h / 2)
@@ -866,7 +968,8 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         for o in occupied:
             cands.append((o[2] + VIEW_GAP + 2.0, o[1]))
             cands.append((o[0], o[3] + VIEW_GAP + 2.0))
-        cands.append((frame[2] - 4 - bw, frame[1] + 4))
+        cands.append((frame[2] - 4 - bw, frame[1] + 4))  # top-right corner
+        cands.append((frame[0] + 4, frame[3] - 4 - bh - (notes_box[3] - notes_box[1] if notes_box else 0)))
         chosen = None
         for cx, cy in cands:
             p = (cx - b[0], cy - b[1])
@@ -878,7 +981,7 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
             if not force:
                 return None
             chosen = (right - b[0], grid_box[1] - b[1])
-        pos[id(ex)] = chosen  # type: ignore[index]
+        pos[id(ex)] = chosen
         occupied.append(abs_box(ex, chosen))
 
     # centre the composition horizontally where the space allows
@@ -905,7 +1008,7 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
     view_rects: dict[str, list[float]] = {}
     view_info: dict[str, dict[str, Any]] = {}
     for vl in [*vls.values(), *extras]:
-        p = pos[vl.name] if vl.name in pos else pos[id(vl)]  # type: ignore[index]
+        p = pos[vl.name] if vl.name in pos else pos[id(vl)]
         p = (p[0] + shift[0], p[1] + shift[1])
         for q in vl.g.placed(p[0], p[1]):
             q["view"] = vl.name
@@ -916,4 +1019,5 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
     prims += info.placed(0, 0)
     prims += notes_g.placed(0, 0)
     return {"size": size, "w": W, "h": H, "scale": list(sc), "scale_txt": scale_label(sc), "iso_scale": iso_scale,
-            "projection": proj, "frame": frame, "prims": prims, "views": view_info, "blocked": blocked}
+            "projection": proj, "frame": frame, "prims": prims, "views": view_info, "blocked": blocked,
+            "iso_dropped": False}

@@ -2,13 +2,18 @@
 
 - SVG: written directly (deterministic text, mm user units).
 - PDF: reportlab (BSD licence) with ``invariant=1`` so the same sheet gives the same bytes.
-- DXF: build123d ``ExportDXF`` (ezdxf, MIT) for the linework, at true model size (paper / drawing scale), with
-  layers VISIBLE / HIDDEN / CENTER / DIM / HATCH / SHEET; texts are added to the same ezdxf document.
+- DXF (ezdxf, MIT): the view geometry in model space at true size (paper / drawing scale), the sheet (frame, title
+  block, dimensions, notes) in a paper-space layout "Sheet" with one viewport at the drawing scale. Layers
+  VISIBLE / HIDDEN / CENTER / HATCH / DIM / TEXT / SHEET / CUT with colours by type; the diameter sign is written as
+  ``%%c`` so every CAD font shows it; view outlines that are curves (ellipses in the isometric view) are single
+  polylines, circles and arcs are true CIRCLE / ARC entities.
+
+``issue_sheet`` turns the review copy (spec / inferred tag colours, italics and the tag legend) into the issue copy
+(monochrome, upright, no legend) without changing any position, so both copies share one layout.
 """
 
 from __future__ import annotations
 
-import itertools
 import math
 from pathlib import Path
 from typing import Any
@@ -28,6 +33,20 @@ def _n(v: float) -> str:
 
 def _arc_pt(cx: float, cy: float, r: float, a: float) -> tuple[float, float]:
     return cx + r * math.cos(math.radians(a)), cy - r * math.sin(math.radians(a))
+
+
+# ----------------------------------------------------------------------------- issue copy
+def issue_sheet(sheet: dict[str, Any]) -> dict[str, Any]:
+    """Monochrome issue copy: no tag legend, no tag colours or italics (MAKE-09). Same layout as the review copy."""
+    prims = []
+    for p in sheet["prims"]:
+        if p["t"] == "text":
+            if p.get("kind") == "legend":
+                continue
+            if p.get("kind") in ("dim", "callout"):
+                p = {**p, "color": "normal", "font": "regular" if p["font"] == "italic" else p["font"]}
+        prims.append(p)
+    return {**sheet, "prims": prims, "copy": "issue"}
 
 
 # ----------------------------------------------------------------------------- SVG
@@ -78,13 +97,12 @@ def to_svg(sheet: dict[str, Any], title: str = "") -> str:
                 attrs.append('font-style="italic"')
             if p["rot"]:
                 attrs.append(f'transform="rotate(-90 {_n(p["x"])} {_n(p["y"])})"')
-            if p.get("kind") in ("dim", "callout"):
-                attrs.append(f'data-kind="{p["kind"]}" data-tag="{p.get("tag") or ""}"')
-                if p.get("param"):
-                    attrs.append(f'data-param="{escape(p["param"])}"')
             tip = ""
-            if p.get("kind") in ("dim", "callout"):
-                what = f"spec: parameter {p['param']}" if p.get("tag") == "spec" else "inferred: measured from geometry"
+            if p.get("kind") in ("dim", "callout") and sheet.get("copy") != "issue":
+                attrs.append(f'data-kind="{p["kind"]}" data-tag="{p.get("tag") or ""}"')
+                if p.get("ref"):
+                    attrs.append(f'data-ref="{escape(p["ref"])}"')
+                what = "spec: equals a model parameter" if p.get("tag") == "spec" else "inferred: measured from the model"
                 tip = f"<title>{escape(p['txt'])} ({escape(what)})</title>"
             out.append(f"<text {' '.join(attrs)}>{tip}{escape(p['txt'])}</text>")
     out.append("</svg>")
@@ -172,63 +190,83 @@ def to_pdf(sheet: dict[str, Any], path: Path, title: str = "") -> None:
 
 
 # ----------------------------------------------------------------------------- DXF
-DXF_LAYERS = {"visible": "VISIBLE", "hidden": "HIDDEN", "center": "CENTER", "cut": "CENTER", "hatch": "HATCH",
-              "dim": "DIM", "cutthick": "VISIBLE"}
+GEOMETRY_LAYERS = {"visible": "VISIBLE", "hidden": "HIDDEN", "center": "CENTER", "hatch": "HATCH"}
+PAPER_LAYERS = {"dim": "DIM", "cut": "CUT", "cutthick": "CUT", "text": "TEXT"}
+#: name: (ACI colour, linetype, lineweight in 1/100 mm)
+DXF_LAYER_STYLE = {"VISIBLE": (7, "Continuous", 50), "HIDDEN": (3, "HIDDEN", 25), "CENTER": (1, "CENTER", 18),
+                   "HATCH": (8, "Continuous", 18), "DIM": (4, "Continuous", 18), "TEXT": (7, "Continuous", 18),
+                   "SHEET": (7, "Continuous", 35), "CUT": (1, "CENTER", 25), "VIEWPORT": (8, "Continuous", 13)}
+
+
+def dxf_text(txt: str) -> str:
+    """CAD fonts (txt.shx and friends) lack Ø: use the %%c control code, shown as a diameter sign everywhere."""
+    return txt.replace("Ø", "%%c").replace("±", "%%p").replace("°", "%%d")
 
 
 def to_dxf(sheet: dict[str, Any], path: Path) -> None:
-    """True-size DXF: paper millimetres divided by the drawing scale, y up."""
-    from build123d import Edge, ExportDXF, LineType, Plane, Unit, Vector
+    """Model space: view geometry at true size (paper mm × scale denominator). Paper space layout "Sheet": the
+    sheet at 1:1 paper millimetres with one viewport onto model space at the drawing scale."""
+    import ezdxf
     from ezdxf.enums import TextEntityAlignment
 
     num, den = sheet["scale"]
     k = den / num  # paper mm -> model mm
-    H = sheet["h"]
-    exp = ExportDXF(unit=Unit.MM)
-    exp.add_layer("VISIBLE", line_weight=0.5)
-    exp.add_layer("HIDDEN", line_weight=0.25, line_type=LineType.HIDDEN)
-    exp.add_layer("CENTER", line_weight=0.18, line_type=LineType.CENTER)
-    exp.add_layer("HATCH", line_weight=0.18)
-    exp.add_layer("DIM", line_weight=0.18)
-    exp.add_layer("SHEET", line_weight=0.35)
-    exp.add_layer("TEXT", line_weight=0.18)
+    W, H = sheet["w"], sheet["h"]
+    doc = ezdxf.new("R2010", setup=True)
+    doc.units = ezdxf.units.MM
+    doc.header["$MEASUREMENT"] = 1
+    for name, (color, lt, lw) in DXF_LAYER_STYLE.items():
+        doc.layers.add(name, color=color, linetype=lt, lineweight=lw)
+    doc.layers.get("VIEWPORT").dxf.plot = 0
+    if "FW" not in doc.styles:
+        doc.styles.new("FW", dxfattribs={"font": "arial.ttf"})
+    msp = doc.modelspace()
+    doc.layouts.rename("Layout1", "Sheet")
+    psp = doc.layouts.get("Sheet")
+    psp.page_setup(size=(W, H), margins=(0, 0, 0, 0), units="mm")
 
-    def P(x: float, y: float) -> Vector:
-        return Vector(x * k, (H - y) * k, 0)
+    def M(x: float, y: float) -> tuple[float, float]:
+        return (x * k, (H - y) * k)
 
-    buckets: dict[str, list[Any]] = {}
-    for p in sheet["prims"]:
-        layer = DXF_LAYERS.get(p["l"], "SHEET")
-        t = p["t"]
-        edges: list[Any] = []
+    def P(x: float, y: float) -> tuple[float, float]:
+        return (x, H - y)
+
+    for pr in sheet["prims"]:
+        t, layer = pr["t"], pr["l"]
+        if t == "text":
+            continue
+        geom = pr.get("view") is not None and layer in GEOMETRY_LAYERS
+        space, T, f = (msp, M, k) if geom else (psp, P, 1.0)
+        lname = GEOMETRY_LAYERS[layer] if geom else PAPER_LAYERS.get(layer, "SHEET")
+        attrs = {"layer": lname}
         if t == "line":
-            a = p["p"]
+            a = pr["p"]
             if math.hypot(a[2] - a[0], a[3] - a[1]) > 1e-6:
-                edges.append(Edge.make_line(P(a[0], a[1]), P(a[2], a[3])))
-        elif t in ("poly", "fill"):
-            pts = p["p"] + ([p["p"][0]] if (p.get("closed") or t == "fill") else [])
-            for a, b in itertools.pairwise(pts):
-                if math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-6:
-                    edges.append(Edge.make_line(P(*a), P(*b)))
+                space.add_line(T(a[0], a[1]), T(a[2], a[3]), dxfattribs=attrs)
+        elif t == "poly":
+            pts = [T(x, y) for x, y in pr["p"]]
+            space.add_lwpolyline(pts, close=bool(pr.get("closed")), dxfattribs=attrs)
+        elif t == "fill":
+            pts = [T(x, y) for x, y in pr["p"]]
+            if len(pts) == 3:
+                space.add_solid(pts, dxfattribs=attrs)
+            else:
+                space.add_lwpolyline(pts, close=True, dxfattribs=attrs)
         elif t == "circle":
-            cx, cy, r = p["p"]
-            edges.append(Edge.make_circle(r * k, Plane(origin=P(cx, cy))))
+            cx, cy, r = pr["p"]
+            space.add_circle(T(cx, cy), r * f, dxfattribs=attrs)
         elif t == "arc":
-            cx, cy, r, a0, a1 = p["p"]
-            edges.append(Edge.make_circle(r * k, Plane(origin=P(cx, cy)), start_angle=a0, end_angle=a1))
-        buckets.setdefault(layer, []).extend(edges)
-    for layer in sorted(buckets):
-        if buckets[layer]:
-            exp.add_shape(buckets[layer], layer=layer)
-    msp = exp._modelspace  # build123d keeps the ezdxf modelspace here; texts are not shapes
+            cx, cy, r, a0, a1 = pr["p"]
+            space.add_arc(T(cx, cy), r * f, a0, a1, dxfattribs=attrs)
     align = {"start": TextEntityAlignment.LEFT, "middle": TextEntityAlignment.CENTER,
              "end": TextEntityAlignment.RIGHT}
-    for p in sheet["prims"]:
-        if p["t"] != "text":
+    for pr in sheet["prims"]:
+        if pr["t"] != "text":
             continue
-        e = msp.add_text(p["txt"], dxfattribs={"height": p["s"] * 0.72 * k, "layer": "TEXT",
-                                               "rotation": 90 if p["rot"] else 0})
-        q = P(p["x"], p["y"])
-        e.set_placement((q.X, q.Y), align=align[p["anchor"]])
-    exp.write(str(path))
-
+        e = psp.add_text(dxf_text(pr["txt"]), dxfattribs={"height": pr["s"] * 0.72, "layer": "TEXT", "style": "FW",
+                                                         "rotation": 90 if pr["rot"] else 0})
+        e.set_placement(P(pr["x"], pr["y"]), align=align[pr["anchor"]])
+    vp = psp.add_viewport(center=(W / 2, H / 2), size=(W, H), view_center_point=(W / 2 * k, H / 2 * k),
+                          view_height=H * k, dxfattribs={"layer": "VIEWPORT"})
+    vp.dxf.status = 2
+    doc.saveas(str(path))
