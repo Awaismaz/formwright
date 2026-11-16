@@ -23,9 +23,11 @@ const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const crossV = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const EMPTY: Sketch = { points: [], entities: [], constraints: [] };
 
-export default function SketchEditor({ project, topo, plane, faceId, editing, preset, hasBody, existing, onDone, onCancel }: {
+export default function SketchEditor({ project, topo, plane, faceId, editing, preset, hasBody, existing, planeRef, onDone, onCancel }: {
   project: Project; topo: Topo | null; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null;
   preset?: SketchPreset; hasBody: boolean; existing: ManualFeature[];
+  /** reference plane feature the sketch is attached to */
+  planeRef?: ManualFeature;
   onDone: () => void; onCancel: () => void;
 }) {
   const yDir = useMemo(() => crossV(plane.normal, plane.x_dir), [plane]);
@@ -338,7 +340,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
     if (!prof.loops.length) { toast.error("Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return; }
     const base = kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
     const common = { name: editing && editing.op === (kind === "revolve" ? "revolve" : "sketch") ? editing.name : nextName(base, existing),
-      suppressed: editing?.suppressed ?? false, plane, profiles: prof.loops, mode, editor: sk };
+      suppressed: editing?.suppressed ?? false, plane, plane_ref: planeRef?.id ?? null, profiles: prof.loops, mode, editor: sk };
     let feature: Record<string, unknown>;
     if (kind === "revolve") {
       if (!centerline) { toast.error("Draw a centerline to revolve about (Centerline tool)."); return; }
@@ -381,7 +383,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-[#f7f9fc] dark:bg-[#161a21]">
       <div className="flex flex-wrap items-center gap-1 border-b border-border bg-panel px-2 py-1.5">
-        <span className="mr-2 text-[13px] font-semibold">Sketch{planeName(plane) ? <span className="ml-1 font-normal text-muted">on {planeName(plane)}</span> : faceId !== null ? <span className="ml-1 font-normal text-muted">on face</span> : null}</span>
+        <span className="mr-2 text-[13px] font-semibold">Sketch{planeRef ? <span className="ml-1 font-normal text-muted">on {planeRef.name}</span> : planeName(plane) ? <span className="ml-1 font-normal text-muted">on {planeName(plane)}</span> : faceId !== null ? <span className="ml-1 font-normal text-muted">on face</span> : null}</span>
         {tools.map(([t, l, i]) => <Tip key={t} content={l} side="bottom"><button onClick={() => { setTool(t); setPending([]); setPendingLine(null); }} className={cx("rounded p-1.5", tool === t ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")} aria-label={l}>{i}</button></Tip>)}
         <span className="mx-1 h-5 w-px bg-border" />
         {relations.map(r => <Tip key={r.label} content={r.label} side="bottom"><button disabled={!r.can} onClick={r.run} className="flex h-7 min-w-7 items-center justify-center rounded px-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-30" aria-label={r.label}>{r.icon}</button></Tip>)}

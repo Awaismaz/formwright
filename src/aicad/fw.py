@@ -35,6 +35,8 @@ from build123d import (
     revolve,
 )
 
+from aicad import refplane as _refplane
+
 _STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
 
 
@@ -310,6 +312,8 @@ def sketch_region(profiles: list[dict[str, Any]]) -> Any:
 
 TOOL_OPS = {"sketch", "extrude", "revolve", "hole"}
 BASE_OPS = {"sketch", "extrude", "revolve"}  # can create the first solid of a hand-modelled part
+NON_GEOMETRIC = _refplane.NON_GEOMETRIC
+ref_plane = _refplane.ref_plane
 
 
 def _sketch_axis(plane: Plane, axis: dict[str, Any]) -> Axis:
@@ -419,6 +423,8 @@ def _sources(f: dict[str, Any], done: dict[str, dict[str, Any]] | None, verb: st
 
 def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any]] | None = None) -> Any:
     op = f["op"]
+    if op in NON_GEOMETRIC:
+        return part
     if part is None and op not in BASE_OPS:
         raise ValueError("this feature needs an existing solid; start the part with a boss or revolve")
     if op in TOOL_OPS:
@@ -481,9 +487,16 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
         return part
     diag = _diag(part, features)
     done: dict[str, dict[str, Any]] = {}
+    # Reference planes resolve from their own numbers, independent of tree order. A sketch attached to one
+    # (plane_ref) follows it; if the plane was deleted, the sketch keeps the placement it had.
+    planes = {str(f.get("id", "")): ref_plane(f) for f in features if f["op"] == "plane"}
     for f in features:
         if f.get("suppressed"):
             continue
+        if f["op"] in NON_GEOMETRIC:
+            continue
+        if f.get("plane_ref") in planes:
+            f = {**f, "plane": planes[str(f["plane_ref"])]}
         try:
             part = _op(part, f, diag, done)
         except Exception as e:

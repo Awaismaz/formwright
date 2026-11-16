@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from aicad import materials
+from aicad import materials, refplane
 from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
@@ -111,7 +111,7 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -256,6 +256,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             if math.dist(out["axis"]["a"], out["axis"]["b"]) < 1e-6:
                 raise HTTPException(422, "Draw a centerline in the sketch to revolve about")
             out["angle"] = _num(f.get("angle", 360), "angle", 0.01, 360)
+        if f.get("plane_ref"):  # attached to a reference plane feature: follows it when the plane is edited
+            out["plane_ref"] = str(f["plane_ref"])[:40]
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))  # full sketch (constraints, dimensions) for re-editing
@@ -275,6 +277,13 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             out.update(kind="linear", step=_pt(f.get("step"), "spacing"))
             if math.hypot(*out["step"]) < 1e-6:
                 raise HTTPException(422, "spacing: must not be zero")
+    elif op == "plane":
+        out["base"] = _sketch_plane(f.get("base") or {})
+        out["base_name"] = str(f.get("base_name") or "")[:60]
+        out["offset"] = _num(f.get("offset") or 0, "offset", -1e5, 1e5)
+        out["angle"] = _num(f.get("angle") or 0, "angle", -180, 180)
+        out["rot_axis"] = "y" if f.get("rot_axis") == "y" else "x"
+        out["plane"] = refplane.ref_plane(out)  # resolved placement, for the app and for attached sketches
     elif op == "mirror":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
@@ -326,10 +335,17 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
         f.write_text(BLANK_MODEL.format(name=p.name), encoding="utf-8")
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
-    new_feats = mutate([dict(x) for x in feats])
+    new_feats = sync_planes(mutate([dict(x) for x in feats]))
     if transform is not None and fresh:
         f.unlink()
         raise HTTPException(404, "There is no design to change yet")
+    if transform is None and _blank(src) and all(x["op"] in refplane.NON_GEOMETRIC for x in new_feats):
+        # a hand-modelled part with only reference geometry so far: nothing to build yet
+        f.write_text(write_manual(src, new_feats), encoding="utf-8")
+        p.updated_at = utcnow()
+        audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
+        ctx.db.commit()
+        return {"ok": True, "features": new_feats, "revision": None, "build_s": None}
     await wait_finalized(p.id)  # never snapshot while background exports are writing
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
@@ -480,6 +496,27 @@ async def delete_design_feature(project_id: str, body: NameIn, ctx: Ctx = Depend
     return {**res, "deleted": body.name}
 
 
+
+
+def _blank(src: str) -> bool:
+    """A part modelled only by hand (no design code before the manual block)."""
+    head = src.split(BLOCK_START)[0]
+    return "result = None  # the first boss or revolve" in head and "fw.feature(" not in head
+
+
+def sync_planes(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep each attached sketch's stored placement equal to its reference plane's. A sketch whose plane was
+    deleted keeps the last placement and is detached."""
+    planes = {x["id"]: x.get("plane") for x in fs if x["op"] == "plane" and x.get("plane")}
+    for x in fs:
+        ref = x.get("plane_ref")
+        if not ref:
+            continue
+        if ref in planes:
+            x["plane"] = dict(planes[ref])
+        else:
+            x.pop("plane_ref", None)
+    return fs
 
 
 class FeatureIn(BaseModel):

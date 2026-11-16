@@ -10,7 +10,7 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
 |---|------|--------|--------|
 | 1 | Sketcher tools: trim, extend, offset, slot, polygon, sketch fillet, mirror entities, angle dimension | Done | see git log "DS-026 (1)" |
 | 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | Done | see git log "DS-026 (2)" |
-| 3 | Reference plane features | Not started | |
+| 3 | Reference plane features | Done | see git log "DS-026 (3)" |
 | 4 | Draft and Rib | Not started | |
 | 5 | Sweep and Loft (sketch-only tree nodes) | Not started | |
 | 6 | Feature tree polish (rollback, rename, context menu) | Not started | |
@@ -113,6 +113,42 @@ a zero normal gives 422.
 → Right plane (preview outline visible) → OK. **24083.716875 mm³** (hand calc 24083.716875; before 24041.858437); tree
 eye suppress → 24041.858437, unsuppress → 24083.716875; edit from the tree to mirror only the hole → **23759.115099**
 (hand calc 23759.115099). Screenshots reviewed: PM with plane preview, mirrored part, suppressed, edit PM, edited result.
+
+## 3. Reference plane features (Done)
+
+**What was built**
+- New manual op `plane` (tree name "Plane1", ribbon **Features → Reference Plane**). It holds a first reference
+  (Top / Front / Right through the origin, a picked planar face, or another reference plane), an offset distance
+  (negative = other side), and an optional angle about the reference's own X or Y axis through its origin (turn first,
+  then offset along the new normal). It is reference geometry only and never changes the solid.
+- The placement is computed by `aicad/refplane.py` (pure Python, shared by model builds and the API, so the API process
+  still doesn't import the CAD kernel) and mirrored in TypeScript (`resolveRefPlane`) for the live preview. It is a pure
+  function of the feature's own numbers, so it is identical on every rebuild, in any tree order and when suppressed.
+- Sketches attach to a plane with `plane_ref`. At build time `fw.apply_manual` places them on the plane's current
+  placement. The API also keeps every attached sketch's stored placement in sync (`sync_planes`). Deleting a plane
+  detaches its sketches, which keep their last placement (no broken features).
+- From scratch: a hand-modelled part may start with planes. With only reference geometry there is nothing to build, so the
+  model is saved without a build, and the tree now loads manual features before the first build.
+- UI: PropertyManager with a live green outline of the plane. In the tree, plane rows have a plane icon, a **Sketch on PlaneN**
+  pencil, and a hover outline in the viewer. The sketch-plane picker lists user planes next to Front/Top/Right, and the sketcher
+  header reads "Sketch on Plane1". Agent prompt updated.
+- Limitation: a plane based on another plane copies that plane's placement when created or edited; it doesn't chain-follow
+  later edits of the base plane. The PropertyManager says so.
+
+**Tests**: `test_reference_plane_features`: Top turned 90° about X with offset −10 resolves to origin (0,10,0), normal
+(0,−1,0), and the volume is unchanged. A through-all R3 cut on it (sent with a stale placement, and the plane wins) gives 24000 − 90π. Editing
+the plane offset to 0 moves the sketch, giving 24000 − 180π. Reordering and suppressing the plane leave the volume unchanged, and deleting it detaches the sketch at
+its last placement; bad inputs give 422. `test_reference_plane_before_any_solid`: plane Top+5 with no build (revision
+None), then a 20×10×10 boss on it: volume 2000, bbox z 5..15.
+
+**Browser walkthrough** (`ref-planes.mjs`, 0 console/page errors), new empty project:
+- Reference Plane Top +10 before any solid: tree shows Plane1 (no build). **Sketch on Plane1** → 30×20 rectangle →
+  extrude 10: **6000 mm³**, bbox z **10..20**.
+- Plane2 = Top turned 90° about X (preview through the origin): resolved normal (0,−1,0). Sketch on Plane2 → R3
+  circle at (0,15) → through-all cut: **5717.256661** (6000 − 90π = 5717.256661).
+- Edit Plane2 offset 10 → the attached cut moves to y = −10 and runs 20 mm: **5434.513322** (6000 − 180π = 5434.513322).
+- Hover Plane1 in the tree: its outline is drawn at the block's bottom face. Screenshots reviewed: plane PM, tree before the first
+  build, sketch on a plane, angled plane PM, cut, plane edit, hover outline.
 
 ## Parked decisions
 - PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),

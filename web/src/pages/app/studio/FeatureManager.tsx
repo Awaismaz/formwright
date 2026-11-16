@@ -6,11 +6,11 @@ import type { ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Button, Field, Input, Tip } from "@/components/ui";
 import { describe, edgeMid } from "@/viewer/measure";
-import { FEATURE_LABEL, nextName } from "@/viewer/planes";
+import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
 export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern" };
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane" };
 const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
@@ -55,7 +55,7 @@ export function xDirFor(n: V3): V3 {
 }
 
 export function selectKindsFor(op: FeatureOp): Pick["kind"][] {
-  return op === "fillet" || op === "chamfer" ? ["edge"] : op === "pattern" ? ["edge", "face"] : ["face"];
+  return op === "fillet" || op === "chamfer" ? ["edge"] : op === "pattern" ? ["edge", "face"] : ["face"]; // plane: a face as its reference
 }
 
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
@@ -70,7 +70,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const pre = preset ?? {};
   const patKind0 = (e?.kind ?? (pre.kind as "linear" | "circular" | undefined) ?? "linear");
   const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
-    : op === "mirror" ? nextName("Mirror", manual)
+    : op === "mirror" ? nextName("Mirror", manual) : op === "plane" ? nextName("Plane", manual)
     : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
   // feature pattern
   const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
@@ -105,6 +105,17 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [cy_, setCy] = useState(String(e?.sketch?.cy ?? 0));
   const [dist, setDist] = useState(String(e?.distance ?? 5));
   const [mode, setMode] = useState<"add" | "cut">(e?.mode ?? (pre.mode as "add" | "cut") ?? "add");
+  // reference plane
+  const otherPlanes = manual.filter(m => m.op === "plane" && m.id !== e?.id && m.plane);
+  const [refBase, setRefBase] = useState<string>(() => {
+    if (!e?.base) return "Top";
+    const named = (["Front", "Top", "Right"] as RefPlane[]).find(n => e.base_name === `${n} Plane`);
+    if (named) return named;
+    return otherPlanes.find(m => m.name === e.base_name) ? `pl:${otherPlanes.find(m => m.name === e.base_name)!.id}` : "face";
+  });
+  const [planeOff, setPlaneOff] = useState(String(e?.offset ?? 10));
+  const [planeAng, setPlaneAng] = useState(String(e?.angle && op === "plane" ? e.angle : 0));
+  const [rotAxis, setRotAxis] = useState<"x" | "y">(e?.rot_axis ?? "x");
   const [mirrorWhat, setMirrorWhat] = useState<"features" | "body">(e ? (e.source?.length ? "features" : "body") : candidates.length ? "features" : "body");
   const [mirrorPlane, setMirrorPlane] = useState<MirrorPlane>(() => {
     if (!e?.plane) return "Right";
@@ -135,13 +146,19 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     }
   }, [pattern, plane]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const planeBase: { def: PlaneDef; name: string } | null = op !== "plane" ? null
+    : refBase === "face" ? (face && faceN ? { def: { origin: face.point, normal: faceN, x_dir: xDirFor(faceN) }, name: "Face" } : e?.base ? { def: e.base, name: e.base_name || "Face" } : null)
+    : refBase.startsWith("pl:") ? (() => { const m = otherPlanes.find(x => `pl:${x.id}` === refBase); return m?.plane ? { def: { origin: m.plane.origin, normal: m.plane.normal, x_dir: m.plane.x_dir ?? xDirFor(m.plane.normal) }, name: m.name } : null; })()
+    : { def: REF_PLANES[refBase as RefPlane], name: `${refBase} Plane` };
+  const refResolved = planeBase ? resolveRefPlane(planeBase.def, num(planeOff), num(planeAng), rotAxis) : null;
   const mirrorPl = op !== "mirror" ? null : mirrorPlane === "face" ? (plane ? { origin: plane.origin, normal: plane.normal } : null) : { origin: [0, 0, 0] as V3, normal: PRINCIPAL[mirrorPlane] };
   useEffect(() => {
     if (op === "extrude" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind, w: num(w), h: num(h), r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 });
     else if (op === "hole" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind: "circle", r: num(size) / 2, cx: 0, cy: 0 });
     else if (mirrorPl) onSketch(planePreview(mirrorPl.origin, mirrorPl.normal, topo));
+    else if (refResolved) onSketch(planePreview(refResolved.origin, refResolved.normal, topo));
     else onSketch(null);
-  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(","), refResolved?.origin.join(","), refResolved?.normal.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onSketch(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (op === "pattern" && picked) { setAxisKey("pick"); if (patKind === "circular") setAxOrigin(picked.origin.map(fmt) as [string, string, string]); } }, [picked?.label, patKind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -155,6 +172,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : needsEdges ? (edges.length > 0 || !!e?.edges?.length)
     : op === "shell" ? (planarFaces.length > 0 || !!e?.faces?.length)
     : op === "mirror" ? !!mirrorPl && (mirrorWhat === "body" || sources.length > 0)
+    : op === "plane" ? !!planeBase && Number.isFinite(num(planeOff)) && Number.isFinite(num(planeAng))
     : !!plane;
 
   // features are replayed in tree order, whatever order they were ticked in
@@ -175,6 +193,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     } else if (op === "shell") {
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
+    } else if (op === "plane") {
+      f = { ...f, base: planeBase!.def, base_name: planeBase!.name, offset: num(planeOff), angle: num(planeAng), rot_axis: rotAxis };
     } else if (op === "mirror") {
       f = { ...f, plane: mirrorPl, source: mirrorWhat === "features" ? inTreeOrder : null };
     } else {
@@ -220,7 +240,21 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
-        {op === "mirror" ? <>
+        {op === "plane" ? <>
+          <div className="rounded-lg border border-border bg-panel2 p-2.5">
+            <div className="label mb-1">First reference</div>
+            <div className="flex flex-wrap gap-1">{seg<string>([["Top", "Top"], ["Front", "Front"], ["Right", "Right"], ["face", "Face"], ...otherPlanes.map(m => [`pl:${m.id}`, m.name] as [string, string])], refBase, setRefBase)}</div>
+            <p className="mt-1 text-[12px] text-muted">{refBase === "face" ? (face && topo ? `${describe(face, topo)}: offset from its plane.` : e?.base ? "Using the original face. Click a planar face to change it." : "Click a planar face in the viewer.")
+              : refBase.startsWith("pl:") ? `Offset from ${planeBase?.name ?? "the plane"} (its placement now; later edits to it don't move this plane).` : `${refBase} Plane through the origin.`}</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {numField("Offset distance", planeOff, setPlaneOff, "mm", "Negative = other side")}
+            {numField("Angle", planeAng, setPlaneAng, "°", "Turns the plane first")}
+          </div>
+          {Math.abs(num(planeAng) || 0) > 0 && <div><div className="label mb-1">Rotate about</div>{seg<"x" | "y">([["x", "Reference X axis"], ["y", "Reference Y axis"]], rotAxis, setRotAxis)}</div>}
+          <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+          <p className="flex gap-1 text-[11px] text-muted"><Info className="mt-0.5 h-3 w-3 shrink-0" />A plane is reference geometry: it never changes the solid. Sketch on it from the feature tree; sketches on it move when you edit the plane.</p>
+        </> : op === "mirror" ? <>
           <div>{seg<"features" | "body">([["features", "Mirror features"], ["body", "Mirror body"]], mirrorWhat, setMirrorWhat)}</div>
           {mirrorWhat === "features" ? featurePicker("Features to mirror", "mirrored")
             : <p className="text-[12px] text-muted">The whole body is mirrored and joined to the original.</p>}

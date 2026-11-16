@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
@@ -170,7 +170,7 @@ const fmtParams = (p: Record<string, unknown>) => Object.entries(p).filter(([, v
   .slice(0, 4).map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? +v.toFixed(3) : String(v)}`).join(" · ");
 
 export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane,
-  selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false }: {
+  selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false, onSketchOn, onPreviewPlane }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
   onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
@@ -178,6 +178,8 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
   /** Design (agent-built) feature actions: pick as a chat reference, suppress/restore without AI, delete via the agent. */
   selectedFeatures?: string[]; onPickFeature?: (name: string) => void;
   onSuppressDesign?: (name: string, suppressed: boolean) => void; onDeleteDesign?: (name: string) => void; agentBusy?: boolean;
+  /** Reference plane features: open a sketch on one; show it in the viewer while hovered. */
+  onSketchOn?: (f: ManualFeature) => void; onPreviewPlane?: (f: ManualFeature | null) => void;
 }) {
   const modelFeats = (status?.features ?? []).filter(f => f.kind !== "manual" && f.kind !== "edit");
   const facesOf = (name: string) => topo ? topo.faces.filter(f => f.feature === name).map(f => f.id) : [];
@@ -265,9 +267,11 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
       <div className="label mb-1 mt-4 flex items-center gap-1"><Pencil className="h-3.5 w-3.5" />Manual features</div>
       {manual.length === 0 ? <p className="text-[12px] text-muted">{status?.fingerprint ? "Use the command bar (Features / Sketch) to add features by hand. They stay editable here." : "Start a part by hand: click a plane above (or Extruded / Revolved Boss in the command bar), sketch a closed profile and extrude or revolve it."}</p> :
         <ul className="space-y-0.5">{manual.map((f, i) => (
-          <li key={f.id} onMouseEnter={() => onHover(f.suppressed ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])}
+          <li key={f.id} onMouseEnter={() => (f.op === "plane" ? onPreviewPlane?.(f) : onHover(f.suppressed ? [] : facesOf(f.name)))} onMouseLeave={() => (f.op === "plane" ? onPreviewPlane?.(null) : onHover([]))}
             className={cx("group flex items-center gap-1 rounded px-2 py-1 hover:bg-primary-soft", f.suppressed && "opacity-50")}>
+            {f.op === "plane" && <Square className="h-3.5 w-3.5 shrink-0 -skew-x-12 text-primary/70" />}
             <button className="flex-1 truncate text-left" onClick={() => onEdit(f)} disabled={busy}>{f.name} <Badge className="ml-1">{f.op === "sketch" && f.mode === "cut" ? "Cut" : FEATURE_LABEL[f.op] ?? f.op}</Badge></button>
+            {f.op === "plane" && onSketchOn && <Tip content={`Sketch on ${f.name}`} side="left"><button disabled={busy} onClick={() => onSketchOn(f)} className="rounded p-0.5 text-muted hover:text-primary" aria-label={`Sketch on ${f.name}`}><PenLine className="h-3.5 w-3.5" /></button></Tip>}
             <Tip content={f.suppressed ? "Unsuppress" : "Suppress"} side="left"><button disabled={busy} onClick={() => onToggle(f)} className="rounded p-0.5 text-muted hover:text-text">{f.suppressed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>
             <button disabled={busy || i === 0} onClick={() => onMove(f, -1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" /></button>
             <button disabled={busy || i === manual.length - 1} onClick={() => onMove(f, 1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" /></button>

@@ -40,5 +40,26 @@ export function nextName(base: string, existing: { name: string }[]): string {
 
 export const FEATURE_LABEL: Record<string, string> = {
   fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror",
-  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern",
+  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane",
 };
+
+/**
+ * Placement of a reference plane feature (same maths as the server's refplane.ref_plane): the base plane turned by
+ * `angle`° about its own X or Y axis through its origin, then moved `offset` mm along the new normal.
+ */
+export function resolveRefPlane(base: PlaneDef, offset: number, angle: number, axis: "x" | "y"): PlaneDef {
+  const unit = (v: V3): V3 => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  let n = unit(base.normal); const d = dot(base.x_dir, n);
+  let x = unit([base.x_dir[0] - n[0] * d, base.x_dir[1] - n[1] * d, base.x_dir[2] - n[2] * d]);
+  const y = cross(n, x);
+  const a = ((Number.isFinite(angle) ? angle : 0) * Math.PI) / 180;
+  if (Math.abs(a) > 1e-12) {
+    const k = axis === "y" ? y : x; const c = Math.cos(a), s = Math.sin(a);
+    const rot = (v: V3): V3 => { const kv = cross(k, v), kd = dot(k, v) * (1 - c); return unit([v[0] * c + kv[0] * s + k[0] * kd, v[1] * c + kv[1] * s + k[1] * kd, v[2] * c + kv[2] * s + k[2] * kd]); };
+    n = rot(n); x = rot(x);
+  }
+  const off = Number.isFinite(offset) ? offset : 0;
+  return { origin: [base.origin[0] + n[0] * off, base.origin[1] + n[1] * off, base.origin[2] + n[2] * off], normal: n, x_dir: x };
+}

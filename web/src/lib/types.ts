@@ -58,7 +58,7 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane"; name: string; suppressed: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
   axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
   source?: string[]; kind?: "linear" | "circular";
@@ -70,6 +70,11 @@ export interface ManualFeature {
   sketch?: { kind: "rect" | "circle" | "poly"; w?: number; h?: number; r?: number; cx?: number; cy?: number };
   distance?: number; mode?: "add" | "cut";
   profiles?: unknown[]; editor?: unknown;
+  /** reference plane: base plane, offset, angle about the base X/Y axis; `plane` holds the resolved placement */
+  base?: { origin: [number, number, number]; normal: [number, number, number]; x_dir: [number, number, number] }; base_name?: string;
+  offset?: number; rot_axis?: "x" | "y";
+  /** sketch attached to a reference plane feature (follows it when the plane is edited) */
+  plane_ref?: string;
 }
 
 export interface Project {

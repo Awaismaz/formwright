@@ -443,3 +443,57 @@ def test_delete_design_feature_without_ai(app_client: TestClient) -> None:  # no
     assert "DELETED_FEATURES = ['Mounting holes (4x)']" in src and "SUPPRESSED_FEATURES" not in src
     chk5 = next(x for x in st["checks"] if x["id"] == "CHK-05")
     assert chk5["gating"] is False and "deleted" in chk5["name"]
+
+
+def test_reference_plane_features(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "planes@x.com", "Planes")
+    # Top plane turned 90 degrees about its X axis is a Front-facing plane (normal -Y); offset -10 puts it at y = +10
+    pl = {"op": "plane", "name": "Plane1", "base": TOP, "base_name": "Top Plane", "angle": 90, "rot_axis": "x", "offset": -10}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pl})
+    assert r.status_code == 200, r.text
+    plane = r.json()["features"][-1]
+    assert plane["plane"] == {"origin": [0, 10, 0], "normal": [0, -1, 0], "x_dir": [1, 0, 0]}
+    assert _vol(c, pid) == pytest.approx(24000, rel=1e-12)  # reference geometry never changes the solid
+    # a through-all cut sketched on it (stored placement is stale on purpose: the plane wins)
+    cut = {"op": "sketch", "name": "Cross hole", "plane": TOP, "plane_ref": plane["id"], "mode": "cut", "end": "through",
+           "profiles": [{"kind": "circle", "cx": 0, "cy": 5, "r": 3}]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": cut})
+    assert r.status_code == 200, r.text
+    assert r.json()["features"][-1]["plane"] == plane["plane"]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 10, rel=1e-9)  # y = 10..20
+    # moving the plane moves the attached sketch
+    assert c.patch(f"/api/projects/{pid}/manual/{plane['id']}", json={"feature": {"offset": 0}}).status_code == 200
+    feats = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert feats[-1]["plane"]["origin"] == [0, 0, 0]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)  # y = 0..20
+    # order and suppression of the plane don't matter; deleting it leaves the sketch where it was
+    ids = [f["id"] for f in feats]
+    assert c.post(f"/api/projects/{pid}/manual/reorder", json={"ids": [ids[0], ids[2], ids[1]]}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    assert c.patch(f"/api/projects/{pid}/manual/{plane['id']}", json={"feature": {"suppressed": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    assert c.delete(f"/api/projects/{pid}/manual/{plane['id']}").status_code == 200
+    left = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert [f["op"] for f in left] == ["sketch", "sketch"] and "plane_ref" not in left[-1]
+    assert left[-1]["plane"]["origin"] == [0, 0, 0]
+    assert _vol(c, pid) == pytest.approx(24000 - math.pi * 9 * 20, rel=1e-9)
+    for bad in ({**pl, "base": {**TOP, "normal": [0, 0, 0]}}, {**pl, "angle": 200}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+
+
+def test_reference_plane_before_any_solid(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "planefirst@x.com")
+    pid = c.post("/api/projects", json={"name": "Plane first"}).json()["id"]
+    pl = {"op": "plane", "name": "Plane1", "base": TOP, "offset": 5}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": pl})
+    assert r.status_code == 200 and r.json()["revision"] is None, r.text
+    pid_plane = r.json()["features"][0]["id"]
+    boss = {"op": "sketch", "name": "Boss", "plane": TOP, "plane_ref": pid_plane, "mode": "add", "distance": 10,
+            "profiles": [_rect(-10, -5, 10, 5)]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": boss})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(20 * 10 * 10, rel=1e-12)
+    topo = c.get(f"/api/projects/{pid}/files/topo.json").json()
+    assert topo["bbox"] == pytest.approx([-10, -5, 5, 10, 5, 15], abs=1e-9)
