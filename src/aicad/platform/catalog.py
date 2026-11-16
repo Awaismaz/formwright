@@ -57,9 +57,13 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Material library with provenance", "Sign-off workflow"],
     },
     "print": {
-        "name": "3D Print Prep", "status": "preview", "icon": "printer",
-        "summary": "Watertightness, wall thickness, overhangs and orientation suggestions before you slice.",
-        "bullets": ["Manifold & wall checks", "Overhang map", "Orientation ranking", "3MF / STL export"],
+        "name": "3D Print Prep", "status": "live", "icon": "printer",
+        "summary": "Check a verified model or an uploaded STL / OBJ / 3MF before you slice: watertightness, wall "
+                   "thickness, overhangs and bridges, build-volume fit and ranked print orientations. Geometric "
+                   "checks and rough estimates, not a slicer.",
+        "bullets": ["Watertight, manifold and self-intersection checks", "Wall-thickness heatmap and overhang map",
+                    "Ranked orientations with support, height and strength notes",
+                    "Mesh repair, oriented STL / 3MF export (mm)"],
     },
     "mesh": {
         "name": "Mesh Studio", "status": "preview", "icon": "shapes",
