@@ -27,12 +27,18 @@ const FAQ = [
   ["Is this a replacement for SOLIDWORKS?", "No. Formwright gets you from idea to a verified, editable starting model fast. Your team keeps refining and documenting in the CAD system it already uses."],
   ["What exactly is checked?", "Shape validity, solid count, closed manifold, bounding box and volume against values computed from your requirements, STEP export/re-import equality and deterministic regeneration. Checks prove geometric consistency — not strength or manufacturability."],
   ["What are tokens?", "AI work is metered in tokens so you only pay for what you use. Each run shows its cost. Trials include 300 tokens; paid plans include a monthly allowance and you can top up any time."],
-  ["Which modules are available today?", "Design Studio is live. Drawing Studio, Image-to-CAD, Assembly Studio, Manufacturing & Engineering Advisors, 3D Print Prep and Mesh Studio are on the roadmap and marked Preview in the app."],
   ["Who owns the designs?", "You do. Generated models and source belong to your organization."],
 ];
 
 export default function Landing() {
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog") });
+  const mods = catalog.data?.modules ?? [];
+  const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+  const live = list(mods.filter(m => m.status === "live").map(m => m.name));
+  const preview = list(mods.filter(m => m.status !== "live").map(m => m.name));
+  const faq = [...FAQ.slice(0, 3), ["Which modules are available today?", mods.length
+    ? `Live today: ${live}. ${preview ? `${preview} ${preview.includes(" and ") ? "are" : "is"} on the roadmap and marked Preview in the app.` : ""}`
+    : "See the module list above: each is marked Live or Preview."], ...FAQ.slice(3)];
   return (
     <main>
       {/* hero */}
@@ -156,7 +162,7 @@ export default function Landing() {
       <section className="mx-auto max-w-3xl px-4 py-20 sm:px-6">
         <h2 className="text-center text-3xl font-semibold tracking-tight">Questions engineers ask</h2>
         <div className="mt-10 divide-y divide-border rounded-xl border border-border bg-panel">
-          {FAQ.map(([q, a]) => (
+          {faq.map(([q, a]) => (
             <details key={q} className="group px-5 py-4 [&_summary::-webkit-details-marker]:hidden">
               <summary className="flex cursor-pointer items-center justify-between font-medium">{q}<span className="ml-4 text-muted transition group-open:rotate-45">+</span></summary>
               <p className="mt-2 text-sm leading-relaxed text-muted">{a}</p>

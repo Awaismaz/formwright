@@ -10,7 +10,7 @@ export const APP_TOUR: DriveStep[] = [
   { element: "[data-tour=quickstart]", popover: { title: "Start from a template",
     description: "Pick a proven starting prompt — bracket, shaft, flange, enclosure — or describe your own part from scratch.", side: "bottom" } },
   { element: "[data-tour=nav-modules]", popover: { title: "Modules",
-    description: "Design Studio is live today. Drawings, manufacturing and engineering advisors are on the roadmap — preview them and join the early-access list.", side: "right" } },
+    description: "Live today: Design Studio, Manufacturing Advisor, Engineering Advisor and 3D Print Prep, each opening straight on your part. Preview modules show what is coming next; join their early-access list.", side: "right" } },
   { element: "[data-tour=tokens]", popover: { title: "Tokens",
     description: "AI work is metered in tokens. Your trial includes 300. You always see the cost of each run, and you can top up or upgrade from Billing.", side: "bottom" } },
   { element: "[data-tour=checklist]", popover: { title: "Your getting-started checklist",

@@ -170,7 +170,7 @@ async def seed_demo(ctx: Ctx = Depends(god_ctx)) -> dict[str, Any]:
             p.last_status = {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id",
                                                     "params")}
             p.builds = 1
-            _snapshot(p, ws)
+            _snapshot(p, ws, cause="Demo part created", kind="library")
         made += 1
     for name, role in (("Priya Natarajan", "admin"), ("Marcus Reid", "engineer"), ("Elena Kowalski", "viewer")):
         email = f"{name.split()[0].lower()}@{DEMO_DOMAIN}"

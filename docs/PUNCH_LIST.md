@@ -104,41 +104,41 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | IO-001 | IO | STEP export (AP214/AP242), units mm, part name/metadata | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-07 passes; opens in SW 2025 + Creo 11 | CHK-07 round-trip pass; byte-identical STEP with fixed timestamp (`test_step_bytes_deterministic`) | Not yet opened in SW/Creo |
-| IO-002 | IO | STL export with tolerance control | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Watertight mesh; deviation ≤ tol | `part.stl` exported, tol 0.01 mm | Watertight/deviation checks pending |
+| IO-002 | IO | STL export with tolerance control | P0 | Done | M1 | MVP | Eng | CAD-001 | Watertight mesh; deviation ≤ tol | Absolute 0.01 mm chordal deviation (`runner.export_stl_abs`; build123d's tolerance is relative: R100 cylinder sag 0.031 → 0.005 mm); `tests/test_agent.py`::test_stl_export_deviation_is_absolute; PP-17 re-reads part.stl | Found by the 3D Print Prep agent |
 | IO-003 | IO | GLB export for web viewer | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Loads in Three.js; scale correct | `model.glb` loads in Three.js viewer (screenshot, session log) | Unit scale inferred in viewer; explicit check pending |
-| IO-004 | IO | 3MF export | P1 | Backlog | M2 | LT | Eng | IO-002 | Opens in a slicer; units preserved | — | |
+| IO-004 | IO | 3MF export | P1 | Done | M2 | LT | Eng | IO-002 | Opens in a slicer; units preserved | 3MF with unit=millimeter, byte-identical rewrite, read-back volume match rel 1e-5 (`tests/test_print.py`) | Via 3D Print Prep exports; Studio also writes part.3mf |
 | IO-005 | IO | STEP import + validation (size limits, isolated parse) | P1 | Backlog | M2 | LT | Eng | SEC-005 | Malformed files rejected safely | — | |
 | IO-006 | IO | Assembly STEP export (hierarchy, placements) | P1 | Backlog | M3 | LT | Eng | ASM-001 | Reimport preserves tree & transforms | — | |
-| IO-007 | IO | DXF export of drawings/flat patterns | P2 | Backlog | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | — | ezdxf (MIT) candidate |
+| IO-007 | IO | DXF export of drawings/flat patterns | P2 | Done | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | DXF 1:1 via build123d ExportDXF (ezdxf, MIT) with layers | DXF dims are lines+text, not associative; DXF bytes not deterministic |
 | IO-008 | IO | Coordinate system + unit preservation tests across all formats | P0 | Backlog | M1 | MVP | Eng | IO-001 | Round-trip test matrix green | — | |
 
 ### PRN — 3D printing preparation
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| PRN-001 | Print | Manifold/watertight validation | P1 | Backlog | M2 | LT | Eng | IO-002 | Detects seeded defects in test meshes | — | trimesh/manifold3d candidates |
-| PRN-002 | Print | Wall thickness analysis | P1 | Backlog | M2 | LT | Eng | PRN-001 | Flags walls < threshold on fixtures | — | |
-| PRN-003 | Print | Overhang/support guidance | P2 | Backlog | M2 | LT | Eng | PRN-001 | Overhang map vs angle threshold | — | |
-| PRN-004 | Print | Orientation suggestions (support area, height, strength axis) | P2 | Backlog | M4 | LT | Eng | PRN-003 | Ranked options with rationale | — | |
-| PRN-005 | Print | Mesh repair | P2 | Backlog | M4 | LT | Eng | PRN-001 | Repairs seeded defects; reports changes | — | |
-| PRN-006 | Print | "Not slicer-verified" disclosure unless checks run | P1 | Backlog | M2 | LT | Eng | PRN-001 | UI text present | — | Honesty requirement |
+| PRN-001 | Print | Manifold/watertight validation | P1 | Done | M2 | LT | Eng | IO-002 | Detects seeded defects in test meshes | `src/aicad/printprep/`; `tests/test_print.py` (box passes; box minus a face: 4 open edges, 1 hole; inward normals, flipped winding, non-manifold fin, self-intersection); docs/reports/print.md | 3D Print Prep Live 2026-11-16 |
+| PRN-002 | Print | Wall thickness analysis | P1 | Done | M2 | LT | Eng | PRN-001 | Flags walls < threshold on fixtures | Ray casting along inward normals, per-triangle heatmap; 1.5 mm shelled cup measured 1.5 mm ±1e-6 (`tests/test_print.py`) | Sampled at triangle centres (+3 points on large triangles) |
+| PRN-003 | Print | Overhang/support guidance | P2 | Done | M2 | LT | Eng | PRN-001 | Overhang map vs angle threshold | T-shape overhang (50−10)×20 = 800 mm², support envelope 800×30 mm³; bridges reported vs limit (`tests/test_print.py`) | Bridge anchoring not checked |
+| PRN-004 | Print | Orientation suggestions (support area, height, strength axis) | P2 | Done | M4 | LT | Eng | PRN-003 | Ranked options with rationale | Ranked orientations with rationale and rotation; flat-face-down ranks above upright-with-supports (`tests/test_print.py`); walkthrough: pipe flange flat, 0 support |  |
+| PRN-005 | Print | Mesh repair | P2 | Done | M4 | LT | Eng | PRN-001 | Repairs seeded defects; reports changes | Seeded hole + duplicate + flipped triangle repaired to exact volume; before/after report; original restorable (`tests/test_print.py`) | Uploads only |
+| PRN-006 | Print | "Not slicer-verified" disclosure unless checks run | P1 | Done | M2 | LT | Eng | PRN-001 | UI text present | Disclosure in every API response, viewer banner and export panel |  |
 
 ### DRW — 2D manufacturing drawings
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| DRW-001 | Drawing | HLR orthographic views (front/top/right) + iso to SVG | P0 | Backlog | M1 | MVP | Eng | CAD-001 | View extents match bbox (CHK-12) | — | |
-| DRW-002 | Drawing | Dimensions from spec features, tagged spec/inferred | P0 | Backlog | M1 | MVP | Eng | DRW-001 | Every spec dim appears once | — | R-TEC-03 |
-| DRW-003 | Drawing | Hole callouts (dia, depth, qty) | P0 | Backlog | M1 | MVP | Eng | DRW-002 | Callouts match census | — | |
-| DRW-004 | Drawing | Title block: material, units, scale, revision, "NOT APPROVED" banner | P0 | Backlog | M1 | MVP | Eng | DRW-001 | Fields populated from spec/run | — | |
-| DRW-005 | Drawing | PDF export (license-cleared library) | P0 | Backlog | M1 | MVP | Eng | DRW-001, LEG-002 | PDF renders identically to SVG | — | |
-| DRW-006 | Drawing | Layout/overlap check (no dimension collisions) | P1 | Backlog | M1 | MVP | Eng | DRW-002 | Zero bbox overlaps of text on fixtures | — | |
-| DRW-010 | Drawing | Section views | P1 | Backlog | M2 | LT | Eng | DRW-001 | Section of FX-03 correct | — | |
+| DRW-001 | Drawing | HLR orthographic views (front/top/right) + iso to SVG | P0 | Done | M1 | MVP | Eng | CAD-001 | View extents match bbox (CHK-12) | Exact HLR views (build123d project_to_viewport) front/top/right + iso; first/third angle; view extents = bbox within 0.01 mm (`tests/test_drawings.py`); docs/reports/drawings.md | Drawing Studio Live 2026-11-16 |
+| DRW-002 | Drawing | Dimensions from spec features, tagged spec/inferred | P0 | Done | M1 | MVP | Eng | DRW-001 | Every spec dim appears once | Overall/diameter/step-chain/hole-position/PCD dimensions tagged spec or inferred, legend on sheet | Spec tag by value+kind match |
+| DRW-003 | Drawing | Hole callouts (dia, depth, qty) | P0 | Done | M1 | MVP | Eng | DRW-002 | Callouts match census | Hole callouts from exact data: '4X Ø6.6 THRU', '6X Ø14 THRU / EQ SP ON PCD Ø120' | C'bore/C'sink called out as plain holes |
+| DRW-004 | Drawing | Title block: material, units, scale, revision, "NOT APPROVED" banner | P0 | Done | M1 | MVP | Eng | DRW-001 | Fields populated from spec/run | Title block (part, material, mm, scale, projection, rev, date, drawn by) + red NOT APPROVED FOR MANUFACTURE banner |  |
+| DRW-005 | Drawing | PDF export (license-cleared library) | P0 | Done | M1 | MVP | Eng | DRW-001, LEG-002 | PDF renders identically to SVG | PDF via reportlab (BSD); SVG native; downloads 200 | svglib rejected (LGPL) |
+| DRW-006 | Drawing | Layout/overlap check (no dimension collisions) | P1 | Done | M1 | MVP | Eng | DRW-002 | Zero bbox overlaps of text on fixtures | CHK-12: no text overlaps / text on geometry / out of frame; seeded overlap fails (test) |  |
+| DRW-010 | Drawing | Section views | P1 | Done | M2 | LT | Eng | DRW-001 | Section of FX-03 correct | Section A-A (X/Y/Z) with hatch and cutting-plane line; section area = shoelace hand value (test) |  |
 | DRW-011 | Drawing | Detail views | P2 | Backlog | M2 | LT | Eng | DRW-001 | | — | |
-| DRW-012 | Drawing | General tolerances block + per-dim tolerances from spec | P1 | Backlog | M2 | LT | Eng | DRW-002 | Only approved tolerances shown as such | — | |
+| DRW-012 | Drawing | General tolerances block + per-dim tolerances from spec | P1 | In Progress | M2 | LT | Eng | DRW-002 | Only approved tolerances shown as such | General tolerance block: 'Not specified' default, ISO 2768 class by name or custom text | Per-dimension tolerances not built |
 | DRW-013 | Drawing | GD&T frames where specified (never invented) | P2 | Backlog | M4 | LT | Eng | DRW-012 | Frames only from explicit input | — | |
 | DRW-014 | Drawing | BOM table on assembly drawings | P1 | Backlog | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | — | |
-| DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Backlog | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | — | §2.A bullet 5 |
+| DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Done | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | Out-of-date drawings regenerate; revision rows ('Regenerated: L 120→150'); byte-identical SVG for same model+options |  |
 | DRW-016 | Drawing | STEP-in → auto drawing (wedge W4 candidate) | P1 | Backlog | M2 | LT | Eng | IO-005, DRW-002 | Pilot-rated usefulness ≥ agreed bar | — | Inferred dims only, clearly labelled |
 
 ### ASM — assemblies
@@ -221,40 +221,42 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DS-025 | Studio | Studio layout: project header bar removed (back, name, status, help, STEP moved into the command-bar tab row); feature panel left, design agent right; feature panel, agent panel and command bar collapsible (remembered); redundant "Add feature" buttons removed from the tree; model id no longer shown in chat | P0 | Done | M1 | MVP | Eng | DS-015 | | Browser screenshots SESSION_LOG (h) | App sidebar already collapsible (bottom-left) |
 | DS-024 | Studio | Model from scratch on reference planes (Front/Top/Right + offset), Revolved Boss/Cut about a sketch centerline, extrude end conditions (blind, mid plane, through all, reverse), linear/circular **pattern of any boss/cut/revolve/hole**, centerline + construction geometry in the sketcher, origin planes in the tree, SOLIDWORKS feature names | P0 | Done | M2 | LT | Eng | DS-017 | A part can be started by hand with no agent/import; revolve and pattern volumes exact | `tests/test_studio.py`::test_part_modelled_from_scratch_with_pattern, ::test_revolved_part_from_scratch; browser walkthroughs SESSION_LOG 2026-11-16 (j): boss 40×20×10 = 8000 mm³ → LPattern 16000 mm³; Revolve1 28274.33 mm³ → Cut-Extrude1 → CirPattern1 26012.39 mm³ (= hand calc), 0 console errors | |
 | DS-026 | Studio | Next: sweep, loft, draft, rib; sketch trim/extend/offset/slot/polygon/fillet; reference plane features; mirror of selected features; assembly mates with Toolbox parts (ASM) | P1 | In Progress | M3 | LT | Eng | DS-024 | | | Delegated to a Design Studio agent 2026-11-16 |
+| DS-027 | Studio | Agent-built features in the tree: suppress/unsuppress and delete **without AI** (delete verified identical to the suppressed model, else stays suppressed), click-to-reference in the agent chat, per-row menu; chat collapses repeated steps | P0 | Done | M2 | LT | Eng | DS-008 | Suppress/delete/restore volumes exact; base feature protected | `tests/test_studio.py`::test_suppress_design_agent_features, ::test_delete_design_feature_without_ai, ::test_delete_step_source_edit_rules; walkthrough SESSION_LOG (k): 91032.24 mm³ = v0 + 4π·3.3²·10 | Founder: deleting a clean feature must not need AI |
+| DS-028 | Studio | Make tab: Live downstream modules (Drawing, DFM Review, 3D Print, Calculations) open on the current part | P1 | Done | M2 | LT | Eng | module merges | Opens module with the project preselected | Walkthrough SESSION_LOG (k): Make → 3D Print → Flange DN100 opened directly | Shows Live modules only |
 
 ## B. AI Manufacturing Advisor
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| MFG-001 | Mfg | Basic CNC DFM rules for M1 family (internal radii, hole L/D, thin walls, std drill sizes) | P1 | Backlog | M1 | MVP | Eng | CAD-009 | Rules fire on seeded fixtures; findings tied to feature IDs | — | Advisory only |
-| MFG-010 | Mfg | Turning DFM rules | P1 | Backlog | M4 | LT | Eng | CAD-024 | Seeded fixture tests | — | |
+| MFG-001 | Mfg | Basic CNC DFM rules for M1 family (internal radii, hole L/D, thin walls, std drill sizes) | P1 | Done | M1 | MVP | Eng | CAD-009 | Rules fire on seeded fixtures; findings tied to feature IDs | CHK-13 CNC rules on exact B-rep with face ids (`src/aicad/manufacturing/`); `tests/test_manufacturing.py`: Ø2×10 hole L/D 5, R1 corners vs Ø6 tool critical, 0.5 mm wall measured 0.5, slot depth/width 5; docs/reports/manufacturing.md | Manufacturing Advisor Live 2026-11-16 |
+| MFG-010 | Mfg | Turning DFM rules | P1 | Done | M4 | LT | Eng | CAD-024 | Seeded fixture tests | Turnable detection (shaft Ø25×150 about +Z) + turning rules (slenderness, shoulders vs nose radius, second-op faces, capacity, bore depth) |  |
 | MFG-011 | Mfg | Sheet metal DFM rules | P2 | Backlog | M4 | LT | Eng | CAD-026 | Seeded fixture tests | — | |
 | MFG-012 | Mfg | Additive DFM rules | P2 | Backlog | M4 | LT | Eng | PRN-002 | Seeded fixture tests | — | |
-| MFG-013 | Mfg | Casting / injection molding DFM (draft, wall uniformity, undercuts) | P2 | Backlog | M4 | LT | Eng | CAD-025 | Seeded fixture tests | — | Only where credible |
-| MFG-014 | Mfg | Process recommendation (material, qty, geometry, tolerance, finish, machines) | P1 | Backlog | M4 | LT | Eng | MFG-010 | Ranked options with stated assumptions + confidence | — | |
-| MFG-015 | Mfg | Shop profile inputs (machines, tooling, rates) | P1 | Backlog | M4 | LT | Eng | PLT-001 | Advice changes with profile | — | |
-| MFG-016 | Mfg | Cost-driver/time-reduction suggestions (setups, tolerances, std parts, part count) | P1 | Backlog | M4 | LT | Eng | MFG-014 | Each suggestion cites feature + rationale | — | |
-| MFG-017 | Mfg | Relative cost model (no firm quotes) with assumptions | P2 | Backlog | M4 | LT | Eng | MFG-015 | Output labelled estimate; inputs shown | — | Never firm quotes |
-| MFG-018 | Mfg | Manufacturability report (PDF) tied to model features | P1 | Backlog | M4 | LT | Eng | MFG-001 | Report links finding → feature → view | — | |
+| MFG-013 | Mfg | Casting / injection molding DFM (draft, wall uniformity, undercuts) | P2 | Done | M4 | LT | Eng | CAD-025 | Seeded fixture tests | Screening: draft, two-part-mould undercuts (auto pull axis), plastic wall thickness | Screening only |
+| MFG-014 | Mfg | Process recommendation (material, qty, geometry, tolerance, finish, machines) | P1 | Done | M4 | LT | Eng | MFG-010 | Ranked options with stated assumptions + confidence | 8 processes ranked with reasons/assumptions; ABS shell at 20k units puts injection moulding top-2 (test); confidence never 'high' |  |
+| MFG-015 | Mfg | Shop profile inputs (machines, tooling, rates) | P1 | Done | M4 | LT | Eng | PLT-001 | Advice changes with profile | Shop profile per org, editable; advice changes with it (Ø8 tool → R3 pocket corners critical) | PD-19 defaults |
+| MFG-016 | Mfg | Cost-driver/time-reduction suggestions (setups, tolerances, std parts, part count) | P1 | Done | M4 | LT | Eng | MFG-014 | Each suggestion cites feature + rationale | Cost drivers cite faces |  |
+| MFG-017 | Mfg | Relative cost model (no firm quotes) with assumptions | P2 | Done | M4 | LT | Eng | MFG-015 | Output labelled estimate; inputs shown | Relative cost per process + quantity curve, labelled 'Relative estimate, not a quote'; unit cost non-increasing with quantity (test) | Rates/prices are labelled assumptions |
+| MFG-018 | Mfg | Manufacturability report (PDF) tied to model features | P1 | Done | M4 | LT | Eng | MFG-001 | Report links finding → feature → view | Printable HTML + PDF (reportlab, BSD) with highlighted views and NOT APPROVED banner |  |
 | MFG-019 | Mfg | BOM + manufacturability combined report for assemblies | P2 | Backlog | M4 | LT | Eng | ASM-008, MFG-018 | | — | |
-| MFG-020 | Mfg | Material library with provenance/versioning | P1 | Backlog | M4 | LT | Eng | — | Each property cites source + version | — | Shared with ENG-003 |
+| MFG-020 | Mfg | Material library with provenance/versioning | P1 | Done | M4 | LT | Eng | — | Each property cites source + version | Material properties with source + version (`manufacturing/matlib.py`); aicad.materials unchanged |  |
 
 ## C. AI Engineering Advisor
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| ENG-001 | Eng | Load case / boundary condition elicitation | P1 | Backlog | M4 | LT | Eng | AGT-003 | Structured load-case record per part | — | |
-| ENG-002 | Eng | Failure mode checklist (stress conc., fatigue, buckling, vibration, thermal, fit) | P1 | Backlog | M4 | LT | Eng | ENG-001 | Checklist tied to features; level = Recommended check | — | |
-| ENG-003 | Eng | Units/material/standards library with provenance & versions | P1 | Backlog | M4 | LT | Eng | MFG-020 | Unit-safe (pint or equiv.) tests | — | |
-| ENG-004 | Eng | Deterministic calculators (beam, bolt, pin shear, bearing, thread engagement) | P1 | Backlog | M4 | LT | Eng | ENG-003 | Verified against textbook worked examples | — | Level = Verified calculation after review |
-| ENG-005 | Eng | Safety factor handling with explicit user/standard source | P1 | Backlog | M4 | LT | Eng | ENG-004 | SF always attributed | — | |
-| ENG-006 | Eng | Recommend analyses/tests to run | P2 | Backlog | M4 | LT | Eng | ENG-002 | Recommendations listed with rationale | — | |
-| ENG-007 | Eng | Advice-level labelling in UI/reports (4 levels) | P0 | Backlog | M4 | LT | Eng | — | Every engineering output labelled | — | VALIDATION §4 |
-| ENG-008 | Eng | Engineer sign-off workflow for safety-critical outputs | P1 | Backlog | M4 | LT | Eng | PLT-004 | Named sign-off recorded; unsigned flagged | — | |
+| ENG-001 | Eng | Load case / boundary condition elicitation | P1 | Done | M4 | LT | Eng | AGT-003 | Structured load-case record per part | Load-case records per project (`<workspace>/engineering/`); docs/reports/engineering.md | Engineering Advisor Live 2026-11-16 |
+| ENG-002 | Eng | Failure mode checklist (stress conc., fatigue, buckling, vibration, thermal, fit) | P1 | Done | M4 | LT | Eng | ENG-001 | Checklist tied to features; level = Recommended check | Failure-mode checklist tied to features with suggested calculators/tests |  |
+| ENG-003 | Eng | Units/material/standards library with provenance & versions | P1 | Done | M4 | LT | Eng | MFG-020 | Unit-safe (pint or equiv.) tests | pint-based unit-checked inputs (BSD); 11 materials with cited mechanical properties, 'verify against certificate' |  |
+| ENG-004 | Eng | Deterministic calculators (beam, bolt, pin shear, bearing, thread engagement) | P1 | Done | M4 | LT | Eng | ENG-003 | Verified against textbook worked examples | 10 calculators match Shigley (10th/11th ed.) worked examples + ISO 898-1 table (`tests/test_engineering.py`, 31 tests; table in report) | Hand-calculation methods with stated assumptions |
+| ENG-005 | Eng | Safety factor handling with explicit user/standard source | P1 | Done | M4 | LT | Eng | ENG-004 | SF always attributed | Strength checks refuse to run without required SF + source; 'meets / below required factor' wording |  |
+| ENG-006 | Eng | Recommend analyses/tests to run | P2 | Done | M4 | LT | Eng | ENG-002 | Recommendations listed with rationale | Checklist recommends analyses/tests with reasons |  |
+| ENG-007 | Eng | Advice-level labelling in UI/reports (4 levels) | P0 | Done | M4 | LT | Eng | — | Every engineering output labelled | Advice-level labels: Preliminary estimate → Verified calculation on sign-off; never Validated simulation |  |
+| ENG-008 | Eng | Engineer sign-off workflow for safety-critical outputs | P1 | Done | M4 | LT | Eng | PLT-004 | Named sign-off recorded; unsigned flagged | Named sign-off with SHA-256 of inputs/results/load cases; any edit → 'Signature invalid'; walkthrough confirmed | PD-20 |
 | ENG-009 | Eng | External FEA integration evaluation (e.g., CalculiX, SW Simulation) | P2 | Backlog | M5 | LT | Eng | LEG-002 | ADR with license + validation approach | — | |
-| ENG-010 | Eng | Stress concentration region highlighting (geometry heuristics) | P2 | Backlog | M4 | LT | Eng | ENG-002 | Highlights on fixtures; labelled heuristic | — | |
-| ENG-011 | Eng | Fit/clearance/tolerance stack-up (1D) | P2 | Backlog | M4 | LT | Eng | ASM-005 | Worked example match | — | |
-| ENG-012 | Eng | Guard: never claim FEA validation from visual review | P0 | Backlog | M4 | LT | Eng | ENG-007 | Test prompts can't elicit "validated" wording without evidence | — | |
+| ENG-010 | Eng | Stress concentration region highlighting (geometry heuristics) | P2 | Done | M4 | LT | Eng | ENG-002 | Highlights on fixtures; labelled heuristic | Heuristic stress-concentration hints (shoulders, holes near edges, small fillets, sharp corners), labelled Heuristic |  |
+| ENG-011 | Eng | Fit/clearance/tolerance stack-up (1D) | P2 | Done | M4 | LT | Eng | ASM-005 | Worked example match | 1D stack-up worst case + RSS (Shigley 1-21/1-24 exact) |  |
+| ENG-012 | Eng | Guard: never claim FEA validation from visual review | P0 | Done | M4 | LT | Eng | ENG-007 | Test prompts can't elicit "validated" wording without evidence | Validation-wording guard tested; API rejects such wording in notes/conclusions/sign-off |  |
 
 ## D. AI Mesh Studio (later module)
 
@@ -288,6 +290,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | PLT-009 | Platform | Usage controls per tenant | P2 | In Progress | M4 | LT | Eng | PLT-004 | Caps enforced | Token preflight, plan/trial gating, seat limits | Per-tenant spend caps pending |
 | PLT-010 | Platform | Collaboration foundations (sharing, comments) | P2 | Backlog | M4 | LT | Eng | PLT-004 | | — | |
 | PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | In Progress | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | STEP/STL downloads per project | Zip bundle pending |
+| PLT-012 | Platform | **Find similar parts** (O-1): orientation-free shape signatures; similar-part ranking with reasons; search by size (`120x80x10`, `Ø50 x 200`) in Projects; Studio Library → Similar Parts | P1 | Done | M2 | LT | Eng | — | Identical part 100 %, scaled family recognised, unrelated parts ranked low | `tests/test_search.py`; walkthrough SESSION_LOG (k): flange copy 100 %, pipe flange 79 %, DN150 'Same shape, scaled ×1.50' 48 % | Research: ~12 h/week spent finding existing models |
 | SEC-001 | Security | M1 isolation: compiler-only execution in subprocess w/ timeout + memory guard | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Timeout test kills runaway job | runner subprocess, timeout, secret-free env, import tripwire (`tests/test_agent.py`) | Tripwire is not a sandbox (R-SEC-05) |
 | SEC-002 | Security | Path traversal + filename sanitization in artifact store | P0 | Done | M1 | MVP | Eng | PLT-002 | Fuzz tests | Allow-listed file names per project, workspace path resolution checks; `tests/test_platform.py`::test_projects_crud_and_paywall |  |
 | SEC-003 | Security | Secrets management (env/keyring; never in workers or logs) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | Log scrubbing test | — | |

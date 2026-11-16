@@ -23,11 +23,12 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Live 3D viewer, STEP / STL export", "Conversational revisions"],
     },
     "drawings": {
-        "name": "Drawing Studio", "status": "preview", "icon": "ruler",
-        "summary": "Generate manufacturing drawings from your model: orthographic and section views, "
-                   "dimensions, hole callouts, title block and BOM.",
-        "bullets": ["3-view + isometric layouts", "Spec vs inferred dimension tags", "PDF / DXF export",
-                    "Associative updates on model change"],
+        "name": "Drawing Studio", "status": "live", "icon": "ruler",
+        "summary": "Turn a verified model into a drawing sheet: exact hidden-line views, a hatched section, "
+                   "dimensions tagged spec or inferred, hole callouts and a title block. Every sheet is "
+                   "consistency-checked and marked not approved for manufacture.",
+        "bullets": ["Front / top / right + isometric, first or third angle", "Section A-A with hatching",
+                    "Spec vs inferred dimensions, hole callouts", "SVG / PDF / DXF, regenerates on model change"],
     },
     "image2cad": {
         "name": "Image & Drawing to CAD", "status": "preview", "icon": "scan",
@@ -43,23 +44,31 @@ MODULES: dict[str, dict[str, Any]] = {
         "bullets": ["Mates & joints", "Interference / clearance checks", "Exploded views", "Assembly STEP + BOM"],
     },
     "manufacturing": {
-        "name": "Manufacturing Advisor", "status": "preview", "icon": "factory",
-        "summary": "Design-for-manufacture checks per process, process recommendations and cost-driver "
-                   "suggestions tied to model features.",
-        "bullets": ["CNC, turning, sheet metal, AM, casting rules", "Process recommendation",
-                    "Cost & setup reduction ideas", "Manufacturability report"],
+        "name": "Manufacturing Advisor", "status": "live", "icon": "factory",
+        "summary": "Advisory design-for-manufacture checks on your exact model: CNC milling, drilling and turning "
+                   "rules, draft and undercut screening, a ranked process shortlist and a relative cost estimate "
+                   "(not a quote), checked against your shop profile.",
+        "bullets": ["CNC and turning DFM checks on the exact B-rep", "Process ranking with stated assumptions",
+                    "Relative cost and cost-driver suggestions", "Printable report (HTML / PDF)"],
     },
     "engineering": {
-        "name": "Engineering Advisor", "status": "preview", "icon": "gauge",
-        "summary": "Load cases, failure modes and recommended analyses with clear evidence levels. "
-                   "Engineer sign-off is always required.",
-        "bullets": ["Load case & failure-mode checklist", "Deterministic calculators",
-                    "Material library with provenance", "Sign-off workflow"],
+        "name": "Engineering Advisor", "status": "live", "icon": "gauge",
+        "summary": "Hand-calculation checks for your parts: beams, bolted joints, pins, bearings, shafts, fits, "
+                   "springs and tolerance stack-ups, with the working and sources shown, inputs pre-filled from "
+                   "the model, and named engineer sign-off. Results are estimates, never validation.",
+        "bullets": ["10 unit-safe calculators, tested against published textbook examples",
+                    "Pre-fill from the model: mass, holes, sections, material",
+                    "Load cases, failure-mode checklist and stress-raiser hints",
+                    "Advice level on every result; signed sets invalidate on edit"],
     },
     "print": {
-        "name": "3D Print Prep", "status": "preview", "icon": "printer",
-        "summary": "Watertightness, wall thickness, overhangs and orientation suggestions before you slice.",
-        "bullets": ["Manifold & wall checks", "Overhang map", "Orientation ranking", "3MF / STL export"],
+        "name": "3D Print Prep", "status": "live", "icon": "printer",
+        "summary": "Check a verified model or an uploaded STL / OBJ / 3MF before you slice: watertightness, wall "
+                   "thickness, overhangs and bridges, build-volume fit and ranked print orientations. Geometric "
+                   "checks and rough estimates, not a slicer.",
+        "bullets": ["Watertight, manifold and self-intersection checks", "Wall-thickness heatmap and overhang map",
+                    "Ranked orientations with support, height and strength notes",
+                    "Mesh repair, oriented STL / 3MF export (mm)"],
     },
     "mesh": {
         "name": "Mesh Studio", "status": "preview", "icon": "shapes",

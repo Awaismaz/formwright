@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
+import type { BuildStatus, Catalog, ManualFeature, Project } from "@/lib/types";
 import { cx, num } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -15,17 +15,27 @@ import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
 import FeatureManager, { planePreview, selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
-import CommandManager, { type Command } from "./studio/CommandManager";
+import CommandManager, { type Command, type MakeModule } from "./studio/CommandManager";
 import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
 import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
+import { SimilarPartsDialog } from "@/components/SimilarParts";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
 
+/** Downstream modules offered on the Make tab when they are Live: each opens the module on this part. */
+const MAKE: Record<string, Omit<MakeModule, "code">> = {
+  drawings: { name: "Drawing", icon: <FileText className="h-5 w-5" />, tip: "Generate the manufacturing drawing of this part" },
+  manufacturing: { name: "DFM Review", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
+  print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
+  engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
+};
+
 export default function ProjectStudio() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { me } = useSession();
   const [editing, setEditing] = useState(false);
@@ -39,7 +49,7 @@ export default function ProjectStudio() {
   const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
   const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset; planeRef?: ManualFeature } | null>(null);
   const [planeOffset, setPlaneOffset] = useState("0");
-  const [dialog, setDialog] = useState<"import" | "toolbox" | null>(null);
+  const [dialog, setDialog] = useState<"import" | "toolbox" | "similar" | null>(null);
   const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
   const viewerApi = useRef<ViewerApi | null>(null);
   const [compare, setCompare] = useState<CompareState | null>(null);
@@ -54,6 +64,9 @@ export default function ProjectStudio() {
   const [chatRequest, setChatRequest] = useState<{ id: number; text: string } | null>(null);
   const [delTarget, setDelTarget] = useState<string | null>(null);
 
+  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
+    .map(m => ({ code: m.code, ...MAKE[m.code]! })), [catalog.data]);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
@@ -152,6 +165,7 @@ export default function ProjectStudio() {
     else if (c.kind === "panel") { setPm(null); setTab(c.tab); if (c.extra === "com") setShowCom(true); }
     else if (c.kind === "import") setDialog("import");
     else if (c.kind === "toolbox") { setTbInit(null); setDialog("toolbox"); }
+    else if (c.kind === "similar") setDialog("similar");
   };
   const runCompare = async (base: number) => {
     try {
@@ -204,7 +218,7 @@ export default function ProjectStudio() {
 
   return (
     <div className="flex h-full flex-col">
-      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool}
+      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} onMake={code => navigate(`/app/modules/${code}?project=${id}`)}
         left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
           <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className="rounded p-1 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
           {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"
@@ -283,6 +297,7 @@ export default function ProjectStudio() {
         <p className="text-[13px] text-muted">The result is checked to be identical to suppressing it. If anything else would change, nothing is deleted and
           the feature stays suppressed. Then you can ask the design agent to remove it. Undo with <b>Revisions</b>.</p>
       </Modal>
+      <SimilarPartsDialog projectId={p.id} open={dialog === "similar"} onClose={() => setDialog(null)} />
       {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
       {dialog === "toolbox" && <Toolbox project={p} initial={tbInit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
 

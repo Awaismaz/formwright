@@ -16,9 +16,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from build123d import Shape, export_gltf, export_step, export_stl, import_step
+from build123d import Shape, export_gltf, export_step, import_step
 
 from aicad import checks
+from aicad.agent.runner import export_stl_abs
 from aicad.parts.plate import PlateSpec, SpecError, build_plate, expected_volume
 
 STEP_TIMESTAMP = "2000-01-01T00:00:00"  # fixed => byte-identical STEP for identical geometry
@@ -79,7 +80,7 @@ def run(spec_path: Path, out_dir: Path) -> dict[str, Any]:
 
     step = out_dir / "part.step"
     _export_atomic(export_step, part, step, timestamp=STEP_TIMESTAMP)
-    _export_atomic(export_stl, part, out_dir / "part.stl", tolerance=0.01)
+    _export_atomic(export_stl_abs, part, out_dir / "part.stl")  # absolute 0.01 mm chordal deviation
     t["export_s"] = time.perf_counter() - t0 - sum(t.values())
 
     t1 = time.perf_counter()

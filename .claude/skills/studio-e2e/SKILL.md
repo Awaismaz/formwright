@@ -14,12 +14,16 @@ Prerequisites (uv, `.venv`, `web/node_modules`) are covered by `dev-setup`. From
 ```bash
 unset VIRTUAL_ENV
 (cd web && npx vite build)                       # app serves the SPA from web/dist
-E2E="$SCRATCH/fw-e2e"; rm -rf "$E2E"; mkdir -p "$E2E"
-export FW_DATA_DIR="$E2E/data" FW_SUPERADMIN_EMAILS="e2e@formwright.test" FW_ADMIN_PASSWORD="E2e-walkthrough-2026"
-uv run aicad app --no-browser --port 8766        # run_in_background; wait until GET /api/auth/me answers 401
+PORT=8766                                         # your own port (agents are each given one)
+E2E="$SCRATCH/fw-e2e-$PORT"                       # ONE FOLDER PER PORT: sessions and agents share the scratch dir
+rm -rf "$E2E"; mkdir -p "$E2E"                    # only ever delete your own folder
+export FW_DATA_DIR="$(cygpath -w "$E2E")\\data"   # Windows path; native Python misreads /c/Users/...
+export FW_SUPERADMIN_EMAILS="e2e@formwright.test" FW_ADMIN_PASSWORD="E2e-walkthrough-2026"
+uv run aicad app --no-browser --port $PORT       # run_in_background; wait until GET /api/health answers 200
 ```
 On first start, `ensure_founder()` creates that superadmin (verified, God mode on), so no signup or mailbox step is
-needed. Use port 8766 so the founder's 8765 instance can keep running.
+needed. Never use port 8765: that is the founder's own app on their real data.
+Stop only your own server: find it by command line (`--port $PORT`) and stop that process tree, never by image name.
 
 ## 2. Walk it
 ```bash

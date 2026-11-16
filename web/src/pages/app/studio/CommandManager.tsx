@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
   Fence, Layers2, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
-  Squircle, Triangle, Upload, Wrench,
+  ScanSearch, Squircle, Triangle, Upload, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Tip } from "@/components/ui";
@@ -14,15 +14,18 @@ export type Command =
   | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
-  | { kind: "import" } | { kind: "toolbox" };
+  | { kind: "import" } | { kind: "toolbox" } | { kind: "similar" };
 
 interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean; needsBody?: boolean }
 
-const TABS = ["Features", "Sketch", "Evaluate", "View", "Library"] as const;
+const TABS = ["Features", "Sketch", "Evaluate", "View", "Library", "Make"] as const;
 
-export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right }: {
+/** Downstream modules shown on the Make tab (only the Live ones are passed in). */
+export interface MakeModule { code: string; name: string; icon: ReactNode; tip: string }
+
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
-  left?: ReactNode; right?: ReactNode;
+  left?: ReactNode; right?: ReactNode; make?: MakeModule[]; onMake?: (code: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
   const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
@@ -77,15 +80,17 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     ],
     Library: [[
       { id: "toolbox", label: "Toolbox", icon: <Wrench className="h-5 w-5" />, tip: "Standard components (fasteners, bearings, gears…) from repeatable generators", cmd: { kind: "toolbox" } },
+      { id: "similar", label: "Similar Parts", icon: <ScanSearch className="h-5 w-5" />, tip: "Find parts you already made that look like this one: same envelope, proportions and holes", cmd: { kind: "similar" }, needsBody: true },
       { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
     ]],
+    Make: [make.map(m => ({ id: m.code, label: m.name, icon: m.icon, tip: m.tip, onClick: () => onMake?.(m.code), disabled })) as Btn[]],
   };
 
   return (
     <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager">
       <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
         {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
-        {TABS.map(t => (
+        {TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
           <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }}
             className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
         <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
@@ -97,7 +102,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
         </div>
       </div>
       {!collapsed && <div className="flex h-[66px] items-stretch gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:thin]">
-        {groups[tab].map((g, gi) => (
+        {groups[tab === "Make" && !make.length ? "Features" : tab].map((g, gi) => (
           <div key={gi} className="flex items-stretch gap-0.5">
             {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
             {g.map(b => {
