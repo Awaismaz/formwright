@@ -23,11 +23,12 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Live 3D viewer, STEP / STL export", "Conversational revisions"],
     },
     "drawings": {
-        "name": "Drawing Studio", "status": "preview", "icon": "ruler",
-        "summary": "Generate manufacturing drawings from your model: orthographic and section views, "
-                   "dimensions, hole callouts, title block and BOM.",
-        "bullets": ["3-view + isometric layouts", "Spec vs inferred dimension tags", "PDF / DXF export",
-                    "Associative updates on model change"],
+        "name": "Drawing Studio", "status": "live", "icon": "ruler",
+        "summary": "Turn a verified model into a drawing sheet: exact hidden-line views, a hatched section, "
+                   "dimensions tagged spec or inferred, hole callouts and a title block. Every sheet is "
+                   "consistency-checked and marked not approved for manufacture.",
+        "bullets": ["Front / top / right + isometric, first or third angle", "Section A-A with hatching",
+                    "Spec vs inferred dimensions, hole callouts", "SVG / PDF / DXF, regenerates on model change"],
     },
     "image2cad": {
         "name": "Image & Drawing to CAD", "status": "preview", "icon": "scan",
