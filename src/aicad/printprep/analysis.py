@@ -11,13 +11,22 @@ from typing import Any
 
 import numpy as np
 
+from aicad import deliverables
 from aicad.printprep import DISCLOSURE, VERSION
 from aicad.printprep.bvh import BVH, segments_hit_triangles
 from aicad.printprep.mesh import Mesh, signed_volume, tri_vectors
 
-LEVEL_GEOM = "Verified calculation"     # deterministic, unit-tested geometry measurement
-LEVEL_EST = "Preliminary estimate"      # rough model with stated assumptions
-LEVEL_ADVICE = "Recommended check"      # guidance to confirm in the slicer
+# Advice levels (docs/VALIDATION.md §4 + "measured", aicad.deliverables). "Verified calculation" is reserved for a
+# calculation set signed by a named engineer, so deterministic mesh measurements are "Measured from the model".
+LEVEL_GEOM = deliverables.LEVEL_LABELS[deliverables.MEASURED]          # deterministic geometry measurement
+LEVEL_EST = deliverables.LEVEL_LABELS[deliverables.PRELIMINARY]        # rough model with stated assumptions
+LEVEL_ADVICE = deliverables.LEVEL_LABELS[deliverables.RECOMMENDED]     # guidance to confirm in the slicer
+
+# Stability of a part standing on the bed (MAKE-17): slenderness = height / sqrt(base area). Above about 3 a part
+# printed on a small base tends to wobble or be knocked over by the nozzle (common FDM/SLA practice: tall, thin parts
+# need a brim, a raft or a lying orientation). The ranking adds a penalty growing with the excess, capped at 1.
+SLENDER_LIMIT = 3.0
+SLENDER_PENALTY_PER_UNIT = 0.25
 
 MAX_RAYS = 80_000
 MAX_SELFX_TRIS = 250_000
@@ -409,8 +418,10 @@ def orientation_metrics(mesh: Mesh, bvh: BVH, rot: np.ndarray, s: dict[str, Any]
     fits = height <= pz + 1e-9 and ((span[0] <= px and span[1] <= py) or (span[0] <= py and span[1] <= px))
     layers = math.ceil(height / float(s["layer_mm"]) - 1e-9) if height > 0 else 0
     est = estimate(s, volume, area, layers, sv)
+    contact_area = float(areas[contact].sum())
     return {"height_mm": height, "footprint_mm": [float(span[0]), float(span[1])], "fits": bool(fits),
-            "contact_area_mm2": float(areas[contact].sum()), "overhang_area_mm2": float(areas[ot].sum()),
+            "slenderness": slenderness(height, contact_area, float(span[0]) * float(span[1])),
+            "contact_area_mm2": contact_area, "overhang_area_mm2": float(areas[ot].sum()),
             "support_area_mm2": support_area, "support_volume_mm3": sv, "support_on_part_mm2": on_part,
             "bridges": bridges, "layers": layers, "estimate": est, "zmin": zmin}
 
@@ -438,6 +449,20 @@ def _bridges(mesh: Mesh, vr: np.ndarray, horiz: np.ndarray, adj: np.ndarray, are
     for r in regions:
         r["bridgeable"] = bool(lim) and r["span_mm"] <= float(lim)
     return {"count": len(regions), "max_span_mm": max(r["span_mm"] for r in regions), "regions": regions[:20]}
+
+
+def slenderness(height: float, contact_area: float, footprint_area: float) -> float:
+    """height / sqrt(base area). The base is the flat area resting on the bed, or the footprint when nothing flat
+    touches it (then supports or a brim carry the part anyway)."""
+    base = contact_area if contact_area >= 1.0 else footprint_area
+    return float(height / math.sqrt(base)) if base > 0 else 0.0
+
+
+def stability_penalty(r: dict[str, Any], s: dict[str, Any]) -> float:
+    """Ranking penalty for a tall, slender part standing on a small base (not for powder-bed processes)."""
+    if not s.get("supports") or r["contact_area_mm2"] < 1.0:
+        return 0.0
+    return min(1.0, max(0.0, r["slenderness"] - SLENDER_LIMIT) * SLENDER_PENALTY_PER_UNIT)
 
 
 def estimate(s: dict[str, Any], volume: float, area: float, layers: int, support_volume: float) -> dict[str, Any]:
@@ -476,10 +501,31 @@ def strength_note(rot: np.ndarray, s: dict[str, Any], load: np.ndarray | None) -
     return "The load direction is oblique to the layers (intermediate strength for FDM).", 0.25
 
 
+def turned_axis(mesh: Mesh, areas: np.ndarray, cyl: list[dict[str, Any]]) -> np.ndarray | None:
+    """Axis of a slender turned (lathe) part: at least half the surface is coaxial outer cylinders and the part is
+    more than 1.5 diameters long along that axis. None for other parts and for meshes without exact faces."""
+    pins = [c for c in cyl if c["kind"] == "pin"]
+    if not pins or mesh.region is None:
+        return None
+    total = float(areas.sum()) or 1.0
+    fa = {c["face"]: float(areas[mesh.region == c["face"]].sum()) for c in pins}
+    ax = np.array(max(pins, key=lambda c: fa[c["face"]])["axis"], dtype=float)
+    ax = ax / np.linalg.norm(ax)
+    coax = [c for c in pins if abs(abs(float(np.dot(np.array(c["axis"], dtype=float), ax))) - 1) < 1e-3]
+    if sum(fa[c["face"]] for c in coax) < 0.5 * total:
+        return None
+    ext = mesh.v @ ax
+    perp = mesh.v - np.outer(ext, ax)
+    length = float(ext.max() - ext.min())
+    dia = 2 * float(np.linalg.norm(perp - perp.mean(axis=0), axis=1).max())
+    return ax if length > 1.5 * dia else None
+
+
 def rank_orientations(mesh: Mesh, bvh: BVH, s: dict[str, Any], names: list[str | None] | None,
                       load: np.ndarray | None, ctx: dict[str, Any]) -> list[dict[str, Any]]:
     n, areas, cen = ctx["n"], ctx["areas"], ctx["cen"]
     cands = candidate_downs(mesh, n, areas, cen, names)
+    axis = turned_axis(mesh, areas, ctx.get("cyl") or [])
     rows = []
     for c in cands:
         r0 = np.eye(3) if c["kind"] == "as_modelled" else rotation_to_down(c["down"])
@@ -497,9 +543,21 @@ def rank_orientations(mesh: Mesh, bvh: BVH, s: dict[str, Any], names: list[str |
         m = orientation_metrics(mesh, bvh, rot, s, n, areas, cen, ctx["volume"], ctx["area"], ctx["adj"],
                                 ctx["hull"])
         note, pen = strength_note(rot, s, load)
-        rows.append({"kind": c["kind"], "label": c["label"], "down": [float(x) for x in c["down"]],
-                     "rotation": rot.round(12).tolist(), "euler_xyz_deg": euler_xyz(rot), **m,
-                     "strength_note": note, "_pen": pen})
+        row = {"kind": c["kind"], "label": c["label"], "down": [float(x) for x in c["down"]],
+               "rotation": rot.round(12).tolist(), "euler_xyz_deg": euler_xyz(rot), **m,
+               "strength_note": note, "_pen": pen}
+        if axis is not None:   # turned part: say whether the axis ends up horizontal or vertical, and why it matters
+            vertical = abs(float((rot @ axis)[2])) > 0.9
+            row["axis_horizontal"] = abs(float((rot @ axis)[2])) < 0.1
+            if s.get("anisotropic"):
+                row["strength_note"] = (
+                    "Axis horizontal: layers run along the shaft, so bending loads stay in the layer plane "
+                    "(strongest for FDM)." if row["axis_horizontal"] else
+                    "Axis vertical: layers stack across the shaft, its weakest direction in bending (FDM). Lay it "
+                    "down for a functional part." if vertical else note)
+                if vertical and load is None:
+                    row["_pen"] += 0.3
+        rows.append(row)
     max_h = max((r["height_mm"] for r in rows), default=1.0) or 1.0
     max_c = max((r["contact_area_mm2"] for r in rows), default=0.0)
     total = ctx["area"] or 1.0
@@ -509,10 +567,12 @@ def rank_orientations(mesh: Mesh, bvh: BVH, s: dict[str, Any], names: list[str |
     for r in rows:
         sup = r["support_area_mm2"] / total
         cont = 1.0 - (min(1.0, r["contact_area_mm2"] / max_c) if max_c > 0 else 0.0)
-        cost = w_sup * 4 * sup + w_h * r["height_mm"] / max_h + w_c * cont + r.pop("_pen") + (0 if r["fits"] else 5)
+        stab = stability_penalty(r, s)
+        cost = (w_sup * 4 * sup + w_h * r["height_mm"] / max_h + w_c * cont + stab + r.pop("_pen")
+                + (0 if r["fits"] else 5))
         r["score"] = round(float(cost), 6)
         r["cost_terms"] = {"support": round(w_sup * 4 * sup, 4), "height": round(w_h * r["height_mm"] / max_h, 4),
-                           "contact": round(w_c * cont, 4)}
+                           "contact": round(w_c * cont, 4), "stability": round(stab, 4)}
         r["rationale"] = _rationale(r, s, total)
     rows.sort(key=lambda r: (r["score"], r["kind"] != "as_modelled", r["label"]))
     for i, r in enumerate(rows):
@@ -539,6 +599,10 @@ def _rationale(r: dict[str, Any], s: dict[str, Any], total: float) -> list[str]:
             out.append(f"{r['contact_area_mm2']:,.0f} mm² flat on the bed")
         else:
             out.append("No flat face on the bed: needs supports or a brim to hold it")
+    if s.get("supports") and r["contact_area_mm2"] >= 1.0 and r["slenderness"] > SLENDER_LIMIT:
+        out.append(f"Tall and slender: {r['height_mm']:,.0f} mm on a {r['contact_area_mm2']:,.0f} mm² base "
+                   f"(height ÷ √base = {r['slenderness']:.1f}, above {SLENDER_LIMIT:g}): risk of wobble or tipping; "
+                   "lay it down or add a brim")
     if not r["fits"]:
         fx, fy = r["footprint_mm"]
         out.append(f"Does not fit the {' × '.join(f'{x:g}' for x in s['printer_mm'])} mm build volume "
@@ -683,7 +747,7 @@ def analyse(mesh: Mesh, bvh: BVH, s: dict[str, Any], material: dict[str, Any] | 
     load = None
     if load_dir in ("X", "Y", "Z"):
         load = np.eye(3)[["X", "Y", "Z"].index(load_dir)]
-    ctx = {"n": n, "areas": areas, "cen": cen, "volume": volume, "area": area, "adj": adj, "hull": hull}
+    ctx = {"n": n, "areas": areas, "cen": cen, "volume": volume, "area": area, "adj": adj, "hull": hull, "cyl": cyl}
     orients = rank_orientations(mesh, bvh, s, names, load, ctx)
     for o in orients:
         o["checks"] = orientation_checks(o, s)

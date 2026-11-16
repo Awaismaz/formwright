@@ -1,4 +1,4 @@
-"""Advisory DFM rules (CHK-13): CNC milling and drilling, turning, and moulding / casting screening.
+"""Advisory DFM rules (CHK-13): CNC milling and drilling, turning, sheet metal and moulding / casting screening.
 
 Each rule is a deterministic function of measured B-rep features and the shop profile. It returns findings with a
 rule id, severity, the measured value against its limit, the rationale with its source, a suggested fix and the
@@ -22,7 +22,7 @@ from aicad.manufacturing.geometry import PartGeom
 from aicad.manufacturing.shop import ShopProfile
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
-PROCESS_LABEL = {"cnc_milling": "CNC milling & drilling", "cnc_turning": "CNC turning",
+PROCESS_LABEL = {"cnc_milling": "CNC milling & drilling", "cnc_turning": "CNC turning", "sheet_metal": "Sheet metal",
                  "moulding_casting": "Moulding & casting"}
 
 
@@ -39,12 +39,18 @@ class Finding:
     source: str
     faces: list[int] = field(default_factory=list)  # B-rep face indices (converted to topo ids on output)
     value: float | None = None
+    # What a deterministic parameter fix would aim for: {"kind": radius|diameter|thickness, "to": mm, "why": text}.
+    target: dict[str, Any] | None = None
+    note: str | None = None  # drawing-note text when the advice is a note rather than a geometry change
+    where: str | None = None  # plain description of the faces ("keyway 6 × 30 mm on the Ø25 section")
+    also: list[str] = field(default_factory=list)  # other process views this finding belongs to
 
     def out(self, g: PartGeom, n: int) -> dict[str, Any]:
         return {"id": f"F-{n:02d}", "rule": self.rule, "process": self.process, "severity": self.severity,
                 "title": self.title, "measured": self.measured, "limit": self.limit, "value": self.value,
                 "rationale": self.rationale, "fix": self.fix, "source": self.source,
-                "faces": g.fids(self.faces), "features": g.features(self.faces),
+                "faces": g.fids(self.faces), "features": g.features(self.faces), "where": self.where,
+                "also": list(self.also), "target": self.target, "note": self.note,
                 "advice_level": ADVICE_LEVELS["check"]}
 
 
@@ -62,6 +68,8 @@ class Ctx:
     turn: F.Turning
     mould_acc: F.Access | None = None
     pull: str | None = None
+    sheet: F.Sheet | None = None
+    material: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,6 +82,92 @@ class Rule:
 
 
 f2 = S.fmt
+
+
+# ----------------------------------------------------------------------------- plain descriptions of face sets
+def _verts(c: Ctx, faces: list[int] | set[int]) -> np.ndarray:
+    arr = [c.g.faces[i].verts for i in faces if len(c.g.faces[i].verts)]
+    if arr:
+        return np.vstack(arr)
+    return np.array([c.g.faces[i].center for i in faces]) if faces else np.zeros((0, 3))
+
+
+def slot_on_turned_part(c: Ctx, faces: list[int]) -> tuple[float, float, float] | None:
+    """(width, length, section diameter) when ``faces`` are a slot along the axis of a turned part (a keyway)."""
+    t = c.turn
+    if not (t.turnable and t.axis is not None and t.axis_point is not None and faces):
+        return None
+    if not set(faces) <= set(t.secondary):
+        return None
+    pts = _verts(c, faces)
+    a = t.axis / float(np.linalg.norm(t.axis))
+    rel = pts - t.axis_point
+    along = rel @ a
+    radial = rel - np.outer(along, a)
+    cen = radial.mean(axis=0)
+    if float(np.linalg.norm(cen)) < 1e-6:
+        return None
+    tdir = np.cross(a, cen / float(np.linalg.norm(cen)))
+    ln = float(np.ptp(along))
+    w = float(np.ptp(rel @ tdir))
+    if w <= 1e-6 or ln < w:
+        return None
+    lo, hi = float((pts @ a).min()), float((pts @ a).max())
+    rev = set(t.revolved)
+    ds = [2 * float(f.radius) for f in c.g.faces if f.i in rev and f.kind == "cylinder" and f.concave is False
+          and f.radius and f.extent_along(a)[0] < hi - 1e-6 and f.extent_along(a)[1] > lo + 1e-6]
+    return round(w, 3), round(ln, 3), round(max(ds), 3) if ds else round(t.max_d, 3)
+
+
+def describe(c: Ctx, faces: list[int]) -> str | None:
+    """Where a finding is, in shop words, for reports and prompts (face ids mean nothing outside the app)."""
+    if not faces:
+        return None
+    fs = set(faces)
+    if len(fs) > 0.6 * len(c.g.faces) and len(fs) > 6:
+        return f"edges and faces across the whole part ({len(fs)} faces)"
+    hs = [h for h in c.holes if set(h.faces) & fs]
+    if hs and fs <= {i for h in hs for i in h.faces}:
+        groups: dict[tuple[float, bool, float], int] = {}
+        for h in hs:
+            k = (round(h.d, 3), h.through, round(h.depth, 2))
+            groups[k] = groups.get(k, 0) + 1
+        return "; ".join((f"{n}× " if n > 1 else "") + f"Ø{f2(d)} "
+                         + ("through hole" if th else f"blind hole, {f2(dep)} deep") + ("s" if n > 1 and th else "")
+                         for (d, th, dep), n in sorted(groups.items()))
+    slot = slot_on_turned_part(c, sorted(fs))
+    if slot:
+        return f"keyway {f2(slot[0])} × {f2(slot[1])} mm on the Ø{f2(slot[2])} section"
+    for pk in c.pockets:
+        pf = {pk.floor, *pk.walls}
+        if fs <= pf:
+            pts = _verts(c, pf)
+            ax = "XYZ".index(pk.direction[-1])
+            ext = [float(np.ptp(pts[:, i])) for i in range(3) if i != ax]
+            what = "corners of the pocket" if fs != pf else "pocket"
+            return f"{what} {f2(max(ext))} × {f2(min(ext))} mm, {f2(pk.depth)} deep from {pk.direction}"
+    cyl = [c.g.faces[i] for i in fs]
+    if all(f.kind == "cylinder" and f.radius and f.axis is not None and (f.sweep or 0) < 2 * math.pi - 1e-3
+           for f in cyl):
+        radii = sorted({round(float(f.radius), 3) for f in cyl})
+        a = cyl[0].axis / float(np.linalg.norm(cyl[0].axis))  # type: ignore[union-attr,operator]
+        ln = max(f.extent_along(a)[1] - f.extent_along(a)[0] for f in cyl)
+        side = "internal" if all(f.concave for f in cyl) else "external" if all(f.concave is False for f in cyl) \
+            else "blend"
+        return (f"{side} " + " / ".join(f"R{f2(r)}" for r in radii) + f" radius, {f2(ln, 1)} mm long"
+                + (f" ({len(cyl)} faces)" if len(cyl) > 1 else ""))
+    t = c.turn
+    if t.turnable and fs <= set(t.revolved):
+        ds = sorted({2 * float(c.g.faces[i].radius) for i in fs
+                     if c.g.faces[i].kind == "cylinder" and c.g.faces[i].radius})
+        if ds:
+            return "turned " + " / ".join(f"Ø{f2(d)}" for d in ds) + " section" + ("s" if len(ds) > 1 else "")
+    pts = _verts(c, fs)
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    mid = (lo + hi) / 2
+    size = " × ".join(f2(float(v), 1) for v in hi - lo)
+    return (f"{len(fs)} face{'s' if len(fs) > 1 else ''} in a {size} mm region around "
+            f"X {f2(float(mid[0]), 1)}, Y {f2(float(mid[1]), 1)}, Z {f2(float(mid[2]), 1)}")
 
 
 # ----------------------------------------------------------------------------- CNC milling
@@ -102,7 +196,8 @@ def r_corner_radius(c: Ctx) -> list[Finding]:
                 "below the smallest available tool radius cannot be milled as modelled.",
                 f"Increase the corner radius to at least R{f2(tool_r * 1.1)} (about 10 % above the tool radius), or "
                 "add a smaller tool to the shop profile if one is available. Sharp corners need EDM.",
-                "Shop profile (smallest tool) and " + S.HUBS, [k.face for k in ks], r))
+                "Shop profile (smallest tool) and " + S.HUBS, [k.face for k in ks], r,
+                target={"kind": "radius", "to": S.nice_up(tool_r * 1.1), "why": f"≥ R{f2(tool_r * 1.1)}"}))
         else:
             need = depth / (2 * r)
             out.append(Finding(
@@ -111,7 +206,8 @@ def r_corner_radius(c: Ctx) -> list[Finding]:
                 f"≥ R{f2(depth / 3)} (⅓ of the cavity depth)",
                 "Deep corners with small radii need long, slender cutters that must run slowly to avoid deflection "
                 "and chatter.", f"Increase the corner radius to about R{f2(depth / 3)} or reduce the cavity depth.",
-                S.HUBS, [k.face for k in ks], r))
+                S.HUBS, [k.face for k in ks], r,
+                target={"kind": "radius", "to": S.nice_up(depth / 3), "why": f"≥ R{f2(depth / 3)}"}))
     return out
 
 
@@ -121,6 +217,19 @@ def r_sharp_internal(c: Ctx) -> list[Finding]:
     faces = sorted({i for s in c.sharp for i in s.faces})
     tool_r = c.shop.smallest_tool_d_mm / 2
     n = len(c.sharp)
+    slot = slot_on_turned_part(c, faces)
+    if slot:
+        w, ln, _dia = slot
+        return [Finding(
+            "DFM-CNC-02", "cnc_milling", "critical", f"Keyway has square ends: {n} sharp internal corners cannot be "
+            "milled", f"R0 on {n} concave edges of the {f2(w)} × {f2(ln)} mm keyway", f"≥ R{f2(tool_r)} (smallest "
+            "tool radius); an end-mill keyway has R = width / 2",
+            "A keyway on a shaft is cut with an end mill (or a disc cutter) along the axis. An end mill leaves "
+            "full-radius ends equal to half the keyway width; a square end needs EDM, broaching or a slotting "
+            "machine.",
+            f"Model the keyway with full-radius ends, R = width / 2 = R{f2(w / 2)} (an end-mill keyway cut with a "
+            f"Ø{f2(w)} end mill), keeping the {f2(ln)} mm length. Or let the ends run out with a disc cutter (sled "
+            "runner keyway).", S.HUBS + "; common keyway practice (end-mill and sled-runner keyseats)", faces, 0.0)]
     return [Finding(
         "DFM-CNC-02", "cnc_milling", "critical", f"{n} sharp internal corner{'s' if n > 1 else ''} cannot be milled",
         f"R0 on {n} concave edge{'s' if n > 1 else ''}", f"≥ R{f2(tool_r)} (smallest tool radius)",
@@ -146,7 +255,8 @@ def r_blend(c: Ctx) -> list[Finding]:
             "Internal blends that are not along a tool axis are cut with a ball-nose or corner-radius tool whose "
             "radius must not exceed the blend radius.",
             "Increase the blend radius, or confirm the shop has a smaller ball-nose cutter.",
-            "Shop profile (smallest tool)", [k.face for k in small], r))
+            "Shop profile (smallest tool)", [k.face for k in small], r,
+            target={"kind": "radius", "to": S.nice_up(tool_r), "why": f"≥ R{f2(tool_r)}"}))
     rest = [k for k in bl if k not in small]
     if rest:
         r = min(k.r for k in rest)
@@ -199,7 +309,8 @@ def r_thin_wall(c: Ctx) -> list[Finding]:
         f"{f2(tmin)} mm minimum wall (ray-sampled between opposite faces)", f"≥ {f2(lim)} mm for {kind} parts",
         "Thin walls vibrate and deflect under cutting forces, which limits accuracy and can break the wall.",
         f"Thicken the wall to at least {f2(lim)} mm, or support it during machining (leave stock, machine it last).",
-        S.HUBS + " (minimum wall thickness)", faces, tmin)]
+        S.HUBS + " (minimum wall thickness)", faces, tmin,
+        target={"kind": "thickness", "to": S.nice_up(lim), "why": f"≥ {f2(lim)} mm"})]
 
 
 def r_undercut(c: Ctx) -> list[Finding]:
@@ -268,12 +379,13 @@ def r_edges(c: Ctx) -> list[Finding]:
     sharp = [e for e in c.g.edges if e.convexity == "convex" and 30.0 <= e.angle_deg <= 120.0]
     if sharp:
         out.append(Finding(
-            "DFM-EDGE-02", "cnc_milling", "info", f"{len(sharp)} sharp external edges",
+            "DFM-EDGE-02", "cnc_milling", "info", "Drawing note suggested: break sharp edges",
             f"{len(sharp)} convex edges without a chamfer or fillet", "Edge break specified on the drawing",
             "Machined edges carry burrs. Shops normally break sharp edges by deburring; modelled micro-fillets add "
             "tool changes and time.", "Add a drawing note such as \"break all sharp edges 0.2-0.5 mm\" instead of "
             "modelling small fillets.", "General machining practice (drawing note)",
-            sorted({i for e in sharp for i in e.faces}), float(len(sharp))))
+            sorted({i for e in sharp for i in e.faces}), float(len(sharp)),
+            note="BREAK ALL SHARP EDGES 0.2-0.5 MM UNLESS OTHERWISE SPECIFIED."))
     fil = [f for f in c.g.faces if f.kind == "cylinder" and f.concave is False and (f.sweep or 0) < 2 * math.pi - 1e-3
            and any(c.g.edges[e].convexity == "smooth" for e in f.edges)]
     if fil:
@@ -324,23 +436,71 @@ def r_hole_std(c: Ctx) -> list[Finding]:
             continue
         faces = [i for h in hs for i in h.faces]
         n = len(hs)
-        names = S.match_standard_hole(d)
-        if names:
+        through = all(h.through for h in hs)
+        holes_txt = f"{n} {'through' if through else 'blind'} hole{'s' if n > 1 else ''}" + (
+            " in a pattern" if n > 1 else "")
+        clear = S.clearance_matches(d)
+        taps = S.tap_drill_matches(d)
+        if through:
+            # A through hole (most often in a bolt pattern) is read as a clearance hole: ISO 273 decides.
+            thread = S.clearance_thread(d)
+            if clear:
+                names = [f"ISO 273 {s} clearance for {t}" for t, s in clear]
+                out.append(Finding(
+                    "DFM-HOLE-02", "cnc_milling", "info", f"Ø{f2(d)} is a standard clearance hole",
+                    f"Ø{f2(d)} ({holes_txt})", "; ".join(names),
+                    "Through holes are read as clearance holes for bolts or screws. This diameter is in the ISO 273 "
+                    "table, so it is a stocked drill and fits the fastener with the stated clearance.",
+                    "No action needed. " + S.VERIFY, S.ISO_273_SOURCE, faces, d))
+            elif thread:
+                f_, m_, c_ = S.ISO_273[thread]
+                lo, hi = S.clearance_neighbours(d)
+                between = (f"between {lo[0]} {lo[1]} Ø{f2(lo[2])} and {hi[0]} {hi[1]} Ø{f2(hi[2])}"
+                           if lo and hi else f"in the {thread} range")
+                tap = (f" If the hole is meant to be tapped through, Ø{f2(d)} is the tap drill for "
+                       f"{', '.join(taps)} coarse; then show the thread on the drawing." if taps else "")
+                out.append(Finding(
+                    "DFM-HOLE-02", "cnc_milling", "warning", f"Ø{f2(d)} is not a standard clearance hole",
+                    f"Ø{f2(d)} ({holes_txt}), {between}",
+                    f"ISO 273 for {thread}: fine Ø{f2(f_)} / medium Ø{f2(m_)} / coarse Ø{f2(c_)}",
+                    "Through holes in a bolt pattern are clearance holes. A diameter between the ISO 273 series gives "
+                    "a clearance nobody specified, and the fastener size is left to guesswork.",
+                    f"Use the ISO 273 size for the intended bolt, e.g. Ø{f2(m_)} ({thread} medium) or Ø{f2(c_)} "
+                    f"({thread} coarse, for a looser pattern fit).{tap} " + S.VERIFY,
+                    f"{S.ISO_273_SOURCE}; {S.TAP_DRILL_SOURCE}", faces, d,
+                    target={"kind": "diameter", "to": m_, "why": f"ISO 273 {thread} medium clearance"}))
+            elif taps:
+                out.append(Finding(
+                    "DFM-HOLE-02", "cnc_milling", "info", f"Ø{f2(d)} matches a tap drill",
+                    f"Ø{f2(d)} ({holes_txt})", f"tap drill for {', '.join(taps)} coarse",
+                    "This through hole is not an ISO 273 clearance size but equals a tap drill, so it reads as a "
+                    "hole to be tapped through.", "If it is to be tapped, show the thread on the drawing. " + S.VERIFY,
+                    S.TAP_DRILL_SOURCE, faces, d))
+            elif not S.is_stock_drill(d):
+                out.append(_non_stock(d, holes_txt, faces))
+            continue
+        if taps or clear:
+            names = [f"tap drill for {t} coarse" for t in taps] + [f"ISO 273 {s} clearance for {t}" for t, s in clear]
             out.append(Finding(
                 "DFM-HOLE-02", "cnc_milling", "info", f"Ø{f2(d)} matches a standard hole size",
-                f"Ø{f2(d)} ({n} hole{'s' if n > 1 else ''})", "; ".join(names),
-                "Standard clearance and tap-drill sizes use stocked drills and match fastener tables.",
-                "No action needed. " + S.VERIFY, f"{S.ISO_273_SOURCE}; {S.TAP_DRILL_SOURCE}", faces, d))
+                f"Ø{f2(d)} ({holes_txt})", "; ".join(names),
+                "A blind hole of a tap-drill size is normally tapped; standard sizes use stocked drills.",
+                ("If it is to be tapped, show the thread and its depth on the drawing. " if taps else "No action "
+                 "needed. ") + S.VERIFY, f"{S.TAP_DRILL_SOURCE}; {S.ISO_273_SOURCE}", faces, d))
         elif not S.is_stock_drill(d):
-            near = S.nearest_stock_drill(d)
-            out.append(Finding(
-                "DFM-HOLE-02", "cnc_milling", "warning", f"Non-standard hole diameter Ø{f2(d, 3)}",
-                f"Ø{f2(d, 3)} ({n} hole{'s' if n > 1 else ''})", f"stocked drill size (nearest Ø{f2(near)})",
-                "Diameters off the stocked drill series need interpolation, boring or a special drill or reamer, which "
-                "adds time and tool cost.",
-                f"Use Ø{f2(near)}, or the ISO 273 clearance / tap drill size for the intended fastener. " + S.VERIFY,
-                S.DRILL_SERIES_SOURCE, faces, d))
+            out.append(_non_stock(d, holes_txt, faces))
     return out
+
+
+def _non_stock(d: float, holes_txt: str, faces: list[int]) -> Finding:
+    near = S.nearest_stock_drill(d)
+    return Finding(
+        "DFM-HOLE-02", "cnc_milling", "warning", f"Non-standard hole diameter Ø{f2(d, 3)}",
+        f"Ø{f2(d, 3)} ({holes_txt})", f"stocked drill size (nearest Ø{f2(near)})",
+        "Diameters off the stocked drill series need interpolation, boring or a special drill or reamer, which "
+        "adds time and tool cost.",
+        f"Use Ø{f2(near)}, or the ISO 273 clearance / tap drill size for the intended fastener. " + S.VERIFY,
+        S.DRILL_SERIES_SOURCE, faces, d, target={"kind": "diameter", "to": near, "why": "nearest stocked drill"})
 
 
 def r_hole_bottom(c: Ctx) -> list[Finding]:
@@ -457,6 +617,97 @@ def r_turn_bores(c: Ctx) -> list[Finding]:
     return out
 
 
+# ----------------------------------------------------------------------------- sheet metal
+def _sheet_applies(c: Ctx) -> bool:
+    return bool(c.sheet and c.sheet.sheet_like and c.sheet.thickness and "sheet" in c.material.get("processes", []))
+
+
+def _bends(c: Ctx) -> tuple[list[tuple[Any, float, Any]], list[Any]]:
+    """(rounded bends as (inner face, inside radius, matching outer face or None), sharp inside bend edges)."""
+    t = float(c.sheet.thickness or 0.0)  # type: ignore[union-attr]
+    part = [f for f in c.g.faces if f.kind == "cylinder" and f.radius and f.axis is not None
+            and f.axis_point is not None and (f.sweep or 0.0) < 2 * math.pi - 1e-3]
+    inner = [f for f in part if f.concave]
+    outer = [f for f in part if f.concave is False]
+    bends = []
+    for f in inner:
+        r = float(f.radius)
+        match = None
+        for o in outer:
+            if abs(abs(float(np.dot(o.axis, f.axis))) - 1) > 1e-6:
+                continue
+            d = o.axis_point - f.axis_point
+            if float(np.linalg.norm(d - np.dot(d, f.axis) * f.axis)) > 1e-3 * max(1.0, t):
+                continue
+            if abs(float(o.radius) - (r + t)) <= 0.05 * t + 0.02:
+                match = o
+                break
+        bends.append((f, r, match))
+    sharp = [e for e in c.g.edges if e.convexity == "concave" and e.kind == "line" and e.length >= 2 * t
+             and len(e.faces) == 2 and all(c.g.faces[i].kind == "plane" for i in e.faces)]
+    return bends, sharp
+
+
+def r_sheet_scope(c: Ctx) -> list[Finding]:
+    sh = c.sheet
+    t = float(sh.thickness or 0.0)  # type: ignore[union-attr]
+    return [Finding(
+        "SHM-00", "sheet_metal", "info", f"Screening only: {f2(t)} mm sheet, bends checked",
+        f"constant {f2(t)} mm thickness over {f2(100 * sh.frac, 0)} % of the surface",  # type: ignore[union-attr]
+        "—", "Inside bend radius against the material table and the formed outer radius are checked. The flat "
+        "pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed.",
+        "Ask your fabricator to review the flat pattern before ordering.", S.BEND_SOURCE, [], t)]
+
+
+def r_bend_radius(c: Ctx) -> list[Finding]:
+    t = float(c.sheet.thickness or 0.0)  # type: ignore[union-attr]
+    bends, sharp = _bends(c)
+    items = [(r, [f.i]) for f, r, _m in bends] + [(0.0, list(e.faces)) for e in sharp]
+    if not items:
+        return []
+    name = c.material.get("name") or "this material"
+    mb = S.min_bend_radius(str(c.material.get("code")), t)
+    faces = sorted({i for _r, fs in items for i in fs})
+    if mb is None:
+        return [Finding(
+            "SHM-01", "sheet_metal", "info", f"Minimum bend radius is not tabulated for {name}",
+            f"inside R{f2(min(r for r, _ in items))} at t = {f2(t)} mm", "fabricator's minimum inside radius",
+            "The minimum inside radius depends on alloy, temper, thickness and grain direction.",
+            "Confirm the minimum inside bend radius with your fabricator.", S.BEND_SOURCE, faces, None)]
+    rmin, k = mb
+    bad = [(r, fs) for r, fs in items if r < rmin - 1e-6]
+    if not bad:
+        return []
+    r = min(r for r, _ in bad)
+    n = len(bad)
+    return [Finding(
+        "SHM-01", "sheet_metal", "critical", f"Inside bend radius R{f2(r)} is below the minimum for {name}",
+        f"R{f2(r)} inside ({n} bend{'s' if n > 1 else ''}, t = {f2(t)} mm)",
+        f"≥ R{f2(rmin)} ({f2(k, 1)} × t for {name} at {f2(t)} mm; verify)",
+        "Bending tighter than the alloy's minimum inside radius stretches the outer fibres past their limit and "
+        "cracks the outside of the bend. Hard tempers such as 6061-T6 are the most sensitive.",
+        f"Increase the inside bend radius to at least R{f2(rmin)}, bend in a softer temper and heat-treat afterwards, "
+        "or machine the part instead of bending it.", S.BEND_SOURCE, sorted({i for _r, fs in bad for i in fs}), r,
+        target={"kind": "radius", "to": S.nice_up(rmin), "why": f"≥ R{f2(rmin)} to bend {name}"})]
+
+
+def r_bend_outer(c: Ctx) -> list[Finding]:
+    t = float(c.sheet.thickness or 0.0)  # type: ignore[union-attr]
+    bends, _sharp = _bends(c)
+    missing = [(f, r) for f, r, m in bends if m is None]
+    if not missing:
+        return []
+    r = min(r for _f, r in missing)
+    n = len(missing)
+    return [Finding(
+        "SHM-02", "sheet_metal", "critical", f"{n} bend{'s' if n > 1 else ''} without an outer radius",
+        f"inside R{f2(r)}, outside corner sharp", f"outside radius = inside radius + t = R{f2(r + t)}",
+        "A formed bend keeps the sheet thickness constant round the corner, so its outside radius is the inside "
+        "radius plus the thickness. A rounded inside with a sharp outside is a machined or welded shape, not a bend.",
+        f"Model the bend with an outside radius of R{f2(r + t)} (inside R{f2(r)} + {f2(t)} mm), or plan the part as "
+        "machined.", "Sheet-metal geometry (constant thickness through a bend)", [f.i for f, _r in missing], r)]
+
+
 # ----------------------------------------------------------------------------- moulding / casting
 def _pull_vec(c: Ctx) -> np.ndarray:
     return {"Z": np.array([0.0, 0.0, 1.0]), "X": np.array([1.0, 0.0, 0.0]), "Y": np.array([0.0, 1.0, 0.0])}[c.pull or "Z"]
@@ -553,6 +804,9 @@ RULES: list[Rule] = [
     Rule("TRN-04", "Secondary (non-rotational) features", "cnc_turning", r_turn_secondary, _turn_applies),
     Rule("TRN-05", "Lathe capacity", "cnc_turning", r_turn_envelope, _turn_applies),
     Rule("TRN-06", "Bore depth", "cnc_turning", r_turn_bores, _turn_applies),
+    Rule("SHM-00", "Sheet-metal screening scope", "sheet_metal", r_sheet_scope, _sheet_applies),
+    Rule("SHM-01", "Minimum inside bend radius (material table)", "sheet_metal", r_bend_radius, _sheet_applies),
+    Rule("SHM-02", "Formed outer radius on bends", "sheet_metal", r_bend_outer, _sheet_applies),
     Rule("MLD-00", "Moulding / casting screening scope", "moulding_casting", r_mould_scope),
     Rule("MLD-01", "Draft angle", "moulding_casting", r_draft),
     Rule("MLD-02", "Undercuts for a two-part mould", "moulding_casting", r_mould_undercut),
@@ -591,6 +845,12 @@ def run(c: Ctx) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
                         "status": "flagged" if flagged else "pass", "findings": len(fs),
                         "worst": min((f.severity for f in fs), key=lambda s: SEVERITY_ORDER[s]) if fs else None})
         found += fs
+    sec = set(c.turn.secondary) if c.turn.turnable else set()
+    for f in found:
+        if f.where is None:
+            f.where = describe(c, f.faces)
+        if f.process == "cnc_milling" and sec and set(f.faces) & sec:
+            f.also = ["cnc_turning"]  # a milled secondary operation of the turned part
     order = {p: i for i, p in enumerate(PROCESS_LABEL)}
     found.sort(key=lambda f: (SEVERITY_ORDER[f.severity], order[f.process], f.rule))
     return [f.out(c.g, i + 1) for i, f in enumerate(found)], summary

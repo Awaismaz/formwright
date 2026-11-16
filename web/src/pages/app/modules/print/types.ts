@@ -13,6 +13,7 @@ export interface Orientation {
   euler_xyz_deg: [number, number, number]; height_mm: number; footprint_mm: [number, number]; fits: boolean;
   contact_area_mm2: number; overhang_area_mm2: number; support_area_mm2: number; support_volume_mm3: number;
   support_on_part_mm2: number; layers: number; score: number; rationale: string[]; strength_note: string;
+  slenderness?: number; axis_horizontal?: boolean;
   bridges: { count: number; max_span_mm: number };
   estimate: { time_s: number; part_material_mm3: number; support_material_mm3: number; model: string;
     part_mass_g: number | null; support_mass_g: number | null; level: string };
@@ -37,7 +38,9 @@ export interface RepairReport {
   before: Record<string, number>; after: Record<string, number>; actions: string[];
 }
 
-export interface ExportFile { name: string; bytes: number; format: string; modified?: string }
+export interface ExportFile { name: string; bytes: number; format: string; modified?: string; label?: string | null;
+  /** current = made from the model build that is current now; outdated = an older build (or unknown) */
+  state?: "current" | "outdated"; made_from_rev?: string | number | null; current_rev?: string | number | null }
 
 export interface Report {
   disclosure: string; units: "mm"; process: ProcessSettings; material: Material | null; checks: Check[];
@@ -51,6 +54,7 @@ export interface Report {
     tolerance_mm?: number; deviation?: { max_mm: number; samples: number } | null; exact_volume_mm3?: number;
     volume_rel_dev?: number; format?: string; units?: string; repaired?: boolean; repair?: RepairReport | null; revision?: number };
   mesh_query: string; notes: string; presets_source: string; exports: ExportFile[];
+  design_material?: { name: string; metal: boolean; note: string | null } | null;
 }
 
 export interface UploadMeta {

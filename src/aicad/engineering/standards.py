@@ -130,6 +130,19 @@ SPRING_WIRE: dict[str, dict[str, Any]] = {
 SPRING_SOURCE = "Shigley Tables 10-1 (end types), 10-2 (buckling α), 10-4 (A, m), 10-5 (G), 10-6 (Ssy/Sut)"
 
 
+# ----------------------------------------------------------------------------- first-iteration Kt (shafts)
+# Shigley 10th ed. Table 7-1 "First iteration estimates for stress-concentration factors Kt and Kts" (bending,
+# torsion). Used only to pre-fill model suggestions; the values become ordinary inputs of the calculation (covered
+# by the set hash), which is why adding this table does not change VERSION. Verify against the chart for the actual
+# r/d (Fig. A-15) once the geometry is final.
+KT_FIRST_ITERATION: dict[str, tuple[float, float]] = {
+    "shoulder_sharp": (2.7, 2.2),          # shoulder fillet, sharp (r/d = 0.02)
+    "shoulder_rounded": (1.7, 1.5),        # shoulder fillet, well rounded (r/d = 0.1)
+    "keyseat_end_mill": (2.14, 3.0),       # end-mill keyseat (r/d = 0.02)
+}
+KT_FIRST_ITERATION_SOURCE = f"{SHIGLEY}, Table 7-1 (first-iteration estimates; refine with Fig. A-15 for the real r/d)"
+
+
 def provenance() -> list[dict[str, Any]]:
     """Library listing for the UI (ENG-003): what tables exist, where they come from, which version."""
     return [
@@ -142,4 +155,6 @@ def provenance() -> list[dict[str, Any]]:
          "rows": len(SURFACE_FACTOR) + len(RELIABILITY_KE)},
         {"table": "Bearing reliability factor a1", "source": BEARING_SOURCE, "rows": len(BEARING_A1)},
         {"table": "Spring wire strengths", "source": SPRING_SOURCE, "rows": len(SPRING_WIRE)},
+        {"table": "First-iteration Kt / Kts (shafts)", "source": KT_FIRST_ITERATION_SOURCE,
+         "rows": len(KT_FIRST_ITERATION)},
     ]

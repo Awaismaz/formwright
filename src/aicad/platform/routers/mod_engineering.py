@@ -13,11 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from aicad import materials
-from aicad.engineering import REGISTRY, core, project, review, store, wording
+from aicad import deliverables, materials
+from aicad.engineering import REGISTRY, core, project, report, review, store, wording
 from aicad.engineering import standards as std
 from aicad.engineering import units as eunits
 from aicad.engineering.calc_machine import stack
@@ -107,12 +108,13 @@ def projects(ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any]:
         ws = workspace_for(p)
         sets = store.load(ws, "sets") if (ws / "engineering").is_dir() else []
         lcs = store.load(ws, "loadcases") if (ws / "engineering").is_dir() else []
-        states = [store.signoff_status(s, lcs)["state"] for s in sets]  # type: ignore[arg-type]
+        cur = deliverables.build_stamp(ws)
+        states = [store.signoff_status(s, lcs, cur)["state"] for s in sets]  # type: ignore[arg-type]
         out.append({"id": p.id, "name": p.name, "built": (ws / "out" / "part.step").is_file(),
                     "part": (p.last_status or {}).get("part"), "material": (p.last_status or {}).get("material"),
                     "thumbnail": f"/api/projects/{p.id}/files/views.png" if (ws / "out" / "views.png").is_file()
                     else None, "sets": len(sets), "signed": states.count("signed"),
-                    "load_cases": len(lcs)})
+                    "model_changed": states.count("model_changed"), "load_cases": len(lcs)})
     return {"items": out}
 
 
@@ -249,15 +251,24 @@ class ItemIn(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     title: str = Field("", max_length=120)
     source: dict[str, Any] | None = None   # project-link provenance of pre-filled inputs
+    confirmed: list[str] = Field(default_factory=list, max_length=40)   # example values the user chose to keep
 
 
 class SignIn(BaseModel):
     statement: str = Field(..., min_length=10, max_length=1000)
     confirm: bool = False
+    loads_in_calcs: bool = False   # no load case linked: the signer confirms the loads are stated in each calculation
 
 
 def _sets(ws: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return store.load(ws, "sets"), store.load(ws, "loadcases")  # type: ignore[return-value]
+
+
+def _dec(ws: Path, cs: dict[str, Any], lcs: list[dict[str, Any]]) -> dict[str, Any]:
+    cur = deliverables.build_stamp(ws)
+    d = store.decorate(cs, lcs, cur)
+    d["sign_statement"] = store.statement_facts(cs, lcs, cur)
+    return d
 
 
 def _find(sets: list[dict[str, Any]], sid: str) -> dict[str, Any]:
@@ -269,14 +280,16 @@ def _find(sets: list[dict[str, Any]], sid: str) -> dict[str, Any]:
 
 @router.get("/projects/{pid}/sets")
 def list_sets(pid: str, ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any]:
-    sets, lcs = _sets(_ws(ctx, pid))
-    return {"items": [store.decorate(s, lcs) for s in sets]}
+    ws = _ws(ctx, pid)
+    sets, lcs = _sets(ws)
+    return {"items": [_dec(ws, s, lcs) for s in sets]}
 
 
 @router.get("/projects/{pid}/sets/{sid}")
 def get_set(pid: str, sid: str, ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any]:
-    sets, lcs = _sets(_ws(ctx, pid))
-    return store.decorate(_find(sets, sid), lcs)
+    ws = _ws(ctx, pid)
+    sets, lcs = _sets(ws)
+    return _dec(ws, _find(sets, sid), lcs)
 
 
 def _check_lcs(ids: list[str], lcs: list[dict[str, Any]]) -> None:
@@ -299,7 +312,7 @@ def create_set(pid: str, body: SetIn, ctx: Ctx = Depends(eng_ctx)) -> dict[str, 
               "history": [{"at": store.now(), "by": _who(ctx), "event": "created", "detail": "Set created"}]}
         sets.append(cs)
         store.save(ws, "sets", sets)
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
 
 
 @router.patch("/projects/{pid}/sets/{sid}")
@@ -326,7 +339,7 @@ def patch_set(pid: str, sid: str, body: SetPatch, ctx: Ctx = Depends(eng_ctx)) -
             what.append("linked load cases")
         store.record_change(cs, h0, lcs, _who(ctx), "Edited " + ", ".join(what or ["nothing"]))
         store.save(ws, "sets", sets)
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
 
 
 @router.delete("/projects/{pid}/sets/{sid}")
@@ -344,12 +357,16 @@ def delete_set(pid: str, sid: str, ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any
     return {"ok": True}
 
 
-def _item(body: ItemIn, ctx: Ctx) -> dict[str, Any]:
+def _item(body: ItemIn, ctx: Ctx, ws: Path) -> dict[str, Any]:
     result = _run(body.calc_id, body.inputs)
     calc = REGISTRY[body.calc_id]
+    examples = {e["key"] for e in result.get("examples") or []}
+    confirmed = sorted(k for k in set(body.confirmed) if k in examples)
+    st = deliverables.read_status(ws)
     return {"id": store.new_id("it"), "calc_id": calc.id, "calc_version": calc.version, "engine": core.ENGINE_VERSION,
             "title": (body.title or calc.name).strip()[:120], "raw_inputs": body.inputs, "result": result,
-            "source": body.source, "added_by": _who(ctx), "added_at": store.now()}
+            "source": body.source, "added_by": _who(ctx), "added_at": store.now(), "confirmed": confirmed,
+            "build": deliverables.build_stamp(ws, st) if st.get("build_id") is not None else None}
 
 
 @router.post("/projects/{pid}/sets/{sid}/items")
@@ -362,11 +379,11 @@ def add_item(pid: str, sid: str, body: ItemIn, ctx: Ctx = Depends(eng_ctx)) -> d
         if len(cs["items"]) >= 60:
             raise HTTPException(422, "A set holds at most 60 calculations")
         h0 = store.set_hash(cs, lcs)
-        it = _item(body, ctx)
+        it = _item(body, ctx, ws)
         cs["items"].append(it)
         store.record_change(cs, h0, lcs, _who(ctx), f"Added '{it['title']}'")
         store.save(ws, "sets", sets)
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
 
 
 @router.patch("/projects/{pid}/sets/{sid}/items/{iid}")
@@ -381,13 +398,13 @@ def update_item(pid: str, sid: str, iid: str, body: ItemIn, ctx: Ctx = Depends(e
             raise HTTPException(404, "Calculation not found")
         h0 = store.set_hash(cs, lcs)
         old = cs["items"][idx]
-        it = _item(body, ctx)
+        it = _item(body, ctx, ws)
         it.update(id=old["id"], added_by=old.get("added_by"), added_at=old.get("added_at"),
                   edited_by=_who(ctx), edited_at=store.now())
         cs["items"][idx] = it
         store.record_change(cs, h0, lcs, _who(ctx), f"Edited inputs of '{it['title']}'")
         store.save(ws, "sets", sets)
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
 
 
 @router.delete("/projects/{pid}/sets/{sid}/items/{iid}")
@@ -404,7 +421,7 @@ def delete_item(pid: str, sid: str, iid: str, ctx: Ctx = Depends(eng_ctx)) -> di
         cs["items"] = [x for x in cs["items"] if x["id"] != iid]
         store.record_change(cs, h0, lcs, _who(ctx), f"Removed '{old['title']}'")
         store.save(ws, "sets", sets)
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
 
 
 @router.post("/projects/{pid}/sets/{sid}/signoff")
@@ -426,12 +443,42 @@ def signoff(pid: str, sid: str, body: SignIn, ctx: Ctx = Depends(eng_ctx)) -> di
                    if it["result"].get("safety_factor") and not it["result"]["safety_factor"].get("source")]
         if missing:
             raise HTTPException(422, f"Safety factor source missing in: {', '.join(missing)}")
+        if not cs.get("load_case_ids") and not body.loads_in_calcs:
+            raise HTTPException(422, "Link the load cases these calculations use, or confirm that the loads are "
+                                     "stated in each calculation")
+        examples = [f"{it['title']} ({', '.join(e['label'] for e in store.unconfirmed(it))})"
+                    for it in cs["items"] if store.unconfirmed(it)]
+        if examples:
+            raise HTTPException(422, "Replace or confirm the example load values first: " + "; ".join(examples))
+        cur = deliverables.build_stamp(ws)
+        old = [it["title"] for it in cs["items"] if it.get("source") and it.get("build")
+               and not deliverables.same_build(it["build"], cur)]
+        if old:
+            raise HTTPException(422, "These calculations were pre-filled from an earlier model revision. Update "
+                                     "their inputs from the current model and save them first: " + ", ".join(old))
         user = {"id": ctx.user.id, "name": ctx.user.name, "email": ctx.user.email, "role": ctx.role}
-        so = store.sign(cs, lcs, user, statement)
+        so = store.sign(cs, lcs, user, statement, build=cur if cur.get("build_id") else None,
+                        loads_in_calcs=body.loads_in_calcs and not cs.get("load_case_ids"))
+        so["facts"] = store.statement_facts(cs, lcs, cur)
         store.save(ws, "sets", sets)
     audit(ctx.db, "engineering.signoff", ctx.actor, ctx.require_org().id, project=pid, set=sid, hash=so["hash"])
     ctx.db.commit()
-    return store.decorate(cs, lcs)
+    return _dec(ws, cs, lcs)
+
+
+@router.get("/projects/{pid}/sets/{sid}/report.pdf")
+def set_report(pid: str, sid: str, ctx: Ctx = Depends(eng_ctx)) -> Response:
+    p = _project(ctx, pid)
+    ws = workspace_for(p)
+    sets, _ = _sets(ws)
+    cs = _find(sets, sid)
+    data = report.build_pdf(ws, sid, p.name)
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in f"{p.name}_{cs['name']}")[:80] or "calculations"
+    audit(ctx.db, "engineering.report", ctx.actor, ctx.require_org().id, project=pid, set=sid)
+    ctx.db.commit()
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{safe}_calculations.pdf"',
+                             "Cache-Control": "no-store"})
 
 
 # ----------------------------------------------------------------------------- stack-ups (ENG-011)

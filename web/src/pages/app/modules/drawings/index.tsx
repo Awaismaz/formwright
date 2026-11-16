@@ -2,17 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box, CheckCircle2, Download, ExternalLink, FileWarning, History, Info, Lock, RefreshCw,
-  Ruler, ShieldAlert, ShieldCheck, XCircle,
+  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileWarning, History, Info,
+  Lock, Plus, RefreshCw, Ruler, ShieldAlert, ShieldCheck, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { ago, cx } from "@/lib/format";
-import { Badge, Button, Card, EmptyState, Input, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
-import { IsoThumb } from "@/components/ProjectCard";
+import { cx } from "@/lib/format";
+import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
-import { DEFAULT_OPTIONS, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
+import { ModuleHeader, PartCard } from "../ModuleHeader";
+import { DEFAULT_OPTIONS, EMPTY_EDITS, localStamp, type DrawingEdits, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
 
 const BASE = "/api/m/drawings";
 
@@ -28,7 +28,7 @@ export default function DrawingStudio({ projectId }: ModuleAppProps) {
   const [params, setParams] = useSearchParams();
   const pid = params.get("project") ?? projectId;
   if (!pid) return <ProjectPicker onPick={id => setParams({ project: id })} />;
-  return <Workspace key={pid} pid={pid} onBack={() => setParams({})} />;
+  return <Workspace key={pid} pid={pid} onBack={() => setParams({})} onSwitch={id => setParams({ project: id })} />;
 }
 
 /* ------------------------------------------------------------------ project picker */
@@ -38,16 +38,11 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
   if (q.error) return <div className="p-10 text-center text-sm text-muted">{(q.error as Error).message}</div>;
   const items = [...(q.data?.items ?? [])].sort((a, b) => Number(b.verified) - Number(a.verified));
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary-soft text-primary"><Ruler className="h-5 w-5" /></div>
-          <div>
-            <div className="flex items-center gap-2"><h1 className="text-[22px] font-semibold tracking-tight">Drawing Studio</h1><StatusBadge status="live" /></div>
-            <p className="mt-0.5 text-sm text-muted">Pick a project to turn its latest verified model into a drawing sheet.</p>
-          </div>
-        </div>
-      </div>
+    <div>
+    <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null} />
+    <div className="mx-auto max-w-7xl px-6 py-6">
+      <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
+      <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>Views are exact hidden-line projections of your model. Dimensions are tagged <b className="text-[#0b3d91]">spec</b> when they equal a declared model parameter and <i className="text-[#9a3412]">inferred</i> when measured from the geometry. Every sheet is consistency-checked and stamped <b>NOT APPROVED FOR MANUFACTURE</b>: an engineer must review it.</div>
@@ -57,9 +52,11 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
           action={<Link to="/app/projects"><Button>Go to projects</Button></Link>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map(p => <PickCard key={p.id} p={p} onPick={onPick} />)}
+          {items.map(p => <PartCard key={p.id} id={p.id} name={p.name} thumbnail={p.thumbnail} sub={p.material ?? "Material not set"} updatedAt={p.updated_at}
+            status={<DrawingBadge p={p} />} disabled={!p.verified} onPick={onPick} />)}
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -68,38 +65,8 @@ function DrawingBadge({ p }: { p: DrawingProject }) {
   if (!p.verified) return <Badge><Lock className="h-3 w-3" />No verified build</Badge>;
   if (!p.drawing) return <Badge tone="primary">No drawing yet</Badge>;
   if (p.drawing.stale) return <Badge tone="warning"><AlertTriangle className="h-3 w-3" />Model changed</Badge>;
-  return <Badge tone={p.drawing.chk12 ? "success" : "danger"}>{p.drawing.chk12 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}Rev {p.drawing.model_rev ?? "—"} · {p.drawing.sheet} {p.drawing.scale}</Badge>;
-}
-
-function PickCard({ p, onPick }: { p: DrawingProject; onPick: (id: string) => void }) {
-  const body = (
-    <>
-      <div className="viewport-bg relative flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-border">
-        {p.thumbnail ? <IsoThumb src={p.thumbnail} /> : <Box className="h-10 w-10 text-muted/50" />}
-      </div>
-      <div className="flex flex-1 flex-col gap-2 p-3.5">
-        <div className="min-w-0"><div className="truncate text-sm font-semibold">{p.name}</div>
-          <div className="truncate text-xs text-muted">{p.material ?? "—"}</div></div>
-        <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
-          <DrawingBadge p={p} /><span>{ago(p.updated_at)}</span>
-        </div>
-      </div>
-    </>
-  );
-  if (!p.verified) {
-    return (
-      <div className="card flex flex-col overflow-hidden opacity-70" title="Build and verify this model in the Design Studio first">
-        {body}
-        <Link to={`/app/projects/${p.id}`} className="border-t border-border px-3.5 py-2 text-xs text-primary hover:underline">Open in Design Studio →</Link>
-      </div>
-    );
-  }
-  return (
-    <button type="button" onClick={() => onPick(p.id)} data-project={p.id}
-      className="card group flex flex-col overflow-hidden text-left transition hover:-translate-y-0.5 hover:shadow-pop">
-      {body}
-    </button>
-  );
+  const rev = p.drawing.sheet_rev && p.drawing.sheet_rev !== "DRAFT" ? `Rev ${p.drawing.sheet_rev}` : "Draft";
+  return <Badge tone={p.drawing.chk12 ? "success" : "danger"}>{p.drawing.chk12 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}{rev} · {p.drawing.sheet} {p.drawing.scale}</Badge>;
 }
 
 /* ------------------------------------------------------------------ workspace */
@@ -131,8 +98,39 @@ function Section({ title, children, hint }: { title: string; children: ReactNode
 
 const VIEW_LABELS: Record<string, string> = { front: "Front", top: "Top", right: "Right", iso: "Isometric" };
 
-function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
+/** Update / regenerate and the downloads. Kept as one element so a shared module header can host it. */
+export function DrawingActions({ pid, rec, canEdit, verified, stale, busy, onRegenerate }: {
+  pid: string; rec: DrawingRecord | null; canEdit: boolean; verified: boolean; stale: boolean; busy: boolean; onRegenerate: () => void;
+}) {
+  const file = (n: string, copy?: "review") => `${BASE}/projects/${pid}/files/${n}?download=1${copy ? `&copy=${copy}` : ""}`;
+  return (
+    <div className="flex items-center gap-1.5" data-testid="drawing-actions">
+      {canEdit && <Button size="sm" variant={stale ? "primary" : "secondary"} loading={busy} disabled={!verified} icon={<RefreshCw className="h-3.5 w-3.5" />}
+        onClick={onRegenerate} data-testid="regenerate">{stale ? "Update drawing" : "Regenerate"}</Button>}
+      {rec && <>
+        <Tip content="Issue copy: monochrome, no tag legend" side="bottom">
+          <a href={file("sheet.pdf")} data-download="pdf" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2">
+            <Download className="h-3.5 w-3.5" />PDF</a>
+        </Tip>
+        <Tip content="DXF: geometry at true size in model space, the sheet in a paper-space layout" side="bottom">
+          <a href={file("sheet.dxf")} data-download="dxf" className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2">
+            <Download className="h-3.5 w-3.5" />DXF</a>
+        </Tip>
+        <Menu>
+          <MenuTrigger asChild><button type="button" aria-label="More downloads" className="inline-flex h-8 items-center rounded border border-border bg-panel px-1.5 text-muted hover:bg-panel2 hover:text-text"><ChevronDown className="h-3.5 w-3.5" /></button></MenuTrigger>
+          <MenuContent>
+            <MenuItem icon={<Download />} onSelect={() => { location.href = file("sheet.svg"); }}>SVG (issue copy)</MenuItem>
+            <MenuItem icon={<Eye />} onSelect={() => { location.href = file("sheet.pdf", "review"); }}>Review copy PDF (tags and legend)</MenuItem>
+          </MenuContent>
+        </Menu>
+      </>}
+    </div>
+  );
+}
+
+function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void; onSwitch: (id: string) => void }) {
   const qc = useQueryClient();
+  const projects = useQuery({ queryKey: ["drw-projects"], queryFn: () => api.get<{ items: DrawingProject[] }>(`${BASE}/projects`) });
   const q = useQuery({ queryKey: ["drw", pid], queryFn: () => api.get<DrawingState>(`${BASE}/projects/${pid}`) });
   const st = q.data;
   const rec = st?.drawing ?? null;
@@ -141,6 +139,7 @@ function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const [customTol, setCustomTol] = useState("");
+  const [locate, setLocate] = useState<{ id: string; n: number } | null>(null);
   const inited = useRef(false);
   const autoRan = useRef(false);
   const timer = useRef<number | null>(null);
@@ -148,30 +147,42 @@ function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
   useEffect(() => {
     if (!st || inited.current) return;
     inited.current = true;
-    if (st.drawing) { setOpts(st.drawing.options); setCustomTol(st.drawing.options.tolerance.text ?? ""); }
+    if (st.drawing) { setOpts({ ...DEFAULT_OPTIONS, ...st.drawing.options }); setCustomTol(st.drawing.options.tolerance.text ?? ""); }
   }, [st]);
+
+  const done = useCallback((r: DrawingState, reason?: string) => {
+    qc.setQueryData(["drw", pid], r);
+    qc.invalidateQueries({ queryKey: ["drw-projects"] });
+    qc.invalidateQueries({ queryKey: ["deliverables", pid] });
+    setNonce(n => n + 1);
+    if (reason) toast.success(reason);
+  }, [pid, qc]);
 
   const generate = useCallback(async (o: DrawingOptions, reason?: string) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.post<DrawingState>(`${BASE}/projects/${pid}/generate`, o);
-      qc.setQueryData(["drw", pid], r);
-      qc.invalidateQueries({ queryKey: ["drw-projects"] });
-      setNonce(n => n + 1);
-      if (reason) toast.success(reason);
+      done(await api.post<DrawingState>(`${BASE}/projects/${pid}/generate`, { ...o, ...localStamp() }), reason);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "The drawing could not be generated.");
     } finally { setBusy(false); }
-  }, [pid, qc]);
+  }, [pid, done]);
 
-  // associative: open with no drawing / a changed model -> (re)generate from the latest verified build
+  const saveEdits = useCallback(async (next: DrawingEdits) => {
+    setBusy(true);
+    setError(null);
+    try {
+      done(await api.post<DrawingState>(`${BASE}/projects/${pid}/edits`, { ...next, ...localStamp() }));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "The edit could not be saved.");
+    } finally { setBusy(false); }
+  }, [pid, done]);
+
+  // first open: draw it. A changed model is never redrawn silently: the user updates it (one rule in every module).
   useEffect(() => {
-    if (!st || autoRan.current || !st.can_edit || !st.project.verified) return;
-    if (!st.drawing || st.stale) {
-      autoRan.current = true;
-      void generate(st.drawing?.options ?? DEFAULT_OPTIONS, st.drawing ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : undefined);
-    }
+    if (!st || autoRan.current || !st.can_edit || !st.project.verified || st.drawing) return;
+    autoRan.current = true;
+    void generate(DEFAULT_OPTIONS);
   }, [st, generate]);
 
   const change = (patch: Partial<DrawingOptions>) => {
@@ -197,60 +208,62 @@ function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
     </div>;
   }
   const chk = rec?.check;
+  const edits = st.edits ?? rec?.edits ?? EMPTY_EDITS;
   const counts = { spec: 0, inferred: 0, ref: 0 };
-  rec?.dimensions.forEach(d => { if (d.aux) counts.ref++; else counts[d.tag]++; });
-  rec?.callouts.forEach(c => c.lines.forEach(l => counts[l.tag]++));
-  const file = (n: string) => `${BASE}/projects/${pid}/files/${n}?download=1`;
+  rec?.dimensions.forEach(d => { if (d.hidden) return; if (d.aux) counts.ref++; else counts[d.tag]++; });
+  rec?.callouts.forEach(c => { if (!c.hidden) c.lines.forEach(l => counts[l.tag]++); });
+  const canEdit = st.can_edit && st.project.verified;
 
   return (
     <div className="flex h-full flex-col">
-      {/* toolbar */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-panel px-3">
-        <Tip content="All projects" side="bottom"><button onClick={onBack} aria-label="All projects" className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-text"><ArrowLeft className="h-4 w-4" /></button></Tip>
-        <div className="flex min-w-0 items-center gap-2">
-          <Ruler className="h-4 w-4 shrink-0 text-primary" />
-          <span className="truncate text-[14px] font-semibold">{st.project.name}</span>
-          {rec && <Badge>Model rev {rec.model_rev ?? "—"}</Badge>}
-          {rec && <Badge>{rec.sheet.size} · {rec.sheet.scale}</Badge>}
+      <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={pid} projectName={st.project.name}
+        projects={projects.data?.items.map(p => ({ id: p.id, name: p.name, disabled: !p.verified }))} onSwitch={id => id ? onSwitch(id) : onBack()}
+        actions={<DrawingActions pid={pid} rec={rec} canEdit={st.can_edit} verified={st.project.verified} stale={st.stale} busy={busy}
+            onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : "Drawing regenerated from the latest build")} />}>
+        {rec && <div className="flex items-center gap-1.5" data-testid="drawing-toolbar">
+          <Badge className="whitespace-nowrap">{rec.sheet.size} · {rec.sheet.scale}</Badge>
           {chk && <CheckBadge chk={chk} />}
-          {st.stale && !busy && <Badge tone="warning"><AlertTriangle className="h-3 w-3" />Model changed since this sheet</Badge>}
+        </div>}
+      </ModuleHeader>
+      {st.stale && rec && !busy && (
+        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px]" data-testid="stale-banner">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+          <span>Model changed since this sheet (model rev {st.made_from_rev ?? rec.model_rev ?? "—"} → {st.current_rev ?? "—"}). The sheet still shows the earlier model.</span>
+          {st.can_edit && <button className="link ml-1 font-medium" onClick={() => void generate(opts, `Drawing updated to model rev ${st.current_rev ?? "—"}`)}>Update drawing</button>}
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          {st.can_edit && <Button size="sm" variant="secondary" loading={busy} disabled={!st.project.verified} icon={<RefreshCw className="h-3.5 w-3.5" />}
-            onClick={() => void generate(opts, "Drawing regenerated from the latest build")} data-testid="regenerate">Regenerate</Button>}
-          {rec && (["svg", "pdf", "dxf"] as const).map(ext => (
-            <Tip key={ext} content={{ svg: "Vector sheet (SVG)", pdf: "Print-ready PDF", dxf: "DXF at true size (1:1 model units)" }[ext]} side="bottom">
-              <a href={file(`sheet.${ext}`)} data-download={ext} className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2">
-                <Download className="h-3.5 w-3.5" />{ext.toUpperCase()}</a>
-            </Tip>
-          ))}
-          <Tip content="Open the model in the Design Studio" side="bottom"><Link to={`/app/projects/${pid}`} className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-text" aria-label="Open in Design Studio"><ExternalLink className="h-4 w-4" /></Link></Tip>
+      )}
+      {st.release && !st.stale && (
+        <div className={cx("flex items-center gap-2 border-b px-4 py-1.5 text-[12.5px]", st.release.current ? "border-success/25 bg-success/5" : "border-border bg-panel2 text-muted")}>
+          {st.release.current ? <><ShieldCheck className="h-4 w-4 text-success" />Issued as Rev {st.release.rev} on {st.release.date}{st.release.by ? ` by ${st.release.by}` : ""}. Downloads are the issued revision.</>
+            : <><Info className="h-4 w-4" />Draft: changes since Rev {st.release.rev} ({st.release.date}) are not issued.</>}
         </div>
-      </div>
-      {(!st.can_edit || error || !st.project.verified) && (
+      )}
+      {(!st.can_edit || error || !st.project.verified || rec?.plan?.note || rec?.sheet.iso_dropped) && (
         <div className={cx("flex items-center gap-2 border-b px-4 py-2 text-[12.5px]", error ? "border-danger/25 bg-danger/5 text-danger" : "border-border bg-panel2 text-muted")}>
           {error ? <><FileWarning className="h-4 w-4" />{error}</>
             : !st.project.verified ? <><Lock className="h-4 w-4" />This project has no verified build. <Link to={`/app/projects/${pid}`} className="link">Build it in the Design Studio</Link> first.</>
-            : <><Info className="h-4 w-4" />You have view-only access: you can open and download drawings but not regenerate them.</>}
+            : !st.can_edit ? <><Info className="h-4 w-4" />You have view-only access: you can open and download drawings but not change them.</>
+            : <><Info className="h-4 w-4" />{[rec?.plan?.note, rec?.sheet.iso_dropped ? `The isometric view is left out so the views can stay at ${rec.sheet.scale}. Choose A3 to show it.` : null].filter(Boolean).join(" ")}</>}
         </div>
       )}
       <div className="flex min-h-0 flex-1">
         {/* side panel */}
-        <aside className="flex w-[300px] shrink-0 flex-col border-r border-border bg-panel">
+        <aside className="flex w-[320px] shrink-0 flex-col border-r border-border bg-panel">
           <Tabs defaultValue="sheet" className="flex min-h-0 flex-1 flex-col">
-            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
+            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="title" compact>Notes</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
             <TabPanel value="sheet" className="min-h-0 flex-1 overflow-y-auto">
-              <OptionsPanel opts={opts} change={change} disabled={!st.can_edit || !st.project.verified} customTol={customTol} setCustomTol={setCustomTol} />
+              <OptionsPanel opts={opts} change={change} disabled={!canEdit} customTol={customTol} setCustomTol={setCustomTol} rec={rec} />
               <div className="px-4 py-3.5"><Legend counts={counts} /></div>
             </TabPanel>
-            <TabPanel value="dims" className="min-h-0 flex-1 overflow-y-auto">{rec ? <DimsPanel rec={rec} /> : <Empty />}</TabPanel>
+            <TabPanel value="dims" className="min-h-0 flex-1 overflow-y-auto">{rec ? <DimsPanel rec={rec} edits={edits} disabled={!canEdit || busy} onSave={saveEdits} onLocate={id => setLocate(l => ({ id, n: (l?.n ?? 0) + 1 }))} /> : <Empty />}</TabPanel>
+            <TabPanel value="title" className="min-h-0 flex-1 overflow-y-auto">{rec ? <TitlePanel rec={rec} edits={edits} disabled={!canEdit || busy} onSave={saveEdits} /> : <Empty />}</TabPanel>
             <TabPanel value="check" className="min-h-0 flex-1 overflow-y-auto">{rec ? <CheckPanel rec={rec} /> : <Empty />}</TabPanel>
             <TabPanel value="rev" className="min-h-0 flex-1 overflow-y-auto">{rec ? <RevPanel rec={rec} /> : <Empty />}</TabPanel>
           </Tabs>
         </aside>
         {/* sheet */}
         <div className="relative min-w-0 flex-1">
-          {rec && svgQ.data ? <SheetViewer svg={svgQ.data} widthMm={rec.sheet.w} heightMm={rec.sheet.h} busy={busy} />
+          {rec && svgQ.data ? <SheetViewer svg={svgQ.data} widthMm={rec.sheet.w} heightMm={rec.sheet.h} busy={busy} highlight={locate} />
             : <div className="flex h-full items-center justify-center bg-[#e9edf2] text-sm text-muted dark:bg-[#1b2027]">
                 {busy || svgQ.isLoading ? <span className="inline-flex items-center gap-2"><RefreshCw className="h-4 w-4 animate-spin" />Generating views from the verified model…</span>
                   : st.project.verified ? "No drawing yet." : "Nothing to draw yet."}
@@ -268,9 +281,9 @@ function Empty() {
 
 function CheckBadge({ chk }: { chk: DrawingRecord["check"] }) {
   return (
-    <Tip side="bottom" content={chk.passed ? "CHK-12 drawing consistency passed: tags, spec parameters, view extents vs model, no text overlaps, hole callouts vs census." : chk.problems.join(" · ")}>
+    <Tip side="bottom" content={chk.passed ? "CHK-12 drawing consistency passed: tags, spec parameters, view extents vs model, each value against its own span, no text overlaps, hole callouts vs census." : chk.problems.join(" · ")}>
       <span data-testid="chk12">
-        <Badge tone={chk.passed ? "success" : "danger"}>{chk.passed ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}CHK-12 {chk.passed ? "passed" : "failed"}</Badge>
+        <Badge tone={chk.passed ? "success" : "danger"} className="whitespace-nowrap">{chk.passed ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}CHK-12 {chk.passed ? "passed" : "failed"}</Badge>
       </span>
     </Tip>
   );
@@ -279,24 +292,30 @@ function CheckBadge({ chk }: { chk: DrawingRecord["check"] }) {
 function Legend({ counts }: { counts: { spec: number; inferred: number; ref: number } }) {
   return (
     <div className="space-y-2" data-testid="legend">
-      <div className="label">Dimension tags</div>
+      <div className="label">Dimension tags (review copy)</div>
       <div className="flex items-baseline gap-2.5 text-[12.5px]"><span className="w-10 font-medium text-[#0b3d91] dark:text-[#7fa6ef]">120</span><span><b>Spec</b> · equals a declared model parameter</span><span className="ml-auto tabular-nums text-muted">{counts.spec}</span></div>
       <div className="flex items-baseline gap-2.5 text-[12.5px]"><span className="w-10 font-medium italic text-[#9a3412] dark:text-[#f0a46b]">120</span><span><b>Inferred</b> · measured from the geometry</span><span className="ml-auto tabular-nums text-muted">{counts.inferred}</span></div>
       <div className="flex items-baseline gap-2.5 text-[12.5px]"><span className="w-10 italic text-[#9a3412] dark:text-[#f0a46b]">(40)</span><span><b>Reference</b> · for information only</span><span className="ml-auto tabular-nums text-muted">{counts.ref}</span></div>
+      <p className="text-[11.5px] text-muted">The PDF, SVG and DXF downloads are the issue copy: monochrome, without these tags.</p>
     </div>
   );
 }
 
-function OptionsPanel({ opts, change, disabled, customTol, setCustomTol }: {
+function OptionsPanel({ opts, change, disabled, customTol, setCustomTol, rec }: {
   opts: DrawingOptions; change: (p: Partial<DrawingOptions>) => void; disabled: boolean; customTol: string; setCustomTol: (s: string) => void;
+  rec: DrawingRecord | null;
 }) {
   const [customOpen, setCustomOpen] = useState(opts.tolerance.mode === "custom");
   const tolValue = customOpen ? "custom" : opts.tolerance.mode === "iso2768" ? `iso-${opts.tolerance.class}` : opts.tolerance.mode;
+  const turned = !!rec?.plan?.turned;
+  const shown = opts.views ?? rec?.plan?.views ?? ["front", "top", "right", "iso"];
   const setView = (v: string, on: boolean) => {
-    const set = new Set(opts.views);
+    const set = new Set(shown);
     if (on) set.add(v); else set.delete(v);
     change({ views: ["front", "top", "right", "iso"].filter(x => set.has(x)) });
   };
+  const sec = opts.section;
+  const turnedSec = sec === "auto" ? "auto" : sec === null ? "off" : sec === "x" || sec === "cross" ? "cross" : "axial";
   return (
     <div>
       <Section title="Sheet">
@@ -308,22 +327,31 @@ function OptionsPanel({ opts, change, disabled, customTol, setCustomTol }: {
         <Segmented value={opts.projection} disabled={disabled} onChange={v => change({ projection: v })}
           options={[{ value: "first", label: "First angle", title: "ISO method E" }, { value: "third", label: "Third angle", title: "ISO method A" }]} />
       </Section>
-      <Section title="Views">
+      <Section title="Views" hint={turned ? "Turned part: drawn with its axis horizontal. One elevation and the end view; the top view would repeat the front." : undefined}>
         <div className="grid grid-cols-2 gap-1.5">
           {["front", "top", "right", "iso"].map(v => (
             <label key={v} className={cx("flex items-center gap-2 rounded border border-border px-2 py-1.5 text-[12.5px]", (disabled || v === "front") && "opacity-70")}>
-              <input type="checkbox" className="accent-[rgb(var(--primary))]" checked={opts.views.includes(v)} disabled={disabled || v === "front"}
+              <input type="checkbox" className="accent-[rgb(var(--primary))]" checked={shown.includes(v)} disabled={disabled || v === "front"}
                 onChange={e => setView(v, e.target.checked)} />{VIEW_LABELS[v]}
             </label>
           ))}
         </div>
+        {opts.views !== null && <button type="button" className="link text-[12px]" disabled={disabled} onClick={() => change({ views: null })}>Use the views chosen for this part</button>}
         <label className="flex items-center justify-between pt-1 text-[12.5px]">Hidden lines (dashed)<Toggle checked={opts.hidden} disabled={disabled} onChange={v => change({ hidden: v })} label="Hidden lines" /></label>
       </Section>
-      <Section title="Section A-A" hint="Cutting plane through the model centre, normal to the chosen axis; the cut faces are hatched.">
-        <label className="flex items-center justify-between text-[12.5px]">Show section view<Toggle checked={!!opts.section} disabled={disabled} onChange={v => change({ section: v ? "y" : null })} label="Section view" /></label>
-        {opts.section && <Segmented value={opts.section} disabled={disabled} onChange={v => change({ section: v })}
-          options={[{ value: "x", label: "X plane" }, { value: "y", label: "Y plane" }, { value: "z", label: "Z plane" }]} />}
-      </Section>
+      {turned ? (
+        <Section title="Section A-A" hint="Parts with a bore are sectioned along the axis in place of the elevation. Solid shafts are never sectioned lengthwise (ISO 128-50): a cross-section through the keyway or flat is shown instead.">
+          <Segmented value={turnedSec} disabled={disabled}
+            onChange={v => change({ section: v === "off" ? null : v === "auto" ? "auto" : v as "axial" | "cross" })}
+            options={[{ value: "auto", label: "Auto" }, { value: "off", label: "Off" }, { value: "axial", label: "Along axis" }, { value: "cross", label: "Across" }]} />
+        </Section>
+      ) : (
+        <Section title="Section A-A" hint="Cutting plane through the model centre, normal to the chosen axis; the cut faces are hatched.">
+          <label className="flex items-center justify-between text-[12.5px]">Show section view<Toggle checked={sec === "x" || sec === "y" || sec === "z"} disabled={disabled} onChange={v => change({ section: v ? "y" : null })} label="Section view" /></label>
+          {(sec === "x" || sec === "y" || sec === "z") && <Segmented value={sec} disabled={disabled} onChange={v => change({ section: v })}
+            options={[{ value: "x", label: "X plane" }, { value: "y", label: "Y plane" }, { value: "z", label: "Z plane" }]} />}
+        </Section>
+      )}
       <Section title="General tolerances" hint="Printed only as you choose it here. Formwright never invents tolerances or GD&T.">
         <select className="input h-8 py-0 text-[13px]" value={tolValue} disabled={disabled} data-testid="tolerance"
           onChange={e => {
@@ -351,21 +379,53 @@ function OptionsPanel({ opts, change, disabled, customTol, setCustomTol }: {
   );
 }
 
-function TagText({ text, tag, aux }: { text: string; tag: "spec" | "inferred"; aux?: boolean }) {
-  return <span className={cx("font-medium tabular-nums", tag === "spec" && !aux ? "text-[#0b3d91] dark:text-[#7fa6ef]" : "italic text-[#9a3412] dark:text-[#f0a46b]")}>{text}</span>;
+function TagText({ text, tag, aux, hidden }: { text: string; tag: "spec" | "inferred"; aux?: boolean; hidden?: boolean }) {
+  return <span className={cx("font-medium tabular-nums", hidden ? "text-muted line-through" : tag === "spec" && !aux ? "text-[#0b3d91] dark:text-[#7fa6ef]" : "italic text-[#9a3412] dark:text-[#f0a46b]")}>{text}</span>;
 }
 
-function DimsPanel({ rec }: { rec: DrawingRecord }) {
+/** Tolerance or fit text for one dimension (user-entered), committed on Enter or blur. */
+function TolInput({ value, disabled, onCommit }: { value: string; disabled: boolean; onCommit: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  return (
+    <input value={v} disabled={disabled} maxLength={24} placeholder="tol." aria-label="Tolerance or fit"
+      onChange={e => setV(e.target.value)} onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      onBlur={() => { if (v.trim() !== value) onCommit(v.trim()); }}
+      className="h-6 w-[64px] rounded border border-border bg-panel px-1.5 text-[11.5px] tabular-nums outline-none placeholder:text-muted/60 focus:border-primary disabled:opacity-60" />
+  );
+}
+
+function DimsPanel({ rec, edits, disabled, onSave, onLocate }: {
+  rec: DrawingRecord; edits: DrawingEdits; disabled: boolean; onSave: (e: DrawingEdits) => void; onLocate: (id: string) => void;
+}) {
   const dims = useMemo(() => [...rec.dimensions].sort((a, b) => a.view.localeCompare(b.view) || a.id.localeCompare(b.id)), [rec]);
+  const label = (p: string) => rec.param_labels?.[p] ?? p;
+  const setDim = (id: string, patch: { hidden?: boolean; tol?: string }) => {
+    const cur = { ...(edits.dims[id] ?? {}), ...patch };
+    const dimsNext = { ...edits.dims };
+    if (!cur.hidden && !cur.tol) delete dimsNext[id]; else dimsNext[id] = { ...(cur.hidden ? { hidden: true } : {}), ...(cur.tol ? { tol: cur.tol } : {}) };
+    onSave({ ...edits, dims: dimsNext });
+  };
+  const base = (text: string, tol?: string | null) => (tol && text.endsWith(` ${tol}`) ? text.slice(0, -tol.length - 1) : text);
+  const HideBtn = ({ id, hidden }: { id: string; hidden?: boolean }) => (
+    <Tip content={hidden ? "Show on the sheet" : "Hide from the sheet"} side="left">
+      <button type="button" disabled={disabled} onClick={() => setDim(id, { hidden: !hidden })} aria-label={hidden ? "Show" : "Hide"}
+        className="rounded p-0.5 text-muted hover:bg-text/5 hover:text-text disabled:opacity-50">{hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button>
+    </Tip>);
   return (
     <div className="divide-y divide-border">
+      <p className="px-4 pt-3 text-[11.5px] text-muted">Click a value to find it on the sheet. Tolerances and fits you enter print after the value and are marked as user-entered; your edits are kept when the model is rebuilt.</p>
       <div className="px-4 py-3">
-        <div className="label mb-2">Hole callouts</div>
-        {rec.callouts.length === 0 ? <p className="text-[12.5px] text-muted">No holes on principal axes.</p>
+        <div className="label mb-2">Callouts</div>
+        {rec.callouts.length === 0 ? <p className="text-[12.5px] text-muted">No holes, radii or chamfers on principal axes.</p>
           : rec.callouts.map(c => (
-            <div key={c.id} className="mb-1.5 text-[12.5px]">
-              {c.lines.map((l, i) => <div key={i} className="flex items-baseline justify-between gap-2"><TagText text={l.text} tag={l.tag} /><span className="text-[11px] text-muted">{l.param ?? "measured"}</span></div>)}
-              <div className="text-[11px] capitalize text-muted">{c.view} view</div>
+            <div key={c.id} className="mb-1.5 flex items-start gap-1.5 text-[12.5px]" data-dim={c.id}>
+              <HideBtn id={c.id} hidden={c.hidden} />
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onLocate(c.id)}>
+                {c.lines.map((l, i) => <div key={i}><TagText text={i === 0 ? base(l.text, c.tol) : l.text} tag={l.tag} hidden={c.hidden} /></div>)}
+                <div className="text-[11px] text-muted"><span className="capitalize">{c.view}</span> view{c.lines.some(l => l.param) ? ` · ${c.lines.flatMap(l => [l.param, ...(l.params ?? [])]).filter((x): x is string => !!x).map(label).join(", ")}` : ""}</div>
+              </button>
+              <TolInput value={edits.dims[c.id]?.tol ?? ""} disabled={disabled || !!c.hidden} onCommit={t => setDim(c.id, { tol: t })} />
             </div>
           ))}
       </div>
@@ -374,23 +434,67 @@ function DimsPanel({ rec }: { rec: DrawingRecord }) {
         <table className="w-full text-[12.5px]">
           <tbody>
             {dims.map(d => (
-              <tr key={d.id} className="border-b border-border/60 last:border-0">
-                <td className="py-1"><TagText text={d.text} tag={d.tag} aux={d.aux} /></td>
-                <td className="py-1 text-muted">{d.aux ? "reference" : d.param ? <code className="rounded bg-text/5 px-1 text-[11.5px] text-text">{d.param}</code> : "measured"}</td>
-                <td className="py-1 text-right capitalize text-muted">{d.view}</td>
+              <tr key={d.id} className="border-b border-border/60 last:border-0" data-dim={d.id}>
+                <td className="w-5 py-1"><HideBtn id={d.id} hidden={d.hidden} /></td>
+                <td className="py-1"><button type="button" className="text-left" onClick={() => onLocate(d.id)}><TagText text={base(d.text, d.tol)} tag={d.tag} aux={d.aux} hidden={d.hidden} /></button></td>
+                <td className="py-1 text-[11.5px] text-muted">{d.aux ? "reference" : d.param ? label(d.param) : "measured"}</td>
+                <td className="py-1 text-right">{!d.aux && <TolInput value={edits.dims[d.id]?.tol ?? ""} disabled={disabled || !!d.hidden} onCommit={t => setDim(d.id, { tol: t })} />}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div className="px-4 py-3">
-        <div className="label mb-1.5">Parameters not on the sheet</div>
-        {rec.mapping.unmapped.length === 0 ? <p className="text-[12.5px] text-muted">Every declared parameter appears as a spec dimension.</p>
+        <div className="label mb-1.5">Parameters not on the sheet as a value</div>
+        {rec.mapping.unmapped.length === 0 ? <p className="text-[12.5px] text-muted">Every declared parameter appears on the sheet.</p>
           : <>
-            <div className="flex flex-wrap gap-1">{rec.mapping.unmapped.map(p => <code key={p} className="rounded bg-text/5 px-1.5 py-0.5 text-[11.5px]">{p}</code>)}</div>
-            <p className="mt-1.5 text-[11.5px] leading-snug text-muted">No unambiguous match in the drawn geometry (radii, chamfers, counts, or values that coincide with another size). They are listed in the sheet notes.</p>
+            <div className="flex flex-wrap gap-1">{rec.mapping.unmapped.map(p => <span key={p} className="rounded bg-text/5 px-1.5 py-0.5 text-[11.5px]">{label(p)}</span>)}</div>
+            <p className="mt-1.5 text-[11.5px] leading-snug text-muted">Their sizes are on the sheet but shown as measured, because the same value appears more than once (no unambiguous match).</p>
           </>}
       </div>
+    </div>
+  );
+}
+
+function TitlePanel({ rec, edits, disabled, onSave }: { rec: DrawingRecord; edits: DrawingEdits; disabled: boolean; onSave: (e: DrawingEdits) => void }) {
+  const fields: [keyof DrawingEdits["title"], string, string][] = [
+    ["title", "Title", rec.title.title], ["drawing_no", "Drawing number", rec.title.drawing_no],
+    ["company", "Company", "Your company"], ["checked_by", "Checked by", "Name of the checker"]];
+  const [vals, setVals] = useState<Record<string, string>>({ ...edits.title });
+  const [note, setNote] = useState("");
+  useEffect(() => setVals({ ...edits.title }), [edits.title]);
+  const commit = (k: string) => {
+    const v = (vals[k] ?? "").trim();
+    if (v === (edits.title[k as keyof DrawingEdits["title"]] ?? "")) return;
+    const t = { ...edits.title, [k]: v };
+    if (!v) delete t[k as keyof DrawingEdits["title"]];
+    onSave({ ...edits, title: t });
+  };
+  const addNote = () => { const n = note.trim(); if (!n) return; onSave({ ...edits, notes: [...edits.notes, n] }); setNote(""); };
+  return (
+    <div>
+      <Section title="Title block" hint="Approval stays “not approved”: the sheet never claims manufacturing approval.">
+        {fields.map(([k, lab, ph]) => (
+          <label key={k} className="block text-[12px]"><span className="text-muted">{lab}</span>
+            <Input value={vals[k] ?? ""} placeholder={ph} maxLength={60} disabled={disabled} className="mt-0.5 h-8 text-[13px]"
+              onChange={e => setVals(v => ({ ...v, [k]: e.target.value }))} onBlur={() => commit(k)}
+              onKeyDown={e => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          </label>
+        ))}
+      </Section>
+      <Section title="Notes" hint="Printed after the standard notes, as you write them.">
+        {edits.notes.length > 0 && <ol className="space-y-1">
+          {edits.notes.map((n, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-[12.5px]"><span className="text-muted">{i + 1}.</span><span className="min-w-0 flex-1">{n}</span>
+              <button type="button" disabled={disabled} aria-label="Remove note" onClick={() => onSave({ ...edits, notes: edits.notes.filter((_, j) => j !== i) })}
+                className="rounded p-0.5 text-muted hover:bg-text/5 hover:text-danger"><X className="h-3.5 w-3.5" /></button></li>))}
+        </ol>}
+        <div className="flex gap-1.5">
+          <Input value={note} maxLength={160} disabled={disabled} placeholder="e.g. Break sharp edges 0.2–0.5 mm" className="h-8 text-[13px]"
+            onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addNote(); }} />
+          <Button size="sm" variant="secondary" disabled={disabled || !note.trim()} icon={<Plus className="h-3.5 w-3.5" />} onClick={addNote}>Add</Button>
+        </div>
+      </Section>
     </div>
   );
 }
@@ -408,6 +512,8 @@ function CheckPanel({ rec }: { rec: DrawingRecord }) {
   const d = rec.check.detail;
   const maxErr = Math.max(0, ...Object.values(d.extents).map(e => e.max_err_mm));
   const holes = Object.entries(d.holes.census).map(([k, v]) => `${v}× Ø${+k}`).join(", ") || "none";
+  const hidden = d.spec_once.hidden_by_user ?? [];
+  const label = (p: string) => rec.param_labels?.[p] ?? p;
   return (
     <div className="px-4 py-3">
       <Card className={cx("mb-3 p-3", rec.check.passed ? "border-success/30" : "border-danger/30")}>
@@ -416,11 +522,13 @@ function CheckPanel({ rec }: { rec: DrawingRecord }) {
       </Card>
       <Row ok={d.tags.untagged.length === 0} label="Every value tagged spec or inferred" detail={`${d.tags.dimensions} dimensions, ${d.tags.callout_lines} callout lines`} />
       <Row ok={d.spec_once.missing.length === 0 && d.spec_once.duplicates.length === 0 && d.spec_once.not_placed.length === 0}
-        label="Spec parameters shown, nothing dimensioned twice" detail={Object.keys(d.spec_once.spec_on_sheet).join(", ") || "no spec dimensions"} />
+        label="Spec parameters shown, nothing dimensioned twice" detail={Object.keys(d.spec_once.spec_on_sheet).map(label).join(", ") || "no spec dimensions"} />
       <Row ok={Object.values(d.extents).every(e => e.passed)} label="View extents match the model" detail={`max deviation ${maxErr.toFixed(4)} mm (limit 0.01)`} />
+      {d.placement && <Row ok={d.placement.misplaced.length === 0} label="Each value against its own span" detail={d.placement.misplaced.length ? d.placement.misplaced.map(m => `${m.text}: ${m.why}`).join("; ") : `${d.placement.checked} dimension values checked`} />}
       <Row ok={d.overlap.text_overlaps.length === 0 && d.overlap.text_over_geometry.length === 0 && d.overlap.outside_frame.length === 0}
         label="No overlapping text" detail={`${d.overlap.texts} texts checked`} />
       <Row ok={Object.keys(d.holes.mismatch).length === 0} label="Hole callouts match the census" detail={holes} />
+      {hidden.length > 0 && <p className="mt-2 flex items-start gap-1.5 text-[11.5px] text-muted"><EyeOff className="mt-0.5 h-3.5 w-3.5 shrink-0" />{hidden.length} dimension{hidden.length > 1 ? "s" : ""} hidden by you. Make sure the sheet still defines the part.</p>}
       {rec.check.problems.length > 0 && <div className="mt-2 rounded border border-danger/25 bg-danger/5 p-2 text-[12px] text-danger">{rec.check.problems.map(p => <div key={p}>• {p}</div>)}</div>}
       <p className="mt-3 text-[11px] text-muted">Generated in {rec.timings.total_s.toFixed(2)} s (geometry {rec.timings.geometry_s.toFixed(2)} s).</p>
     </div>
@@ -428,14 +536,20 @@ function CheckPanel({ rec }: { rec: DrawingRecord }) {
 }
 
 function RevPanel({ rec }: { rec: DrawingRecord }) {
+  const issued = rec.revisions ?? [];
   return (
     <div className="px-4 py-3">
-      <div className="label mb-2 flex items-center gap-1.5"><History className="h-3.5 w-3.5" />Revision history</div>
-      <p className="mb-3 text-[11.5px] text-muted">The sheet follows the model: each new verified build that is drawn adds a row (shown in the sheet's revision table).</p>
+      <div className="label mb-2 flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5" />Issued revisions</div>
+      {issued.length === 0 ? <p className="mb-4 text-[12px] text-muted">None yet. The sheet is a draft until you issue a release from the Design Studio; the issue freezes this sheet, the model and the reports as Rev A.</p>
+        : <ol className="mb-4 space-y-1.5">{[...issued].reverse().map(r => (
+          <li key={r.rev} className="rounded border border-border p-2 text-[12.5px]"><div className="flex justify-between"><span className="font-semibold">Rev {r.rev}</span><span className="text-[11px] text-muted">{r.date}</span></div>
+            <div>{r.change}</div><div className="text-[11px] text-muted">by {r.by || "—"}</div></li>))}</ol>}
+      <div className="label mb-2 flex items-center gap-1.5"><History className="h-3.5 w-3.5" />Model builds drawn</div>
+      <p className="mb-3 text-[11.5px] text-muted">Each verified build that was drawn. These are working drafts, not revisions of the drawing.</p>
       <ol className="space-y-2">
         {[...rec.history].reverse().map((h, i) => (
           <li key={`${h.build_id}-${i}`} className="rounded border border-border p-2 text-[12.5px]">
-            <div className="flex items-center justify-between"><span className="font-semibold">Rev {h.rev}</span><span className="text-[11px] text-muted">{h.date}</span></div>
+            <div className="flex items-center justify-between"><span className="font-semibold">Model rev {h.rev}</span><span className="text-[11px] text-muted">{h.date}</span></div>
             <div className="mt-0.5">{h.change}</div>
             <div className="text-[11px] text-muted">by {h.by || "—"}</div>
           </li>

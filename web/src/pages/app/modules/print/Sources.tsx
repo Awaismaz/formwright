@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
-import { Box as BoxIcon, FileUp, Printer, Trash2, Upload } from "lucide-react";
+import { FileUp, Printer, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import type { Project } from "@/lib/types";
 import { Badge, Button, Card, Modal, Spinner } from "@/components/ui";
-import { IsoThumb } from "@/components/ProjectCard";
+import { PartCard } from "../ModuleHeader";
 import type { UploadMeta } from "./types";
 import type { Src } from "./index";
 
@@ -41,18 +41,9 @@ export function SourcePicker({ projects, uploads, loading, onPick, onUpload, onD
         <Card className="mt-3 p-6 text-sm text-muted">No built projects yet. Build a part in the Design Studio, or upload a mesh.</Card>
       ) : (
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {built.map(p => (
-            <button key={p.id} onClick={() => onPick({ kind: "projects", id: p.id })} data-project={p.id}
-              className="card group overflow-hidden text-left transition hover:-translate-y-0.5 hover:shadow-pop">
-              <div className="viewport-bg relative flex aspect-[4/3] items-center justify-center overflow-hidden">
-                {p.thumbnail ? <IsoThumb src={`${p.thumbnail}?v=${p.last_status?.build_id ?? 0}`} /> : <BoxIcon className="h-10 w-10 text-muted" />}
-              </div>
-              <div className="border-t border-border p-3">
-                <div className="truncate text-[13px] font-semibold">{p.name}</div>
-                <div className="mt-0.5 flex items-center justify-between text-[11.5px] text-muted"><span>{p.last_status?.material && p.last_status.material !== "unspecified" ? String(p.last_status.material) : "Material not set"}</span><span>{ago(p.updated_at)}</span></div>
-              </div>
-            </button>
-          ))}
+          {built.map(p => <PartCard key={p.id} id={p.id} name={p.name} thumbnail={p.thumbnail} version={p.last_status?.build_id ?? 0} updatedAt={p.updated_at}
+            sub={p.last_status?.material && p.last_status.material !== "unspecified" ? String(p.last_status.material) : "Material not set"}
+            status={<Badge tone="success">Verified model</Badge>} onPick={id => onPick({ kind: "projects", id })} />)}
         </div>
       )}
       {other.length > 0 && <p className="mt-2 text-[12px] text-muted">{other.length} project(s) without a verified build are hidden.</p>}

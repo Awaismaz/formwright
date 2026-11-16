@@ -7,8 +7,13 @@ import { Tip } from "@/components/ui";
  * inlined so it stays crisp at any zoom and its dimension tooltips work. Wheel zooms about the cursor, drag pans,
  * double-click fits the sheet.
  */
-export default function SheetViewer({ svg, widthMm, heightMm, busy }: { svg: string; widthMm: number; heightMm: number; busy?: boolean }) {
+export default function SheetViewer({ svg, widthMm, heightMm, busy, highlight }: {
+  svg: string; widthMm: number; heightMm: number; busy?: boolean;
+  /** A dimension / callout id to locate on the sheet: it is coloured and brought to the centre. */
+  highlight?: { id: string; n: number } | null;
+}) {
   const box = useRef<HTMLDivElement>(null);
+  const sheet = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ k: 1, x: 0, y: 0 }); // k: screen px per sheet mm; x, y: sheet offset
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const { k } = view;
@@ -55,6 +60,24 @@ export default function SheetViewer({ svg, widthMm, heightMm, busy }: { svg: str
     return () => el.removeEventListener("wheel", onWheel);
   }, [zoomAt]);
 
+  // locate a dimension picked in the side panel: colour its value(s) and centre the first one
+  useEffect(() => {
+    const el = sheet.current, outer = box.current;
+    if (!el || !outer) return;
+    el.querySelectorAll(".drw-hl").forEach(n => n.classList.remove("drw-hl"));
+    if (!highlight) return;
+    const hits = Array.from(el.querySelectorAll(`[data-ref="${CSS.escape(highlight.id)}"]`));
+    if (!hits.length) return;
+    hits.forEach(n => n.classList.add("drw-hl"));
+    const r = hits[0]!.getBoundingClientRect(), o = outer.getBoundingClientRect();
+    const cx = r.left + r.width / 2 - o.left, cy = r.top + r.height / 2 - o.top;
+    setView(v => {
+      const nk = Math.max(v.k, Math.min(40, (o.width - 48) / widthMm * 2.2));
+      const sx = (cx - v.x) / v.k, sy = (cy - v.y) / v.k; // sheet mm under the value
+      return { k: nk, x: o.width / 2 - sx * nk, y: o.height / 2 - sy * nk };
+    });
+  }, [highlight, svg, widthMm]);
+
   const fitK = (() => {
     const el = box.current;
     if (!el) return 1;
@@ -69,7 +92,8 @@ export default function SheetViewer({ svg, widthMm, heightMm, busy }: { svg: str
       onPointerMove={e => { const d = drag.current; if (d) setView(v => ({ ...v, x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y })); }}
       onPointerUp={() => { drag.current = null; }}
       onDoubleClick={fit}>
-      <div className="absolute left-0 top-0 bg-white shadow-[0_2px_12px_rgba(16,24,40,.18)] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+      <style>{".drw-hl{fill:#d97706 !important;font-weight:700;paint-order:stroke;stroke:#fde68a;stroke-width:1.2px}"}</style>
+      <div ref={sheet} className="absolute left-0 top-0 bg-white shadow-[0_2px_12px_rgba(16,24,40,.18)] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
         style={{ width: widthMm * k, height: heightMm * k, transform: `translate(${off.x}px, ${off.y}px)` }}
         dangerouslySetInnerHTML={{ __html: svg }} />
       {busy && <div className="pointer-events-none absolute inset-0 bg-white/30 backdrop-blur-[1px] dark:bg-black/20" />}
