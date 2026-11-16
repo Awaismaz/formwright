@@ -43,11 +43,12 @@ MODULES: dict[str, dict[str, Any]] = {
         "bullets": ["Mates & joints", "Interference / clearance checks", "Exploded views", "Assembly STEP + BOM"],
     },
     "manufacturing": {
-        "name": "Manufacturing Advisor", "status": "preview", "icon": "factory",
-        "summary": "Design-for-manufacture checks per process, process recommendations and cost-driver "
-                   "suggestions tied to model features.",
-        "bullets": ["CNC, turning, sheet metal, AM, casting rules", "Process recommendation",
-                    "Cost & setup reduction ideas", "Manufacturability report"],
+        "name": "Manufacturing Advisor", "status": "live", "icon": "factory",
+        "summary": "Advisory design-for-manufacture checks on your exact model: CNC milling, drilling and turning "
+                   "rules, draft and undercut screening, a ranked process shortlist and a relative cost estimate "
+                   "(not a quote), checked against your shop profile.",
+        "bullets": ["CNC and turning DFM checks on the exact B-rep", "Process ranking with stated assumptions",
+                    "Relative cost and cost-driver suggestions", "Printable report (HTML / PDF)"],
     },
     "engineering": {
         "name": "Engineering Advisor", "status": "preview", "icon": "gauge",
