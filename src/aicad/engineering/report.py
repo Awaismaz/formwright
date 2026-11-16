@@ -66,6 +66,8 @@ def _value(p: core.Param | None, v: Any) -> str:
                                   f"{' ' + units.KINDS[cols[k].kind].label if k in cols and cols[k].kind in units.KINDS else ''}"
                                   for k, x in r.items()))
         return "; ".join(rows)
+    if p and p.kind == "moment" and isinstance(v, (int, float)):
+        return f"{core.g(float(v) / 1000)} N·m"          # engineers read torque in N·m (canonical is N·mm)
     if isinstance(v, float):
         s = core.g(v)
     else:
@@ -135,15 +137,17 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
                      ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f6f7f9"))])
 
     level = cs["level_label"]
-    story: list[Any] = [P(f"{st['label'].upper()} · Advice level: {level}", ban), Spacer(1, 6),
+    head = f"Advice level: {level}" if st["state"] == "signed" else f"{st['label']} · Advice level: {level}"
+    story: list[Any] = [P(head, ban), Spacer(1, 6),
                         P(f"Calculation package: {cs['name']}", h1), P(project_name, sm), Spacer(1, 6)]
     signed_rev = st.get("signed_on_rev")
     cover = [[P("Project"), P(project_name)],
              [P("Part"), P(status.get("part") or "—")],
              [P("Material (model)"), P(status.get("material") or "—")],
              [P("Model"), P(f"revision {cur.get('model_rev') or '—'} · build {str(cur.get('build_id') or '—')[-8:]}")],
-             [P("Advice level"), P(level)],
-             [P("Sign-off"), P(st["label"])]]
+             [P("Advice level"), P(level)]]
+    if st["state"] != "signed":
+        cover.append([P("Sign-off"), P(st["label"])])
     if so:
         who = "self-checked (the signer also authored calculations in this set)" if so.get("self_check") \
             else "independent check (the signer did not author these calculations)"
@@ -197,7 +201,7 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
             rows.append([P(str(j), sm), P(s["label"]), Paragraph(eq, mono),
                          P(f"{core.g(s['value']) if isinstance(s['value'], float) else _e(s['value'])} {s.get('unit') or ''}"),
                          P(s.get("ref") or "", sm)])
-        tb = Table(rows, colWidths=[7 * mm, 38 * mm, 77 * mm, 26 * mm, 34 * mm], repeatRows=1)
+        tb = Table(rows, colWidths=[9 * mm, 37 * mm, 76 * mm, 26 * mm, 34 * mm], repeatRows=1)
         tb.setStyle(grid)
         story.append(tb)
         if r["checks"]:
@@ -222,7 +226,7 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
         story.append(P("No load cases linked." + (" The signer confirmed that the loads are stated in each "
                                                   "calculation." if so.get("loads_in_calcs") else "")))
     for c in linked:
-        loads = "; ".join(f"{ld['name']} {core.g(float(ld['value']))} {ld['unit']} ({ld['basis']}"
+        loads = "; ".join(f"{ld['name']} {core.g(float(ld['value']))} {str(ld['unit']).replace('*', '·')} ({ld['basis']}"
                           f"{', ' + ld['source'] if ld.get('source') else ''})" for ld in c.get("loads") or [])
         sup = "; ".join(f"{s_['type']} {s_.get('location') or ''}".strip() for s_ in c.get("supports") or [])
         story.append(KeepTogether([P(f"{c['name']} ({c['kind']})", h3), P(f"Loads: {loads or '—'}"),
@@ -236,7 +240,7 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
         if raw.get("conclusion"):
             story.append(P("Conclusion: " + raw["conclusion"]))
     story += [P("Limits of this document", h2), P(DISCLAIMER),
-              P("Advice levels (docs: VALIDATION §4): Recommended check → Preliminary estimate → Verified calculation "
+              P("Advice levels, lowest to highest evidence: Recommended check → Preliminary estimate → Verified calculation "
                 "(signed by a named engineer) → Validated simulation (not produced by Formwright).", sm)]
 
     buf = io.BytesIO()
