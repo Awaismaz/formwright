@@ -58,3 +58,52 @@ def guess(material_text: str | None) -> str | None:
 
 def get(code: str | None) -> dict[str, object] | None:
     return next((m for m in MATERIALS if m["code"] == code), None)
+
+
+# ----------------------------------------------------------------------------- mechanical properties (ENG-003)
+# Added for the Engineering Advisor. Only values with a cited source are listed; every value is TYPICAL or a
+# specification MINIMUM as labelled, for one stated condition. Verify against the supplier certificate (mill test
+# report) before relying on it. Bump MECHANICAL_VERSION on any change.
+MECHANICAL_VERSION = "matlib-1.0.0"
+MECHANICAL_NOTE = ("Typical or specification-minimum values for the stated condition, as cited. Verify against the "
+                   "supplier certificate before release.")
+
+_ASM_AL = "ASM Handbook Vol. 2 / Aluminum Association typical properties"
+_SHIGLEY_A20 = "Shigley's Mechanical Engineering Design, Table A-20 (minimum, cold drawn) and Table A-5 (E, ν)"
+MECHANICAL: dict[str, dict[str, object]] = {
+    "al_6061": {"condition": "T6", "basis": "typical", "Sut_MPa": 310, "Sy_MPa": 276, "E_GPa": 68.9, "nu": 0.33,
+                "fatigue_MPa": 96.5, "fatigue_note": "R.R. Moore, 5×10⁸ cycles (no endurance limit)",
+                "source": _ASM_AL},
+    "al_7075": {"condition": "T6", "basis": "typical", "Sut_MPa": 572, "Sy_MPa": 503, "E_GPa": 71.7, "nu": 0.33,
+                "fatigue_MPa": 159, "fatigue_note": "R.R. Moore, 5×10⁸ cycles (no endurance limit)",
+                "source": _ASM_AL},
+    "al_5052": {"condition": "H32", "basis": "typical", "Sut_MPa": 228, "Sy_MPa": 193, "E_GPa": 70.3, "nu": 0.33,
+                "fatigue_MPa": 117, "fatigue_note": "R.R. Moore, 5×10⁸ cycles (no endurance limit)",
+                "source": _ASM_AL},
+    "steel_1018": {"condition": "cold drawn", "basis": "minimum", "Sut_MPa": 440, "Sy_MPa": 370, "E_GPa": 207,
+                   "nu": 0.292, "source": _SHIGLEY_A20},
+    "steel_1045": {"condition": "cold drawn", "basis": "minimum", "Sut_MPa": 630, "Sy_MPa": 530, "E_GPa": 207,
+                   "nu": 0.292, "source": _SHIGLEY_A20},
+    "steel_4140": {"condition": "annealed", "basis": "typical", "Sut_MPa": 655, "Sy_MPa": 415, "E_GPa": 205,
+                   "nu": 0.29, "source": "ASM Handbook Vol. 1 typical properties"},
+    "ss_304": {"condition": "annealed plate/sheet", "basis": "minimum", "Sut_MPa": 515, "Sy_MPa": 205,
+               "E_GPa": 193, "nu": 0.29, "source": "ASTM A240 (minimum); E, ν typical (ASM)"},
+    "ss_316": {"condition": "annealed plate/sheet", "basis": "minimum", "Sut_MPa": 515, "Sy_MPa": 205,
+               "E_GPa": 193, "nu": 0.29, "source": "ASTM A240 (minimum); E, ν typical (ASM)"},
+    "ss_17_4": {"condition": "H900", "basis": "minimum", "Sut_MPa": 1310, "Sy_MPa": 1170, "E_GPa": 197,
+                "nu": 0.27, "source": "ASTM A564 Type 630 H900 (minimum); E, ν typical (ASM)"},
+    "cast_iron_gray": {"condition": "ASTM A48 class 30", "basis": "minimum", "Sut_MPa": 214, "Sy_MPa": None,
+                       "E_GPa": 100, "nu": 0.26, "brittle": True,
+                       "source": "ASTM A48 class 30 / Shigley Table A-24; E varies 90–115 GPa with stress level"},
+    "ti_6al4v": {"condition": "annealed (Grade 5)", "basis": "minimum", "Sut_MPa": 895, "Sy_MPa": 828,
+                 "E_GPa": 114, "nu": 0.34, "source": "ASTM B348 Grade 5 (minimum); E, ν typical (ASM)"},
+}
+
+
+def mechanical(code: str | None) -> dict[str, object] | None:
+    """Mechanical properties with provenance for a material code, or None when no cited values exist."""
+    m = get(code)
+    props = MECHANICAL.get(code or "")
+    if m is None or props is None:
+        return None
+    return {"code": code, "name": m["name"], **props, "version": MECHANICAL_VERSION, "note": MECHANICAL_NOTE}
