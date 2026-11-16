@@ -84,13 +84,17 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       </ul>
     </SampleFrame>),
   assembly: () => (
-    <SampleFrame title="Assembly — Damper sub-assembly (5 parts)">
+    <SampleFrame title="Assembly — demo L bracket on the demo mounting plate">
       <div className="grid gap-4 md:grid-cols-2">
         <div><div className="label mb-2">Tree & mates</div>
-          <ul className="space-y-1 font-mono text-[12px]">{["▾ damper_asm", "   ├ body (fixed)", "   ├ piston ⟷ body: concentric, slide", "   ├ rod ⟷ piston: rigid", "   ├ cap ⟷ body: coincident", "   └ 2× M6 bolt ⟷ cap: concentric"].map(l => <li key={l}>{l}</li>)}</ul>
-          <div className="mt-3 text-xs text-muted">DOF: 1 (slide along Z) · fully constrained otherwise</div></div>
-        <div><div className="label mb-2">Interference & clearance</div>
-          <FindingsTable rows={[["rod / cap", "Clearance 0.15 mm", "ok", "—"], ["piston / body", "Interference 0.02 mm³", "high", "Reduce piston Ø by 0.05 mm"], ["bolt / body", "Thread engagement 1.8×d", "ok", "—"]]} /></div>
+          <ul className="space-y-1 font-mono text-[12px]">{["▾ Mounting Plate assembly", "   ├ (f) Mounting Plate<1>", "   ├ (−) L Bracket<1>", "   └ ▸ Fastener stack 1 M5×25", "Coincident  +Z face ↔ −Z face", "Concentric  Ø6.6 hole ↔ Ø5.5 hole"].map(l => <li key={l} className="whitespace-pre">{l}</li>)}</ul>
+          <div className="mt-3 text-xs text-muted">(f) fixed · (−) can still move: mates show what is left free · Check: 0 interferences (exact B-rep boolean)</div></div>
+        <div><div className="label mb-2">Fastener auto-fit (picked hole Ø5.5)</div>
+          <table className="w-full text-[12.5px] tabular-nums"><tbody className="divide-y divide-border">
+            {[["Grip measured", "5 + 10 = 15 mm"], ["Washers ISO 7089", "2 × 1.0 mm"], ["Nut m ISO 4032", "4.7 mm"], ["Protrusion 2 × P", "1.6 mm"], ["Minimum length", "≥ 23.3 mm → M5×25 (ISO 888)"]].map(([k, v]) => (
+              <tr key={k}><td className="py-1.5 pr-3 text-muted">{k}</td><td className="py-1.5 text-right">{v}</td></tr>))}
+          </tbody></table>
+          <div className="mt-2 flex items-center gap-2 text-xs text-muted"><Badge tone="warning">VERIFY</Badge>ISO tables and a stated rule, not a joint calculation.</div></div>
       </div>
     </SampleFrame>),
   image2cad: () => (

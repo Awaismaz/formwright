@@ -29,22 +29,28 @@ export interface ViewportProps {
   /** When set (the assembly revision), take an isometric snapshot once the parts are in place. */
   thumbKey?: number | null;
   onThumb?: (png: string, key: number) => void;
+  /** Drag gizmo on one free instance (AMI-09); onDrag gets its dropped placement. */
+  gizmo?: { id: string; mode: "translate" | "rotate" } | null;
+  onDrag?: (id: string, T: number[]) => void;
+  /** Change to re-fit the view (e.g. after an insert). */
+  fitKey?: string | number | null;
 }
 
 export function Viewport(props: ViewportProps) {
-  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb } = props;
+  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb, gizmo, onDrag, fitKey } = props;
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<AssemblyViewer | null>(null);
   const [loaded, setLoaded] = useState(0);
   const [loading, setLoading] = useState(false);
   const [hover, setHover] = useState<AsmPick | null>(null);
-  const cbs = useRef({ onPick, describe });
-  cbs.current = { onPick, describe };
+  const cbs = useRef({ onPick, describe, onDrag });
+  cbs.current = { onPick, describe, onDrag };
 
   useEffect(() => {
     const v = new AssemblyViewer(host.current!, document.documentElement.classList.contains("dark"));
     v.onClick = (p, e) => cbs.current.onPick(p, e);
     v.onHover = p => setHover(p);
+    v.onDrag = (id, T) => cbs.current.onDrag?.(id, T);
     eng.current = v;
     (window as unknown as { __fwAsm?: AssemblyViewer }).__fwAsm = v;
     return () => { v.dispose(); eng.current = null; };
@@ -68,6 +74,8 @@ export function Viewport(props: ViewportProps) {
     eng.current?.setExplode(view.explode, explode);
   }, [view.instances, view.explode, loaded, explode]);
   useEffect(() => { eng.current?.setPicking(picking); }, [picking]);
+  useEffect(() => { eng.current?.setGizmo(gizmo?.id ?? null, gizmo?.mode); }, [gizmo?.id, gizmo?.mode, view.instances, loaded, explode]);
+  useEffect(() => { if (fitKey !== null && fitKey !== undefined && !loading) eng.current?.fit(); }, [fitKey, loading]);
   useEffect(() => { eng.current?.setPicks(picks); }, [picks, loaded, view.instances, explode]);
   useEffect(() => { eng.current?.setMarks(marks); }, [marks, loaded, view.instances, explode]);
   useEffect(() => { eng.current?.setSelected(selected); }, [selected, loaded]);

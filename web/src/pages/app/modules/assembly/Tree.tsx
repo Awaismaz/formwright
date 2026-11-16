@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   AlertTriangle, ArrowDownUp, Ban, Box, ChevronDown, ChevronRight, Circle, CircleDot, Eye, EyeOff, Link2, MoreHorizontal,
-  Pin, PinOff, RefreshCw, RotateCw, Ruler, Trash2, Wrench, Layers, Equal, TriangleRight,
+  Pencil, Pin, PinOff, RefreshCw, RotateCw, Ruler, Trash2, Wrench, Layers, Equal, TriangleRight,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip } from "@/components/ui";
@@ -38,6 +38,8 @@ interface TreeProps {
   onMate: (mid: string, body: Record<string, unknown> | null) => void;
   hoverMate: (m: Mate | null) => void;
   focusMate: string | null;
+  onEdit: (m: Mate) => void;
+  onRefit: (gid: string) => void;
 }
 
 export function Tree(p: TreeProps) {
@@ -48,6 +50,8 @@ export function Tree(p: TreeProps) {
   const userMates = view.mates.filter(m => !m.group);
   const stackMates = view.mates.filter(m => m.group);
   const problems = view.mates.filter(m => m.status !== "ok" && m.status !== "suppressed");
+  const brokenIn = (gid: string) => view.mates.some(m => m.group === gid && m.status === "broken");
+  const stackBroken = stackMates.some(m => m.status !== "ok" && m.status !== "suppressed");
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="asm-tree">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
@@ -57,7 +61,7 @@ export function Tree(p: TreeProps) {
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {loose.map(i => <Row key={i.id} i={i} {...p} />)}
         {groups.map(({ g, items }) => {
-          const isOpen = open[g.id] ?? false;
+          const isOpen = open[g.id] ?? brokenIn(g.id);
           const anySel = items.some(i => i.id === p.selected);
           return (
             <div key={g.id}>
@@ -69,6 +73,15 @@ export function Tree(p: TreeProps) {
                 <button type="button" className="min-w-0 flex-1 truncate text-left" title={g.name}
                   onClick={() => p.onSelect(items[1]?.id ?? items[0]!.id)}>{g.name.replace(/ \(.*\)$/, "")}
                   <span className="ml-1 text-muted">{g.spec.designation}×{g.spec.length?.L}</span></button>
+                {g.check && (
+                  <Tip content={g.check.text + (g.check.summary ? ` Proposed: ${g.check.summary}.` : "")}>
+                    {g.check.summary && p.canEdit
+                      ? <button type="button" onClick={() => p.onRefit(g.id)} data-refit={g.id}
+                          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-1.5 text-[10.5px] font-semibold text-warning hover:bg-warning/20">
+                          <RefreshCw className="h-3 w-3" />Update</button>
+                      : <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />}
+                  </Tip>
+                )}
                 {p.canEdit && <Tip content="Remove this fastener stack"><button type="button" onClick={() => p.onDeleteGroup(g.id)}
                   className="hidden rounded p-0.5 text-muted hover:text-danger group-hover:block"><Trash2 className="h-3.5 w-3.5" /></button></Tip>}
               </div>
@@ -81,16 +94,16 @@ export function Tree(p: TreeProps) {
           <span className="ml-auto text-[11px] tabular-nums text-muted">{view.mates.length}</span>
         </div>
         {problems.length > 0 && <div className="mx-2 mb-1 flex items-start gap-1.5 rounded border border-danger/30 bg-danger/5 px-2 py-1.5 text-[11.5px] text-danger">
-          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />{problems.length} mate{problems.length > 1 ? "s" : ""} not satisfied. Delete or suppress {problems.length > 1 ? "them" : "it"}, or change the value.</div>}
+          <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />{problems.length} mate{problems.length > 1 ? "s" : ""} not satisfied. Use Edit on {problems.length > 1 ? "each" : "it"} to change the value or re-pick a reference, or suppress {problems.length > 1 ? "them" : "it"}.</div>}
         {userMates.length === 0 && stackMates.length === 0 && <div className="px-3 py-2 text-[12px] text-muted">No mates yet. Use the Mate tab to pick two faces.</div>}
         {userMates.map(m => <MateRow key={m.id} m={m} {...p} />)}
         {stackMates.length > 0 && (
           <div>
-            <button type="button" onClick={() => setOpen(o => ({ ...o, __stack: !o.__stack }))}
+            <button type="button" onClick={() => setOpen(o => ({ ...o, __stack: !(o.__stack ?? stackBroken) }))}
               className="flex w-full items-center gap-1 px-2 py-1 text-[12px] text-muted hover:text-text">
-              {open.__stack ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}Fastener mates ({stackMates.length})
+              {(open.__stack ?? stackBroken) ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}Fastener mates ({stackMates.length})
             </button>
-            {open.__stack && stackMates.map(m => <MateRow key={m.id} m={m} {...p} />)}
+            {(open.__stack ?? stackBroken) && stackMates.map(m => <MateRow key={m.id} m={m} {...p} />)}
           </div>
         )}
       </div>
@@ -135,16 +148,22 @@ function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh }: {
   );
 }
 
-function MateRow({ m, canEdit, onMate, hoverMate, focusMate }: { m: Mate } & TreeProps) {
+function MateRow({ m, canEdit, onMate, hoverMate, focusMate, onEdit }: { m: Mate } & TreeProps) {
   const bad = m.status === "conflict" || m.status === "unsatisfied" || m.status === "broken";
   const val = m.type === "distance" ? ` ${m.value ?? 0} mm` : m.type === "angle" ? ` ${m.value ?? 0}°` : "";
+  const side = (desc: string | undefined, name: string, lost: boolean | undefined) =>
+    lost ? <span className="font-medium text-danger">missing face · {name}</span> : <>{desc ?? "reference"} · {name}</>;
+  const refs = `${m.a_lost ? "missing" : m.a_desc ?? ""} (${m.a_name}) ↔ ${m.b_lost ? "missing" : m.b_desc ?? ""} (${m.b_name})`;
   return (
-    <div className={cx("group flex items-center gap-1.5 px-2 py-1 text-[12px]", focusMate === m.id ? "bg-primary-soft" : "hover:bg-text/[.04]",
-      m.suppressed && "opacity-50")} onMouseEnter={() => hoverMate(m)} onMouseLeave={() => hoverMate(null)} data-mate={m.id}>
-      <span className={cx("shrink-0", bad ? "text-danger" : "text-muted")}>{MATE_ICON[m.type]}</span>
-      <span className="min-w-0 flex-1 truncate" title={`${m.label}${val}: ${m.a_name} ↔ ${m.b_name}`}>
-        <span className={cx("font-medium", bad && "text-danger")}>{m.label}{val}</span>
-        <span className="text-muted"> {m.a_name} · {m.b_name}</span>
+    <div className={cx("group flex items-start gap-1.5 px-2 py-1 text-[12px]", focusMate === m.id ? "bg-primary-soft" : "hover:bg-text/[.04]",
+      m.suppressed && "opacity-50")} onMouseEnter={() => hoverMate(m)} onMouseLeave={() => hoverMate(null)} data-mate={m.id}
+      onDoubleClick={() => canEdit && onEdit(m)}>
+      <span className={cx("mt-px shrink-0", bad ? "text-danger" : "text-muted")}>{MATE_ICON[m.type]}</span>
+      <span className="min-w-0 flex-1 leading-tight" title={`${m.label}${val}: ${refs}`}>
+        <span className={cx("block truncate font-medium", bad && "text-danger")}>{m.label}{val}
+          {m.status === "conflict" && <span className="ml-1 font-normal">· off by {m.residual_mm?.toFixed(3)} mm / {m.residual_deg?.toFixed(2)}°, not applied</span>}
+          {m.status === "broken" && <span className="ml-1 font-normal">· re-pick the missing face</span>}</span>
+        <span className="block truncate text-[11px] text-muted">{side(m.a_desc, m.a_name, m.a_lost)} ↔ {side(m.b_desc, m.b_name, m.b_lost)}</span>
       </span>
       {m.status === "conflict" && <Tip content={`Conflicts with earlier mates (off by ${m.residual_mm?.toFixed(3)} mm / ${m.residual_deg?.toFixed(2)}°). It is not applied.`}><Ban className="h-3.5 w-3.5 text-danger" /></Tip>}
       {m.status === "broken" && <Tip content="The referenced face no longer exists after the part was updated."><AlertTriangle className="h-3.5 w-3.5 text-danger" /></Tip>}
@@ -152,6 +171,7 @@ function MateRow({ m, canEdit, onMate, hoverMate, focusMate }: { m: Mate } & Tre
         <Menu>
           <MenuTrigger asChild><button type="button" className="rounded p-0.5 text-muted opacity-0 hover:text-text group-hover:opacity-100 data-[state=open]:opacity-100"><MoreHorizontal className="h-3.5 w-3.5" /></button></MenuTrigger>
           <MenuContent>
+            <MenuItem icon={<Pencil />} onSelect={() => onEdit(m)}>{m.status === "broken" ? "Repair mate…" : "Edit mate…"}</MenuItem>
             {m.type !== "concentric" && <MenuItem icon={<ArrowDownUp />} onSelect={() => onMate(m.id, { flip: !m.flip })}>Flip alignment</MenuItem>}
             {m.type === "concentric" && <MenuItem icon={<RotateCw />} onSelect={() => onMate(m.id, { flip: !m.flip })}>Reverse axis</MenuItem>}
             <MenuItem icon={<Ban />} onSelect={() => onMate(m.id, { suppressed: !m.suppressed })}>{m.suppressed ? "Unsuppress" : "Suppress"}</MenuItem>

@@ -3,7 +3,7 @@ export type V3 = [number, number, number];
 export interface AsmSummary {
   id: string; name: string; project_id: string | null; updated_at: string; instances: number; mates: number;
   fasteners: number; status: SolveStatus | null; thumbnail: string | null; dof: number | null; free_spins: number | null;
-  own_thumbnail: boolean;
+  own_thumbnail: boolean; broken_mates?: number; stale_parts?: number; stacks_to_check?: number;
 }
 
 export type SolveStatus = "fully_defined" | "under_defined" | "over_defined";
@@ -33,6 +33,7 @@ export interface Sel { inst: string; kind: "face" | "edge"; id: number }
 export interface Mate {
   id: string; type: MateType; label: string; value: number | null; flip: boolean; suppressed: boolean;
   group: string | null; a: Sel; b: Sel; a_name: string; b_name: string; status: MateStatus;
+  a_desc?: string; b_desc?: string; a_lost?: boolean; b_lost?: boolean;
   residual_mm: number | null; residual_deg: number | null;
 }
 
@@ -40,6 +41,7 @@ export interface Group {
   id: string; kind: "fastener"; name: string; pattern: string | null; hole: { inst: string; hole: number };
   spec: { summary: string; designation: string; size: number; kind: string; grip: number; rule: string;
     length: LengthCalc; warnings: string[]; sources: string[]; clearance: { text: string } };
+  check?: { text: string; summary: string | null };
 }
 
 export interface Solve {
@@ -98,15 +100,29 @@ export interface Proposal {
   grip: number; members: { inst: string; name: string; t: number }[]; size?: number; designation?: string; pitch?: number;
   clearance?: { class: string | null; nominal: number | null; text: string }; length?: LengthCalc; rule?: string;
   items?: { role: string; code: string; params: Record<string, number>; title: string; standard: string; material: string }[];
-  summary?: string;
+  summary?: string; no_room?: boolean;
 }
 export interface Probe {
   kind: "through" | "tapped" | "blocked"; hole_d: number; grip: number; reason?: string;
   members: { inst: string; name: string; t: number }[];
   tapped: { name: string; d: number; depth: number; blind: boolean } | null;
+  mismatch?: { inst: string; name: string; hole: number; d: number; size: number } | null;
 }
 export interface FitPlan {
   holes: { inst: string; inst_name: string; hole: number; probe: Probe; proposal: Proposal }[];
   ok: number; failed: number; stacks: { summary: string; count: number }[];
   style: "hex_bolt" | "shcs"; washers: "both" | "head" | "none"; flip: boolean;
+}
+
+export interface HoleFix { project_id: string; project: string; param: string; label: string; from: number; to: number; radius: boolean }
+export interface HolePair {
+  a_hole: number; b_hole: number; a_d: number; b_d: number; target: { inst: string; hole: number }; grip: number | null;
+  mismatch: { inst: string; hole: number; d: number; to_d: number; size: number | null; name?: string; fix: HoleFix | null } | null;
+  proposal: Proposal; point: V3;
+}
+export interface PairPlan { a: string; b: string; a_name: string; b_name: string; pairs: HolePair[]; ok: number }
+export interface Clash { a: string; b: string; a_name: string; b_name: string; volume_mm3: number }
+export interface RefreshResult {
+  refreshed: number; references_kept: number; references_followed: number; references_lost: number;
+  broken_mates: string[]; stacks_to_check: number;
 }

@@ -11,6 +11,13 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   clear: { label: "Clear", cls: "bg-success/10 text-success border-success/25" },
 };
 
+export function plural(n: number, word: string, many = `${word}s`): string { return `${n} ${n === 1 ? word : many}`; }
+
+/** Two-line pair name, so long instance names are never cut in the 360 px panel. */
+function PairName({ a, b }: { a: string; b: string }) {
+  return <span className="min-w-0 leading-tight"><span className="block truncate">{a}</span><span className="block truncate text-muted">↔ {b}</span></span>;
+}
+
 export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowFocus }: {
   view: AsmView; onRun: () => void; busy: boolean; focus: number | null; onFocus: (k: number | null) => void;
   rowFocus: number | null; onRowFocus: (k: number | null) => void;
@@ -28,11 +35,12 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
       {!an && <div className="px-4 py-6 text-[12.5px] leading-relaxed text-muted">Runs an exact boolean intersection between every pair of
         parts whose boxes overlap (interference volume in mm³) and the exact minimum distance between mated and neighbouring parts.</div>}
       {an && (
-        <>
-          <Section title="Interference" right={<span className="text-[11.5px] tabular-nums text-muted">{an.interference.checked_pairs} pairs checked</span>}>
+        <div className={cx(an.stale && "opacity-55 grayscale")} data-stale={an.stale || undefined}>
+          <Section title="Interference" right={<span className="text-[11.5px] tabular-nums text-muted">{plural(an.interference.checked_pairs, "pair")} checked</span>}>
             {clashes.length === 0 ? (
-              <div className="flex items-center gap-2 rounded border border-success/25 bg-success/5 px-2.5 py-2 text-[12.5px] text-success" data-testid="no-clash">
-                <CheckCircle2 className="h-4 w-4" />No interference</div>
+              <div className={cx("flex items-center gap-2 rounded border px-2.5 py-2 text-[12.5px]",
+                an.stale ? "border-border bg-text/[.03] text-muted" : "border-success/25 bg-success/5 text-success")} data-testid="no-clash">
+                <CheckCircle2 className="h-4 w-4" />{an.stale ? "No interference at the last check. Re-run it for the current assembly." : "No interference"}</div>
             ) : (
               <div className="space-y-1">
                 <div className="flex items-center gap-2 rounded border border-danger/30 bg-danger/5 px-2.5 py-2 text-[12.5px] font-medium text-danger" data-testid="clash-summary">
@@ -41,7 +49,7 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
                   <button key={k} type="button" onClick={() => onFocus(focus === k ? null : k)} data-clash={k}
                     className={cx("flex w-full items-center justify-between gap-2 rounded border px-2.5 py-1.5 text-left text-[12px]",
                       focus === k ? "border-danger bg-danger/10" : "border-border hover:border-danger/50")}>
-                    <span className="min-w-0 truncate">{p.a_name} ↔ {p.b_name}</span>
+                    <PairName a={p.a_name} b={p.b_name} />
                     <span className="shrink-0 font-semibold tabular-nums text-danger">{mm(p.volume_mm3, 3)} mm³</span>
                   </button>
                 ))}
@@ -58,7 +66,7 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
                   {an.clearance.rows.map((r, k) => (
                     <tr key={k} onClick={() => onRowFocus(rowFocus === k ? null : k)}
                       className={cx("cursor-pointer border-t border-border", rowFocus === k ? "bg-primary-soft/60" : "hover:bg-text/[.03]")}>
-                      <td className="max-w-[150px] truncate px-1 py-1" title={`${r.a_name} ↔ ${r.b_name}${r.mates.length ? " (mated)" : ""}`}>{r.a_name} ↔ {r.b_name}</td>
+                      <td className="px-1 py-1" title={`${r.a_name} ↔ ${r.b_name}${r.mates.length ? " (mated)" : ""}`}><PairName a={r.a_name} b={r.b_name} /></td>
                       <td className="px-1 py-1 text-right tabular-nums">{r.status === "clear" ? `${mm(r.distance_mm, 3)} mm` : "0"}</td>
                       <td className="px-1 py-1 text-right"><span className={cx("rounded-full border px-1.5 py-px text-[10.5px] font-semibold", STATUS[r.status]!.cls)}>{STATUS[r.status]!.label}</span></td>
                     </tr>
@@ -66,10 +74,10 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-[11.5px] text-muted">Mated pairs plus every pair within {mm(an.clearance.near_mm, 1)} mm. Click a row to show the gap.</p>
+            <p className="mt-2 text-[11.5px] text-muted">Mated pairs, plus neighbours closer than 5 % of the assembly size (about {Math.max(1, Math.round(an.clearance.near_mm))} mm here). Click a row to show the gap.</p>
           </Section>
           <div className="flex items-start gap-2 px-4 py-3 text-[11.5px] leading-snug text-muted"><Info className="mt-px h-3.5 w-3.5 shrink-0" />{an.note}</div>
-        </>
+        </div>
       )}
     </div>
   );
