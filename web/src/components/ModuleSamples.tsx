@@ -100,7 +100,7 @@ const SAMPLES: Record<string, () => JSX.Element> = {
           <svg viewBox="0 0 200 150" className="w-3/4"><path d="M30 110 L30 40 L60 40 L60 95 L170 95 L170 110 Z" fill="none" stroke="#3b4250" strokeWidth="2" strokeLinejoin="round" strokeDasharray="1 0" /><circle cx="45" cy="60" r="5" fill="none" stroke="#3b4250" strokeWidth="1.5" /><circle cx="140" cy="103" r="4" fill="none" stroke="#3b4250" strokeWidth="1.5" /><text x="90" y="125" fontSize="9" fill="#3b4250">~120?</text></svg>
         </div>
         <ul className="space-y-2 text-[13px]">
-          {[["Profile: L-section", "high"], ["Hole on vertical leg", "high"], ["Overall length ≈ 120 mm", "low"], ["Thickness", "missing"], ["Hole diameters", "missing"]].map(([t, c]) => (
+          {[["Profile: L-section", "high"], ["Hole on vertical leg", "high"], ["Overall length: needs one real dimension", "missing"], ["Thickness", "missing"], ["Hole diameters", "missing"]].map(([t, c]) => (
             <li key={t} className="flex items-center justify-between rounded border border-border px-3 py-2">{t}<Badge tone={c === "high" ? "success" : c === "low" ? "warning" : "danger"}>{c === "missing" ? "Ask user" : `confidence ${c}`}</Badge></li>))}
           <li className="rounded-lg bg-primary-soft p-3 text-primary">“What thickness should the bracket be, and are the holes for M5 or M6 bolts?”</li>
         </ul>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -31,6 +31,11 @@ const MAKE: Record<string, Omit<MakeModule, "code">> = {
   manufacturing: { name: "DFM Review", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
   print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
   engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
+};
+
+/** Live input modules offered on the Library tab: they bring outside geometry into this part. */
+const LIBRARY: Record<string, Omit<MakeModule, "code">> = {
+  image2cad: { name: "From Drawing", icon: <ScanLine className="h-5 w-5" />, tip: "Turn a drawing PDF, scan or sketch into this part: every dimension read, nothing guessed" },
 };
 
 export default function ProjectStudio() {
@@ -67,6 +72,8 @@ export default function ProjectStudio() {
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
   const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
     .map(m => ({ code: m.code, ...MAKE[m.code]! })), [catalog.data]);
+  const libraryModules = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && LIBRARY[m.code])
+    .map(m => ({ code: m.code, ...LIBRARY[m.code]! })), [catalog.data]);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
@@ -225,7 +232,7 @@ export default function ProjectStudio() {
 
   return (
     <div className="flex h-full flex-col">
-      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} onMake={code => navigate(`/app/modules/${code}?project=${id}`)}
+      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} library={libraryModules} onMake={code => navigate(`/app/modules/${code}?project=${id}`)}
         left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
           <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className="rounded p-1 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
           {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"

@@ -23,9 +23,9 @@ const TABS = ["Features", "Sketch", "Evaluate", "View", "Library", "Make"] as co
 /** Downstream modules shown on the Make tab (only the Live ones are passed in). */
 export interface MakeModule { code: string; name: string; icon: ReactNode; tip: string }
 
-export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake }: {
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [] }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
-  left?: ReactNode; right?: ReactNode; make?: MakeModule[]; onMake?: (code: string) => void;
+  left?: ReactNode; right?: ReactNode; make?: MakeModule[]; onMake?: (code: string) => void; library?: MakeModule[];
 }) {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
   const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
@@ -86,7 +86,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "toolbox", label: "Toolbox", icon: <Wrench className="h-5 w-5" />, tip: "Standard components (fasteners, bearings, gears…) from repeatable generators", cmd: { kind: "toolbox" } },
       { id: "similar", label: "Similar Parts", icon: <ScanSearch className="h-5 w-5" />, tip: "Find parts you already made that look like this one: same envelope, proportions and holes", cmd: { kind: "similar" }, needsBody: true },
       { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
-    ]],
+    ], ...(library.length ? [library.map(m => ({ id: m.code, label: m.name, icon: m.icon, tip: m.tip, onClick: () => onMake?.(m.code) })) as Btn[]] : [])],
     Make: [make.map(m => ({ id: m.code, label: m.name, icon: m.icon, tip: m.tip, onClick: () => onMake?.(m.code), disabled })) as Btn[]],
   };
 
