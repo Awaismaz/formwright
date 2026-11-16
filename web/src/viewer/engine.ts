@@ -487,8 +487,10 @@ export class CadViewer {
     const o = new THREE.Points(g, m); o.renderOrder = 11; o.position.copy(off);
     return o;
   }
-  private faceOverlay(fid: number, color: number, opacity: number) {
-    const f = this.topo!.faces[fid]!;
+  /** Translucent copy of a face, or null if the id is not in the current topology (e.g. a highlight from before a rebuild). */
+  private faceOverlay(fid: number, color: number, opacity: number): THREE.Mesh | null {
+    const f = this.topo?.faces[fid];
+    if (!f) return null;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(f.pos, 3)); g.setIndex(f.idx);
     const m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
@@ -498,13 +500,13 @@ export class CadViewer {
   }
   private objectsFor(p: Pick, color: number, strong: boolean): THREE.Object3D[] {
     const topo = this.topo!;
-    if (p.kind === "face") return [this.faceOverlay(p.id, color, strong ? 0.45 : 0.3)];
+    if (p.kind === "face") { const o = this.faceOverlay(p.id, color, strong ? 0.45 : 0.3); return o ? [o] : []; }
     if (p.kind === "edge") {
-      const e = topo.edges[p.id]!;
+      const e = topo.edges[p.id]; if (!e) return [];
       return [this.fatLine(e.pts, color, strong ? 4 : 3.5, this.solidOffset(topo.faces[e.faces[0] ?? 0]?.solid ?? 0))];
     }
     if (p.kind === "center") {
-      const e = topo.edges[p.edge]!;
+      const e = topo.edges[p.edge]; if (!e) return [];
       const off = this.solidOffset(topo.faces[e.faces[0] ?? 0]?.solid ?? 0);
       return [this.fatLine(e.pts, color, 2, off), this.dot(p.point, color, 12, off)];
     }
@@ -545,7 +547,7 @@ export class CadViewer {
   highlightFaces(ids: number[]) {
     this.dropAll(this.featureObjs);
     if (!this.topo) return;
-    for (const id of ids) { const o = this.faceOverlay(id, 0x2fa36b, 0.4); this.scene.add(o); this.featureObjs.push(o); }
+    for (const id of ids) { const o = this.faceOverlay(id, 0x2fa36b, 0.4); if (o) { this.scene.add(o); this.featureObjs.push(o); } }
   }
 
   setCenterOfMass(p: V3 | null) {

@@ -157,11 +157,13 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "mirror" ? !!mirrorPl && (mirrorWhat === "body" || sources.length > 0)
     : !!plane;
 
+  // features are replayed in tree order, whatever order they were ticked in
+  const inTreeOrder = manual.filter(m => sources.includes(m.id)).map(m => m.id);
   const submit = async () => {
     let f: Record<string, unknown> = { op, name, suppressed: e?.suppressed ?? false };
     if (op === "pattern") {
       const d = patDir()!;
-      f = { ...f, source: sources, count: num(patCount), ...(patKind === "circular"
+      f = { ...f, source: inTreeOrder, count: num(patCount), ...(patKind === "circular"
         ? { kind: "circular", axis: { origin: axOrigin.map(num), dir: d }, angle: num(patAngle) }
         : { kind: "linear", step: d.map(c => c * num(spacing)) }) };
     } else if (needsEdges) {
@@ -174,7 +176,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
     } else if (op === "mirror") {
-      f = { ...f, plane: mirrorPl, source: mirrorWhat === "features" ? sources : null };
+      f = { ...f, plane: mirrorPl, source: mirrorWhat === "features" ? inTreeOrder : null };
     } else {
       f = { ...f, plane, distance: num(dist), mode,
         sketch: kind === "rect" ? { kind, w: num(w), h: num(h), cx: num(cx_) || 0, cy: num(cy_) || 0 } : { kind, r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 } };
@@ -225,7 +227,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
             <div className="label mb-1">Mirror plane</div>
             <div className="mb-2">{seg<MirrorPlane>([["Right", "Right"], ["Front", "Front"], ["Top", "Top"], ["face", "Face"]], mirrorPlane, setMirrorPlane)}</div>
-            <p className="text-[12px] text-muted">{mirrorPlane !== "face" ? `${mirrorPlane} Plane through the origin. The blue rectangle shows it.`
+            <p className="text-[12px] text-muted">{mirrorPlane !== "face" ? `${mirrorPlane} Plane through the origin (green outline).`
               : face && topo ? `${describe(face, topo)}: its plane is the mirror plane.`
               : plane ? "Using the original plane. Click a planar face to change it." : "Click a planar face in the viewer."}</p>
           </div>

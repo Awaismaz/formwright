@@ -9,7 +9,7 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
 | # | Item | Status | Commit |
 |---|------|--------|--------|
 | 1 | Sketcher tools: trim, extend, offset, slot, polygon, sketch fillet, mirror entities, angle dimension | Done | see git log "DS-026 (1)" |
-| 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | In progress | |
+| 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | Done | see git log "DS-026 (2)" |
 | 3 | Reference plane features | Not started | |
 | 4 | Draft and Rib | Not started | |
 | 5 | Sweep and Loft (sketch-only tree nodes) | Not started | |
@@ -83,5 +83,37 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
   16625.923368 − 2 × 40.973897 (ring area from the saved profiles: 16543.975573). Angle in the saved profile: 30.000°.
 - Screenshots reviewed: sketch before trim, polygon preview, finished sketch, angle dimension, mirror selection, offset preview, final cut.
 
+## 2. Mirror features (Done)
+
+**What was built**
+- `fw._op` "mirror" takes an optional `source` list of earlier feature ids. Each source's tool body (the solid a
+  boss/cut/revolve/hole adds or removes, including its hole pattern) is reflected about the plane, then added or cut like
+  the original. Without `source` it is the existing body mirror. Source resolution is shared with feature patterns
+  (`fw._sources`): a source that is missing, suppressed or later in the tree, or a non-tool feature (fillet, chamfer,
+  shell...), gives a clean error, and the previous model is restored.
+- Validation: plane origin and normal (the normal must be non-zero); `source` takes 1–20 ids. Editing a feature mirror into a body
+  mirror sends `source: null`.
+- Mirror PropertyManager: **Mirror features | Mirror body** toggle, a feature checklist (the same component as patterns),
+  and the plane as Right / Front / Top (through the origin, SOLIDWORKS convention) or **Face** (picked planar face; when
+  editing, the original plane is kept until a new face is picked). A green outline in the viewer previews the mirror
+  plane, sized to the model. Patterns and mirrors replay their sources **in tree order**, whatever order they were ticked
+  in (the walkthrough showed results depending on tick order).
+- Agent prompt (manual-features list) now mentions feature mirroring.
+- **Viewer crash fixed (pre-existing):** suppressing or deleting a feature while the pointer was over its tree row
+  blanked the whole page (`faceOverlay` read a face id from the previous build). Face/edge overlays now skip ids not in
+  the current topology, and tree highlights are cleared when a new topology loads.
+
+**Tests**: `tests/test_studio.py::test_mirror_features_about_a_principal_plane`. On a 60×40×10 block: a through hole
+(R3), a lug 8×10×5 and a blind pin hole (Ø4×6) are mirrored about the Right plane. Volume = 24000 + 2·(−90π + 400 − 24π),
+bbox 60×40×15. Editing to a body mirror about x=30 doubles the volume; editing to the hole only gives the expected value.
+Suppressing a source gives 422 "mirrored feature" with the model restored; a chamfer as source gives "can't be mirrored";
+a zero normal gives 422.
+
+**Browser walkthrough** (`mirror-features.mjs`, 0 console/page errors): ribbon Mirror → PM → tick Hole, Lug and Pin hole
+→ Right plane (preview outline visible) → OK. **24083.716875 mm³** (hand calc 24083.716875; before 24041.858437); tree
+eye suppress → 24041.858437, unsuppress → 24083.716875; edit from the tree to mirror only the hole → **23759.115099**
+(hand calc 23759.115099). Screenshots reviewed: PM with plane preview, mirrored part, suppressed, edit PM, edited result.
+
 ## Parked decisions
-- None yet for item 1.
+- PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),
+  not "YZ through the model centre" as before. Existing features keep their stored plane.

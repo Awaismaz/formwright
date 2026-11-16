@@ -71,6 +71,7 @@ export default function ProjectStudio() {
     return () => clearTimeout(t);
   }, [p?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (st?.build_id) setCompare(null); }, [st?.build_id]);
+  useEffect(() => { setHl([]); }, [topo]); // face ids highlighted from a previous build are meaningless now
 
   const refresh = () => {
     for (const k of ["status", "project", "manual", "revisions", "params", "recognition"]) qc.invalidateQueries({ queryKey: [k, id] });
