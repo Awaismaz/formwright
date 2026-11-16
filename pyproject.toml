@@ -8,6 +8,7 @@ dependencies = [
     "build123d==0.13.0",
     "claude-agent-sdk==0.2.182",
     "fastapi>=0.115",
+    "reportlab>=5.1.0",
     "sqlalchemy>=2.0.36",
     "stripe>=11.0",
     "uvicorn>=0.30",
