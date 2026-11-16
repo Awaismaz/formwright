@@ -115,24 +115,30 @@ export function ModulePage() {
               <div><b>This module is in preview.</b> The screens below illustrate the planned workflow with sample data. It isn't generating results from your projects yet — join early access and we'll invite you as soon as it does.</div>
             </div>
           )}
+          {m.status === "live" && (
+            <div className="mt-5 flex items-start gap-3 rounded-lg border border-success/30 bg-success/5 p-4 text-sm">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+              <div><b>This module is live.</b> Unlock it for {org?.name ?? "your workspace"} to run it on your own parts. It opens straight on a project from the Design Studio's <b>Make</b> tab. The screens below are illustrative samples.</div>
+            </div>
+          )}
           <div className="mt-6"><ModuleSample code={code} /></div>
-          <h2 className="mt-8 font-semibold">What it will do</h2>
+          <h2 className="mt-8 font-semibold">{m.status === "live" ? "What it does" : "What it will do"}</h2>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">{m.bullets.map(b => <li key={b} className="flex items-start gap-2 text-sm"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{b}</li>)}</ul>
         </div>
         <aside className="space-y-4">
-          <Card className="p-5">
+          {m.status !== "live" && <Card className="p-5">
             <div className="label">Early access</div>
             <p className="mt-2 text-sm text-muted">Be first to use {m.name} on your own projects and help shape it.</p>
             <Button className="mt-4 w-full" variant={onList ? "secondary" : "primary"} icon={onList ? <Check className="h-4 w-4" /> : <Bell className="h-4 w-4" />} disabled={onList} loading={busy === "wl"} onClick={join}>
               {onList ? "You're on the list" : "Join early access"}</Button>
-          </Card>
+          </Card>}
           <Card className="p-5">
             <div className="label">Availability</div>
             {owned ? <p className="mt-2 flex items-center gap-2 text-sm"><Unlock className="h-4 w-4 text-success" /> Unlocked for {org?.name}. It activates for you automatically when the module goes live.</p> : <>
               {addon && <div className="mt-3 flex items-baseline justify-between"><span className="text-sm">Add-on</span><span className="text-xl font-semibold">{money(addon.price_cents, addon.interval)}</span></div>}
               {plansWith.length > 0 && <p className="mt-2 text-xs text-muted">Also included in: {plansWith.map(p => p.name).join(", ")}.</p>}
               {canManage(org?.role) ? <>
-                {addon && <Button className="mt-4 w-full" variant="secondary" icon={<Lock className="h-4 w-4" />} loading={busy === "buy"} onClick={unlock}>Unlock add-on</Button>}
+                {addon && <Button className="mt-4 w-full" variant={m.status === "live" ? "primary" : "secondary"} icon={<Lock className="h-4 w-4" />} loading={busy === "buy"} onClick={unlock}>{m.status === "live" ? `Unlock ${m.name}` : "Unlock add-on"}</Button>}
                 <Button className="mt-2 w-full" variant="ghost" onClick={() => nav("/app/billing")}>Compare plans</Button>
                 {m.status === "preview" && <p className="mt-2 text-[11px] text-muted">Unlocking now reserves the module for your workspace; it switches on for you automatically when it goes live.</p>}
               </> : <p className="mt-3 text-xs text-muted">Ask a workspace admin to unlock this module.</p>}

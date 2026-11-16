@@ -147,3 +147,5 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-16 | 3D Print permissions | Viewers analyse/download; engineers upload, repair, export, delete | When roles are reviewed |
 | PD-17 | Uploaded-mesh retention/quota | Stored per workspace on disk, no retention or quota limit | Before external users |
 | PD-18 | Module check numbering | 3D Print uses PP-01..17 internally; map to CHK-15+ later if a single catalogue is wanted | Optional |
+| PD-19 | Manufacturing defaults & permissions | Shop defaults (Ø3 smallest tool, 50 mm reach, rates, MRR) shown as 'Assumed defaults' until saved; rule limits from public design guides; material prices are placeholders; owners/admins/engineers edit the profile | Before pilots |
+| PD-20 | Engineering sign-off policy | Authors may self-sign (recorded and shown as self-check); engineer/admin/owner can sign, never while impersonating; no default safety factor (always user-entered with source); add-on stays $29/mo, not in Pro/Team | Before pilots |

@@ -228,35 +228,35 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| MFG-001 | Mfg | Basic CNC DFM rules for M1 family (internal radii, hole L/D, thin walls, std drill sizes) | P1 | Backlog | M1 | MVP | Eng | CAD-009 | Rules fire on seeded fixtures; findings tied to feature IDs | — | Advisory only |
-| MFG-010 | Mfg | Turning DFM rules | P1 | Backlog | M4 | LT | Eng | CAD-024 | Seeded fixture tests | — | |
+| MFG-001 | Mfg | Basic CNC DFM rules for M1 family (internal radii, hole L/D, thin walls, std drill sizes) | P1 | Done | M1 | MVP | Eng | CAD-009 | Rules fire on seeded fixtures; findings tied to feature IDs | CHK-13 CNC rules on exact B-rep with face ids (`src/aicad/manufacturing/`); `tests/test_manufacturing.py`: Ø2×10 hole L/D 5, R1 corners vs Ø6 tool critical, 0.5 mm wall measured 0.5, slot depth/width 5; docs/reports/manufacturing.md | Manufacturing Advisor Live 2026-11-16 |
+| MFG-010 | Mfg | Turning DFM rules | P1 | Done | M4 | LT | Eng | CAD-024 | Seeded fixture tests | Turnable detection (shaft Ø25×150 about +Z) + turning rules (slenderness, shoulders vs nose radius, second-op faces, capacity, bore depth) |  |
 | MFG-011 | Mfg | Sheet metal DFM rules | P2 | Backlog | M4 | LT | Eng | CAD-026 | Seeded fixture tests | — | |
 | MFG-012 | Mfg | Additive DFM rules | P2 | Backlog | M4 | LT | Eng | PRN-002 | Seeded fixture tests | — | |
-| MFG-013 | Mfg | Casting / injection molding DFM (draft, wall uniformity, undercuts) | P2 | Backlog | M4 | LT | Eng | CAD-025 | Seeded fixture tests | — | Only where credible |
-| MFG-014 | Mfg | Process recommendation (material, qty, geometry, tolerance, finish, machines) | P1 | Backlog | M4 | LT | Eng | MFG-010 | Ranked options with stated assumptions + confidence | — | |
-| MFG-015 | Mfg | Shop profile inputs (machines, tooling, rates) | P1 | Backlog | M4 | LT | Eng | PLT-001 | Advice changes with profile | — | |
-| MFG-016 | Mfg | Cost-driver/time-reduction suggestions (setups, tolerances, std parts, part count) | P1 | Backlog | M4 | LT | Eng | MFG-014 | Each suggestion cites feature + rationale | — | |
-| MFG-017 | Mfg | Relative cost model (no firm quotes) with assumptions | P2 | Backlog | M4 | LT | Eng | MFG-015 | Output labelled estimate; inputs shown | — | Never firm quotes |
-| MFG-018 | Mfg | Manufacturability report (PDF) tied to model features | P1 | Backlog | M4 | LT | Eng | MFG-001 | Report links finding → feature → view | — | |
+| MFG-013 | Mfg | Casting / injection molding DFM (draft, wall uniformity, undercuts) | P2 | Done | M4 | LT | Eng | CAD-025 | Seeded fixture tests | Screening: draft, two-part-mould undercuts (auto pull axis), plastic wall thickness | Screening only |
+| MFG-014 | Mfg | Process recommendation (material, qty, geometry, tolerance, finish, machines) | P1 | Done | M4 | LT | Eng | MFG-010 | Ranked options with stated assumptions + confidence | 8 processes ranked with reasons/assumptions; ABS shell at 20k units puts injection moulding top-2 (test); confidence never 'high' |  |
+| MFG-015 | Mfg | Shop profile inputs (machines, tooling, rates) | P1 | Done | M4 | LT | Eng | PLT-001 | Advice changes with profile | Shop profile per org, editable; advice changes with it (Ø8 tool → R3 pocket corners critical) | PD-19 defaults |
+| MFG-016 | Mfg | Cost-driver/time-reduction suggestions (setups, tolerances, std parts, part count) | P1 | Done | M4 | LT | Eng | MFG-014 | Each suggestion cites feature + rationale | Cost drivers cite faces |  |
+| MFG-017 | Mfg | Relative cost model (no firm quotes) with assumptions | P2 | Done | M4 | LT | Eng | MFG-015 | Output labelled estimate; inputs shown | Relative cost per process + quantity curve, labelled 'Relative estimate, not a quote'; unit cost non-increasing with quantity (test) | Rates/prices are labelled assumptions |
+| MFG-018 | Mfg | Manufacturability report (PDF) tied to model features | P1 | Done | M4 | LT | Eng | MFG-001 | Report links finding → feature → view | Printable HTML + PDF (reportlab, BSD) with highlighted views and NOT APPROVED banner |  |
 | MFG-019 | Mfg | BOM + manufacturability combined report for assemblies | P2 | Backlog | M4 | LT | Eng | ASM-008, MFG-018 | | — | |
-| MFG-020 | Mfg | Material library with provenance/versioning | P1 | Backlog | M4 | LT | Eng | — | Each property cites source + version | — | Shared with ENG-003 |
+| MFG-020 | Mfg | Material library with provenance/versioning | P1 | Done | M4 | LT | Eng | — | Each property cites source + version | Material properties with source + version (`manufacturing/matlib.py`); aicad.materials unchanged |  |
 
 ## C. AI Engineering Advisor
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| ENG-001 | Eng | Load case / boundary condition elicitation | P1 | Backlog | M4 | LT | Eng | AGT-003 | Structured load-case record per part | — | |
-| ENG-002 | Eng | Failure mode checklist (stress conc., fatigue, buckling, vibration, thermal, fit) | P1 | Backlog | M4 | LT | Eng | ENG-001 | Checklist tied to features; level = Recommended check | — | |
-| ENG-003 | Eng | Units/material/standards library with provenance & versions | P1 | Backlog | M4 | LT | Eng | MFG-020 | Unit-safe (pint or equiv.) tests | — | |
-| ENG-004 | Eng | Deterministic calculators (beam, bolt, pin shear, bearing, thread engagement) | P1 | Backlog | M4 | LT | Eng | ENG-003 | Verified against textbook worked examples | — | Level = Verified calculation after review |
-| ENG-005 | Eng | Safety factor handling with explicit user/standard source | P1 | Backlog | M4 | LT | Eng | ENG-004 | SF always attributed | — | |
-| ENG-006 | Eng | Recommend analyses/tests to run | P2 | Backlog | M4 | LT | Eng | ENG-002 | Recommendations listed with rationale | — | |
-| ENG-007 | Eng | Advice-level labelling in UI/reports (4 levels) | P0 | Backlog | M4 | LT | Eng | — | Every engineering output labelled | — | VALIDATION §4 |
-| ENG-008 | Eng | Engineer sign-off workflow for safety-critical outputs | P1 | Backlog | M4 | LT | Eng | PLT-004 | Named sign-off recorded; unsigned flagged | — | |
+| ENG-001 | Eng | Load case / boundary condition elicitation | P1 | Done | M4 | LT | Eng | AGT-003 | Structured load-case record per part | Load-case records per project (`<workspace>/engineering/`); docs/reports/engineering.md | Engineering Advisor Live 2026-11-16 |
+| ENG-002 | Eng | Failure mode checklist (stress conc., fatigue, buckling, vibration, thermal, fit) | P1 | Done | M4 | LT | Eng | ENG-001 | Checklist tied to features; level = Recommended check | Failure-mode checklist tied to features with suggested calculators/tests |  |
+| ENG-003 | Eng | Units/material/standards library with provenance & versions | P1 | Done | M4 | LT | Eng | MFG-020 | Unit-safe (pint or equiv.) tests | pint-based unit-checked inputs (BSD); 11 materials with cited mechanical properties, 'verify against certificate' |  |
+| ENG-004 | Eng | Deterministic calculators (beam, bolt, pin shear, bearing, thread engagement) | P1 | Done | M4 | LT | Eng | ENG-003 | Verified against textbook worked examples | 10 calculators match Shigley (10th/11th ed.) worked examples + ISO 898-1 table (`tests/test_engineering.py`, 31 tests; table in report) | Hand-calculation methods with stated assumptions |
+| ENG-005 | Eng | Safety factor handling with explicit user/standard source | P1 | Done | M4 | LT | Eng | ENG-004 | SF always attributed | Strength checks refuse to run without required SF + source; 'meets / below required factor' wording |  |
+| ENG-006 | Eng | Recommend analyses/tests to run | P2 | Done | M4 | LT | Eng | ENG-002 | Recommendations listed with rationale | Checklist recommends analyses/tests with reasons |  |
+| ENG-007 | Eng | Advice-level labelling in UI/reports (4 levels) | P0 | Done | M4 | LT | Eng | — | Every engineering output labelled | Advice-level labels: Preliminary estimate → Verified calculation on sign-off; never Validated simulation |  |
+| ENG-008 | Eng | Engineer sign-off workflow for safety-critical outputs | P1 | Done | M4 | LT | Eng | PLT-004 | Named sign-off recorded; unsigned flagged | Named sign-off with SHA-256 of inputs/results/load cases; any edit → 'Signature invalid'; walkthrough confirmed | PD-20 |
 | ENG-009 | Eng | External FEA integration evaluation (e.g., CalculiX, SW Simulation) | P2 | Backlog | M5 | LT | Eng | LEG-002 | ADR with license + validation approach | — | |
-| ENG-010 | Eng | Stress concentration region highlighting (geometry heuristics) | P2 | Backlog | M4 | LT | Eng | ENG-002 | Highlights on fixtures; labelled heuristic | — | |
-| ENG-011 | Eng | Fit/clearance/tolerance stack-up (1D) | P2 | Backlog | M4 | LT | Eng | ASM-005 | Worked example match | — | |
-| ENG-012 | Eng | Guard: never claim FEA validation from visual review | P0 | Backlog | M4 | LT | Eng | ENG-007 | Test prompts can't elicit "validated" wording without evidence | — | |
+| ENG-010 | Eng | Stress concentration region highlighting (geometry heuristics) | P2 | Done | M4 | LT | Eng | ENG-002 | Highlights on fixtures; labelled heuristic | Heuristic stress-concentration hints (shoulders, holes near edges, small fillets, sharp corners), labelled Heuristic |  |
+| ENG-011 | Eng | Fit/clearance/tolerance stack-up (1D) | P2 | Done | M4 | LT | Eng | ASM-005 | Worked example match | 1D stack-up worst case + RSS (Shigley 1-21/1-24 exact) |  |
+| ENG-012 | Eng | Guard: never claim FEA validation from visual review | P0 | Done | M4 | LT | Eng | ENG-007 | Test prompts can't elicit "validated" wording without evidence | Validation-wording guard tested; API rejects such wording in notes/conclusions/sign-off |  |
 
 ## D. AI Mesh Studio (later module)
 
