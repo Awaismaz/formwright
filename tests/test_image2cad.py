@@ -303,7 +303,7 @@ VISION_ANSWER = """Here is what I can read.
    {"text": "about 40ish", "x": 0.8, "y": 0.3, "confidence": 0.4}
  ],
  "unreadable": [{"note": "smudged note near the top right", "x": 0.85, "y": 0.1}],
- "missing": [{"what": "Thickness", "why": "only one view is drawn"}]}
+ "missing": [{"what": "Thickness", "why": "only one view is drawn"}, {"what": "Units", "why": "not written"}]}
 ```"""
 
 
@@ -318,19 +318,21 @@ def test_vision_block_parsing_and_questions() -> None:
     ids = {n["id"] for n in st["needs"]}
     assert {"reference", "confirm_d2", "kind_d2", "unparsed_0", "unreadable_0", "missing_0"} <= ids
     assert "confirm_d1" not in ids  # high confidence is listed as read, not asked
+    assert "missing_1" not in ids  # units are set with the reference, never a separate guess
     assert st["open"] == len(st["needs"]) and not st["ready"]
     assert st["scale"]["status"] == "undefined"  # never guessed
     # answer everything
     rv = review.clean_review({
         "reference": {"dim": "d1", "value": 120, "unit": "mm"},
         "answers": {"confirm_d2": {"choice": "keep"}, "kind_d2": {"choice": "diameter"},
-                    "unparsed_0": {"choice": "ignore"}, "unreadable_0": {"choice": "ignore"},
+                    "unparsed_0": {"choice": "note"}, "unreadable_0": {"choice": "ignore"},
                     "missing_0": {"choice": "value", "value": 6, "unit": "mm"}}}, r)
     st = review.state(r, rv)
     assert st["ready"] and st["scale"]["status"] == "confirmed"
     prompt = review.handoff_prompt({"name": "sketch.png"}, r, st, rv)
     assert "120 mm, overall length" in prompt and "Ø12" in prompt and "Thickness = 6 mm" in prompt
     assert "Do not measure any size from the reference image" in prompt
+    assert "Note written on the drawing: “about 40ish”" in prompt
 
 
 def test_handoff_prompt_contains_exactly_the_confirmed_values(pdf_read: dict[str, Any]) -> None:

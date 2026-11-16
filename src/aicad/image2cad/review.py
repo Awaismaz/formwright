@@ -26,6 +26,7 @@ KIND_NAMES = {"linear": "length", "diameter": "diameter", "radius": "radius", "s
               "chamfer": "chamfer"}
 SIZE_KINDS = ("linear", "diameter", "radius", "square", "spherical_radius", "spherical_diameter")
 UNITS = ("mm", "in")
+_HANDLED = re.compile(r"(?i)^\s*(units?|(general )?tolerances?|scale)\s*$")
 
 
 def empty_review() -> dict[str, Any]:
@@ -236,9 +237,10 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
              question=f"What is “{u['text']}”?",
              detail="It holds a number but isn't a dimension callout we recognise." +
                     (f" It may be the {u['describes']}." if u.get("describes") else ""),
-             options=[{"value": "ignore", "label": "Not a dimension, ignore it"},
-                      {"value": "callout", "label": "It's a dimension…"}], default=None, input="callout",
-             answered=a.get("choice") == "ignore" or (a.get("choice") == "callout" and bool(parse(a.get("text") or ""))))
+             options=[{"value": "callout", "label": "It's a dimension…"},
+                      {"value": "note", "label": "Pass it on as a note"},
+                      {"value": "ignore", "label": "Ignore it"}], default=None, input="callout",
+             answered=a.get("choice") in ("ignore", "note") or (a.get("choice") == "callout" and bool(parse(a.get("text") or ""))))
 
     # 6. unreadable areas (vision)
     for i, u in enumerate(read.get("unreadable", [])):
@@ -251,7 +253,8 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
              answered=a.get("choice") == "ignore" or (a.get("choice") == "text" and bool(a.get("text"))))
 
     # 7. missing sizes
-    missing = list(read.get("missing", []))
+    # units are set with the reference and tolerances are stated as an assumption: not separate questions
+    missing = [m for m in read.get("missing", []) if not _HANDLED.match(m.get("what") or "")]
     if read.get("method") == "vector" and len([v for v in views if v.get("kind") in ("ortho", "section")]) == 1:
         missing.append({"what": "Depth (the third dimension)", "why": "Only one view is drawn"})
     if not [d for d in dims if not d["excluded"]]:
@@ -260,7 +263,7 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
         a = answers.get(f"missing_{i}", {})
         need(id=f"missing_{i}", kind="missing", question=f"Missing: {m['what']}", detail=m.get("why"),
              options=[{"value": "value", "label": "I know it…"},
-                      {"value": "estimate", "label": "Estimate it and flag it as assumed"},
+                      {"value": "estimate", "label": "Estimate (flagged)"},
                       {"value": "not_needed", "label": "Not needed"}],
              default=None, input="value", default_unit=(units or {}).get("value"),
              answered=a.get("choice") in ("estimate", "not_needed") or
@@ -428,6 +431,8 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
             extra.append(f"{nd['question'].removeprefix('Missing: ')} = {fmt(a['value'])} {a['unit']}")
         elif nd["kind"] == "missing" and a.get("choice") == "not_needed":
             extra.append(f"{nd['question'].removeprefix('Missing: ')}: not needed")
+        elif nd["kind"] == "unparsed" and a.get("choice") == "note":
+            extra.append(f"Note written on the drawing: {nd['question'].removeprefix('What is ').rstrip('?')}")
         elif nd["kind"] == "unreadable" and a.get("choice") == "text":
             extra.append(f"{nd['question'].removeprefix('Unreadable: ')}: it says “{a['text']}”")
         elif nd["kind"] == "choice" and nd["id"].startswith("conflict_") and a.get("choice") == "keep":

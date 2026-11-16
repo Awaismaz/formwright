@@ -83,6 +83,7 @@ def _dir(ctx: Ctx, uid: str) -> Path:
 def _summary(d: Path, meta: dict[str, Any]) -> dict[str, Any]:
     out = {k: meta.get(k) for k in ("id", "name", "type", "bytes", "created_at", "status", "error", "project_id",
                                     "method", "pages", "step")}
+    out["created_at"] = str(out.get("created_at") or "").removesuffix("+00:00")  # naive UTC, like other modules
     out["preview"] = f"/api/m/image2cad/uploads/{meta['id']}/preview.png" if (d / "preview.png").is_file() else None
     read = store.read_json(d, "read.json")
     if read and meta.get("status") in ("review", "created"):

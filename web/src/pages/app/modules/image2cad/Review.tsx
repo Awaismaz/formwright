@@ -125,8 +125,11 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
   const pins: Pin[] = [];
   st.dims.forEach(d => {
     if (d.x == null || d.y == null) return;
-    const corner = !!d.box;
-    pins.push({ id: d.id, x: corner ? d.box![2]! : d.x, y: corner ? d.box![1]! : d.y, corner, n: number.get(d.id)!, title: d.label,
+    // pin beside the text, not on it: the box corner for PDF text, a small offset from the centre for vision reads
+    const corner = true;
+    const px = d.box ? d.box[2]! : Math.min(d.x + 0.018, 0.995);
+    const py = d.box ? d.box[1]! : Math.max(d.y - 0.012, 0.005);
+    pins.push({ id: d.id, x: px, y: py, corner, n: number.get(d.id)!, title: d.label,
       tone: d.excluded ? "off" : refDim === d.id ? "ref" : needByDim.has(d.id) ? "ask" : "read" });
   });
   st.needs.forEach(n => {
@@ -155,7 +158,13 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
           <div className="min-h-0 flex-1 overflow-y-auto" data-testid="checklist">
             <ScaleCard st={st} read={read} />
             <Section title="What we need" count={openNeeds.length} tone={openNeeds.length ? "warning" : "success"}
-              empty={openNeeds.length === 0 ? "Nothing open. Every value is read or answered." : undefined}>
+              empty={openNeeds.length === 0 ? "Nothing open. Every value is read or answered." : undefined}
+              action={editable && openNeeds.filter(n => n.kind === "missing").length >= 2 ? (
+                <Tip content="Every open missing size will be estimated by the designer and listed as an assumption" side="left">
+                  <button type="button" className="text-[12px] text-primary hover:underline" data-testid="estimate-rest"
+                    onClick={() => save({ ...rv, answers: { ...rv.answers, ...Object.fromEntries(openNeeds.filter(n => n.kind === "missing").map(n => [n.id, { choice: "estimate" }])) } }, true)}>
+                    Estimate all missing sizes (flagged)</button>
+                </Tip>) : undefined}>
               {openNeeds.map(n => (
                 <NeedCard key={n.id} n={n} rv={rv} st={st} hot={hot === n.id || (!!n.dim && hot === n.dim)} onHot={setHot}
                   num={n.dim ? number.get(n.dim) : undefined} number={number} disabled={!editable}
@@ -201,13 +210,14 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
   );
 }
 
-function Section({ title, count, tone, empty, children }: { title: string; count?: number; tone?: "warning" | "success"; empty?: string; children: ReactNode }) {
+function Section({ title, count, tone, empty, action, children }: { title: string; count?: number; tone?: "warning" | "success"; empty?: string; action?: ReactNode; children: ReactNode }) {
   return (
     <section className="border-b border-border px-4 py-3.5">
       <div className="mb-2.5 flex items-center gap-2">
         <h2 className="label">{title}</h2>
         {count != null && <span className={cx("rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
           tone === "warning" ? "bg-warning/15 text-warning" : tone === "success" ? "bg-success/15 text-success" : "bg-text/[.06] text-muted")}>{count}</span>}
+        {action && <span className="ml-auto">{action}</span>}
       </div>
       {empty && <p className="flex items-center gap-1.5 text-[12.5px] text-success"><CheckCircle2 className="h-4 w-4" />{empty}</p>}
       <div className="space-y-2">{children}</div>
@@ -233,7 +243,8 @@ function ScaleCard({ st, read }: { st: ReviewState; read: Full["read"] }) {
         <p className="relative mt-1.5 text-[12.5px] leading-snug text-text/80">{s.summary}</p>
         <ul className="relative mt-2 space-y-1 text-[12px] text-muted">
           <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Stated</span>{s.stated ? <span><b className="text-text">{s.stated.text}</b> · {s.stated.evidence}</span> : "No scale written on the drawing"}</li>
-          <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Units</span>{s.units ? <span><b className="text-text">{s.units.value}</b> · {s.units.evidence}</span> : "Not stated: set them with the reference"}</li>
+          <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Units</span>{s.units ? <span><b className="text-text">{s.units.value}</b> · {s.units.evidence}</span>
+            : s.reference ? <span><b className="text-text">{s.reference.unit}</b> · set by your reference</span> : "Not stated: set them with the reference"}</li>
           {s.evidence.map(e => <li key={e} className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Geometry</span><span className="flex gap-1"><Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />{e}</span></li>)}
           {read?.method === "vision" && <li className="flex gap-1.5"><span className="w-[72px] shrink-0 text-text/60">Image</span>Not to scale. Sizes are never measured from it.</li>}
         </ul>
