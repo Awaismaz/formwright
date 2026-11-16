@@ -1,0 +1,612 @@
+"""Assembly Studio API (module ``assembly``): assemblies of verified project parts and Toolbox components, with
+mates, interference and clearance checks, exploded view, BOM, fastener auto-fit and assembly STEP export.
+
+All routes are org-scoped and need the module (plan / add-on ``addon_assembly`` / God-mode bypass), else 402.
+Viewers can open assemblies, the BOM and the last exported STEP; changes need the engineer role.
+
+  GET    /api/m/assembly/assemblies                          list
+  POST   /api/m/assembly/assemblies                          create (optionally from a project: its part, fixed)
+  GET    /api/m/assembly/for-project/{project_id}            the assembly opened from that project (or null)
+  GET    /api/m/assembly/sources                             verified projects + Toolbox catalogue to insert
+  GET    /api/m/assembly/assemblies/{id}                     full view (instances, parts, mates, solve, explode, BOM)
+  PATCH  /api/m/assembly/assemblies/{id}                     rename
+  DELETE /api/m/assembly/assemblies/{id}
+  POST   /api/m/assembly/assemblies/{id}/instances           insert a project part or a Toolbox component
+  PATCH  /api/m/assembly/assemblies/{id}/instances/{iid}     rename / show / fix / move
+  DELETE /api/m/assembly/assemblies/{id}/instances/{iid}
+  POST   /api/m/assembly/assemblies/{id}/instances/{iid}/refresh   "Part updated: refresh"
+  POST   /api/m/assembly/assemblies/{id}/mates               add a mate (solved immediately)
+  PATCH  /api/m/assembly/assemblies/{id}/mates/{mid}         value / flip / suppress
+  DELETE /api/m/assembly/assemblies/{id}/mates/{mid}
+  DELETE /api/m/assembly/assemblies/{id}/groups/{gid}        remove a fastener stack
+  POST   /api/m/assembly/assemblies/{id}/analyse             interference + clearance (exact)
+  GET    /api/m/assembly/assemblies/{id}/bom[?format=csv]
+  POST   /api/m/assembly/assemblies/{id}/export              assembly STEP (re-import verified)
+  GET    /api/m/assembly/assemblies/{id}/files/assembly.step
+  POST   /api/m/assembly/assemblies/{id}/fasteners/propose   fastener auto-fit proposal for a hole / pattern
+  POST   /api/m/assembly/assemblies/{id}/fasteners/accept    insert the proposed stacks
+  GET    /api/m/assembly/parts/{key}/topo                    exact topology of a part snapshot (viewer)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from aicad import toolbox
+from aicad.assembly import AssemblyInputError, service, solver, store
+from aicad.platform.config import get_settings
+from aicad.platform.deps import Ctx, verified_ctx
+from aicad.platform.models import Project
+from aicad.platform.routers.projects import _thumb, wait_finalized, workspace_for
+from aicad.platform.services import audit, org_modules, track
+
+router = APIRouter(prefix="/api/m/assembly", tags=["assembly"])
+CODE = "assembly"
+_locks: dict[str, asyncio.Lock] = {}
+
+
+# ----------------------------------------------------------------------------- access
+def asm_ctx(ctx: Ctx = Depends(verified_ctx)) -> Ctx:
+    org = ctx.require_org()
+    if CODE not in org_modules(ctx.db, org) and not ctx.god_on("bypass_paywall"):
+        raise HTTPException(402, {"message": "Assembly Studio isn't included in your plan. Unlock the add-on to "
+                                             "assemble your parts.", "cta": "/app/modules/assembly"})
+    return ctx
+
+
+def _editor(ctx: Ctx) -> None:
+    if ctx.role == "viewer":
+        raise HTTPException(403, "Viewers can open assemblies but can't change them.")
+
+
+def _root(ctx: Ctx) -> Path:
+    return store.org_root(get_settings().data_dir, ctx.require_org().id)
+
+
+def _doc(ctx: Ctx, aid: str) -> dict[str, Any]:
+    try:
+        d = store.load(_root(ctx), aid)
+    except AssemblyInputError:
+        d = None
+    if d is None or d.get("org_id") != ctx.require_org().id:
+        raise HTTPException(404, "Assembly not found")
+    return d
+
+
+def _lock(aid: str) -> asyncio.Lock:
+    lk = _locks.get(aid)
+    if lk is None:
+        lk = _locks[aid] = asyncio.Lock()
+    return lk
+
+
+def _err(e: Exception) -> HTTPException:
+    if isinstance(e, AssemblyInputError):
+        return HTTPException(409, str(e))
+    if isinstance(e, toolbox.ToolboxError):
+        return HTTPException(422, str(e))
+    if isinstance(e, service.WorkerError):
+        return HTTPException(500, "The geometry operation failed on this assembly. Try again, or remove the part "
+                                  "that was just added.")
+    raise e
+
+
+def _project(ctx: Ctx, pid: str) -> Project:
+    p = ctx.db.get(Project, pid)
+    if p is None or p.org_id != ctx.require_org().id:
+        raise HTTPException(404, "Project not found")
+    return p
+
+
+def _status(ws: Path) -> dict[str, Any]:
+    f = ws / "out" / "status.json"
+    try:
+        return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _model_rev(ws: Path, build_id: Any) -> str | None:
+    root = ws / "revisions"
+    if not root.is_dir():
+        return None
+    for d in sorted((d for d in root.iterdir() if d.is_dir() and d.name.isdigit()), key=lambda d: -int(d.name)):
+        st = store.read_json(d / "status.json") or {}
+        if build_id is not None and str(st.get("build_id")) == str(build_id):
+            return d.name
+    return None
+
+
+async def _project_part(ctx: Ctx, p: Project) -> str:
+    ws = workspace_for(p)
+    await wait_finalized(p.id)
+    st = _status(ws)
+    return await service.ensure_project_part(_root(ctx), p.org_id, p.id, p.name, ws, st,
+                                             _model_rev(ws, st.get("build_id")))
+
+
+# ----------------------------------------------------------------------------- views
+def _projects_for(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Project]:
+    ids = {i["source"]["project_id"] for i in doc["instances"] if i["source"]["kind"] == "project"}
+    if doc.get("project_id"):
+        ids.add(doc["project_id"])
+    if not ids:
+        return {}
+    rows = ctx.db.scalars(select(Project).where(Project.id.in_(ids), Project.org_id == ctx.require_org().id)).all()
+    return {p.id: p for p in rows}
+
+
+def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
+    root = _root(ctx)
+    parts = service._parts(root, doc)
+    projects = _projects_for(ctx, doc)
+    current: dict[str, str | None] = {pid: str(_status(workspace_for(p)).get("build_id")) for pid, p in projects.items()}
+    names = service.display_names(doc)
+    solve = doc.get("solve") or {}
+    sinst = solve.get("instances", {})
+    smates = solve.get("mates", {})
+    instances = []
+    for i in doc["instances"]:
+        src = i["source"]
+        stale = missing = False
+        if src["kind"] == "project":
+            pid = src["project_id"]
+            if pid not in projects:
+                missing = True
+            else:
+                stale = current.get(pid) not in (None, "None") and current.get(pid) != str(src["build_id"])
+        instances.append({**i, "display": names[i["id"]], "stale": stale, "source_missing": missing,
+                          "dof": sinst.get(i["id"])})
+    mates = []
+    for m in doc["mates"]:
+        st = smates.get(m["id"], {})
+        if m.get("broken"):
+            status = "broken"
+        elif m.get("suppressed"):
+            status = "suppressed"
+        elif st.get("conflict"):
+            status = "conflict"
+        elif st and not st.get("ok"):
+            status = "unsatisfied"
+        else:
+            status = "ok"
+        mates.append({"id": m["id"], "type": m["type"], "label": solver.LABEL[m["type"]], "value": m.get("value"),
+                      "flip": m.get("flip", False), "suppressed": m.get("suppressed", False), "group": m.get("group"),
+                      "a": {k: m["a"][k] for k in ("inst", "kind", "id")}, "b": {k: m["b"][k] for k in ("inst", "kind", "id")},
+                      "a_name": names.get(m["a"]["inst"]), "b_name": names.get(m["b"]["inst"]), "status": status,
+                      "residual_mm": st.get("residual_mm"), "residual_deg": st.get("residual_deg")})
+    pview = {}
+    for k, p in parts.items():
+        info = p["info"]
+        pview[k] = {"key": k, "name": p["name"], "kind": p["kind"], "material": p.get("material"),
+                    "standard": p.get("standard"), "code": p.get("code"), "params": p.get("params"),
+                    "bbox": info["bbox"], "center": info["center"], "volume": info["volume"],
+                    "holes": [{kk: h.get(kk) for kk in ("id", "d", "axis", "center", "depth", "through", "faces")}
+                              for h in info.get("holes", [])],
+                    "patterns": info.get("patterns", []), "topo_url": f"/api/m/assembly/parts/{k}/topo"}
+    ddir = store.doc_dir(root, doc["id"])
+    sig = service.geometry_signature(doc)
+    analysis = store.read_json(ddir / "analysis.json")
+    if analysis:
+        analysis["stale"] = analysis.get("signature") != sig
+    exp = store.read_json(ddir / "export.json")
+    if exp:
+        exp["stale"] = exp.get("signature") != sig
+        exp["url"] = f"/api/m/assembly/assemblies/{doc['id']}/files/assembly.step"
+    home = projects.get(doc.get("project_id") or "")
+    return {
+        "assembly": {k: doc.get(k) for k in ("id", "name", "project_id", "rev", "created_at", "updated_at")},
+        "home_project": {"id": home.id, "name": home.name} if home else None,
+        "instances": instances, "parts": pview, "mates": mates, "groups": doc["groups"], "solve": solve or None,
+        "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
+        "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
+        "can_edit": ctx.role != "viewer",
+    }
+
+
+def _summary(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
+    thumb = None
+    pid = doc.get("project_id") or next((i["source"]["project_id"] for i in doc["instances"]
+                                         if i["source"]["kind"] == "project"), None)
+    if pid:
+        p = ctx.db.get(Project, pid)
+        if p is not None and p.org_id == ctx.require_org().id:
+            thumb = _thumb(p)
+    s = doc.get("solve") or {}
+    return {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"), "updated_at": doc["updated_at"],
+            "instances": len(doc["instances"]), "mates": len(doc["mates"]),
+            "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
+            "status": s.get("status"), "thumbnail": thumb}
+
+
+# ----------------------------------------------------------------------------- bodies
+class CreateIn(BaseModel):
+    name: str | None = Field(None, max_length=120)
+    project_id: str | None = None
+
+
+class RenameIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ToolboxIn(BaseModel):
+    code: str
+    params: dict[str, float] = Field(default_factory=dict)
+
+
+class InsertIn(BaseModel):
+    project_id: str | None = None
+    toolbox: ToolboxIn | None = None
+
+
+class RotateIn(BaseModel):
+    axis: Literal["X", "Y", "Z"]
+    deg: float = Field(ge=-360, le=360)
+
+
+class InstancePatch(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=120)
+    visible: bool | None = None
+    fixed: bool | None = None
+    translate: list[float] | None = Field(None, min_length=3, max_length=3)
+    rotate: RotateIn | None = None
+    T: list[float] | None = Field(None, min_length=12, max_length=12)
+
+
+class Sel(BaseModel):
+    inst: str
+    kind: Literal["face", "edge"]
+    id: int
+
+
+class MateIn(BaseModel):
+    type: Literal["auto", "coincident", "flush", "distance", "angle", "concentric"] = "auto"
+    a: Sel
+    b: Sel
+    value: float = 0.0
+    flip: bool = False
+
+
+class MatePatch(BaseModel):
+    value: float | None = None
+    flip: bool | None = None
+    suppressed: bool | None = None
+
+
+class FitIn(BaseModel):
+    inst: str
+    hole: int = Field(ge=0)
+    pattern: bool = True
+    style: Literal["hex_bolt", "shcs"] = "hex_bolt"
+    washers: Literal["both", "head", "none"] = "both"
+    flip: bool = False
+
+
+# ----------------------------------------------------------------------------- routes
+@router.get("/assemblies")
+def list_assemblies(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    return {"items": [_summary(ctx, d) for d in store.list_docs(_root(ctx)) if d.get("org_id") == ctx.require_org().id]}
+
+
+@router.get("/for-project/{project_id}")
+def for_project(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _project(ctx, project_id)
+    for d in store.list_docs(_root(ctx)):
+        if d.get("project_id") == project_id and d.get("org_id") == ctx.require_org().id:
+            return {"assembly": _summary(ctx, d)}
+    return {"assembly": None}
+
+
+@router.get("/sources")
+def sources(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    org = ctx.require_org()
+    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+                          .order_by(Project.updated_at.desc())).all()
+    projects = []
+    for p in rows:
+        ws = workspace_for(p)
+        st = _status(ws)
+        projects.append({"id": p.id, "name": p.name, "thumbnail": _thumb(p), "material": st.get("material"),
+                         "verified": bool(st.get("ok")) and (ws / "out" / "part.step").is_file(),
+                         "part": st.get("part")})
+    tb = [c for c in toolbox.catalog()]
+    return {"projects": projects, "toolbox": tb, "mate_types": [{"type": t, "label": solver.LABEL[t],
+                                                                  "needs": solver.NEEDS[t]} for t in solver.MATE_TYPES]}
+
+
+@router.post("/assemblies")
+async def create(body: CreateIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    org = ctx.require_org()
+    root = _root(ctx)
+    p = _project(ctx, body.project_id) if body.project_id else None
+    name = (body.name or "").strip() or (f"{service.clean_name(p.name)} assembly" if p else "New assembly")
+    doc = store.new_doc(name, org.id, ctx.user.id, p.id if p else None)
+    if p is not None:
+        try:
+            key = await _project_part(ctx, p)
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+        service.add_instance(root, doc, key)
+        service.run_solve(root, doc)
+    store.save(root, doc)
+    audit(ctx.db, "assembly.created", ctx.user, org.id, target=doc["id"], project=doc.get("project_id"))
+    track(ctx.db, "assembly_created", ctx.user, org.id, from_project=bool(p))
+    ctx.db.commit()
+    return _view(ctx, doc)
+
+
+@router.get("/assemblies/{aid}")
+def get_assembly(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    try:
+        return _view(ctx, _doc(ctx, aid))
+    except AssemblyInputError as e:
+        raise _err(e) from e
+
+
+@router.patch("/assemblies/{aid}")
+async def rename(aid: str, body: RenameIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        doc["name"] = body.name.strip()
+        store.save(_root(ctx), doc)
+    return _view(ctx, doc)
+
+
+@router.delete("/assemblies/{aid}")
+async def delete(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    async with _lock(aid):
+        _doc(ctx, aid)
+        store.delete(_root(ctx), aid)
+    audit(ctx.db, "assembly.deleted", ctx.user, ctx.require_org().id, target=aid)
+    ctx.db.commit()
+    return {"ok": True}
+
+
+async def _mutate(ctx: Ctx, aid: str, fn: Any, solve: bool = True, prealign: Any = None) -> dict[str, Any]:
+    _editor(ctx)
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        root = _root(ctx)
+        try:
+            r = fn(doc, root)
+            if asyncio.iscoroutine(r):
+                r = await r
+            if solve:
+                service.run_solve(root, doc, prealign(doc, r) if prealign else ())
+        except (AssemblyInputError, toolbox.ToolboxError, service.WorkerError) as e:
+            raise _err(e) from e
+        store.save(root, doc)
+    view = _view(ctx, doc)
+    if isinstance(r, dict) and r.get("_extra"):
+        view["result"] = r["_extra"]
+    return view
+
+
+@router.post("/assemblies/{aid}/instances")
+async def insert(aid: str, body: InsertIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    if (body.project_id is None) == (body.toolbox is None):
+        raise HTTPException(422, "Insert either a project part or a Toolbox component.")
+
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        if body.project_id:
+            key = await _project_part(ctx, _project(ctx, body.project_id))
+        else:
+            assert body.toolbox is not None
+            key = await service.ensure_toolbox_part(root, ctx.require_org().id, body.toolbox.code, body.toolbox.params)
+        inst = service.add_instance(root, doc, key)
+        return {"_extra": {"instance": inst["id"]}}
+
+    view = await _mutate(ctx, aid, fn)
+    track(ctx.db, "assembly_part_inserted", ctx.user, ctx.require_org().id,
+          kind="project" if body.project_id else "toolbox")
+    ctx.db.commit()
+    return view
+
+
+@router.patch("/assemblies/{aid}/instances/{iid}")
+async def patch_instance(aid: str, iid: str, body: InstancePatch, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    def fn(doc: dict[str, Any], root: Path) -> None:
+        inst = service._inst(doc, iid)
+        if body.name is not None:
+            inst["name"] = body.name.strip()
+        if body.visible is not None:
+            inst["visible"] = body.visible
+        if body.fixed is not None:
+            inst["fixed"] = body.fixed
+        if body.translate is not None or body.rotate is not None or body.T is not None:
+            service.move_instance(root, doc, iid, {"translate": body.translate, "T": body.T,
+                                                   "rotate": body.rotate.model_dump() if body.rotate else None})
+
+    geometric = body.fixed is not None or body.translate is not None or body.rotate is not None or body.T is not None
+    return await _mutate(ctx, aid, fn, solve=geometric)
+
+
+@router.delete("/assemblies/{aid}/instances/{iid}")
+async def delete_instance(aid: str, iid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    return await _mutate(ctx, aid, lambda doc, root: service.remove_instance(doc, iid))
+
+
+@router.post("/assemblies/{aid}/instances/{iid}/refresh")
+async def refresh(aid: str, iid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        inst = service._inst(doc, iid)
+        if inst["source"]["kind"] != "project":
+            raise AssemblyInputError("Toolbox parts don't change.")
+        p = _project(ctx, inst["source"]["project_id"])
+        old = inst["part"]
+        key = await _project_part(ctx, p)
+        kept = broken = 0
+        n = 0
+        new_part = store.part(root, key)
+        for i in doc["instances"]:
+            if i["part"] == old:
+                k, b = service.remap_refs(root, doc, i["id"], key)
+                kept, broken, n = kept + k, broken + b, n + 1
+                i["part"] = key
+                i["source"] = service._source(new_part)  # type: ignore[arg-type]
+        return {"_extra": {"refreshed": n, "references_kept": kept, "references_lost": broken}}
+
+    return await _mutate(ctx, aid, fn)
+
+
+@router.post("/assemblies/{aid}/mates")
+async def add_mate(aid: str, body: MateIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        m = service.make_mate(root, doc, body.model_dump())
+        return {"_extra": {"mate": m["id"]}, "id": m["id"]}
+
+    return await _mutate(ctx, aid, fn, prealign=lambda doc, r: [r["id"]])
+
+
+@router.patch("/assemblies/{aid}/mates/{mid}")
+async def patch_mate(aid: str, mid: str, body: MatePatch, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    def fn(doc: dict[str, Any], root: Path) -> None:
+        m = next((x for x in doc["mates"] if x["id"] == mid), None)
+        if m is None:
+            raise AssemblyInputError("Mate not found")
+        if body.value is not None:
+            if m["type"] == "angle" and not 0 <= body.value <= 180:
+                raise AssemblyInputError("Angle must be between 0° and 180°.")
+            if m["type"] == "distance" and not 0 <= body.value <= 10000:
+                raise AssemblyInputError("Distance must be between 0 and 10000 mm.")
+            m["value"] = float(body.value)
+        if body.flip is not None:
+            m["flip"] = body.flip
+        if body.suppressed is not None:
+            m["suppressed"] = body.suppressed
+        if body.flip is not None or body.value is not None:
+            return {"id": mid}  # type: ignore[return-value]
+        return None
+
+    return await _mutate(ctx, aid, fn, prealign=lambda doc, r: [r["id"]] if r else [])
+
+
+@router.delete("/assemblies/{aid}/mates/{mid}")
+async def delete_mate(aid: str, mid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    def fn(doc: dict[str, Any], root: Path) -> None:
+        if not any(m["id"] == mid for m in doc["mates"]):
+            raise AssemblyInputError("Mate not found")
+        doc["mates"] = [m for m in doc["mates"] if m["id"] != mid]
+
+    return await _mutate(ctx, aid, fn)
+
+
+@router.delete("/assemblies/{aid}/groups/{gid}")
+async def delete_group(aid: str, gid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    return await _mutate(ctx, aid, lambda doc, root: service.remove_group(doc, gid))
+
+
+@router.post("/assemblies/{aid}/analyse")
+async def analyse(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        try:
+            res = await service.analyse(_root(ctx), ctx.require_org().id, doc)
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+    track(ctx.db, "assembly_analysed", ctx.user, ctx.require_org().id, interferences=res["interference"]["count"])
+    ctx.db.commit()
+    return {"analysis": {**res, "stale": False}}
+
+
+@router.get("/assemblies/{aid}/bom")
+def get_bom(aid: str, format: Literal["json", "csv"] = "json", ctx: Ctx = Depends(asm_ctx)) -> Any:
+    doc = _doc(ctx, aid)
+    projects = _projects_for(ctx, doc)
+    try:
+        b = service.bom(_root(ctx), doc, {pid: p.name for pid, p in projects.items()})
+    except AssemblyInputError as e:
+        raise _err(e) from e
+    if format == "csv":
+        track(ctx.db, "download", ctx.user, ctx.require_org().id, file="assembly/bom.csv")
+        ctx.db.commit()
+        return Response(service.bom_csv(b), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{_safe(doc["name"])}_BOM.csv"'})
+    return {"assembly": {"id": doc["id"], "name": doc["name"]}, **b}
+
+
+def _safe(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:60] or "assembly"
+
+
+@router.post("/assemblies/{aid}/export")
+async def export(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        try:
+            res = await service.export_step(_root(ctx), ctx.require_org().id, doc)
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+    audit(ctx.db, "assembly.exported", ctx.user, ctx.require_org().id, target=aid, instances=res["instances"])
+    track(ctx.db, "assembly_exported", ctx.user, ctx.require_org().id, ok=res["ok"])
+    ctx.db.commit()
+    return {"export": {**res, "stale": False, "url": f"/api/m/assembly/assemblies/{aid}/files/assembly.step"}}
+
+
+@router.get("/assemblies/{aid}/files/assembly.step")
+def download(aid: str, ctx: Ctx = Depends(asm_ctx)) -> FileResponse:
+    doc = _doc(ctx, aid)
+    f = store.doc_dir(_root(ctx), aid) / "assembly.step"
+    if not f.is_file():
+        raise HTTPException(404, "Export the assembly first")
+    track(ctx.db, "download", ctx.user, ctx.require_org().id, file="assembly/assembly.step")
+    ctx.db.commit()
+    return FileResponse(f, media_type="application/step",
+                        headers={"Content-Disposition": f'attachment; filename="{_safe(doc["name"])}.step"',
+                                 "Cache-Control": "no-store"})
+
+
+@router.post("/assemblies/{aid}/fasteners/propose")
+async def fit_propose(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        root = _root(ctx)
+        try:
+            targets = service.fastener_targets(root, doc, body.inst, body.hole, body.pattern)
+            plan = await service.propose(root, ctx.require_org().id, doc, targets, body.style, body.washers, body.flip)
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+    names = service.display_names(doc)
+    for h in plan["holes"]:
+        h["inst_name"] = names.get(h["inst"])
+    return plan
+
+
+@router.post("/assemblies/{aid}/fasteners/accept")
+async def fit_accept(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        targets = service.fastener_targets(root, doc, body.inst, body.hole, body.pattern)
+        res = await service.accept(root, ctx.require_org().id, doc, targets, body.style, body.washers, body.flip)
+        return {"_extra": {"inserted": res["inserted"]}}
+
+    view = await _mutate(ctx, aid, fn, solve=False)
+    audit(ctx.db, "assembly.fasteners_inserted", ctx.user, ctx.require_org().id, target=aid,
+          stacks=(view.get("result") or {}).get("inserted"))
+    track(ctx.db, "assembly_fasteners_inserted", ctx.user, ctx.require_org().id,
+          stacks=(view.get("result") or {}).get("inserted"))
+    ctx.db.commit()
+    return view
+
+
+@router.get("/parts/{key}/topo")
+def part_topo(key: str, ctx: Ctx = Depends(asm_ctx)) -> FileResponse:
+    try:
+        f = store.part_dir(_root(ctx), key) / "topo.json"
+    except AssemblyInputError as e:
+        raise HTTPException(404, "Part not found") from e
+    if not f.is_file():
+        raise HTTPException(404, "Part not found")
+    return FileResponse(f, media_type="application/json", headers={"Cache-Control": "private, max-age=86400"})
