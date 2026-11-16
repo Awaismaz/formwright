@@ -16,7 +16,7 @@ from aicad import materials
 from aicad.engineering import review
 from aicad.engineering import standards as std
 
-GEOMETRY_VERSION = "geo-1.0.1"   # bump when recognition/hint logic changes (invalidates the cache)
+GEOMETRY_VERSION = "geo-1.0.2"   # bump when recognition/hint logic changes (invalidates the cache)
 G_ACCEL = 9.80665               # standard gravity, m/s² (ISO 80000-3)
 
 
@@ -112,6 +112,38 @@ def _q(value: float, unit: str = "mm") -> dict[str, Any]:
     return {"value": round(float(value), 4), "unit": unit}
 
 
+def keyway(rec: dict[str, Any], sharp: list[dict[str, Any]]) -> dict[str, float] | None:
+    """A keyseat on a turned part, from its sharp internal edges running along the axis: two parallel edges at the
+    keyseat floor corners. Returns the section diameter, width, depth and length, or None."""
+    stock = rec.get("stock") or {}
+    if stock.get("kind") != "turned" or stock.get("axis") not in ("X", "Y", "Z"):
+        return None
+    ka = "XYZ".index(stock["axis"])
+    bmin, size = rec.get("bbox_min") or [0, 0, 0], rec.get("bbox") or [0, 0, 0]
+    ctr = [bmin[i] + size[i] / 2 for i in range(3)]
+    o = [j for j in range(3) if j != ka]
+    axial = [s for s in sharp if s.get("type") == "line" and abs(abs(s["dir"][ka]) - 1) < 1e-6]
+    if len(axial) < 2:
+        return None
+    a, b = sorted(axial, key=lambda s: -s["length"])[:2]
+    if abs(a["length"] - b["length"]) > 1e-3 or abs(a["center"][ka] - b["center"][ka]) > 1e-3:
+        return None
+    pa = [a["center"][j] - ctr[j] for j in o]
+    pb = [b["center"][j] - ctr[j] for j in o]
+    w = math.dist(pa, pb)
+    r_floor = math.hypot((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2)
+    z = a["center"][ka]
+    d = float(stock["d"])
+    for bo in rec.get("bosses", []):     # a smaller section covering the keyseat's axial position
+        lo, hi = sorted([(bo.get("bottom") or [0, 0, 0])[ka], (bo.get("top") or [0, 0, 0])[ka]])
+        if lo - 1e-6 <= z <= hi + 1e-6:
+            d = float(bo["d"])
+    depth = d / 2 - r_floor
+    if w <= 0 or depth <= 0 or depth >= d / 2:
+        return None
+    return {"d": d, "w": round(w, 3), "depth": round(depth, 3), "length": round(a["length"], 3)}
+
+
 def suggestions(info: dict[str, Any]) -> list[dict[str, Any]]:
     """Pre-filled calculator inputs from the model. Every value carries a provenance line."""
     out: list[dict[str, Any]] = []
@@ -179,12 +211,34 @@ def suggestions(info: dict[str, Any]) -> list[dict[str, Any]]:
     if stock.get("kind") == "turned":
         ds = sorted({stock["d"], *(b["d"] for b in rec.get("bosses", []))})
         d = ds[0]
-        inp = {"d": _q(d)}
-        prov = {"d": f"Smallest turned diameter Ø{d:g} (recognised)"}
-        if Sut and Sy:
-            inp.update(Sut=_q(Sut, "MPa"), Sy=_q(Sy, "MPa"))
-            prov.update(Sut=f"From {msrc}", Sy=f"From {msrc}")
-        out.append({"calc_id": "shaft_fatigue", "title": f"Shaft section Ø{d:g}", "inputs": inp, "provenance": prov})
+
+        def shaft(title: str, d: float, dprov: str, kt: tuple[float, float] | None = None, ktprov: str = "") -> None:
+            inp: dict[str, Any] = {"d": _q(d)}
+            prov = {"d": dprov}
+            if kt:
+                inp.update(kf_mode="kt_q", Kt=kt[0], Kts=kt[1])
+                prov.update(Kt=ktprov, Kts=ktprov)
+            if Sut and Sy:
+                inp.update(Sut=_q(Sut, "MPa"), Sy=_q(Sy, "MPa"))
+                prov.update(Sut=f"From {msrc}", Sy=f"From {msrc}")
+            out.append({"calc_id": "shaft_fatigue", "title": title, "inputs": inp, "provenance": prov,
+                        "section": True})
+
+        shaft(f"Shaft section Ø{d:g}", d, f"Smallest turned diameter Ø{d:g} (recognised)")
+        for h in info.get("hints") or []:     # critical sections: shoulders (Kt from Shigley Table 7-1)
+            if h.get("kind") == "shoulder" and (h.get("prefill") or {}).get("d"):
+                ds_ = float(h["prefill"]["d"])
+                kt = std.KT_FIRST_ITERATION["shoulder_sharp"]
+                shaft(f"Shoulder at Ø{ds_:g} ({h['title'].split('(')[-1].rstrip(')')})", ds_,
+                      f"Smaller diameter at the shoulder: {h['title']}", kt,
+                      f"Sharp shoulder fillet, first-iteration estimate ({std.KT_FIRST_ITERATION_SOURCE})")
+        kw = keyway(rec, info.get("sharp_edges") or [])
+        if kw:
+            kt = std.KT_FIRST_ITERATION["keyseat_end_mill"]
+            shaft(f"Keyway section Ø{kw['d']:g} ({kw['w']:g} × {kw['depth']:g} keyseat)", kw["d"],
+                  f"Ø{kw['d']:g} section carrying the {kw['w']:g} mm wide, {kw['depth']:g} mm deep, {kw['length']:g} mm "
+                  "long keyseat (from its sharp internal edges); use the gross diameter per Shigley §7-4", kt,
+                  f"End-mill keyseat, first-iteration estimate ({std.KT_FIRST_ITERATION_SOURCE})")
         bores = [h for h in holes if h.get("through") and h["d"] > 0.3 * stock["d"]]
         if bores:
             b = max(bores, key=lambda h: h["d"])
