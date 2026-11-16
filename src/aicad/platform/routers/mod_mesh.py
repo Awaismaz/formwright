@@ -76,7 +76,7 @@ class RenderIn(BaseModel):
 
     def options(self) -> scene.Options:
         try:
-            return scene.Options(**self.model_dump()).validate()
+            return scene.Options(**self.model_dump(include=set(RenderIn.model_fields))).validate()
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
 
@@ -98,7 +98,7 @@ class LookIn(BaseModel):
 
     def options(self) -> scene.Options:
         try:
-            return scene.Options(**self.model_dump()).validate()
+            return scene.Options(**self.model_dump(include=set(RenderIn.model_fields))).validate()
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
 

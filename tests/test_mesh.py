@@ -778,3 +778,12 @@ def test_assembly_render_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     # moving a part makes the render an earlier revision of the assembly
     doc["instances"][1]["T"][11] = 40.0
     assert assembly_render.info(ws, root, doc, "")["previews"][0]["stale"] is True
+
+
+def test_assembly_render_request_body_builds_render_options() -> None:
+    """The walkthrough hit a 500: the explode fraction was passed on to the render options."""
+    from aicad.platform.routers.mod_mesh import AssemblyRenderIn
+
+    body = AssemblyRenderIn(explode=0.5, lighting="dark", quality="final")
+    opts = body.options()
+    assert opts.lighting == "dark" and opts.quality == "final" and body.explode == 0.5
