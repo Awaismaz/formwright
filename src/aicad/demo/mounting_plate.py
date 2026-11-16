@@ -4,11 +4,17 @@ from build123d import *
 
 NAME = "Mounting plate"
 MATERIAL = "Aluminium 6061-T6"
-L, W, T = 120.0, 80.0, 10.0
-HOLE_D, EDGE = 6.6, 10.0          # M6 clearance (ISO 273 medium)
-PL, PW, PD, PR = 40.0, 30.0, 4.0, 3.0
+L = 120.0
+W = 80.0
+T = 10.0
+HOLE_D = 6.6  # M6 clearance (ISO 273 medium)
+EDGE = 10.0
+PL = 40.0
+PW = 30.0
+PD = 4.0
+PR = 3.0
 CH = 1.0
-PARAMS = dict(L=L, W=W, T=T, HOLE_D=HOLE_D, EDGE=EDGE, POCKET_L=PL, POCKET_W=PW, POCKET_D=PD, POCKET_R=PR, CHAMFER=CH)
+PARAMS = dict(L=L, W=W, T=T, HOLE_D=HOLE_D, EDGE=EDGE, PL=PL, PW=PW, PD=PD, PR=PR, CH=CH)
 
 part = Box(L, W, T, align=(Align.CENTER, Align.CENTER, Align.MIN))
 part = chamfer(part.edges().group_by(Axis.Z)[-1], CH)

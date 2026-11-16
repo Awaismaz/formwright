@@ -348,6 +348,102 @@ async def restore_revision(project_id: str, n: int, ctx: Ctx = Depends(verified_
     return {"ok": True, "status_ok": st.get("ok")}
 
 
+class ParamsIn(BaseModel):
+    values: dict[str, float]
+
+
+_ASSIGN = r"^(?P<name>{name})(?P<sp>\s*=\s*)(?P<val>-?\d+(?:\.\d+)?)(?P<rest>\s*(?:#.*)?)$"
+
+
+def editable_params(source: str) -> dict[str, float]:
+    """Top-level `NAME = <number>` assignments that can be edited without the AI."""
+    import re
+
+    out: dict[str, float] = {}
+    for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(-?\d+(?:\.\d+)?)\s*(?:#.*)?$", source, re.MULTILINE):
+        out[m.group(1)] = float(m.group(2))
+    return out
+
+
+async def _rebuild(p: Project, ws: Path) -> dict[str, Any]:
+    proc = await asyncio.create_subprocess_exec(sys.executable, "-I", "-m", "aicad.agent.runner",
+                                                str(ws / "model.py"), str(ws / "out"), cwd=str(ws))
+    try:
+        await asyncio.wait_for(proc.wait(), 180)
+    except TimeoutError:
+        proc.kill()
+        raise HTTPException(504, "Rebuild timed out") from None
+    stl = ws / "out" / "part.stl"
+    if stl.is_file():
+        r = await asyncio.create_subprocess_exec(sys.executable, "-m", "aicad.agent.render", str(stl),
+                                                 str(ws / "out" / "views.png"), p.name, cwd=str(ws))
+        await asyncio.wait_for(r.wait(), 60)
+    return json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
+
+
+@router.get("/projects/{project_id}/params")
+def get_params(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    f = workspace_for(_project(ctx, project_id)) / "model.py"
+    return {"editable": editable_params(f.read_text(encoding="utf-8")) if f.is_file() else {}}
+
+
+@router.post("/projects/{project_id}/params")
+async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Deterministic parameter edit: rewrite simple numeric assignments in model.py and rebuild (no AI, no tokens).
+    The edit is kept only if the rebuilt part passes its checks; otherwise model.py is restored."""
+    import math
+    import re
+
+    p = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403)
+    s = _sessions.get(p.id)
+    if s and s.busy:
+        raise HTTPException(409, "Agent is busy")
+    ws = workspace_for(p)
+    f = ws / "model.py"
+    if not f.is_file():
+        raise HTTPException(404, "No model yet")
+    src = f.read_text(encoding="utf-8")
+    editable = editable_params(src)
+    new = src
+    changes = {}
+    for name, val in body.values.items():
+        if name not in editable:
+            raise HTTPException(422, f"{name} is not a simple editable parameter. Ask the design agent instead.")
+        if not math.isfinite(val):
+            raise HTTPException(422, f"{name}: invalid number")
+        raw = re.search(_ASSIGN.format(name=re.escape(name)), new, re.MULTILINE)
+        was_int = raw is not None and "." not in raw["val"]
+        if was_int and not float(val).is_integer():
+            raise HTTPException(422, f"{name} must be a whole number")
+        lit = str(int(val)) if was_int else (repr(float(val)) if not float(val).is_integer() else f"{float(val):.1f}")
+        new, n = re.subn(_ASSIGN.format(name=re.escape(name)), lambda m, lit=lit: f"{m['name']}{m['sp']}{lit}{m['rest']}", new,
+                         count=1, flags=re.MULTILINE)
+        if n:
+            changes[name] = {"from": editable[name], "to": val}
+    if not changes:
+        return {"ok": True, "changed": {}}
+    f.write_text(new, encoding="utf-8")
+    st = await _rebuild(p, ws)
+    if not st.get("ok"):
+        f.write_text(src, encoding="utf-8")
+        await _rebuild(p, ws)
+        reason = st.get("error") or ", ".join(c["id"] for c in st.get("checks", []) if c["gating"] and not c["passed"])
+        raise HTTPException(422, f"That change failed the geometry checks ({reason}); the previous model was restored. "
+                                 "Ask the design agent if the change needs a design update (e.g. EXPECTED values).")
+    p.last_status = {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
+    p.builds += 1
+    p.updated_at = utcnow()
+    rev = _snapshot(p, ws)
+    audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
+    ctx.db.commit()
+    if s:
+        s.publish({"type": "text", "text": "Parameters updated without AI: " + ", ".join(
+            f"`{k}` {v['from']:g} → {v['to']:g}" for k, v in changes.items()) + f" (revision {rev})."})
+    return {"ok": True, "changed": changes, "revision": rev}
+
+
 @router.post("/projects/{project_id}/agent/chat")
 async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     p = _project(ctx, project_id)

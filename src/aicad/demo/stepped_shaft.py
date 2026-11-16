@@ -4,9 +4,14 @@ from build123d import *
 
 NAME = "Stepped shaft"
 MATERIAL = "Steel 1045"
-D1, L1, D2, L2 = 20.0, 40.0, 25.0, 70.0
-KW, KD, KL = 6.0, 3.5, 30.0   # keyway width, depth (from Ø25 surface), length
-PARAMS = dict(D1=D1, L1=L1, D2=D2, L2=L2, KEY_W=KW, KEY_D=KD, KEY_L=KL)
+D1 = 20.0
+L1 = 40.0
+D2 = 25.0
+L2 = 70.0
+KW = 6.0  # keyway width, depth (from Ø25 surface), length
+KD = 3.5
+KL = 30.0
+PARAMS = dict(D1=D1, L1=L1, D2=D2, L2=L2, KW=KW, KD=KD, KL=KL)
 
 shaft = Cylinder(D1 / 2, L1, align=(Align.CENTER, Align.CENTER, Align.MIN))
 shaft += Pos(0, 0, L1) * Cylinder(D2 / 2, L2, align=(Align.CENTER, Align.CENTER, Align.MIN))

@@ -4,9 +4,14 @@ from build123d import *
 
 NAME = "Slip-on pipe flange"
 MATERIAL = "Carbon steel"
-OD, T, BORE = 150.0, 16.0, 60.3
-RF_D, RF_H = 100.0, 2.0
-N_BOLTS, BOLT_D, PCD = 6, 14.0, 120.0
+OD = 150.0
+T = 16.0
+BORE = 60.3
+RF_D = 100.0
+RF_H = 2.0
+N_BOLTS = 6
+BOLT_D = 14.0
+PCD = 120.0
 PARAMS = dict(OD=OD, T=T, BORE=BORE, RF_D=RF_D, RF_H=RF_H, N_BOLTS=N_BOLTS, BOLT_D=BOLT_D, PCD=PCD)
 
 f = Cylinder(OD / 2, T, align=(Align.CENTER, Align.CENTER, Align.MIN))

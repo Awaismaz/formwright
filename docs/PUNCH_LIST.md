@@ -1,6 +1,6 @@
 # Punch List
 
-Last updated: 2026-11-16 (Session 1c, design agent). Synchronized with `ROADMAP.md`.
+Last updated: 2026-11-16 (Session 1d, Formwright platform). Synchronized with `ROADMAP.md`.
 
 ## Legend
 
@@ -21,9 +21,9 @@ Last updated: 2026-11-16 (Session 1c, design agent). Synchronized with `ROADMAP.
 | MFG / ENG | 24 | 0 | 0 | 0 |
 | MSH | 12 | 0 | 0 | 0 |
 | PLT / SEC / UX / INF / DOC | 39 | 1 | 4 | 1 |
-| **Total** | **199** | **19** | **26** | **10** |
+| **Total** | **211** | **37** | **33** | **11** |
 
-Implemented so far is a **prototype**: the FX-01 spike, deterministic checks CHK-02..08, a live viewer, and the chat-driven design agent (`aicad studio`, Claude Agent SDK). There are no drawings, no DFM checks and no sandbox yet. Per-module rows above are not re-split; the Total row is authoritative.
+Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboarding, tours, billing with tokens and add-ons, admin console, God mode) and the live **Design Studio** (AI agent, checks, live viewer, parameter edits, revisions). Other CAD modules are honest **Preview** placeholders (ADR-016). Per-module rows above are not re-split; the Total row is authoritative.
 
 ---
 
@@ -54,15 +54,16 @@ Implemented so far is a **prototype**: the FX-01 spike, deterministic checks CHK
 | LEG-005 | Legal | Review Anthropic commercial/API terms (output ownership, retention, training, embedding) | P0 | Blocked | M1 | MVP | Counsel | — | Summary + counsel sign-off | — | Needs counsel |
 | LEG-006 | Legal | Review SOLIDWORKS/Creo API & EULA terms for automation/bridges | P1 | Blocked | M2 | LT | Counsel | — | Written guidance | — | Needs counsel |
 | LEG-007 | Legal | IP checklist: assignment, contractor agreements, confidentiality, trademark search, patents-where-justified | P1 | Blocked | M1 | MVP | Counsel | — | Checklist drafted (not legal advice) and reviewed | — | Draft can be prepared by Eng; sign-off by counsel |
-| LEG-008 | Legal | Privacy, data retention, DPA template for pilots | P1 | Blocked | M2 | LT | Counsel | — | DPA + retention policy | — | |
+| LEG-008 | Legal | Privacy, data retention, DPA template for pilots | P1 | Blocked | M2 | LT | Counsel | — | DPA + retention policy | Draft privacy/terms/AUP pages (marked Draft) | Needs counsel (PD-05) |
 | LEG-009 | Legal | Export-control (ITAR/EAR) screening process for uploads | P1 | Blocked | M2 | LT | Counsel | — | Screening policy + upload attestation | — | |
 | LEG-010 | Legal | AI-assisted authorship + provenance record for code and fixtures | P1 | Backlog | M1 | MVP | Eng | GOV-004 | PROVENANCE section in repo; fixtures carry provenance | — | |
 | COM-001 | Commercial | 5–10 pilot interviews (consultancies, shops, independent PEs) | P0 | Backlog | M1 | MVP | Founder | — | Notes per interview; wedge W3 vs W4 decision | — | Validates AS-01/02/04/05 |
 | COM-002 | Commercial | Pricing hypotheses + willingness-to-pay test | P1 | Backlog | M2 | LT | Founder | COM-001 | Documented hypotheses and results | — | |
-| COM-003 | Commercial | Pilot onboarding pack + success metrics (time saved) | P1 | Backlog | M2 | LT | Founder | COM-001 | Pack exists; metrics captured for ≥3 pilots | — | |
-| COM-004 | Commercial | Pilot telemetry (consented) | P1 | Backlog | M2 | LT | Eng | PLT-008 | Opt-in telemetry dashboard | — | |
-| COM-005 | Commercial | Billing/usage controls | P2 | Backlog | M4 | LT | Eng | PLT-009 | Usage caps enforced per tenant | — | Only once commercially justified |
-| COM-006 | Commercial | Support workflow (issue intake, SLAs for pilots) | P2 | Backlog | M2 | LT | Founder | COM-003 | Documented process | — | |
+| COM-003 | Commercial | Pilot onboarding pack + success metrics (time saved) | P1 | In Progress | M2 | LT | Founder | COM-001 | Pack exists; metrics captured for ≥3 pilots | Onboarding wizard, tours, checklist, CUSTOMER_JOURNEY.md | Pilot success metrics TBD |
+| COM-004 | Commercial | Pilot telemetry (consented) | P1 | In Progress | M2 | LT | Eng | PLT-008 | Opt-in telemetry dashboard | JourneyEvent instrumentation + Admin funnel | Consent banner pending (PD-05) |
+| COM-005 | Commercial | Billing/usage controls | P2 | In Progress | M4 | LT | Eng | PLT-009 | Usage caps enforced per tenant | Plans/add-ons/token packs, Stripe + simulated checkout; `tests/test_platform.py` | Stripe test mode needs keys (PD-06) |
+| COM-006 | Commercial | Support workflow (issue intake, SLAs for pilots) | P2 | In Progress | M2 | LT | Founder | COM-003 | Documented process | Help center, feedback form, support mailto | Ticketing/SLAs pending |
+| COM-007 | Commercial | Stripe test-mode end-to-end (keys, webhook, portal) | P0 | Blocked | M2 | LT | Founder | PD-06 | Real test checkout updates plan via webhook | — | Code done; needs Stripe account |
 
 ## A. AI Design Studio — geometry & CAD
 
@@ -79,7 +80,7 @@ Implemented so far is a **prototype**: the FX-01 spike, deterministic checks CHK
 | CAD-009 | CAD | Deterministic regeneration + geometry fingerprint | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-08 passes | CHK-08: fingerprint + STEP bytes identical on rebuild | Not yet via spec compiler |
 | CAD-010 | CAD | Emit readable build123d source per spec (for transparency/export) | P1 | Backlog | M1 | MVP | Eng | CAD-001 | Running emitted source reproduces fingerprint | — | |
 | CAD-011 | CAD | Natural language → Part Spec (via AGT) with controllable dims & intent | P0 | Backlog | M1 | MVP | Eng | AGT-003 | Benchmark EVAL-003 pass-rate reported | — | §2.A bullet 1 |
-| CAD-012 | CAD | Conversational revisions: spec diffs, undo/redo, version list | P0 | Backlog | M1 | MVP | Eng | CAD-009 | Revision N reproducible; undo restores fingerprint | — | §2.A bullet 11 |
+| CAD-012 | CAD | Conversational revisions: spec diffs, undo/redo, version list | P0 | In Progress | M1 | MVP | Eng | CAD-009 | Revision N reproducible; undo restores fingerprint | Conversational revisions + revision snapshots + restore + param edits | Undo/redo of single steps pending |
 | CAD-020 | CAD | Vector-PDF drawing → spec (dimension text extraction, view association) | P1 | Backlog | M2 | LT | Eng | COM-001 | 10 original drawings: dims recovered, ambiguities flagged | — | Candidate W3 |
 | CAD-021 | CAD | Raster drawing → spec (OCR + vision), flag missing views/tolerances | P2 | Backlog | M2 | LT | Eng | CAD-020 | Ambiguity list on every run | — | |
 | CAD-022 | CAD | Image/photo/sketch → spec with explicit missing-dimension questions | P1 | Backlog | M2 | LT | Eng | AGT-006 | Never invents scale; asks for ≥1 reference dim | — | §2.A bullet 2 |
@@ -240,42 +241,53 @@ Implemented so far is a **prototype**: the FX-01 spike, deterministic checks CHK
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| PLT-001 | Platform | Projects/workspaces data model | P1 | Backlog | M2 | LT | Eng | INF-002 | CRUD + tests | — | |
-| PLT-002 | Platform | Versioning + provenance per artifact (content hashes) | P0 | Backlog | M1 | MVP | Eng | CAD-009 | Every artifact has hash + producing run | — | |
+| PLT-001 | Platform | Projects/workspaces data model | P1 | Done | M2 | LT | Eng | INF-002 | CRUD + tests | Organizations + projects models/routes; `tests/test_platform.py` | SQLite dev; Postgres via FW_DATABASE_URL untested |
+| PLT-002 | Platform | Versioning + provenance per artifact (content hashes) | P0 | In Progress | M1 | MVP | Eng | CAD-009 | Every artifact has hash + producing run | STEP sha256 in status; revision snapshots per build | Content-addressed store pending |
 | PLT-003 | Platform | Job model: queue, retries, idempotency, progress events, cancellation | P0 | Backlog | M1 | MVP | Eng | INF-002 | Kill/retry tests; SSE progress | — | SQLite in M1 |
-| PLT-004 | Platform | Auth + permissions (single user M1 → multi-user M2) | P1 | Backlog | M2 | LT | Eng | PLT-001 | Role tests | — | |
-| PLT-005 | Platform | Per-job cost metering | P0 | Backlog | M1 | MVP | Eng | AGT-009 | Cost per job in run record + UI | — | |
+| PLT-004 | Platform | Auth + permissions (single user M1 → multi-user M2) | P1 | Done | M2 | LT | Eng | PLT-001 | Role tests | Email/password auth, roles owner/admin/engineer/viewer, invites, seat limits; `tests/test_platform.py` | SSO/2FA planned (Preview in Settings) |
+| PLT-005 | Platform | Per-job cost metering | P0 | Done | M1 | MVP | Eng | AGT-009 | Cost per job in run record + UI | Token ledger + per-run metering `_on_event`; `tests/test_platform.py`::test_agent_result_event_debits_tokens | Compute cost is the SDK estimate (PD-03) |
 | PLT-006 | Platform | Human-in-the-loop approval queue | P1 | Backlog | M2 | LT | Eng | CAD-028 | Pending approvals listed; resume job on approve | — | |
-| PLT-007 | Platform | User feedback/corrections capture | P1 | Backlog | M2 | LT | Eng | PLT-001 | Stored with run link | — | |
+| PLT-007 | Platform | User feedback/corrections capture | P1 | Done | M2 | LT | Eng | PLT-001 | Stored with run link | /api/feedback (general, bug, idea, waitlist, ratings) + Admin → Feedback; `tests/test_platform.py` |  |
 | PLT-008 | Platform | Consent-gated dataset collection | P2 | Backlog | M2 | LT | Eng | LEG-008 | No data stored without consent flag | — | |
-| PLT-009 | Platform | Usage controls per tenant | P2 | Backlog | M4 | LT | Eng | PLT-004 | Caps enforced | — | |
+| PLT-009 | Platform | Usage controls per tenant | P2 | In Progress | M4 | LT | Eng | PLT-004 | Caps enforced | Token preflight, plan/trial gating, seat limits | Per-tenant spend caps pending |
 | PLT-010 | Platform | Collaboration foundations (sharing, comments) | P2 | Backlog | M4 | LT | Eng | PLT-004 | | — | |
-| PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | Backlog | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | — | |
+| PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | In Progress | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | STEP/STL downloads per project | Zip bundle pending |
 | SEC-001 | Security | M1 isolation: compiler-only execution in subprocess w/ timeout + memory guard | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Timeout test kills runaway job | runner subprocess, timeout, secret-free env, import tripwire (`tests/test_agent.py`) | Tripwire is not a sandbox (R-SEC-05) |
-| SEC-002 | Security | Path traversal + filename sanitization in artifact store | P0 | In Progress | M1 | MVP | Eng | PLT-002 | Fuzz tests | Viewer serves allow-listed names only; `tests/test_viewer.py` traversal cases → 404 | Artifact store not built yet |
+| SEC-002 | Security | Path traversal + filename sanitization in artifact store | P0 | Done | M1 | MVP | Eng | PLT-002 | Fuzz tests | Allow-listed file names per project, workspace path resolution checks; `tests/test_platform.py`::test_projects_crud_and_paywall |  |
 | SEC-003 | Security | Secrets management (env/keyring; never in workers or logs) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | Log scrubbing test | — | |
 | SEC-004 | Security | Container sandbox: no network, ro mounts, limits, no secrets, per-tenant scratch | P1 | Blocked | M2 | LT | Eng | approval | Escape test suite passes | — | No Docker / WSL distro; install needs approval |
 | SEC-005 | Security | Upload validation: type sniffing, size limits, zip-bomb guards, isolated parsing | P1 | Backlog | M2 | LT | Eng | SEC-004 | Malicious fixture suite rejected | — | |
-| SEC-006 | Security | Tenant isolation (data + compute) | P1 | Backlog | M2 | LT | Eng | PLT-004 | Cross-tenant access tests fail closed | — | |
+| SEC-006 | Security | Tenant isolation (data + compute) | P1 | In Progress | M2 | LT | Eng | PLT-004 | Cross-tenant access tests fail closed | Org scoping on every query; role checks; cross-org 404s | Compute isolation pending (SEC-004) |
 | SEC-007 | Security | Data classification at upload + "no third-party AI" mode | P1 | Backlog | M2 | LT | Eng | LEG-009 | Classified data never reaches provider (test) | — | R-SEC-04 |
 | SEC-008 | Security | Threat model document | P1 | Backlog | M2 | LT | Eng | ARC-002 | STRIDE-style doc reviewed | — | |
 | SEC-009 | Security | Dependency vulnerability scanning in CI | P1 | Backlog | M1 | MVP | Eng | INF-003 | CI job runs pip-audit/npm audit | — | |
 | UX-001 | UX | CLI: `make`, `edit-param`, `revise`, `export` | P0 | Backlog | M1 | MVP | Eng | AGT-004 | End-to-end demo via CLI | — | M1a |
-| UX-002 | UX | Minimal web UI: prompt, assumptions approval, params panel, downloads | P0 | In Progress | M1 | MVP | Eng | INF-004 | VS-1 demo in browser | Chat panel + live viewer + checks panel in `aicad studio` (screenshot, SESSION_LOG c) | Assumption approval is conversational, not a form |
+| UX-002 | UX | Minimal web UI: prompt, assumptions approval, params panel, downloads | P0 | Done | M1 | MVP | Eng | INF-004 | VS-1 demo in browser | Full React app: marketing, auth, onboarding, dashboard, studio, modules, billing, team, settings, help, admin; E2E browser walk-through, SESSION_LOG (d) |  |
 | UX-003 | UX | Offscreen renderer (fixed cameras) | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-10 passes | `agent/render.py` VTK offscreen 2×2 views | CHK-10 automatic render check pending |
-| UX-004 | UX | Three.js viewer: orbit, part tree, selection, measure | P1 | In Progress | M1 | MVP | Eng | IO-003 | Measured dims match spec | `src/aicad/viewer/static/index.html`: orbit, 4 views, edges, wireframe, section, measure | Part tree and selection pending |
-| UX-005 | UX | Feature tree + parameter editing UI | P1 | Backlog | M2 | LT | Eng | UX-004 | Edit → regenerate | — | |
-| UX-006 | UX | Revision history / compare UI | P2 | Backlog | M2 | LT | Eng | CAD-012 | | — | |
-| UX-007 | UX | Clear capability labels (implemented/prototype/inferred/not approved) | P0 | Backlog | M1 | MVP | Eng | — | Labels on every output | — | Honesty requirement |
+| UX-004 | UX | Three.js viewer: orbit, part tree, selection, measure | P1 | In Progress | M1 | MVP | Eng | IO-003 | Measured dims match spec | React Viewer3D (orbit, 4 views, edges, wireframe, section, measure) | Part tree for assemblies pending |
+| UX-005 | UX | Feature tree + parameter editing UI | P1 | In Progress | M2 | LT | Eng | UX-004 | Edit → regenerate | Params tab: deterministic edit + rebuild, no AI/tokens; `tests/test_platform.py`::test_param_edit_* | Only simple numeric top-level assignments |
+| UX-006 | UX | Revision history / compare UI | P2 | Done | M2 | LT | Eng | CAD-012 | | Revisions tab with restore (deterministic rebuild) | Visual diff pending |
+| UX-007 | UX | Clear capability labels (implemented/prototype/inferred/not approved) | P0 | Done | M1 | MVP | Eng | — | Labels on every output | Live/Preview badges, SAMPLE labels, NOT APPROVED banner, simulated-payment banners |  |
 | UX-008 | UX | Live local viewer: auto-reload on spec save, mesh from re-imported STEP, checks panel | P0 | Done | M0 | MVP | Eng | ARC-010 | Save spec → viewer shows new geometry + checks within ~1 s; only allow-listed files served | `aicad live`; headless-Chrome screenshots 120→150 mm rebuild (SESSION_LOG 2026-11-16 b); `tests/test_viewer.py` | Founder request; ADR-012. Three.js from CDN: vendor before offline use |
 | UX-009 | UX | Studio chat panel: streaming agent text, tool steps with status, Stop/New, cost-estimate line | P0 | Done | M1 | MVP | Eng | AGT-014 | Prompt typed in browser drives the agent; tool progress visible; result line shows turns/time/est. cost | Screenshot, SESSION_LOG c | Escape-first minimal markdown |
+| UX-010 | UX | Marketing site: landing, pricing, legal drafts, responsive | P0 | Done | M1 | MVP | Eng | — | Investor-grade landing with honest Live/Preview roadmap | E2E browser walk-through, SESSION_LOG (d) | Copy reviewed for no over-claims |
+| UX-011 | UX | Signup → verify → 5-step onboarding wizard → workspace + trial | P0 | Done | M1 | MVP | Eng | PLT-004 | New user reaches dashboard with 300 tokens in < 2 min | E2E browser walk-through, SESSION_LOG (d); `tests/test_platform.py` | |
+| UX-012 | UX | Guided product tour + studio tour + getting-started checklist | P0 | Done | M1 | MVP | Eng | UX-011 | Auto-start once, restartable; checklist reflects real state | E2E browser walk-through, SESSION_LOG (d) | driver.js |
+| UX-013 | UX | God mode: bypasses, journey jumps, scenarios, demo seed, impersonation | P0 | Done | M1 | MVP | Eng | PLT-004 | Founder can demo any step in < 10 s; disabled in production | `tests/test_platform.py`::test_god_mode_* ; E2E browser walk-through, SESSION_LOG (d) | ADR-014 |
+| UX-014 | UX | Command palette (Ctrl+K), notifications, dark theme, collapsible sidebar | P1 | Done | M1 | MVP | Eng | UX-002 | | E2E browser walk-through, SESSION_LOG (d) | |
+| UX-015 | UX | Module preview pages with SAMPLE outputs, waitlist, add-on unlock | P0 | Done | M1 | MVP | Eng | ADR-016 | Every Preview module explains itself honestly | E2E browser walk-through, SESSION_LOG (d) | |
+| UX-016 | UX | Super-admin console: KPIs, funnel, users, orgs, catalog editor, payments, feedback, audit, outbox, system | P0 | Done | M1 | MVP | Eng | PLT-004 | | `tests/test_platform.py`::test_admin_console_and_impersonation | |
+| UX-017 | UX | Brand identity: name, logo, palette, typography (BRAND.md) | P0 | Done | M1 | MVP | Eng | ADR-015 | | docs/BRAND.md | Trademark check parked (PD-01) |
+| UX-018 | UX | Mobile/tablet layout pass for the app shell and studio | P2 | Backlog | M2 | LT | Eng | UX-002 | Usable at 768 px | — | Marketing is responsive; studio is desktop-first |
 | INF-001 | Infra | uv venv (Py3.12), lockfile, pinned deps | P0 | In Progress | M1 | MVP | Eng | ARC-010 | Fresh clone → `uv sync` → tests pass | `pyproject.toml`, `uv.lock`, `.venv` Py 3.12.13 | Fresh-clone test not yet run |
-| INF-002 | Infra | SQLite persistence + local artifact store | P0 | Backlog | M1 | MVP | Eng | INF-001 | Migration + tests | — | ADR-008 |
+| INF-002 | Infra | SQLite persistence + local artifact store | P0 | Done | M1 | MVP | Eng | INF-001 | Migration + tests | SQLAlchemy + SQLite + filesystem workspaces |  |
 | INF-003 | Infra | CI (lint, type, tests, no paid calls) incl. Linux runner | P0 | Backlog | M1 | MVP | Eng | GOV-004 | CI green on Win + Linux | — | R-TEC-07 |
-| INF-004 | Infra | FastAPI app + SSE progress | P0 | In Progress | M1 | MVP | Eng | PLT-003 | API contract tests | `src/aicad/studio/app.py` FastAPI + SSE; endpoint tests |  |
+| INF-004 | Infra | FastAPI app + SSE progress | P0 | Done | M1 | MVP | Eng | PLT-003 | API contract tests | `aicad.platform.app` FastAPI + SSE + SPA serving; `tests/test_platform.py` |  |
 | INF-005 | Infra | Observability: per-stage timings, model calls, tokens, failures | P0 | Backlog | M1 | MVP | Eng | AGT-009 | Structured logs + run summary | — | |
 | INF-006 | Infra | Pilot deployment: single VM, Postgres, S3-compatible store, containerized worker | P1 | Backlog | M2 | LT | Eng | SEC-004 | Deploy script; restore test | — | Cloud spend needs approval |
 | INF-007 | Infra | Cost-per-design model (CPU-s, tokens, storage) | P1 | Backlog | M2 | LT | Eng | INF-005 | Measured, not estimated from dev box | — | AS-08 |
+| INF-008 | Infra | Alembic migrations before first production deploy | P0 | Backlog | M2 | LT | Eng | INF-002 | Schema upgrades without data loss | — | ADR-014 consequence |
+| INF-009 | Infra | Distributed rate limiting + session cleanup job | P1 | Backlog | M2 | LT | Eng | INF-006 | | — | Current limiter is in-process |
 | DOC-001 | Docs | Known limitations doc (single-view ambiguity, sign-off, no native history) | P0 | Backlog | M1 | MVP | Eng | — | Doc published in repo/UI | — | |
 | DOC-002 | Docs | Developer README (setup, run, test) | P0 | In Progress | M1 | MVP | Eng | INF-001 | New machine setup succeeds | `README.md` | Fresh-machine test pending |
 | DOC-003 | Docs | Part Spec DSL reference | P1 | Backlog | M1 | MVP | Eng | ARC-011 | Every op documented with example | — | |

@@ -120,7 +120,10 @@ def trial_state(org: Organization) -> dict[str, Any]:
         return {"on_trial": False}
     now = utcnow()
     ends = org.trial_ends_at or now
-    return {"on_trial": True, "trial_ends_at": ends.isoformat(), "days_left": max(0, (ends - now).days),
+    import math
+
+    days_left = max(0, math.ceil((ends - now).total_seconds() / 86400))
+    return {"on_trial": True, "trial_ends_at": ends.isoformat(), "days_left": days_left,
             "expired": ends < now}
 
 

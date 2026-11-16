@@ -1,45 +1,73 @@
-# AI CAD — engineering design platform (M0 spike)
+# Formwright
 
-Status: **prototype.** Chat-driven design agent (`aicad studio`), deterministic geometry checks, local live viewer. No drawings, DFM or sandbox yet. See `docs/` for the plan (`PUNCH_LIST.md`, `ROADMAP.md`, `ARCHITECTURE.md`).
+**The AI design engineer for mechanical teams: from idea to verified, manufacturable CAD.**
 
-## Setup (Windows, uv)
+This repository contains:
+- the full **Formwright web application**: marketing site, signup and onboarding, guided tours, workspaces and teams, billing with tokens and add-ons, admin console and God mode;
+- the live **Design Studio**: an AI agent (Claude Agent SDK) that writes parametric build123d CAD, builds it, runs deterministic geometry checks and shows the part live.
+
+Modules that aren't built yet appear in the app as labelled **Preview** placeholders (`docs/DECISIONS.md` ADR-016).
+
+## Run it (Windows, development)
+
+Prerequisites: [uv](https://docs.astral.sh/uv/), Node 20+, and Claude Code installed and logged in (the design agent uses that login in development).
 
 ```sh
 uv python install 3.12
 uv sync
+cd web && npm install && npm run build && cd ..
+uv run aicad app            # opens http://127.0.0.1:8765
 ```
 
-The project uses its own `.venv` (Python 3.12). It does not touch the base conda env. If a conda env is active, uv warns that `VIRTUAL_ENV` is ignored; that is expected.
+On first start a **founder super-admin** account is created. The credentials are written to `data/ADMIN_CREDENTIALS.txt` (gitignored). Sign in with them, complete onboarding, and use the orange **God mode** button (bottom right) to:
+- bypass paywalls, token limits, verification and onboarding;
+- jump to any step of the customer journey, or put your workspace into a scenario (trial low on tokens, expired, Pro, Team, past due…);
+- seed demo projects (real, verified builds) and demo teammates;
+- view the app as any user (Admin → Users → View as).
 
-## Design agent (chat → CAD)
+Investor demo script: `docs/CUSTOMER_JOURNEY.md` §5.
+
+### Frontend development with hot reload
 
 ```sh
-uv run aicad studio --project my_part        # opens http://127.0.0.1:8765/
+uv run aicad app --no-browser     # API on :8765
+cd web && npm run dev             # UI on :5173, proxies /api to :8765
 ```
 
-Type a request in the left panel. The agent (Claude Agent SDK, the same engine as Claude Code) writes `workspace/my_part/model.py` in build123d, builds it, runs the geometry checks, looks at a 4-view render, and fixes problems. The 3D viewer updates on every build. Ask for changes in the same conversation. **New** starts a fresh conversation; the files stay.
+## Configuration (environment variables)
 
-- **Auth:** by default it uses this PC's Claude Code login, with no API billing. This is for the founder's own development only. Before anyone else uses it, run with `--api-key` (or an Anthropic-approved method); see `docs/RISKS.md` R-LIC-05.
-- **Safety:** the agent can only touch files inside its workspace and has no shell. Model scripts run in a subprocess with a timeout and an import tripwire, but **this is not a sandbox**. Use it only with your own prompts on this PC until the container sandbox exists (SEC-004).
+| Variable | Default | Purpose |
+|---|---|---|
+| `FW_ENV` | `development` | `production` disables God mode and simulated payments, and requires `--api-key` |
+| `FW_DATA_DIR` | `./data` | SQLite database, workspaces, admin credentials |
+| `FW_DATABASE_URL` | SQLite in data dir | Any SQLAlchemy URL (Postgres planned) |
+| `FW_APP_URL` | `http://127.0.0.1:8765` | Used in email links and Stripe redirects |
+| `FW_SUPERADMIN_EMAILS` | `founder@formwright.dev` | Comma-separated; these accounts get the admin console and God mode |
+| `FW_ADMIN_PASSWORD` | random | Password for the auto-created founder account |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | unset | Enables real Stripe Checkout (test or live). Unset means a labelled simulated checkout |
+| `FW_SMTP_HOST`, `FW_SMTP_PORT`, `FW_SMTP_USER`, `FW_SMTP_PASSWORD`, `FW_SMTP_FROM` | unset | Sends real email. Unset means emails go to the local outbox (Admin → Email outbox, and a dev mailbox on the verify page) |
+| `ANTHROPIC_API_KEY` | ignored in dev | Used only with `aicad app --api-key`; required before anyone but the founder uses the agent |
 
-## Spec-file mode (no AI)
+## Tests
 
 ```sh
-uv run aicad build specs/fx01_plate.json     # build + checks, artifacts in out/fx01_plate/
-uv run aicad live  specs/fx01_plate.json     # build, open live viewer, rebuild on every save
-uv run pytest -q                             # tests (no network, no paid calls)
+uv run pytest -q          # backend + geometry + agent plumbing (no AI calls)
+cd web && npx tsc --noEmit -p .
 ```
 
-With `aicad live` running, edit and save `specs/fx01_plate.json`. The browser at http://127.0.0.1:8765/ reloads the model and the check results within about a second. Invalid specs show an error instead of a model.
+## Other commands
 
-## What the viewer shows
+```sh
+uv run aicad build specs/fx01_plate.json     # spec-file build + checks (no AI)
+uv run aicad live  specs/fx01_plate.json     # live viewer, rebuild on save
+uv run aicad studio --project NAME           # original single-user agent studio
+```
 
-- The mesh is tessellated from the **re-imported `part.step`**, so it shows what the STEP file contains.
-- Iso/front/top/right views, edges, wireframe, an X section plane, and point-to-point measurement. Measurements are mesh picks, so they are approximate to the tessellation tolerance.
-- Pass/fail is decided by kernel checks (CHK-02…08), not by the picture.
-- The viewer loads Three.js 0.170.0 from the jsdelivr CDN, so it needs internet access the first time.
+## Important limits (read before showing anyone)
 
-## Limits
+- **Agent auth:** the design agent uses the founder's Claude Code login. That is for the founder's own development only. Before any other person uses it, switch to an API key (`--api-key`) or an Anthropic-approved method (`docs/RISKS.md` R-LIC-05).
+- **Not a sandbox:** agent-written model scripts run as Python on this machine, with a timeout and an import tripwire. A container sandbox is required before external users (SEC-004).
+- **Payments:** simulated unless Stripe keys are set. Simulated revenue in the admin console is labelled.
+- **Engineering:** checks prove geometric consistency with stated expectations only. Nothing is validated for strength or manufacture.
 
-- The viewer reads the STEP file with the same OCCT kernel that wrote it. It cannot detect interop problems in other CAD readers. Occasional SOLIDWORKS/Creo spot checks stay in the plan (EVAL-005).
-- The server binds to 127.0.0.1 and serves only an allow-list of artifact names.
+Planning docs: `docs/` (punch list, roadmap, architecture, decisions and parked decisions, risks, validation, customer journey, brand, session log).

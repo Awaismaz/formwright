@@ -285,3 +285,65 @@ def test_email_tokens_are_hashed(app_client: TestClient) -> None:
     assert rows and all(r.token_hash != tok for r in rows)
     assert db.scalar(select(User).where(User.email == "hash@x.com")).password_hash.startswith("$argon2")
     db.close()
+
+
+def _project_with_model(c: TestClient, script: str) -> tuple[str, Path]:
+    from aicad.platform.models import Project
+    from aicad.platform.routers.projects import workspace_for
+
+    pid = c.post("/api/projects", json={"name": "Plate"}).json()["id"]
+    db = session_factory()()
+    ws = workspace_for(db.get(Project, pid))
+    db.close()
+    (ws / "model.py").write_text(script, encoding="utf-8")
+    return pid, ws
+
+
+def test_param_edit_rebuilds_without_ai_and_rolls_back_on_failure(app_client: TestClient) -> None:
+    c = app_client
+    signup(c, "params@x.com")
+    demo = Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo" / "mounting_plate.py"
+    pid, ws = _project_with_model(c, demo.read_text(encoding="utf-8"))
+    editable = c.get(f"/api/projects/{pid}/params").json()["editable"]
+    assert editable["L"] == 120.0 and editable["CH"] == 1.0 and "PL" in editable
+    before = c.get("/api/auth/me").json()["org"]["token_balance"]
+    r = c.post(f"/api/projects/{pid}/params", json={"values": {"L": 150}})
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"]["L"] == {"from": 120.0, "to": 150.0}
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"] and st["fingerprint"]["bbox"][0] == 150.0
+    assert c.get("/api/auth/me").json()["org"]["token_balance"] == before  # no tokens spent
+    # pocket deeper than the plate -> geometry/check failure -> restored
+    r = c.post(f"/api/projects/{pid}/params", json={"values": {"PD": 12}})
+    assert r.status_code == 422 and "restored" in r.json()["detail"]
+    assert "L = 150.0" in (ws / "model.py").read_text(encoding="utf-8")
+    assert c.post(f"/api/projects/{pid}/params", json={"values": {"NOPE": 1}}).status_code == 422
+    assert c.get(f"/api/projects/{pid}/revisions").json()["items"][0]["n"] >= 1
+
+
+def test_agent_result_event_debits_tokens(app_client: TestClient) -> None:
+    from aicad.platform.routers.projects import _on_event
+
+    c = app_client
+    me = signup(c, "meter@x.com")
+    pid = c.post("/api/projects", json={"name": "Meter"}).json()["id"]
+    ev = {"type": "result", "subtype": "success", "turns": 3, "cost_est_usd": 0.2401}
+    _on_event(pid, me["user"]["id"], god_tokens=False)(ev)
+    assert ev["tokens_charged"] == 25
+    assert c.get("/api/auth/me").json()["org"]["token_balance"] == 275
+    ledger = c.get("/api/billing").json()["ledger"]
+    assert ledger[0]["reason"] == "usage" and ledger[0]["delta"] == -25
+    ev2 = {"type": "result", "subtype": "success", "turns": 1, "cost_est_usd": 0.5}
+    _on_event(pid, me["user"]["id"], god_tokens=True)(ev2)
+    assert ev2["tokens_charged"] == 0 and c.get("/api/auth/me").json()["org"]["token_balance"] == 275
+
+
+def test_param_edit_keeps_integers(app_client: TestClient) -> None:
+    c = app_client
+    signup(c, "ints@x.com")
+    demo = Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo" / "pipe_flange.py"
+    pid, ws = _project_with_model(c, demo.read_text(encoding="utf-8"))
+    assert c.post(f"/api/projects/{pid}/params", json={"values": {"N_BOLTS": 6.5}}).status_code == 422
+    r = c.post(f"/api/projects/{pid}/params", json={"values": {"N_BOLTS": 8}})
+    assert r.status_code == 200, r.text
+    assert "N_BOLTS = 8\n" in (ws / "model.py").read_text(encoding="utf-8")

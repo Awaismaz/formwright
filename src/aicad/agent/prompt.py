@@ -25,8 +25,12 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 ## model.py contract
 - Use build123d (`from build123d import *`). Units are millimetres. Z is up; the part's base
   sits on Z=0 unless the user says otherwise; front view looks along +Y.
-- Put all driving dimensions as named variables at the top, and expose them in
-  `PARAMS = {...}` so the user can see and edit them. Set `NAME` and `MATERIAL` when known.
+- Put every driving dimension on its own line at the top as `DIM_NAME = <number>  # meaning`
+  (one per line, plain number literal, no tuple assignment, no expression). The app lets users
+  edit exactly these lines and rebuild without you. Derived values come after, computed from them.
+  Expose them in `PARAMS = dict(DIM_NAME=DIM_NAME, ...)` using the same names. Set `NAME` and `MATERIAL`.
+- EXPECTED must be computed from those same variables (formulas, not literals) so it stays
+  correct when a user edits a parameter.
 - The final shape MUST be assigned to `result` (Part, Solid, or Compound for multi-part).
   For assemblies, build each part separately, set `.label`, and combine with
   `Compound(children=[...])`; set EXPECTED["solids"] to the part count.

@@ -1,0 +1,113 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MailPlus, MoreHorizontal, Trash2, UserMinus, Users } from "lucide-react";
+import { toast } from "sonner";
+import { api, ApiError } from "@/lib/api";
+import { canManage, useSession } from "@/lib/session";
+import type { Org, Role } from "@/lib/types";
+import { ago, date } from "@/lib/format";
+import { Avatar, Badge, Button, Card, Field, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader, Progress } from "@/components/ui";
+
+interface TeamData {
+  org: Org; my_role: Role; roles: Role[];
+  members: { id: string; user_id: string; name: string; email: string; role: Role; joined_at: string; last_login_at: string | null }[];
+  invites: { id: string; email: string; role: Role; created_at: string; expires_at: string }[];
+}
+
+const ROLE_HELP: Record<Role, string> = {
+  owner: "Full control, including billing and deleting the workspace",
+  admin: "Manage members, billing and all projects",
+  engineer: "Create projects and run the design agent",
+  viewer: "View projects and download exports",
+};
+
+export default function Team() {
+  const { me } = useSession();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["team"], queryFn: () => api.get<TeamData>("/api/team") });
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<Role>("engineer");
+  const [busy, setBusy] = useState(false);
+  if (!q.data) return <PageLoader />;
+  const { org, members, invites, my_role } = q.data;
+  const manage = canManage(my_role);
+  const full = org.seats_used + invites.length >= org.seat_limit;
+  const refresh = () => qc.invalidateQueries({ queryKey: ["team"] });
+  const call = async (fn: () => Promise<unknown>, ok: string) => {
+    try { await fn(); toast.success(ok); refresh(); } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
+  };
+  const invite = async () => {
+    setBusy(true);
+    try { await api.post("/api/team/invites", { email, role }); toast.success(`Invitation sent to ${email}`); setOpen(false); setEmail(""); refresh(); qc.invalidateQueries({ queryKey: ["checklist"] }); }
+    catch (e) {
+      if (e instanceof ApiError && e.status === 402) { toast.error(e.message, { action: { label: "Upgrade", onClick: () => nav("/app/billing") } }); }
+      else toast.error(e instanceof ApiError ? e.message : "Failed");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <PageHeader title="Team" subtitle={`Members and roles for ${org.name}.`}
+        actions={manage && <Button icon={<MailPlus className="h-4 w-4" />} onClick={() => setOpen(true)}>Invite teammate</Button>} />
+      <Card className="mb-6 flex flex-wrap items-center gap-6 p-5">
+        <div className="flex items-center gap-3"><Users className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Seats</div><div className="text-xs text-muted">{org.seats_used} used{invites.length ? ` · ${invites.length} pending` : ""} of {org.seat_limit >= 1000 ? "unlimited" : org.seat_limit}</div></div></div>
+        {org.seat_limit < 1000 && <Progress className="max-w-xs flex-1" value={org.seats_used + invites.length} max={org.seat_limit} tone={full ? "warning" : "primary"} />}
+        {full && manage && <Button size="sm" variant="secondary" onClick={() => nav("/app/billing")}>Get more seats</Button>}
+      </Card>
+      <Card className="overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-panel2 text-left text-xs text-muted"><tr><th className="px-4 py-2.5 font-medium">Member</th><th className="px-4 py-2.5 font-medium">Role</th><th className="px-4 py-2.5 font-medium">Last active</th><th className="px-4 py-2.5 font-medium">Joined</th><th /></tr></thead>
+          <tbody className="divide-y divide-border">
+            {members.map(m => (
+              <tr key={m.id}>
+                <td className="px-4 py-3"><div className="flex items-center gap-3"><Avatar name={m.name} size={32} /><div><div className="font-medium">{m.name}{m.user_id === me?.user?.id && <span className="ml-1.5 text-xs text-muted">(you)</span>}</div><div className="text-xs text-muted">{m.email}</div></div></div></td>
+                <td className="px-4 py-3"><Badge tone={m.role === "owner" ? "accent" : m.role === "admin" ? "primary" : "neutral"}>{m.role}</Badge></td>
+                <td className="px-4 py-3 text-muted">{ago(m.last_login_at)}</td>
+                <td className="px-4 py-3 text-muted">{date(m.joined_at)}</td>
+                <td className="px-4 py-3 text-right">
+                  {(manage || m.user_id === me?.user?.id) && (
+                    <Menu>
+                      <MenuTrigger asChild><button className="rounded p-1.5 text-muted hover:bg-text/5" aria-label="Member actions"><MoreHorizontal className="h-4 w-4" /></button></MenuTrigger>
+                      <MenuContent>
+                        {manage && <><MenuLabel>Change role</MenuLabel>
+                          {(["owner", "admin", "engineer", "viewer"] as Role[]).filter(r => r !== m.role && (r !== "owner" || my_role === "owner")).map(r =>
+                            <MenuItem key={r} onSelect={() => call(() => api.patch(`/api/team/members/${m.id}`, { role: r }), `Role changed to ${r}`)}>{r}</MenuItem>)}
+                          <MenuSeparator /></>}
+                        <MenuItem icon={<UserMinus />} danger onSelect={() => call(() => api.del(`/api/team/members/${m.id}`), m.user_id === me?.user?.id ? "You left the workspace" : "Member removed")}>
+                          {m.user_id === me?.user?.id ? "Leave workspace" : "Remove from workspace"}</MenuItem>
+                      </MenuContent>
+                    </Menu>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {invites.map(i => (
+              <tr key={i.id} className="bg-panel2/40">
+                <td className="px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-border"><MailPlus className="h-4 w-4 text-muted" /></span><div><div className="font-medium">{i.email}</div><div className="text-xs text-muted">Invitation pending · expires {date(i.expires_at)}</div></div></div></td>
+                <td className="px-4 py-3"><Badge>{i.role}</Badge></td><td className="px-4 py-3 text-muted">—</td><td className="px-4 py-3 text-muted">{date(i.created_at)}</td>
+                <td className="px-4 py-3 text-right">{manage && <button className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-danger" aria-label="Revoke invitation" onClick={() => call(() => api.del(`/api/team/invites/${i.id}`), "Invitation revoked")}><Trash2 className="h-4 w-4" /></button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(Object.keys(ROLE_HELP) as Role[]).map(r => <div key={r} className="rounded-lg border border-border bg-panel p-3"><div className="text-sm font-medium capitalize">{r}</div><div className="mt-0.5 text-xs text-muted">{ROLE_HELP[r]}</div></div>)}
+      </div>
+      <Modal open={open} onOpenChange={setOpen} title="Invite a teammate" description="They'll get an email with a link to join this workspace."
+        footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={invite} loading={busy} disabled={!email}>Send invitation</Button></>}>
+        <div className="space-y-4">
+          <Field label="Email"><Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="colleague@company.com" autoFocus /></Field>
+          <Field label="Role" hint={ROLE_HELP[role]}>
+            <select value={role} onChange={e => setRole(e.target.value as Role)} className="input">
+              {(["admin", "engineer", "viewer"] as Role[]).map(r => <option key={r} value={r}>{r[0]!.toUpperCase() + r.slice(1)}</option>)}
+            </select>
+          </Field>
+          {full && <p className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs">All seats are in use on your plan. Upgrade to Team for 5 seats.</p>}
+        </div>
+      </Modal>
+    </div>
+  );
+}

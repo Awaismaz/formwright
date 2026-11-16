@@ -226,6 +226,20 @@ def resend(request: Request, ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.get("/dev-mailbox")
+def dev_mailbox(ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
+    """Development only: show the signed-in user's latest emails, so the journey works without SMTP."""
+    s = get_settings()
+    if s.production or s.smtp_host:
+        raise HTTPException(404)
+    from aicad.platform.models import Outbox
+
+    rows = ctx.db.scalars(select(Outbox).where(Outbox.to == ctx.user.email).order_by(Outbox.created_at.desc())
+                          .limit(5)).all()
+    return {"items": [{"subject": r.subject, "body": r.body, "link": r.link, "created_at": r.created_at.isoformat()}
+                      for r in rows]}
+
+
 @router.post("/forgot-password")
 def forgot(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     _rate_limit(f"forgot:{client_ip(request)}")

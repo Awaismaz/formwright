@@ -100,3 +100,43 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 - Accepts dependence on the Claude Code harness. The provider abstraction now lives at the tool boundary (`build_model` and the checks are provider-neutral), not at the loop.
 - AI-written Python runs on the dev PC without a sandbox. Mitigations are a subprocess, timeout, stripped environment and an import tripwire, which is **not** a security boundary (R-SEC-05). A container sandbox (SEC-004) is required before any customer use.
 **Evidence:** e2e run 2026-11-16 (SESSION_LOG c): L-bracket prompt → 3 turns, 38.4 s, all gating checks pass, auth = subscription login.
+
+## ADR-014 — Formwright platform architecture (full product shell)
+**Status:** Accepted 2026-11-16 (founder asked for a complete, production-grade, user-facing product before going deeper on CAD features)
+**Decision:**
+- One deployable: FastAPI (`aicad.platform.app`) serves the JSON API and the built React SPA from one origin.
+- Persistence: SQLAlchemy 2. SQLite in dev (`data/formwright.db`), and any SQLAlchemy URL via `FW_DATABASE_URL` (Postgres planned).
+- Auth: email + password (argon2). Opaque session tokens are stored hashed, in an HttpOnly SameSite=Lax cookie. Email-verification and reset tokens are hashed with expiries. CSRF uses a required custom header on every mutating API call. Security headers and CSP are set. Login, signup and reset are rate-limited.
+- Tenancy: organizations, memberships and roles (owner, admin, engineer, viewer). Every project, ledger row and payment is scoped by org. Workspaces live on disk at `data/workspaces/<org>/<project>/`.
+- Monetisation: a catalog of plans (subscriptions), add-ons (module unlocks as in-app purchases) and token packs. A token wallet with an append-only ledger. Agent runs are metered as `tokens = ceil(estimated compute USD / $0.01)`, with a 10-token preflight. Parameter edits and restores are free.
+- Payments: Stripe Checkout, Billing Portal and signed webhooks when `STRIPE_SECRET_KEY` is set. Otherwise a clearly labelled **simulated** checkout is used, and it is refused in production.
+- God mode: super-admin only, with bypasses, journey scenarios, demo seed and impersonation. The router 404s and the flags are ignored when `FW_ENV=production`.
+- Frontend: React 18, TypeScript, Vite 6, Tailwind 3, Radix primitives, TanStack Query, three.js, driver.js and sonner. All pinned; `npm audit` reports 0 vulnerabilities.
+**Alternatives:** Next.js with SSR (unneeded for an app behind login; the marketing site can move later); a hosted auth provider such as Clerk or Auth0 (vendor cost and data residency, so revisit for SSO/Enterprise); separate API and web origins (CORS and cookie complexity).
+**Consequences:** No migrations yet (`create_all`), so Alembic is needed before the first production deploy (INF-008). In-memory rate limiting is single-process only.
+
+## ADR-015 — Brand: Formwright
+**Status:** Accepted 2026-11-16 (founder delegated the choice). Trademark and domain checks are parked (PD-01). See `docs/BRAND.md`.
+
+## ADR-016 — Preview modules are honest placeholders
+**Status:** Accepted 2026-11-16
+**Decision:** Modules that aren't built (Drawing, Image-to-CAD, Assembly, Manufacturing, Engineering, Print, Mesh) appear in navigation, pricing and the app with a **Preview** badge. Their pages show illustrative output labelled **SAMPLE**, plus early-access sign-up and add-on unlock. Nothing is presented as generated from user data.
+**Why:** The investor and customer demos must not misrepresent capability (master prompt §0.4).
+
+---
+
+## Parked decisions (need the founder; work continued with the defaults shown)
+
+| ID | Decision | Default used meanwhile | Needed by |
+|---|---|---|---|
+| PD-01 | Final brand name: trademark, company and domain clearance for "Formwright" | Name used everywhere; domains are placeholders | Before any public launch |
+| PD-02 | Pricing: Pro $49/mo with 1,500 tokens; Team $199/mo with 7,500 tokens and 5 seats; add-ons $9–29/mo; packs $10/$35/$150 | Editable in Admin → Pricing catalog | Before pilots pay |
+| PD-03 | Token economics: 1 token = $0.01 of estimated compute; 10-token preflight; trial 300 tokens / 14 days | Implemented as configurable constants | After measuring real runs |
+| PD-04 | Billing for **preview** add-ons: charge now, pre-order, or free reservation | Purchase unlocks the entitlement immediately (simulated payments only) | Before Stripe live mode |
+| PD-05 | Data/AI policy wording (e.g. "never used to train models"), DPA and retention | Marketing copy avoids training claims; legal pages marked **Draft** | Before pilots |
+| PD-06 | Stripe account (test keys, then live) and webhook endpoint | Simulated payments | When ready to take real payments |
+| PD-07 | Email provider (SMTP / SES / Postmark) and sender domain | Local outbox + dev mailbox | Before inviting external users |
+| PD-08 | Production hosting (single VM vs PaaS), Postgres provider, backups | Local only | Before pilots |
+| PD-09 | Agent auth for anyone except the founder: Anthropic API key (or approved method) | Founder's Claude Code login (dev only) | Before the first external user (AGT-015) |
+| PD-10 | Container sandbox for agent-written code (Docker Desktop or WSL2) | Subprocess + tripwire (not a sandbox) | Before the first external user (SEC-004) |
+| PD-11 | Support and sales contact addresses | Placeholder `@formwright.dev` mailto links | Before launch |
