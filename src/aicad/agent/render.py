@@ -96,6 +96,59 @@ def render(stl: Path, png: Path, title: str = "", size: tuple[int, int] = (1400,
     writer.SetFileName(str(png))
     writer.SetInputConnection(w2i.GetOutputPort())
     writer.Write()
+    if png.name == "views.png":
+        try:  # the project-card picture: one clean view, never allowed to break the review sheet above
+            _thumb(vtk, normals, edges, centre, diag, png.with_name("thumb.png"))
+        except Exception as e:  # noqa: BLE001
+            print(f"thumbnail skipped: {e}", file=sys.stderr)
+
+
+def _thumb(vtk, normals, edges, centre, diag, out: Path, size: tuple[int, int] = (960, 720)) -> None:  # type: ignore[no-untyped-def]
+    """Isometric view on a transparent background, without labels or the axis triad (for project cards)."""
+    win = vtk.vtkRenderWindow()
+    win.SetOffScreenRendering(1)
+    win.SetSize(*size)
+    win.SetAlphaBitPlanes(1)
+    win.SetMultiSamples(0)
+    ren = vtk.vtkRenderer()
+    ren.SetBackground(1.0, 1.0, 1.0)
+    ren.SetBackgroundAlpha(0.0)
+    ren.SetUseFXAA(True)
+    m = vtk.vtkPolyDataMapper()
+    m.SetInputConnection(normals.GetOutputPort())
+    a = vtk.vtkActor()
+    a.SetMapper(m)
+    a.GetProperty().SetColor(0.72, 0.75, 0.80)
+    a.GetProperty().SetSpecular(0.25)
+    em = vtk.vtkPolyDataMapper()
+    em.SetInputConnection(edges.GetOutputPort())
+    em.SetResolveCoincidentTopologyToPolygonOffset()
+    ea = vtk.vtkActor()
+    ea.SetMapper(em)
+    ea.GetProperty().SetColor(0.08, 0.09, 0.12)
+    ea.GetProperty().SetLineWidth(2.0)
+    ren.AddActor(a)
+    ren.AddActor(ea)
+    _, d, up = VIEWS[0]
+    cam = ren.GetActiveCamera()
+    cam.ParallelProjectionOn()
+    cam.SetFocalPoint(*centre)
+    n = sum(x * x for x in d) ** 0.5
+    cam.SetPosition(*(c + diag * 2 * x / n for c, x in zip(centre, d, strict=True)))
+    cam.SetViewUp(*up)
+    ren.ResetCamera()
+    cam.SetParallelScale(cam.GetParallelScale() * 0.86)
+    win.AddRenderer(ren)
+    win.Render()
+    w2i = vtk.vtkWindowToImageFilter()
+    w2i.SetInput(win)
+    w2i.SetInputBufferTypeToRGBA()
+    w2i.ReadFrontBufferOff()
+    w2i.Update()
+    writer = vtk.vtkPNGWriter()
+    writer.SetFileName(str(out))
+    writer.SetInputConnection(w2i.GetOutputPort())
+    writer.Write()
 
 
 if __name__ == "__main__":

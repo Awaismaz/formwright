@@ -40,7 +40,7 @@ from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Organization, Project, User
 from aicad.platform.routers import projects as proj
 from aicad.platform.routers.billing import tokens_for_cost
-from aicad.platform.services import audit, debit, org_modules, track
+from aicad.platform.services import audit, debit, notify, org_modules, track
 
 router = APIRouter(prefix="/api/m/image2cad", tags=["image2cad"])
 log = logging.getLogger("aicad.image2cad")
@@ -148,9 +148,23 @@ async def _read_task(d: Path, org_id: str, user_id: str, god_tokens: bool) -> No
         if store.read_json(d, "review.json") is None:
             store.write_json(d, "review.json", review.empty_review())
         store.update_meta(d, status="review", step=None, error=None)
+        if res.get("needs_vision"):
+            _notify_read(user_id, d)
     except Exception:
         log.exception("image2cad read failed")
         store.update_meta(d, status="failed", step=None, error="The file could not be read.")
+
+
+def _notify_read(user_id: str, d: Path) -> None:
+    """An image read takes a minute or two: tell the user when the values are ready to review."""
+    db = session_factory()()
+    try:
+        meta = store.read_json(d, "meta.json") or {}
+        notify(db, user_id, f"{meta.get('name', 'Your image')} is read",
+               "The values are ready to review before modelling.", "/app/modules/image2cad")
+        db.commit()
+    finally:
+        db.close()
 
 
 def _meter(org_id: str, user_id: str, god_tokens: bool, cost: float | None, d: Path) -> None:
@@ -170,6 +184,11 @@ def _meter(org_id: str, user_id: str, god_tokens: bool, cost: float | None, d: P
 
 
 def _start(d: Path, ctx: Ctx) -> None:
+    from aicad.platform import metering
+
+    if (ctx.user.email_verified_at is None and not ctx.god_on("skip_verification") and not ctx.god_on("bypass_tokens")
+            and metering.unverified_spent(ctx.db, ctx.user) >= metering.UNVERIFIED_TOKEN_CAP - metering.MIN_RUN_TOKENS):
+        raise HTTPException(403, "Verify your email to keep using AI reads. We sent you a link.")
     t = asyncio.create_task(_read_task(d, ctx.require_org().id, ctx.user.id, ctx.god_on("bypass_tokens")))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)

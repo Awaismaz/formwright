@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from aicad.platform.config import get_settings
 from aicad.platform.db import get_db, utcnow
-from aicad.platform.deps import COOKIE, Ctx, auth_ctx, client_ip, optional_ctx
+from aicad.platform.deps import COOKIE, Ctx, auth_ctx, client_ip, in_grace, optional_ctx
 from aicad.platform.models import AuthSession, EmailToken, Membership, Organization, User
 from aicad.platform.security import (
     hash_password,
@@ -117,7 +117,7 @@ def consume_email_token(db: Session, token: str, kind: str) -> User:
 
 def next_step(ctx: Ctx) -> str:
     u = ctx.user
-    if u.email_verified_at is None and not ctx.god_on("skip_verification"):
+    if u.email_verified_at is None and not ctx.god_on("skip_verification") and not in_grace(u):
         return "verify_email"
     if ctx.org is None or (u.onboarding_completed_at is None and not ctx.god_on("skip_onboarding")):
         return "onboarding"

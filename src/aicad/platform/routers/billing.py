@@ -7,22 +7,23 @@ Two payment providers behind one flow:
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from aicad.platform import metering
 from aicad.platform.catalog import MODULES, TOKEN_COSTS, product_dict
 from aicad.platform.config import get_settings
 from aicad.platform.db import get_db, utcnow
-from aicad.platform.deps import Ctx, verified_ctx
+from aicad.platform.deps import Ctx, confirmed_ctx, verified_ctx
 from aicad.platform.models import Entitlement, Organization, Payment, Product, TokenLedger, User
-from aicad.platform.services import audit, credit, notify, public_org, track
+from aicad.platform.services import audit, credit, notify, public_org, seat_limit, seats_used, track
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
@@ -35,14 +36,19 @@ class SimulateIn(BaseModel):
     outcome: str  # success|fail
 
 
+class BudgetIn(BaseModel):
+    tokens: int
+
+
 def _catalog(db: Session) -> dict[str, Any]:
     prods = db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.sort)).all()
     by: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for p in prods:
         by[p.kind].append(product_dict(p))
-    return {"plans": by["plan"], "addons": by["addon"], "topups": by["topup"],
+    return {"plans": by["plan"], "addons": by["addon"], "topups": by["topup"], "seats": by["seat"],
             "modules": [{"code": k, **v} for k, v in MODULES.items()],
-            "token_costs": TOKEN_COSTS, "stripe_mode": get_settings().stripe_mode}
+            "token_costs": TOKEN_COSTS, "typical_run": metering.DEFAULT_ESTIMATE,
+            "trial_tokens": get_settings().trial_tokens, "stripe_mode": get_settings().stripe_mode}
 
 
 @router.get("/catalog")
@@ -77,7 +83,73 @@ def overview(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
                      for p in payments],
         "usage_30d": [{"date": d, "tokens": usage.get(d, 0)} for d in days],
         "addons": addons, "catalog": _catalog(db), "can_purchase": ctx.role in ("owner", "admin"),
+        "run_budget": {"tokens": metering.default_budget(db, org), "min": metering.BUDGET_MIN,
+                       "max": metering.BUDGET_MAX},
+        "account_credit_cents": int(metering.prefs(db, org).get("credit_cents", 0)),
+        "extra_seats": int(metering.prefs(db, org).get("extra_seats", 0)),
     }
+
+
+@router.patch("/run-budget")
+def set_run_budget(body: BudgetIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The workspace's default per-run budget: a design-agent run stops cleanly when it reaches this."""
+    ctx.require_role("admin")
+    org = ctx.require_org()
+    if not metering.BUDGET_MIN <= body.tokens <= metering.BUDGET_MAX:
+        raise HTTPException(422, f"Choose between {metering.BUDGET_MIN} and {metering.BUDGET_MAX:,} tokens")
+    metering.set_prefs(ctx.db, org, run_budget_tokens=body.tokens)
+    audit(ctx.db, "billing.run_budget", ctx.user, org.id, tokens=body.tokens)
+    ctx.db.commit()
+    return {"tokens": body.tokens}
+
+
+# ------------------------------------------------------------------ plan switches (proration)
+def _period(prod: Product) -> timedelta:
+    return timedelta(days=365 if prod.interval == "year" else 30)
+
+
+def plan_switch(db: Session, org: Organization, prod: Product) -> dict[str, Any]:
+    """What switching to `prod` costs now: credit for the unused part of the current paid period (prorated by
+    time), any account credit, the seat check and the add-ons the new plan already includes."""
+    cur = db.get(Product, org.plan_code)
+    now = utcnow()
+    unused = 0
+    if (cur and cur.kind == "plan" and cur.price_cents and org.plan_status in ("active", "past_due")
+            and org.current_period_end and org.current_period_end > now):
+        left = (org.current_period_end - now) / _period(cur)
+        unused = round(cur.price_cents * min(1.0, max(0.0, left)))
+    account = int(metering.prefs(db, org).get("credit_cents", 0))
+    credit_total = unused + account
+    charge = max(0, prod.price_cents - credit_total)
+    limit = prod.seats or 1000
+    used = seats_used(db, org)
+    owned = {e.module: e for e in db.scalars(select(Entitlement).where(Entitlement.org_id == org.id))}
+    included = [m for m in (prod.modules or []) if m in owned and owned[m].source == "purchase"]
+    addon_prices = {a.modules[0]: a for a in db.scalars(select(Product).where(Product.kind == "addon")) if a.modules}
+    losing = [m for m in ((cur.modules or []) if cur and org.plan_status == "active" else [])
+              if m not in (prod.modules or []) and m not in owned]
+    return {
+        "from": {"code": cur.code, "name": cur.name, "price_cents": cur.price_cents} if cur else None,
+        "to": {"code": prod.code, "name": prod.name, "price_cents": prod.price_cents, "tokens": prod.tokens},
+        "direction": "up" if cur is None or prod.price_cents >= cur.price_cents else "down",
+        "unused_credit_cents": unused, "account_credit_cents": account, "charge_cents": charge,
+        "leftover_credit_cents": max(0, credit_total - prod.price_cents),
+        "period_end": (now + _period(prod)).isoformat(),
+        "seats": {"used": used, "limit": limit, "over": max(0, used - limit)},
+        "cancels_addons": [{"module": m, "name": MODULES[m]["name"] if m in MODULES else m,
+                            "price_cents": addon_prices[m].price_cents if m in addon_prices else 0}
+                           for m in included],
+        "loses_modules": [MODULES[m]["name"] for m in losing if m in MODULES],
+    }
+
+
+@router.post("/preview")
+def preview(body: CheckoutIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    org = ctx.require_org()
+    prod = ctx.db.get(Product, body.product_code)
+    if prod is None or not prod.active or prod.kind != "plan" or prod.contact_sales or not prod.purchasable:
+        raise HTTPException(404, "Not a plan you can switch to")
+    return plan_switch(ctx.db, org, prod)
 
 
 def fulfil(db: Session, pay: Payment, provider_ref: str | None = None) -> None:
@@ -93,10 +165,20 @@ def fulfil(db: Session, pay: Payment, provider_ref: str | None = None) -> None:
         pay.provider_ref = provider_ref
     user = db.get(User, pay.user_id) if pay.user_id else None
     if prod.kind == "plan":
+        sw = plan_switch(db, org, prod)
+        metering.set_prefs(db, org, credit_cents=sw["leftover_credit_cents"])
+        for c in sw["cancels_addons"]:  # the new plan includes it: stop billing the add-on separately
+            e = db.scalar(select(Entitlement).where(Entitlement.org_id == org.id, Entitlement.module == c["module"]))
+            if e is not None:
+                db.delete(e)
+                audit(db, "billing.addon_included_in_plan", user, org.id, target=c["module"], plan=prod.code)
         org.plan_code, org.plan_status = prod.code, "active"
-        org.current_period_end = utcnow() + timedelta(days=30 if prod.interval == "month" else 365)
+        org.current_period_end = utcnow() + _period(prod)
         if prod.tokens:
             credit(db, org, prod.tokens, "plan", f"{prod.name} plan allowance", user, ref=pay.id)
+    elif prod.kind == "seat":
+        extra = int(metering.prefs(db, org).get("extra_seats", 0)) + max(1, prod.seats or 1)
+        metering.set_prefs(db, org, extra_seats=extra)
     elif prod.kind == "addon":
         for m in prod.modules:
             if not db.scalar(select(Entitlement).where(Entitlement.org_id == org.id, Entitlement.module == m)):
@@ -111,7 +193,7 @@ def fulfil(db: Session, pay: Payment, provider_ref: str | None = None) -> None:
 
 
 @router.post("/checkout")
-def checkout(body: CheckoutIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+def checkout(body: CheckoutIn, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     ctx.require_role("admin")
     org = ctx.require_org()
     s = get_settings()
@@ -124,11 +206,23 @@ def checkout(body: CheckoutIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
             ctx.db.scalar(select(Entitlement).where(Entitlement.org_id == org.id, Entitlement.module == m))
             for m in prod.modules):
         raise HTTPException(409, "You already own this add-on")
+    if prod.kind == "seat" and not (org.plan_code == "team" and org.plan_status == "active"):
+        raise HTTPException(409, "Extra seats are added to the Team plan. Choose Team first.")
+    amount = prod.price_cents
+    switching = prod.kind == "plan" and org.plan_code != "trial" and org.plan_status in ("active", "past_due")
+    if prod.kind == "plan":
+        amount = plan_switch(ctx.db, org, prod)["charge_cents"]
     pay = Payment(org_id=org.id, user_id=ctx.user.id, product_code=prod.code, kind=prod.kind,
-                  amount_cents=prod.price_cents, provider="stripe" if s.stripe_live else "simulated")
+                  amount_cents=amount, provider="stripe" if s.stripe_live else "simulated")
     ctx.db.add(pay)
     ctx.db.flush()
     track(ctx.db, "checkout_started", ctx.user, org.id, product=prod.code)
+    if prod.kind == "plan" and amount == 0 and not s.stripe_live:
+        fulfil(ctx.db, pay, provider_ref=f"credit_{pay.id[:12]}")  # fully covered by credit: nothing to pay
+        ctx.db.commit()
+        return {"provider": "credit", "payment_id": pay.id, "url": f"/app/checkout/{pay.id}"}
+    if switching and s.stripe_live and org.stripe_subscription_id:
+        return _stripe_switch(ctx, org, prod, pay)
     if not s.stripe_live:
         ctx.db.commit()
         return {"provider": "simulated", "payment_id": pay.id, "url": f"/app/checkout/{pay.id}"}
@@ -157,6 +251,25 @@ def checkout(body: CheckoutIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
     return {"provider": "stripe", "payment_id": pay.id, "url": sess.url}
 
 
+def _stripe_switch(ctx: Ctx, org: Organization, prod: Product, pay: Payment) -> dict[str, Any]:
+    """Real Stripe: change the existing subscription's item (Stripe prorates) instead of a second checkout.
+    Not exercised in development (simulated provider); requires the plan's `stripe_price_id`."""
+    import stripe
+
+    if not prod.stripe_price_id:
+        raise HTTPException(409, "This plan has no Stripe price configured. Set it in the admin catalog.")
+    s = get_settings()
+    stripe.api_key = s.stripe_secret_key
+    sub = stripe.Subscription.retrieve(org.stripe_subscription_id)
+    item = sub["items"]["data"][0]["id"]
+    stripe.Subscription.modify(org.stripe_subscription_id, items=[{"id": item, "price": prod.stripe_price_id}],
+                               proration_behavior="always_invoice", metadata={"payment_id": pay.id})
+    pay.provider_ref = f"{org.stripe_subscription_id}:{item}"
+    fulfil(ctx.db, pay)
+    ctx.db.commit()
+    return {"provider": "stripe", "payment_id": pay.id, "url": f"/app/checkout/{pay.id}"}
+
+
 @router.get("/payments/{payment_id}")
 def payment(payment_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     pay = ctx.db.get(Payment, payment_id)
@@ -167,8 +280,38 @@ def payment(payment_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]
             "product": product_dict(prod) if prod else None, "created_at": pay.created_at.isoformat()}
 
 
+@router.get("/payments/{payment_id}/receipt", response_class=HTMLResponse)
+def receipt(payment_id: str, ctx: Ctx = Depends(verified_ctx)) -> HTMLResponse:
+    """A printable receipt for a paid payment (labelled when the payment was simulated)."""
+    from html import escape
+
+    org = ctx.require_org()
+    pay = ctx.db.get(Payment, payment_id)
+    if pay is None or pay.org_id != org.id or pay.status != "paid":
+        raise HTTPException(404, "No receipt for this payment")
+    prod = ctx.db.get(Product, pay.product_code)
+    sim = pay.provider in ("simulated", "credit") or (pay.provider_ref or "").startswith(("sim_", "credit_"))
+    when = (pay.paid_at or pay.created_at).strftime("%d %b %Y %H:%M UTC")
+    item = escape(prod.name if prod else pay.product_code)
+    period = f" ({prod.interval}ly)" if prod and prod.interval else ""
+    note = ("<p class=sim>Simulated payment for testing: no money moved and this is not a tax invoice.</p>"
+            if sim else "")
+    html = f"""<!doctype html><html><head><meta charset=utf-8><title>Receipt {escape(pay.id[:12])} · Formwright</title>
+<style>body{{font:14px/1.5 system-ui,sans-serif;color:#1d2330;max-width:640px;margin:40px auto;padding:0 20px}}
+h1{{font-size:20px;margin:0 0 4px}}table{{width:100%;border-collapse:collapse;margin:24px 0}}
+td{{padding:8px 0;border-bottom:1px solid #e3e7ee}}td:last-child{{text-align:right}}.muted{{color:#69707d}}
+.sim{{border:1px solid #e9b98c;background:#fdf4ec;padding:8px 12px;border-radius:6px}}
+@media print{{button{{display:none}}}}</style></head><body>
+<h1>Receipt</h1><div class=muted>Formwright · {escape(org.name)}</div>{note}
+<table><tr><td>Item</td><td>{item}{period}</td></tr><tr><td>Date</td><td>{when}</td></tr>
+<tr><td>Payment</td><td>{escape(pay.id)}</td></tr><tr><td>Status</td><td>Paid</td></tr>
+<tr><td><b>Total</b></td><td><b>${pay.amount_cents / 100:,.2f} {pay.currency.upper()}</b></td></tr></table>
+<button onclick="print()">Print or save as PDF</button></body></html>"""
+    return HTMLResponse(html)
+
+
 @router.post("/payments/{payment_id}/simulate")
-def simulate(payment_id: str, body: SimulateIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+def simulate(payment_id: str, body: SimulateIn, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     if get_settings().production:
         raise HTTPException(404)
     pay = ctx.db.get(Payment, payment_id)
@@ -188,7 +331,7 @@ def simulate(payment_id: str, body: SimulateIn, ctx: Ctx = Depends(verified_ctx)
 
 
 @router.post("/cancel")
-def cancel_plan(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+def cancel_plan(ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     ctx.require_role("owner")
     org = ctx.require_org()
     s = get_settings()
@@ -208,8 +351,24 @@ def cancel_plan(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.delete("/seats")
+def remove_seat(ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
+    """Drop one extra seat (only when it is free)."""
+    ctx.require_role("owner")
+    org = ctx.require_org()
+    extra = int(metering.prefs(ctx.db, org).get("extra_seats", 0))
+    if extra <= 0:
+        raise HTTPException(404, "No extra seats")
+    if seats_used(ctx.db, org) > seat_limit(ctx.db, org) - 1:
+        raise HTTPException(409, "Every seat is in use. Remove a member first.")
+    metering.set_prefs(ctx.db, org, extra_seats=extra - 1)
+    audit(ctx.db, "billing.seat_removed", ctx.user, org.id)
+    ctx.db.commit()
+    return {"ok": True}
+
+
 @router.delete("/addons/{module}")
-def remove_addon(module: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+def remove_addon(module: str, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     ctx.require_role("owner")
     org = ctx.require_org()
     e = ctx.db.scalar(select(Entitlement).where(Entitlement.org_id == org.id, Entitlement.module == module))
@@ -277,6 +436,4 @@ async def webhook(request: Request, db: Session = Depends(get_db)) -> dict[str, 
 
 
 def tokens_for_cost(cost_usd: float | None) -> int:
-    if not cost_usd:
-        return TOKEN_COSTS["design_run_min"]
-    return max(TOKEN_COSTS["design_run_min"], math.ceil(cost_usd / TOKEN_COSTS["usd_per_token"]))
+    return metering.tokens_for_usd(cost_usd)
