@@ -41,10 +41,15 @@ MODULES: dict[str, dict[str, Any]] = {
                     "One-click hand-off to the Design Studio with the reference attached"],
     },
     "assembly": {
-        "name": "Assembly Studio", "status": "preview", "icon": "boxes",
-        "summary": "Multi-part assemblies with mates, interference checks, degrees-of-freedom analysis, "
-                   "exploded views and BOM.",
-        "bullets": ["Mates & joints", "Interference / clearance checks", "Exploded views", "Assembly STEP + BOM"],
+        "name": "Assembly Studio", "status": "live", "icon": "boxes",
+        "summary": "Assemble your verified parts and Toolbox components with mates that report under- and "
+                   "over-defined states honestly. Exact interference volumes and clearances, an exploded view, a "
+                   "BOM, and Fastener auto-fit: pick a hole and get the ISO bolt, washers and nut sized from the "
+                   "clearance and the measured grip.",
+        "bullets": ["Coincident, flush, concentric, distance and angle mates with DOF analysis",
+                    "Fastener auto-fit: standard bolt length from the measured grip, rule cited",
+                    "Exact interference volumes and minimum clearances",
+                    "Exploded view, BOM (CSV) and assembly STEP with hierarchy"],
     },
     "manufacturing": {
         "name": "Manufacturing Advisor", "status": "live", "icon": "factory",
