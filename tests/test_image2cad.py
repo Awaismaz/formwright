@@ -557,16 +557,16 @@ def test_vision_copy_is_compact(tmp_path: Path) -> None:
 
 # ----------------------------------------------------------------------------- audit fixes (AMI-03, 15, 24, 25, I1)
 def test_cost_estimate_starts_from_the_measured_run_and_learns(tmp_path: Path) -> None:
-    """AMI-03: with no history the estimate is the measured audit run (read 63, build 275); after 3 measured runs
+    """AMI-03: with no history the estimate comes from the two measured runs (read 63 / 251, build 275 / 291); after 3 measured runs
     it is their median, and the upper figure is the 90th percentile (nearest rank)."""
     from aicad.image2cad import cost
 
     e = cost.estimate(tmp_path)
-    assert e["read"] == {"tokens": 63, "high": 63, "runs": 0, "basis": "seed"}
-    assert e["build"]["tokens"] == 275 and e["build"]["basis"] == "seed"
+    assert e["read"] == {"tokens": 157, "high": 251, "runs": 0, "basis": "seed"}  # seed [63, 251]
+    assert e["build"]["tokens"] == 283 and e["build"]["basis"] == "seed"       # seed [275, 291]
     cost.record(tmp_path, "build", 310)
-    e = cost.estimate(tmp_path)["build"]  # pool [310, 275]: median 292.5 -> 293, p90 -> 310
-    assert (e["tokens"], e["high"], e["runs"]) == (293, 310, 1)
+    e = cost.estimate(tmp_path)["build"]  # pool [310, 275, 291]: median 291, p90 -> 310
+    assert (e["tokens"], e["high"], e["runs"]) == (291, 310, 1)
     for t in (200, 400):
         cost.record(tmp_path, "build", t)
     e = cost.estimate(tmp_path)["build"]  # measured only: [310, 200, 400]
@@ -620,12 +620,12 @@ def test_runs_start_only_when_the_balance_covers_the_estimate(app_client: Any, t
     signup(c, "cost@x.com")
     _unlock(c)
     est = c.get("/api/m/image2cad/estimate").json()
-    assert est["read"]["tokens"] == 63 and est["build"]["tokens"] == 275 and est["unlimited"] is False
+    assert est["read"]["tokens"] == 157 and est["build"]["tokens"] == 283 and est["unlimited"] is False
     assert c.get("/api/m/image2cad/uploads").json()["estimate"]["balance"] == est["balance"]
     _set_balance("cost@x.com", 50)
     png = base64.b64encode(_png()).decode()
     r = c.post("/api/m/image2cad/uploads", json={"filename": "sketch.png", "data_b64": png})
-    assert r.status_code == 402 and "Reading an image takes about 63 tokens" in r.json()["detail"]["message"]
+    assert r.status_code == 402 and "Reading an image takes about 157, up to 251 tokens" in r.json()["detail"]["message"]
     assert "has 50" in r.json()["detail"]["message"] and r.json()["detail"]["cta"] == "/app/billing#tokens"
     assert c.get("/api/m/image2cad/uploads").json()["items"] == []  # nothing stored, nothing read
     pdf = tmp_path / "plate.pdf"
@@ -641,7 +641,7 @@ def test_runs_start_only_when_the_balance_covers_the_estimate(app_client: Any, t
         "reference": {"dim": by["100"], "value": 100, "unit": "mm"}, "answers": {"front_view": {"choice": front["id"]}}})
     _set_balance("cost@x.com", 200)
     r = c.post(f"/api/m/image2cad/uploads/{uid}/create", json={})
-    assert r.status_code == 402 and "Building the model takes about 275 tokens" in r.json()["detail"]["message"]
+    assert r.status_code == 402 and "Building the model takes about 283, up to 291 tokens" in r.json()["detail"]["message"]
     assert c.post(f"/api/m/image2cad/uploads/{uid}/roundtrip").status_code == 409  # no model yet
     _set_balance("cost@x.com", 300)
     r = c.post(f"/api/m/image2cad/uploads/{uid}/create", json={})
@@ -663,7 +663,7 @@ def test_runs_start_only_when_the_balance_covers_the_estimate(app_client: Any, t
     db.commit()
     db.close()
     e = c.get("/api/m/image2cad/estimate").json()["build"]
-    assert (e["tokens"], e["high"], e["runs"]) == (293, 310, 1)
+    assert (e["tokens"], e["high"], e["runs"]) == (291, 310, 1)
     assert c.get("/api/m/image2cad/estimate").json()["build"]["runs"] == 1  # settled once
     # AMI-I1: a verified build of FX-DRW-1 (100 x 60 x 20 block) stands in for the agent's model
     write_model(ws / "out")

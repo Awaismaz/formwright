@@ -6,9 +6,10 @@ it really cost (``tokens_for_cost`` of the SDK's cost estimate, also under God m
 ``<data>/image2cad/costs.json``. The estimate shown before a run is the median of the recent runs, and the upper
 figure is their 90th percentile; a run may start only when the balance covers that upper figure.
 
-Until there are ``MIN_RUNS`` measured runs, the measured audit run of 2026-11-17 seeds the sample (stepped-shaft
-drawing: read 63 tokens, build 275 tokens, "Done · 4 turns · 111.9 s"). It is the only measurement before this file
-existed, so it is used rather than a guess.
+Until there are ``MIN_RUNS`` measured runs, the two measured stepped-shaft runs seed the sample: the audit run of
+2026-11-17 (read 63 tokens, build 275) and the fix walkthrough of the same drawing (read 251, build 291). A read of
+the same image varied 4x between them, which is why the preflight uses the upper figure, and why the read itself is
+also capped at the workspace balance.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from statistics import median
 from typing import Any
 
 KINDS = ("read", "build")
-SEED = {"read": 63, "build": 275}  # measured 2026-11-17 (docs/reports/audit/asm-mesh-img.md, AMI-03)
+SEED = {"read": [63, 251], "build": [275, 291]}  # measured 2026-11-17 (audit run, fix walkthrough; AMI-03)
 MIN_RUNS = 3  # fewer measured runs than this: the seed run joins the sample
 WINDOW = 20  # recent runs used for the estimate
 KEEP = 60  # runs kept per kind
@@ -61,9 +62,9 @@ def percentile(values: list[int], q: float) -> int:
     return int(s[max(0, math.ceil(q * len(s)) - 1)])
 
 
-def summarise(samples: list[int], seed: int) -> dict[str, Any]:
+def summarise(samples: list[int], seed: list[int]) -> dict[str, Any]:
     measured = len(samples)
-    pool = samples[-WINDOW:] + ([seed] if measured < MIN_RUNS else [])
+    pool = samples[-WINDOW:] + (list(seed) if measured < MIN_RUNS else [])
     typical = math.ceil(median(pool))
     return {"tokens": typical, "high": max(typical, percentile(pool, 0.9)), "runs": measured,
             "basis": "measured" if measured >= MIN_RUNS else "seed"}
