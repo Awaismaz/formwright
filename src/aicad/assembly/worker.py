@@ -26,8 +26,10 @@ def _handle(req: dict[str, Any]) -> Any:
     op = req.get("op")
     if op == "prepare":
         return geometry.prepare(Path(req["dest"]), step=req.get("step"), toolbox_spec=req.get("toolbox"))
+    if op == "ping":
+        return {"warm": True}
     if op == "interference":
-        return geometry.interference(req["instances"])
+        return geometry.interference(req["instances"], only=req.get("only"))
     if op == "clearance":
         return geometry.clearance(req["instances"], [tuple(p) for p in req.get("pairs", [])],
                                   float(req.get("near_mm", 10.0)))

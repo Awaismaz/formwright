@@ -230,6 +230,39 @@ def make_mate(root: Path, doc: dict[str, Any], body: dict[str, Any]) -> dict[str
     return m
 
 
+def edit_mate(root: Path, doc: dict[str, Any], m: dict[str, Any], body: dict[str, Any]) -> bool:
+    """Change a mate in place (type, value, flip, suppress, re-pick either reference; AMI-06). Returns True when the
+    mate's geometry changed, so the caller pre-aligns it like a new mate."""
+    t = body.get("type") or m["type"]
+    if t not in solver.MATE_TYPES:
+        raise AssemblyInputError("Unknown mate type")
+    a = resolve_ref(root, doc, body["a"]) if body.get("a") else m["a"]
+    b = resolve_ref(root, doc, body["b"]) if body.get("b") else m["b"]
+    if a["inst"] == b["inst"]:
+        raise AssemblyInputError("Pick references on two different parts.")
+    need = solver.NEEDS[t]
+    if a["ref"]["kind"] != need or b["ref"]["kind"] != need:
+        raise AssemblyInputError(f"{solver.LABEL[t]} needs two " +
+                                 ("flat faces." if need == "plane" else "cylindrical faces, circular or straight edges."))
+    value = float(body["value"]) if body.get("value") is not None else float(m.get("value") or 0.0)
+    if not math.isfinite(value):
+        raise AssemblyInputError("Value out of range")
+    if t == "angle" and not 0 <= value <= 180:
+        raise AssemblyInputError("Angle must be between 0° and 180°.")
+    if t == "distance" and not 0 <= value <= 10000:
+        raise AssemblyInputError("Distance must be between 0 and 10000 mm.")
+    if t not in ("angle", "distance"):
+        value = 0.0
+    flip = bool(body["flip"]) if body.get("flip") is not None else bool(m.get("flip"))
+    geometric = (t != m["type"] or value != float(m.get("value") or 0.0) or bool(body.get("a")) or bool(body.get("b"))
+                 or flip != bool(m.get("flip")))
+    m["type"], m["a"], m["b"], m["value"], m["flip"] = t, a, b, value, flip
+    if body.get("suppressed") is not None:
+        m["suppressed"] = bool(body["suppressed"])
+    m["broken"] = bool(m["a"].get("lost") or m["b"].get("lost"))
+    return geometric
+
+
 def _spec(m: dict[str, Any]) -> solver.MateSpec:
     return solver.MateSpec(m["id"], m["type"], m["a"]["inst"], solver.Ref.of(m["a"]["ref"]), m["b"]["inst"],
                            solver.Ref.of(m["b"]["ref"]), float(m.get("value") or 0.0), bool(m.get("flip")))
@@ -269,29 +302,161 @@ def _same(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return float(np.linalg.norm(w - va * float(w @ va))) < 1e-6
 
 
-def remap_refs(root: Path, doc: dict[str, Any], iid: str, new_key: str) -> tuple[int, int]:
-    """Point the mates of instance iid at the same geometry in a new part snapshot. Returns (kept, broken)."""
+def _compatible(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Same kind of reference with the same orientation (planes keep their outward normal; axes may flip)."""
+    if a["kind"] != b["kind"]:
+        return False
+    va, vb = xform.unit(a["v"]), xform.unit(b["v"])
+    if a["kind"] == "plane":
+        return float(va @ vb) > 1 - 1e-6
+    return abs(abs(float(va @ vb)) - 1) < 1e-6 and (a.get("r") is None) == (b.get("r") is None)
+
+
+def _line_offset(a: dict[str, Any], q: Any) -> float:
+    v = xform.unit(a["v"])
+    w = np.asarray(q, dtype=float) - np.asarray(a["p"], dtype=float)
+    return float(np.linalg.norm(w - v * float(w @ v)))
+
+
+def _canon(v: Any) -> np.ndarray:
+    u = xform.unit(v)
+    for c in u:
+        if abs(c) > 1e-9:
+            return u if c > 0 else -u
+    return u
+
+
+def match_ref(old: dict[str, Any], old_id: int, old_pool: dict[str, dict[str, Any]], new_pool: dict[str, dict[str, Any]],
+              old_role: set[int], new_role: set[int], scale: float, face: bool) -> tuple[int | None, bool]:
+    """Find the reference in a rebuilt part that plays the same role as ``old`` (AMI-05).
+
+    Returns (new id or None, identical geometry?). Order of evidence: the same id with identical geometry; identical
+    geometry under another id; then the *same role and topology*: same kind and orientation, same feature role (a
+    recognised hole stays a hole), and either the same axis line (a hole whose Ø changed) or the same rank among its
+    peers (the top face stays the top face when the plate gets thicker; the upper rim stays the upper rim)."""
+    hit = new_pool.get(str(old_id))
+    if hit is not None and _same(old, hit):
+        return old_id, True
+    for k, v in sorted(new_pool.items(), key=lambda kv: int(kv[0])):
+        if _same(old, v):
+            return int(k), True
+    role = old_id in old_role
+
+    def group(pool: dict[str, dict[str, Any]], roles: set[int]) -> list[tuple[int, dict[str, Any]]]:
+        return sorted(((int(k), r) for k, r in pool.items() if _compatible(old, r) and (int(k) in roles) == role),
+                      key=lambda kr: kr[0])
+
+    peers = [kr for kr in group(old_pool, old_role) if kr[0] != old_id] + [(old_id, old)]
+    cands = group(new_pool, new_role)
+    if not cands:
+        return None, False
+    v = _canon(old["v"])
+
+    def ranked(items: list[tuple[int, dict[str, Any]]], key: Any) -> list[int]:
+        return [k for k, _r in sorted(items, key=lambda kr: key(kr[1]))]
+
+    if old["kind"] == "plane":
+        def pkey(r: dict[str, Any]) -> tuple[float, ...]:
+            p = np.asarray(r["p"], dtype=float)
+            return (round(float(p @ v), 6), *(round(float(x), 3) for x in p))
+
+        if len(peers) == len(cands):
+            return ranked(cands, pkey)[ranked(peers, pkey).index(old_id)], False
+        o = float(np.asarray(old["p"]) @ v)
+        best = min(cands, key=lambda kr: abs(float(np.asarray(kr[1]["p"]) @ v) - o)
+                   + 0.01 * float(np.linalg.norm(np.asarray(kr[1]["p"]) - np.asarray(old["p"]))))
+        return best[0], False
+
+    # axes: cylindrical faces (ordered by radius on one line) and circular / straight edges (ordered along the line)
+    p0 = np.asarray(old["p"], dtype=float)
+
+    def akey(r: dict[str, Any]) -> tuple[float, float]:
+        t = round(float((np.asarray(r["p"], dtype=float) - p0) @ v), 6)
+        rr = round(float(r.get("r") or 0.0), 6)
+        return (rr, t) if face else (t, rr)
+
+    tol = max(0.5, 0.02 * scale)
+    near = [kr for kr in cands if _line_offset(old, kr[1]["p"]) <= tol]
+    if near:
+        off = min(_line_offset(old, kr[1]["p"]) for kr in near)
+        near = [kr for kr in near if _line_offset(old, kr[1]["p"]) <= off + 1e-6]
+        on_line = [kr for kr in peers if _line_offset(old, kr[1]["p"]) <= 1e-6]
+        if len(on_line) == len(near) > 1:
+            return ranked(near, akey)[ranked(on_line, akey).index(old_id)], False
+        ko = akey(old)
+        best = min(near, key=lambda kr: abs(akey(kr[1])[0] - ko[0]) + abs(akey(kr[1])[1] - ko[1]))
+        return best[0], False
+    if len(peers) == len(cands):
+        def gkey(r: dict[str, Any]) -> tuple[float, ...]:
+            pp = np.asarray(r["p"], dtype=float)
+            foot = pp - v * float(pp @ v)
+            return (*(round(float(x), 3) for x in foot), round(float(r.get("r") or 0.0), 6))
+
+        return ranked(cands, gkey)[ranked(peers, gkey).index(old_id)], False
+    return None, False
+
+
+def _hole_faces(info: dict[str, Any] | None) -> set[int]:
+    return {int(f) for h in (info or {}).get("holes", []) for f in h.get("faces", [])}
+
+
+def remap_refs(root: Path, doc: dict[str, Any], iid: str, new_key: str, old_key: str | None = None) -> dict[str, int]:
+    """Point the mates of instance iid at the same references in a new part snapshot, matched by role and topology
+    rather than identical geometry. Returns counts {kept (identical), followed (geometry changed), lost}."""
     new = store.refs(root, new_key)
-    kept = broken = 0
+    new_part = store.part(root, new_key) or {}
+    old_part = store.part(root, old_key) if old_key else None
+    try:
+        old = store.refs(root, old_key) if old_key and old_part else {"faces": {}, "edges": {}}
+    except (AssemblyInputError, OSError, ValueError):
+        old = {"faces": {}, "edges": {}}
+    roles = {"faces": (_hole_faces(old_part["info"] if old_part else None), _hole_faces(new_part.get("info"))),
+             "edges": (set(), set())}
+    bb = (new_part.get("info") or {}).get("bbox") or [0, 0, 0, 100, 100, 100]
+    scale = float(np.linalg.norm(np.array(bb[3:]) - np.array(bb[:3]))) or 100.0
+    out = {"kept": 0, "followed": 0, "lost": 0}
     for m in doc["mates"]:
+        touched = False
         for side in ("a", "b"):
             s = m[side]
             if s["inst"] != iid:
                 continue
-            pool = new["faces" if s["kind"] == "face" else "edges"]
-            hit = pool.get(str(s["id"]))
-            if hit is None or not _same(s["ref"], hit):
-                hit_id = next((k for k, v in sorted(pool.items(), key=lambda kv: int(kv[0])) if _same(s["ref"], v)), None)
-                if hit_id is None:
-                    m["broken"] = True
-                    broken += 1
-                    continue
-                s["id"] = int(hit_id)
-                hit = pool[hit_id]
-            s["ref"] = hit
-            m["broken"] = False
-            kept += 1
-    return kept, broken
+            touched = True
+            pool = "faces" if s["kind"] == "face" else "edges"
+            o_role, n_role = roles[pool]
+            new_id, same = match_ref(s["ref"], int(s["id"]), old.get(pool) or {}, new[pool], o_role, n_role, scale,
+                                     face=pool == "faces")
+            if new_id is None:
+                s["lost"] = True
+                out["lost"] += 1
+                continue
+            s["id"] = new_id
+            s["ref"] = new[pool][str(new_id)]
+            s.pop("lost", None)
+            out["kept" if same else "followed"] += 1
+        if touched:
+            m["broken"] = bool(m["a"].get("lost") or m["b"].get("lost"))
+    return out
+
+
+def remap_hole(old_info: dict[str, Any] | None, new_info: dict[str, Any], k: int) -> int | None:
+    """Index of the same hole in a rebuilt part: parallel axis, nearest axis line (its Ø may have changed)."""
+    holes = new_info.get("holes", [])
+    if old_info is None or not 0 <= k < len(old_info.get("holes", [])):
+        return k if 0 <= k < len(holes) else None
+    h = old_info["holes"][k]
+    ref = {"kind": "axis", "p": (h.get("exact") or {}).get("p") or h["center"], "v": h["axis"]}
+    best, best_d = None, math.inf
+    for j, n in enumerate(holes):
+        if abs(abs(float(xform.unit(n["axis"]) @ xform.unit(h["axis"]))) - 1) > 1e-6:
+            continue
+        d = _line_offset(ref, (n.get("exact") or {}).get("p") or n["center"])
+        d += 0.01 * float(np.linalg.norm(np.asarray(n["center"]) - np.asarray(h["center"])))
+        if d < best_d:
+            best, best_d = j, d
+    bb = new_info.get("bbox") or [0, 0, 0, 100, 100, 100]
+    tol = max(0.5, 0.02 * float(np.linalg.norm(np.array(bb[3:]) - np.array(bb[:3]))))
+    return best if best is not None and best_d <= tol else None
 
 
 # ----------------------------------------------------------------------------- explode (ASM-007)
@@ -534,12 +699,14 @@ def _space_warnings(pr: dict[str, Any], prop: dict[str, Any]) -> None:
     sp = pr["head"].get("space")
     if sp is not None and sp < head_h + wh - 1e-6:
         prop["warnings"].append(f"Head side: only {sp:g} mm free for the head and washer ({head_h + wh:g} mm needed).")
+        prop["no_room"] = True
     if prop["kind"] == "through":
         wn = toolbox.WASHER[d][2] if "washer_nut" in items else 0.0
         need = wn + prop["length"]["protrusion"] + 0.0
         sp = pr["nut"].get("space")
         if sp is not None and sp < need - 1e-6:
             prop["warnings"].append(f"Nut side: only {sp:g} mm free for the washer, nut and bolt end ({need:g} mm needed).")
+            prop["no_room"] = True
 
 
 async def propose(root: Path, org_id: str, doc: dict[str, Any], targets: list[dict[str, Any]], style: str,
@@ -562,6 +729,43 @@ async def propose(root: Path, org_id: str, doc: dict[str, Any], targets: list[di
             "style": style, "washers": washers, "flip": flip}
 
 
+def coaxial_hole_pairs(root: Path, doc: dict[str, Any], a: str, b: str) -> list[dict[str, Any]]:
+    """Every recognised hole of part a that lines up with a recognised hole of part b (same axis line within
+    0.01 mm, in the current placement). The stack is fitted from the smaller hole, so the screw passes both
+    (AMI-I2: "Fasten these two parts")."""
+    ia, ib = _inst(doc, a), _inst(doc, b)
+    if a == b or ia.get("group") or ib.get("group"):
+        raise AssemblyInputError("Pick two different parts (not fasteners).")
+    parts = _parts(root, doc)
+
+    def world(inst: dict[str, Any]) -> list[tuple[int, dict[str, Any], np.ndarray, np.ndarray]]:
+        T = xform.from12(inst["T"])
+        return [(k, h, xform.pt(T, (h.get("exact") or {}).get("p") or h["center"]), xform.unit(xform.vec(T, h["axis"])))
+                for k, h in enumerate(parts[inst["part"]]["info"].get("holes", []))]
+
+    out = []
+    used_b: set[int] = set()
+    for ka, ha, pa, ua in world(ia):
+        for kb, hb, pb, ub in world(ib):
+            if kb in used_b or abs(abs(float(ua @ ub)) - 1) > 1e-6:
+                continue
+            w = pb - pa
+            if float(np.linalg.norm(w - ua * float(w @ ua))) > 0.01:
+                continue
+            used_b.add(kb)
+            small = (a, ka, ha) if ha["d"] <= hb["d"] + 1e-9 else (b, kb, hb)
+            big = (b, kb, hb) if small[0] == a else (a, ka, ha)
+            sa, sb = fasteners.size_for_clearance(ha["d"]), fasteners.size_for_clearance(hb["d"])
+            out.append({"a_hole": ka, "b_hole": kb, "a_d": ha["d"], "b_d": hb["d"],
+                        "target": {"inst": small[0], "hole": small[1]},
+                        "mismatch": None if (sa and sb and sa["d"] == sb["d"]) or abs(ha["d"] - hb["d"]) < 1e-9 else
+                        {"inst": small[0], "hole": small[1], "d": small[2]["d"], "to_d": big[2]["d"],
+                         "size": (fasteners.size_for_clearance(big[2]["d"]) or {}).get("d")},
+                        "point": [round(float(x), 4) for x in pa]})
+            break
+    return out
+
+
 def _tb_ref(root: Path, key: str, kind: str, *, r: float | None = None, z: float | None = None,
             nz: float | None = None) -> dict[str, Any] | None:
     for fid, f in sorted(store.refs(root, key)["faces"].items(), key=lambda kv: int(kv[0])):
@@ -581,6 +785,7 @@ async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dic
     plan = await propose(root, org_id, doc, targets, style, washers, flip)
     pattern_id = store.next_id(doc, "fp") if len(targets) > 1 else None
     made = 0
+    before = {i["id"] for i in doc["instances"]}
     for h in plan["holes"]:
         prop = h["proposal"]
         if not prop["ok"]:
@@ -593,14 +798,78 @@ async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dic
         n_groups = sum(1 for g in doc["groups"] if g.get("kind") == "fastener") + 1
         doc["groups"].append({"id": gid, "kind": "fastener", "name": f"Fastener stack {n_groups} ({prop['summary']})",
                               "pattern": pattern_id, "hole": {"inst": h["inst"], "hole": h["hole"]},
-                              "spec": {k: prop[k] for k in ("summary", "designation", "size", "kind", "grip", "rule",
-                                                             "clearance", "length", "warnings", "sources")}})
+                              "spec": {**{k: prop[k] for k in ("summary", "designation", "size", "kind", "grip", "rule",
+                                                               "clearance", "length", "warnings", "sources")},
+                                       "style": style, "washers": washers, "flip": flip}})
         _insert_stack(root, doc, h, keys, gid)
     if not made:
         raise AssemblyInputError(next((h["proposal"].get("error") for h in plan["holes"] if h["proposal"].get("error")),
                                       "No fastener could be fitted."))
     run_solve(root, doc)
-    return {"inserted": made, "plan": plan}
+    new_ids = [i["id"] for i in doc["instances"] if i["id"] not in before]
+    clashes = await stack_clashes(root, org_id, doc, new_ids)
+    return {"inserted": made, "plan": plan, "clashes": clashes}
+
+
+async def stack_clashes(root: Path, org_id: str, doc: dict[str, Any], ids: list[str]) -> list[dict[str, Any]]:
+    """Exact interference of just-inserted fastener parts against everything else (thread engagement excluded), so
+    a stack that lands inside a part is reported at once instead of looking verified (AMI-01)."""
+    if not ids:
+        return []
+    res = await _call(org_id, {"op": "interference", "instances": worker_instances(root, doc), "only": ids}, timeout=240)
+    names = display_names(doc)
+    return [{"a": p["a"], "b": p["b"], "a_name": names[p["a"]], "b_name": names[p["b"]],
+             "volume_mm3": p["volume_mm3"]} for p in res["pairs"] if p["kind"] == "interference"]
+
+
+async def recheck_stacks(root: Path, org_id: str, doc: dict[str, Any], old_infos: dict[str, dict[str, Any]]) -> int:
+    """After parts were refreshed, re-run the fastener proposal for every inserted stack (AMI-07). A stack whose
+    size, length or fit changed is flagged ``check`` with the new proposal, and the user updates it in one click.
+    ``old_infos`` maps refreshed instance ids to their previous part info (to follow the picked hole)."""
+    flagged = 0
+    for g in doc["groups"]:
+        if g.get("kind") != "fastener" or not g.get("hole"):
+            continue
+        h = g["hole"]
+        g.pop("check", None)
+        try:
+            inst = _inst(doc, h["inst"])
+        except AssemblyInputError:
+            g["check"] = {"text": "The part this stack was fitted to is gone. Delete the stack.", "summary": None}
+            flagged += 1
+            continue
+        info = (store.part(root, inst["part"]) or {}).get("info") or {}
+        if h["inst"] in old_infos:
+            k = remap_hole(old_infos[h["inst"]], info, int(h["hole"]))
+            if k is None:
+                g["check"] = {"text": "The hole this stack was fitted to is gone from the updated part.",
+                              "summary": None}
+                flagged += 1
+                continue
+            h["hole"] = k
+        spec = g.get("spec") or {}
+        plan = await propose(root, org_id, doc, [{"inst": h["inst"], "hole": int(h["hole"])}],
+                             spec.get("style", "hex_bolt"), spec.get("washers", "both"), bool(spec.get("flip")))
+        hp = plan["holes"][0]
+        prop = hp["proposal"]
+        old_grip = float(spec.get("grip") or 0.0)
+        if not prop.get("ok"):
+            g["check"] = {"text": "No longer fits: " + (prop.get("error") or "the hole changed."), "summary": None}
+            flagged += 1
+            continue
+        grip_changed = abs(float(prop.get("grip") or 0.0) - old_grip) > 1e-6
+        if prop["summary"] == spec.get("summary") and not grip_changed:
+            continue
+        why = []
+        if prop.get("designation") != spec.get("designation"):
+            hd = hp["probe"].get("hole_d")
+            why.append(f"hole now Ø{hd:g} ({prop['designation']} clearance)" if hd else "the hole changed")
+        if grip_changed:
+            why.append(f"grip now {float(prop['grip']):g} mm (was {old_grip:g} mm)")
+        g["check"] = {"text": "Check size: " + "; ".join(why or ["the joint changed"]) + ".",
+                      "summary": prop["summary"]}
+        flagged += 1
+    return flagged
 
 
 def _insert_stack(root: Path, doc: dict[str, Any], h: dict[str, Any], keys: dict[str, str], gid: str) -> None:

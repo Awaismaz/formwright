@@ -183,6 +183,8 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
                       "flip": m.get("flip", False), "suppressed": m.get("suppressed", False), "group": m.get("group"),
                       "a": {k: m["a"][k] for k in ("inst", "kind", "id")}, "b": {k: m["b"][k] for k in ("inst", "kind", "id")},
                       "a_name": names.get(m["a"]["inst"]), "b_name": names.get(m["b"]["inst"]), "status": status,
+                      "a_desc": _ref_desc(doc, parts, m["a"]), "b_desc": _ref_desc(doc, parts, m["b"]),
+                      "a_lost": bool(m["a"].get("lost")), "b_lost": bool(m["b"].get("lost")),
                       "residual_mm": st.get("residual_mm"), "residual_deg": st.get("residual_deg")})
     pview = {}
     for k, p in parts.items():
@@ -214,6 +216,37 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_AXES = (("+X", (1, 0, 0)), ("−X", (-1, 0, 0)), ("+Y", (0, 1, 0)), ("−Y", (0, -1, 0)), ("+Z", (0, 0, 1)),
+         ("−Z", (0, 0, -1)))
+
+
+def _ref_desc(doc: dict[str, Any], parts: dict[str, dict[str, Any]], side: dict[str, Any]) -> str:
+    """Plain description of a mate reference, so two mates of one type can be told apart (AMI-20):
+    "Ø6.6 hole", "Ø20 cylinder", "Ø5.5 edge", "+Z face" (world direction of the outward normal)."""
+    import numpy as np
+
+    from aicad.assembly import xform
+
+    r = side.get("ref") or {}
+    try:
+        inst = service._inst(doc, side["inst"])
+    except AssemblyInputError:
+        return "reference"
+    if r.get("kind") == "plane":
+        v = xform.vec(xform.from12(inst["T"]), r["v"])
+        for name, ax in _AXES:
+            if float(np.dot(v, ax)) > 1 - 1e-6:
+                return f"{name} face"
+        return "flat face"
+    if r.get("r") is None:
+        return "straight edge"
+    d = f"Ø{2 * float(r['r']):.4g}"
+    if side["kind"] == "edge":
+        return f"{d} edge"
+    holes = (parts.get(inst["part"]) or {}).get("info", {}).get("holes", [])
+    return f"{d} hole" if any(side["id"] in h.get("faces", []) for h in holes) else f"{d} cylinder"
+
+
 def _thumb_url(ctx: Ctx, doc: dict[str, Any]) -> str | None:
     meta = store.read_json(store.doc_dir(_root(ctx), doc["id"]) / "thumb.json")
     if not meta or not (store.doc_dir(_root(ctx), doc["id"]) / "thumb.png").is_file():
@@ -222,27 +255,27 @@ def _thumb_url(ctx: Ctx, doc: dict[str, Any]) -> str | None:
 
 
 def _summary(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
+    s = doc.get("solve") or {}
+    projects = _projects_for(ctx, doc)
+    current = {pid: str(_status(workspace_for(p)).get("build_id")) for pid, p in projects.items()}
+    stale = sum(1 for i in doc["instances"] if i["source"]["kind"] == "project"
+                and current.get(i["source"]["project_id"]) not in (None, "None")
+                and current.get(i["source"]["project_id"]) != str(i["source"]["build_id"]))
+    out = {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"), "updated_at": doc["updated_at"],
+           "instances": len(doc["instances"]), "mates": len(doc["mates"]),
+           "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
+           "status": s.get("status"), "dof": s.get("dof"), "free_spins": s.get("free_spins"),
+           "broken_mates": sum(1 for m in doc["mates"] if m.get("broken")), "stale_parts": stale,
+           "stacks_to_check": sum(1 for g in doc["groups"] if g.get("check"))}
     own = _thumb_url(ctx, doc)
     if own:
-        s = doc.get("solve") or {}
-        return {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"),
-                "updated_at": doc["updated_at"], "instances": len(doc["instances"]), "mates": len(doc["mates"]),
-                "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
-                "status": s.get("status"), "dof": s.get("dof"), "free_spins": s.get("free_spins"),
-                "thumbnail": own, "own_thumbnail": True}
+        return {**out, "thumbnail": own, "own_thumbnail": True}
     thumb = None
     pid = doc.get("project_id") or next((i["source"]["project_id"] for i in doc["instances"]
                                          if i["source"]["kind"] == "project"), None)
-    if pid:
-        p = ctx.db.get(Project, pid)
-        if p is not None and p.org_id == ctx.require_org().id:
-            thumb = _thumb(p)
-    s = doc.get("solve") or {}
-    return {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"), "updated_at": doc["updated_at"],
-            "instances": len(doc["instances"]), "mates": len(doc["mates"]),
-            "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
-            "status": s.get("status"), "dof": s.get("dof"), "free_spins": s.get("free_spins"),
-            "thumbnail": thumb, "own_thumbnail": False}
+    if pid and pid in projects:
+        thumb = _thumb(projects[pid])
+    return {**out, "thumbnail": thumb, "own_thumbnail": False}
 
 
 # ----------------------------------------------------------------------------- bodies
@@ -294,6 +327,9 @@ class MateIn(BaseModel):
 
 
 class MatePatch(BaseModel):
+    type: Literal["coincident", "flush", "distance", "angle", "concentric"] | None = None
+    a: Sel | None = None
+    b: Sel | None = None
     value: float | None = None
     flip: bool | None = None
     suppressed: bool | None = None
@@ -304,13 +340,77 @@ class ThumbIn(BaseModel):
     rev: int = Field(ge=0)
 
 
-class FitIn(BaseModel):
+class HoleRef(BaseModel):
     inst: str
     hole: int = Field(ge=0)
+
+
+class FitIn(BaseModel):
+    inst: str | None = None
+    hole: int = Field(0, ge=0)
     pattern: bool = True
+    targets: list[HoleRef] | None = Field(None, max_length=64)   # several holes at once ("Fasten these two parts")
     style: Literal["hex_bolt", "shcs"] = "hex_bolt"
     washers: Literal["both", "head", "none"] = "both"
     flip: bool = False
+
+
+class PairIn(BaseModel):
+    a: str
+    b: str
+    style: Literal["hex_bolt", "shcs"] = "hex_bolt"
+    washers: Literal["both", "head", "none"] = "both"
+
+
+class FixHoleIn(BaseModel):
+    inst: str
+    param: str = Field(min_length=1, max_length=80)
+    value: float
+
+
+def _targets(root: Path, doc: dict[str, Any], body: FitIn) -> list[dict[str, Any]]:
+    if body.targets:
+        out = []
+        for t in body.targets:
+            inst = service._inst(doc, t.inst)
+            if inst.get("group"):
+                raise AssemblyInputError("Pick a hole in a part, not in a fastener.")
+            if not 0 <= t.hole < len((store.part(root, inst["part"]) or {}).get("info", {}).get("holes", [])):
+                raise AssemblyInputError("Hole not found")
+            out.append({"inst": t.inst, "hole": t.hole})
+        return out
+    if body.inst is None:
+        raise AssemblyInputError("Pick a hole first.")
+    return service.fastener_targets(root, doc, body.inst, body.hole, body.pattern)
+
+
+def _hole_param(ctx: Ctx, doc: dict[str, Any], iid: str, d: float, to_d: float) -> dict[str, Any] | None:
+    """The one editable design parameter of a project part that sets this hole's Ø (value equal to the Ø, or to
+    its radius). None when there is no such parameter or more than one candidate: then the fix is left to the
+    Design Studio, never guessed."""
+    from aicad.platform.routers.projects import current_editable
+
+    inst = service._inst(doc, iid)
+    if inst["source"]["kind"] != "project":
+        return None
+    try:
+        p = _project(ctx, inst["source"]["project_id"])
+    except HTTPException:
+        return None
+    ws = workspace_for(p)
+    if str(_status(ws).get("build_id")) != str(inst["source"]["build_id"]):
+        return None  # the assembly shows an older build: refresh first
+    meta = _status(ws).get("param_meta") or {}
+    hits = []
+    for name, val in current_editable(ws).items():
+        if isinstance(val, bool):
+            continue
+        for scale in (1.0, 0.5):
+            if abs(float(val) - d * scale) < 1e-9:
+                hits.append({"project_id": p.id, "project": service.clean_name(p.name), "param": name,
+                             "label": (meta.get(name) or {}).get("label") or name, "from": float(val),
+                             "to": round(to_d * scale, 6), "radius": scale == 0.5})
+    return hits[0] if len(hits) == 1 else None
 
 
 # ----------------------------------------------------------------------------- routes
@@ -460,27 +560,74 @@ async def delete_instance(aid: str, iid: str, ctx: Ctx = Depends(asm_ctx)) -> di
     return await _mutate(ctx, aid, lambda doc, root: service.remove_instance(doc, iid))
 
 
+async def _refresh_project(ctx: Ctx, doc: dict[str, Any], root: Path, project_id: str) -> dict[str, Any]:
+    """Re-point every instance of a project at its latest verified build: mate references follow by role and
+    topology (AMI-05), and every fastener stack is re-checked against the updated holes and grips (AMI-07)."""
+    p = _project(ctx, project_id)
+    key = await _project_part(ctx, p)
+    new_part = store.part(root, key)
+    counts = {"kept": 0, "followed": 0, "lost": 0}
+    old_infos: dict[str, dict[str, Any]] = {}
+    n = 0
+    for i in doc["instances"]:
+        if i["source"]["kind"] != "project" or i["source"]["project_id"] != project_id or i["part"] == key:
+            continue
+        old = i["part"]
+        old_infos[i["id"]] = (store.part(root, old) or {}).get("info") or {}
+        c = service.remap_refs(root, doc, i["id"], key, old)
+        for k in counts:
+            counts[k] += c[k]
+        i["part"] = key
+        i["source"] = service._source(new_part)  # type: ignore[arg-type]
+        n += 1
+    service.run_solve(root, doc)
+    stacks = await service.recheck_stacks(root, ctx.require_org().id, doc, old_infos) if n else 0
+    broken = [m["id"] for m in doc["mates"] if m.get("broken")]
+    return {"refreshed": n, "references_kept": counts["kept"], "references_followed": counts["followed"],
+            "references_lost": counts["lost"], "broken_mates": broken, "stacks_to_check": stacks}
+
+
 @router.post("/assemblies/{aid}/instances/{iid}/refresh")
 async def refresh(aid: str, iid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
         inst = service._inst(doc, iid)
         if inst["source"]["kind"] != "project":
             raise AssemblyInputError("Toolbox parts don't change.")
-        p = _project(ctx, inst["source"]["project_id"])
-        old = inst["part"]
-        key = await _project_part(ctx, p)
-        kept = broken = 0
-        n = 0
-        new_part = store.part(root, key)
-        for i in doc["instances"]:
-            if i["part"] == old:
-                k, b = service.remap_refs(root, doc, i["id"], key)
-                kept, broken, n = kept + k, broken + b, n + 1
-                i["part"] = key
-                i["source"] = service._source(new_part)  # type: ignore[arg-type]
-        return {"_extra": {"refreshed": n, "references_kept": kept, "references_lost": broken}}
+        return {"_extra": await _refresh_project(ctx, doc, root, inst["source"]["project_id"])}
 
-    return await _mutate(ctx, aid, fn)
+    return await _mutate(ctx, aid, fn, solve=False)
+
+
+@router.post("/warm")
+async def warm(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Start this workspace's geometry engine ahead of the first operation (AMI-08). Cheap when already warm."""
+    import time
+
+    t0 = time.perf_counter()
+    try:
+        await service._call(ctx.require_org().id, {"op": "ping"}, timeout=180)
+    except service.WorkerError as e:
+        raise _err(e) from e
+    return {"ok": True, "s": round(time.perf_counter() - t0, 2)}
+
+
+@router.get("/where-used/{project_id}")
+def where_used(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Assemblies that use a project's part, with how many of its instances are behind the latest build and how
+    many mates are broken (AMI-10)."""
+    p = _project(ctx, project_id)
+    current = str(_status(workspace_for(p)).get("build_id"))
+    out = []
+    for d in store.list_docs(_root(ctx)):
+        if d.get("org_id") != ctx.require_org().id:
+            continue
+        mine = [i for i in d["instances"] if i["source"]["kind"] == "project" and i["source"]["project_id"] == p.id]
+        if not mine:
+            continue
+        out.append({"id": d["id"], "name": d["name"], "instances": len(mine),
+                    "stale": sum(1 for i in mine if current not in ("None",) and str(i["source"]["build_id"]) != current),
+                    "broken_mates": sum(1 for m in d["mates"] if m.get("broken"))})
+    return {"items": out}
 
 
 @router.post("/assemblies/{aid}/mates")
@@ -494,23 +641,12 @@ async def add_mate(aid: str, body: MateIn, ctx: Ctx = Depends(asm_ctx)) -> dict[
 
 @router.patch("/assemblies/{aid}/mates/{mid}")
 async def patch_mate(aid: str, mid: str, body: MatePatch, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
-    def fn(doc: dict[str, Any], root: Path) -> None:
+    def fn(doc: dict[str, Any], root: Path) -> dict[str, Any] | None:
         m = next((x for x in doc["mates"] if x["id"] == mid), None)
         if m is None:
             raise AssemblyInputError("Mate not found")
-        if body.value is not None:
-            if m["type"] == "angle" and not 0 <= body.value <= 180:
-                raise AssemblyInputError("Angle must be between 0° and 180°.")
-            if m["type"] == "distance" and not 0 <= body.value <= 10000:
-                raise AssemblyInputError("Distance must be between 0 and 10000 mm.")
-            m["value"] = float(body.value)
-        if body.flip is not None:
-            m["flip"] = body.flip
-        if body.suppressed is not None:
-            m["suppressed"] = body.suppressed
-        if body.flip is not None or body.value is not None:
-            return {"id": mid}  # type: ignore[return-value]
-        return None
+        geometric = service.edit_mate(root, doc, m, body.model_dump(exclude_none=True))
+        return {"id": mid} if geometric else None
 
     return await _mutate(ctx, aid, fn, prealign=lambda doc, r: [r["id"]] if r else [])
 
@@ -598,7 +734,7 @@ async def fit_propose(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dic
         doc = _doc(ctx, aid)
         root = _root(ctx)
         try:
-            targets = service.fastener_targets(root, doc, body.inst, body.hole, body.pattern)
+            targets = _targets(root, doc, body)
             plan = await service.propose(root, ctx.require_org().id, doc, targets, body.style, body.washers, body.flip)
         except (AssemblyInputError, service.WorkerError) as e:
             raise _err(e) from e
@@ -611,9 +747,9 @@ async def fit_propose(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dic
 @router.post("/assemblies/{aid}/fasteners/accept")
 async def fit_accept(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
-        targets = service.fastener_targets(root, doc, body.inst, body.hole, body.pattern)
+        targets = _targets(root, doc, body)
         res = await service.accept(root, ctx.require_org().id, doc, targets, body.style, body.washers, body.flip)
-        return {"_extra": {"inserted": res["inserted"]}}
+        return {"_extra": {"inserted": res["inserted"], "clashes": res["clashes"]}}
 
     view = await _mutate(ctx, aid, fn, solve=False)
     audit(ctx.db, "assembly.fasteners_inserted", ctx.user, ctx.require_org().id, target=aid,
@@ -622,6 +758,81 @@ async def fit_accept(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dict
           stacks=(view.get("result") or {}).get("inserted"))
     ctx.db.commit()
     return view
+
+
+@router.post("/assemblies/{aid}/fasteners/pairs")
+async def fit_pairs(aid: str, body: PairIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """"Fasten these two parts" (AMI-I2): every coaxial hole pair between two parts with its proposed stack, fitted
+    from the smaller hole. A mismatched pair (Ø6.6 over Ø5.5) also carries the one-click part fix when one design
+    parameter of the smaller hole's project sets that Ø."""
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        root = _root(ctx)
+        try:
+            pairs = service.coaxial_hole_pairs(root, doc, body.a, body.b)
+            plan = await service.propose(root, ctx.require_org().id, doc, [p["target"] for p in pairs],
+                                         body.style, body.washers, False) if pairs else {"holes": []}
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+    names = service.display_names(doc)
+    fixes: dict[str, Any] = {}
+    for p, h in zip(pairs, plan["holes"], strict=True):
+        p["proposal"] = h["proposal"]
+        p["grip"] = h["probe"].get("grip")
+        mm = p["mismatch"]
+        if mm:
+            k = f"{mm['inst']}:{mm['d']}:{mm['to_d']}"
+            if k not in fixes:
+                fixes[k] = _hole_param(ctx, doc, mm["inst"], float(mm["d"]), float(mm["to_d"]))
+            mm["fix"] = fixes[k]
+            mm["name"] = names.get(mm["inst"])
+    return {"a": body.a, "b": body.b, "a_name": names.get(body.a), "b_name": names.get(body.b), "pairs": pairs,
+            "ok": sum(1 for p in pairs if p["proposal"]["ok"])}
+
+
+@router.post("/assemblies/{aid}/fix-hole")
+async def fix_hole(aid: str, body: FixHoleIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """One-click part fix: a deterministic parameter edit on the part's Design Studio project (no AI, no tokens;
+    the Studio keeps it only if the rebuilt part passes its checks), then refresh of every instance of that part
+    in this assembly with mate re-mapping and stack re-checks."""
+    from aicad.platform.routers.projects import ParamsIn, set_params
+
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        inst = service._inst(doc, body.inst)
+        if inst["source"]["kind"] != "project":
+            raise AssemblyInputError("Toolbox parts can't be edited here.")
+        pid = inst["source"]["project_id"]
+        res = await set_params(pid, ParamsIn(values={body.param: body.value}), ctx)
+        out = await _refresh_project(ctx, doc, root, pid)
+        return {"_extra": {**out, "param": body.param, "changed": res.get("changed"), "revision": res.get("revision")}}
+
+    view = await _mutate(ctx, aid, fn, solve=False)
+    audit(ctx.db, "assembly.part_fixed", ctx.user, ctx.require_org().id, target=aid, param=body.param)
+    ctx.db.commit()
+    return view
+
+
+@router.post("/assemblies/{aid}/groups/{gid}/refit")
+async def refit_group(aid: str, gid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Replace a fastener stack with a fresh proposal for its hole ("Update stack" after a part change, AMI-07)."""
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        g = next((x for x in doc["groups"] if x["id"] == gid and x.get("kind") == "fastener"), None)
+        if g is None or not g.get("hole"):
+            raise AssemblyInputError("Fastener stack not found")
+        spec = g.get("spec") or {}
+        target = {"inst": g["hole"]["inst"], "hole": int(g["hole"]["hole"])}
+        service._inst(doc, target["inst"])
+        plan = await service.propose(root, ctx.require_org().id, doc, [target], spec.get("style", "hex_bolt"),
+                                     spec.get("washers", "both"), bool(spec.get("flip")))
+        if not plan["holes"][0]["proposal"]["ok"]:
+            raise AssemblyInputError(plan["holes"][0]["proposal"].get("error") or "No fastener fits this hole now.")
+        service.remove_group(doc, gid)
+        res = await service.accept(root, ctx.require_org().id, doc, [target], spec.get("style", "hex_bolt"),
+                                   spec.get("washers", "both"), bool(spec.get("flip")))
+        return {"_extra": {"inserted": res["inserted"], "clashes": res["clashes"],
+                           "summary": plan["holes"][0]["proposal"]["summary"]}}
+
+    return await _mutate(ctx, aid, fn, solve=False)
 
 
 @router.post("/assemblies/{aid}/thumbnail")

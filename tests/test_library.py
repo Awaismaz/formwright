@@ -50,6 +50,30 @@ def test_recognition_finds_stock_holes_and_patterns() -> None:
     assert all(h["through"] for h in rec["holes"] if h["d"] == 6.6)
 
 
+def test_through_holes_are_judged_by_the_local_wall_not_the_whole_part() -> None:
+    """AMI-02: a hole is through when both of its own ends open to air. The demo L bracket's Ø5.5 holes go through
+    5 mm legs of a part that is 40 / 60 mm tall along those axes; a counterbore floor and a blind bottom close a hole."""
+    import runpy
+
+    from build123d import Align, Box, Cylinder, Pos
+
+    ns = runpy.run_path(str(Path(__file__).parents[1] / "src" / "aicad" / "demo" / "l_bracket.py"))
+    holes = recognize(ns["result"])["holes"]
+    assert len(holes) == 4 and all(h["through"] and h["depth"] == pytest.approx(5.0) for h in holes)
+    # 30 mm tall step block: Ø6.6 hole through a 6 mm ledge, Ø6.6 + Ø11 × 4 counterbore, Ø5 × 8 blind hole
+    part = Box(60, 20, 6, align=(Align.MIN, Align.MIN, Align.MIN)) + Pos(40, 0, 0) * Box(20, 20, 30, align=(Align.MIN, Align.MIN, Align.MIN))
+    part -= Pos(10, 10, -1) * Cylinder(3.3, 8, align=(Align.CENTER, Align.CENTER, Align.MIN))       # ledge: through
+    part -= Pos(25, 10, -1) * Cylinder(3.3, 8, align=(Align.CENTER, Align.CENTER, Align.MIN))       # cbore hole
+    part -= Pos(25, 10, 2) * Cylinder(5.5, 5, align=(Align.CENTER, Align.CENTER, Align.MIN))        # Ø11 × 4 deep
+    part -= Pos(50, 10, 22) * Cylinder(2.5, 9, align=(Align.CENTER, Align.CENTER, Align.MIN))       # blind 8 from top
+    rec = {(h["d"], round(h["center"][0])): h for h in recognize(part)["holes"]}
+    assert rec[(6.6, 10)]["through"] and rec[(6.6, 10)]["depth"] == pytest.approx(6.0)
+    assert rec[(6.6, 25)]["through"] and rec[(6.6, 25)]["depth"] == pytest.approx(2.0)
+    assert not rec[(11.0, 25)]["through"] and rec[(11.0, 25)]["depth"] == pytest.approx(4.0)
+    assert not rec[(5.0, 50)]["through"] and rec[(5.0, 50)]["depth"] == pytest.approx(8.0)
+    assert rec[(5.0, 50)]["dir"] == pytest.approx([0, 0, -1])                                      # drilled from the top
+
+
 def test_every_toolbox_component_is_deterministic_and_matches_expected() -> None:
     from build123d import export_step
 
