@@ -272,6 +272,33 @@ None), then a 20×10×10 boss on it: volume 2000, bbox z 5..15.
   Suppress (no AI) / Delete… (no AI).
 - Screenshots reviewed: manual context menu, rollback bar, inserted at the bar, renamed, agent context menu.
 
+## Gate, files outside the Studio area, what's left
+
+**Gate (final commit)**: `uv run ruff check src tests` clean; `cd web && npx tsc --noEmit` clean; `npm test` (vitest) 19/19;
+`npx vite build` OK; full `uv run pytest -q`: **190 passed** (8 min 12 s). Also run after each merge of main: `tests/test_studio.py`
+and `tests/test_changes.py` (22 passed).
+
+**Files touched outside the Studio file list**:
+- `src/aicad/refplane.py` (new, pure Python: reference-plane maths and the `NON_GEOMETRIC` op set, shared by `fw` and the API).
+- `web/src/components/Viewer3D.tsx`: one class, so the empty-state overlay doesn't block orbiting.
+- `web/src/lib/types.ts`: `ManualFeature` op union and fields.
+- `web/package.json` / `package-lock.json`: vitest 4.1.12 (MIT) and the `test` script.
+- `src/aicad/agent/prompt.py`: manual-features list only.
+- Not touched: `runner.py`, module folders, `mod_*.py`, App/AppLayout/Modules.
+
+**What's left / known limits** (candidates for the next DS row):
+- Sketcher: the offset adds a parallel relation but no driving offset dimension; trim works on lines, arcs and circles but
+  not splines (there are none); the sketch fillet joins two lines only (no line–arc corners); no slot variants (centre-point or arc slot).
+- Reference planes chained from another plane copy its placement and don't follow later edits of it; no "plane through
+  three points" or "plane normal to a curve".
+- Draft: there is no per-face pull arrow in the viewer; Rib: symmetric thickness, parallel to the sketch, no rib draft.
+- Sweep: no guide curves or twist, and the profile must be placed at the path start by the user; Loft: no guide curves
+  or tangency, and each section must be one closed profile.
+- Rollback bar applies to manual features; agent-built steps use Suppress. The bar cannot be dragged (step buttons only).
+- Assembly mates with Toolbox parts (also on the DS-026 row) belong to the Assembly module (ASM) and were not in this brief's list.
+- Punch list, session log and decisions files were not edited (per the agent brief). Suggested DS-026 status: Done for the six
+  items above, with "assembly mates" moved to ASM.
+
 ## Parked decisions
 - PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),
   not "YZ through the model centre" as before. Existing features keep their stored plane.
