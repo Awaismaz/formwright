@@ -59,7 +59,7 @@ drawing sheet (SVG, PDF and DXF), gated by the deterministic check **CHK-12**. E
 ## Tests
 
 - `tests/test_drawings.py`: 16 tests, all passing (~50 s). The fixture is an original box with holes, and the expected values are derived from its inputs. They cover views and extents, hidden lines, the census, the section area, parameter kinds and number formatting, tagging, the coincidence guard, CHK-12 pass and seeded fails, valid SVG/PDF/DXF, determinism (byte-identical SVG for the same model, including a different date and output folder), options (A4, third angle, ISO 2768-m), associative revisions, user errors, and the API (401, 402, add-on unlock, 409 with no build, generate, files, path traversal 404, stale flag, viewer 403, other org 404) plus the catalog being live.
-- Gate: `ruff check src tests` clean, `tsc --noEmit` clean, `vite build` OK. `tests/test_drawings.py` and `tests/test_platform.py` pass (31 tests). The full-suite result is in the final message.
+- Gate: `ruff check src tests` clean, `tsc --noEmit` clean, `vite build` OK. `tests/test_drawings.py` and `tests/test_platform.py` pass (31 tests). Full suite: `uv run pytest -q` reports **100 passed** (5 min 22 s).
 
 ## Walkthrough (studio-e2e, port 8772, data `scratch/fw-e2e-8772`)
 
