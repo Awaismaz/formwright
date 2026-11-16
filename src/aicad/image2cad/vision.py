@@ -64,12 +64,12 @@ async def run_agent(folder: Path, image: str) -> tuple[str, float | None]:
         query,
     )
 
-    from aicad.agent.session import make_guard
+    from aicad.agent.session import AGENT_BUFFER_BYTES, make_guard
 
     opts = ClaudeAgentOptions(
         cwd=str(folder), tools=["Read"], allowed_tools=["Read"], permission_mode="dontAsk",
         system_prompt={"type": "preset", "preset": "claude_code", "append": VISION_INSTRUCTIONS},
-        setting_sources=[], max_turns=4,
+        setting_sources=[], max_turns=4, max_buffer_size=AGENT_BUFFER_BYTES,
         hooks={"PreToolUse": [HookMatcher(matcher="Read", hooks=[make_guard(folder)])]})
     texts: list[str] = []
     cost: float | None = None
@@ -167,8 +167,29 @@ def to_read(raw: dict[str, Any]) -> dict[str, Any]:
             "missing": missing, "checks": []}
 
 
+VISION_PX = 1568  # long side Claude reads best; larger images are downscaled by the model anyway
+
+
+def vision_copy(folder: Path, image: str) -> str:
+    """A compact copy of `image` for the vision read: at most VISION_PX on the long side, saved as JPEG or PNG,
+    whichever is smaller. Photos as lossless PNG can be several hundred KB, and the agent stream carries the image
+    more than once per message, so a large PNG overflowed the transport (found with a 600×851 phone photo)."""
+    from PIL import Image
+
+    src = folder / image
+    with Image.open(src) as im:
+        im = im.convert("RGB")
+        im.thumbnail((VISION_PX, VISION_PX), Image.Resampling.LANCZOS)
+        im.save(folder / "vision.jpg", "JPEG", quality=88, optimize=True)
+        im.save(folder / "vision.png", "PNG", optimize=True)
+    jpg, png = (folder / "vision.jpg").stat().st_size, (folder / "vision.png").stat().st_size
+    keep, drop = ("vision.jpg", "vision.png") if jpg <= png else ("vision.png", "vision.jpg")
+    (folder / drop).unlink(missing_ok=True)
+    return keep
+
+
 async def read_image(folder: Path, image: str = "preview.png") -> tuple[dict[str, Any] | None, float | None]:
     """(read dict or None when the answer had no usable block, cost in USD)."""
-    text, cost = await run_agent(folder, image)
+    text, cost = await run_agent(folder, vision_copy(folder, image))
     raw = parse_block(text)
     return (to_read(raw) if raw is not None else None), cost

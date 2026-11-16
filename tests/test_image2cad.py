@@ -515,3 +515,26 @@ def test_catalog_marks_image2cad_live_without_claims() -> None:
     assert not wording.claims(m["summary"] + " ".join(m["bullets"]))
     # the hand-off never claims the model is verified against the drawing
     assert not wording.claims(review.handoff_prompt.__doc__ or "")
+
+
+def test_vision_copy_is_compact(tmp_path: Path) -> None:
+    """Photos went to the vision read as large PNGs and overflowed the agent stream; the copy must be small."""
+    import random
+
+    from PIL import Image, ImageDraw
+
+    from aicad.image2cad.vision import VISION_PX, vision_copy
+
+    rnd = random.Random(7)
+    photo = Image.new("RGB", (1800, 1200))
+    photo.putdata([(rnd.randrange(256), rnd.randrange(256), rnd.randrange(256)) for _ in range(1800 * 1200)])
+    photo.save(tmp_path / "preview.png")
+    name = vision_copy(tmp_path, "preview.png")
+    with Image.open(tmp_path / name) as im:
+        assert max(im.size) == VISION_PX
+    assert name == "vision.jpg" and (tmp_path / name).stat().st_size < (tmp_path / "preview.png").stat().st_size / 3
+    drawing = Image.new("RGB", (1200, 800), "white")
+    ImageDraw.Draw(drawing).rectangle((100, 100, 1100, 700), outline="black", width=3)
+    drawing.save(tmp_path / "preview.png")
+    assert vision_copy(tmp_path, "preview.png") == "vision.png"  # line art: PNG is the smaller, sharper copy
+    assert not (tmp_path / "vision.jpg").exists()

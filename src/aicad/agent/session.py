@@ -35,6 +35,9 @@ CAD_TOOLS = ["mcp__cad__build_model"]
 WEBFETCH_HOSTS = {"build123d.readthedocs.io"}
 PATH_KEYS = ("file_path", "path", "notebook_path")
 MAX_TURNS = 80
+# The agent stream carries attached images (base64) inside single JSON messages; the SDK default of 1 MB
+# rejected ordinary photos and drawings. Uploads are capped well below this.
+AGENT_BUFFER_BYTES = 32 * 1024 * 1024
 
 
 def _inside(p: str, root: Path) -> bool:
@@ -262,6 +265,7 @@ class AgentSession:
             hooks={"PreToolUse": [HookMatcher(matcher="Read|Write|Edit|Glob|Grep|WebFetch",
                                               hooks=[make_guard(self.workspace)])]},
             max_turns=MAX_TURNS,
+            max_buffer_size=AGENT_BUFFER_BYTES,
             model=self.model,
             resume=self.session_id,  # continue the same agent conversation after a restart
         )
