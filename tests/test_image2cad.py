@@ -329,7 +329,7 @@ def test_vision_block_parsing_and_questions() -> None:
     st = review.state(r, rv)
     assert st["ready"] and st["scale"]["status"] == "confirmed"
     prompt = review.handoff_prompt({"name": "sketch.png"}, r, st, rv)
-    assert "overall length = 120 mm" in prompt and "Ø12" in prompt and "Thickness = 6 mm" in prompt
+    assert "120 mm, overall length" in prompt and "Ø12" in prompt and "Thickness = 6 mm" in prompt
     assert "Do not measure any size from the reference image" in prompt
 
 
@@ -435,9 +435,9 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     # not ready -> cannot create
     assert c.post(f"/api/m/image2cad/uploads/{uid}/create", json={}).status_code == 409
     by = {d["text"]: d["id"] for d in full["read"]["dims"]}
-    assert c.put(f"/api/m/image2cad/uploads/{uid}/review", json={"dims": {by["R5"]: {"text": "nope"}}}).status_code == 422
+    assert c.post(f"/api/m/image2cad/uploads/{uid}/review", json={"dims": {by["R5"]: {"text": "nope"}}}).status_code == 422
     front = next(v for v in full["read"]["views"] if v.get("suggest_front"))
-    rv = c.put(f"/api/m/image2cad/uploads/{uid}/review", json={
+    rv = c.post(f"/api/m/image2cad/uploads/{uid}/review", json={
         "reference": {"dim": by["100"], "value": 100, "unit": "mm"}, "answers": {"front_view": {"choice": front["id"]}},
         "dims": {by["R5"]: {"excluded": True}}})
     assert rv.status_code == 200 and rv.json()["state"]["ready"]
@@ -466,7 +466,7 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     db.commit()
     db.close()
     assert c.get(f"/api/m/image2cad/uploads/{uid}").json()["can_edit"] is False
-    assert c.put(f"/api/m/image2cad/uploads/{uid}/review", json={}).status_code == 403
+    assert c.post(f"/api/m/image2cad/uploads/{uid}/review", json={}).status_code == 403
     assert c.post("/api/m/image2cad/uploads", json={"filename": "p.pdf", "data_b64": b64}).status_code == 403
     assert c.delete(f"/api/m/image2cad/uploads/{uid}").status_code == 403
     # another organisation sees nothing

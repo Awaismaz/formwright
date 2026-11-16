@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 from aicad.image2cad import InputError
@@ -270,6 +271,14 @@ def state(read: dict[str, Any], review: dict[str, Any] | None) -> dict[str, Any]
             "scale": scale_state(read, review, by_id), "assumptions": assumptions(read, review, dims, missing)}
 
 
+def dim_what(d: dict[str, Any], read: dict[str, Any]) -> str:
+    """Plain description of a dimension: what it measures and where, e.g. 'horizontal length, View 2'."""
+    what = d.get("describes") or (f"{d['dir']} {KIND_NAMES.get(d['kind'], d['kind'])}" if d.get("dir")
+                                  else KIND_NAMES.get(d.get("kind") or "", "size"))
+    where = _view_name(read, d.get("view"))
+    return f"{what}, {where}" if where else what
+
+
 def _ratio(read: dict[str, Any]) -> str:
     s = read.get("scale")
     return s["text"] if s else "the stated scale"
@@ -303,19 +312,21 @@ def scale_state(read: dict[str, Any], review: dict[str, Any], by_id: dict[str, A
     if not (ref.get("value") and ref.get("unit")):
         return out
     d = by_id.get(ref.get("dim") or "")
-    what = (ref.get("describes") or (d.get("describes") if d else None) or (d["label"] if d else "reference"))
-    out["reference"] = {"dim": ref.get("dim"), "value": ref["value"], "unit": ref["unit"], "describes": what}
+    what = ref.get("describes") or (dim_what(d, read) if d else "reference size")
+    out["reference"] = {"dim": ref.get("dim"), "value": ref["value"], "unit": ref["unit"], "describes": what,
+                        "label": d["label"] if d else None}
     out["status"] = "confirmed"
     if d and abs((d.get("value") or 0) - ref["value"]) > 1e-9:
         out["status"] = "corrected"
     ref_txt = f"{fmt(ref['value'])} {ref['unit']}"
     if read.get("method") == "vector":
         st = read.get("scale")
-        out["summary"] = (f"Sizes come from the drawing's dimensions in {ref['unit']}, confirmed by {what} = {ref_txt}."
+        out["summary"] = (f"Sizes come from the drawing's dimensions in {ref['unit']}. Reference confirmed: {ref_txt} "
+                          f"({what})."
                           + (f" Stated scale {st['text']}." if st else " No scale is stated on the drawing; the model "
                              "uses the written dimensions only."))
     else:
-        out["summary"] = (f"Set by your reference: {what} = {ref_txt}. Sizes that aren't written are never measured "
+        out["summary"] = (f"Set by your reference: {ref_txt} ({what}). Sizes that aren't written are never measured "
                           "from the image unless you choose to estimate them.")
     if units and units.get("value") and units["value"] != ref["unit"]:
         out["warning"] = (f"The drawing indicates {units['value']} ({units['evidence']}) but your reference is in "
@@ -331,7 +342,9 @@ def assumptions(read: dict[str, Any], review: dict[str, Any], dims: list[dict[st
             not any("TOLERANCE" in k for k in (read.get("title") or {})):
         out.append("No tolerances were read: the model is built at nominal sizes.")
     gt = next((v for k, v in (read.get("title") or {}).items() if "TOLERANCE" in k), None)
-    if gt:
+    if gt and re.fullmatch(r"(?i)\s*(not specified|none|n/?a|[-—–]+)\s*", gt):
+        out.append("No tolerances are specified on the drawing: the model is built at nominal sizes.")
+    elif gt:
         out.append(f"General tolerances on the drawing: {gt}. The model is built at nominal sizes.")
     answers = review.get("answers", {})
     for i, m in enumerate(missing):
@@ -359,7 +372,7 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
               "The drawing is attached as a reference image."), ""]
     if read.get("part"):
         lines += [f"Part: {read['part']}", ""]
-    lines.append(f"Units: {unit}. Reference dimension (confirmed by me): {ref['describes']} = {fmt(ref['value'])} {unit}.")
+    lines.append(f"Units: {unit}. Reference dimension (confirmed by me): {fmt(ref['value'])} {unit}, {ref['describes']}.")
     if read.get("scale"):
         lines.append(f"Drawing scale: {read['scale']['text']} ({read['scale']['evidence'].lower()}).")
     else:
@@ -369,6 +382,13 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
     views = {v["id"]: v for v in read.get("views", [])}
     if fv in views:
         lines.append(f"Front view: {views[fv]['name']}" + (f" ({views[fv]['place']})" if views[fv].get("place") else "") + ".")
+    if len(views) > 1:
+        kinds = {"iso": "isometric", "section": "section", "detail": "detail"}
+        lines.append("Views on the sheet: " + "; ".join(
+            v["name"] + (f" ({kinds[v['kind']]})" if v["kind"] in kinds else f" ({v['place']})" if v.get("place") else "")
+            for v in views.values()) + ".")
+    if read.get("projection"):
+        lines.append(f"Projection: {read['projection']['value']} angle.")
     lines += ["", "Confirmed dimensions (use exactly these values):"]
     live = [d for d in st["dims"] if not d["excluded"]]
     order = list(views) + [None]
@@ -385,7 +405,7 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
         lines.append(f"- {vname}:")
         for d in group:
             n += 1
-            bits = [d["label"]]
+            bits = []
             if d.get("dir") and d["kind"] == "linear":
                 bits.append(d["dir"])
             if d.get("describes"):
@@ -398,7 +418,7 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
                 bits.append(f"corrected by me from “{d['read_text']}”" if d.get("read_text") else "corrected by me")
             if d["source"] == "user":
                 bits.append("added by me")
-            lines.append(f"  {n}. " + "; ".join(bits))
+            lines.append(f"  {n}. {d['label']}" + (f" ({'; '.join(bits)})" if bits else ""))
     if n == 0:
         lines.append("- none beyond the reference dimension")
     extra = []
@@ -420,7 +440,8 @@ def handoff_prompt(meta: dict[str, Any], read: dict[str, Any], st: dict[str, Any
     if review.get("notes"):
         lines += ["", f"My notes: {review['notes']}"]
     lines += ["", ("Rules: build from the confirmed values only. Do not measure any size from the reference image; "
-              "use it for the shape and where features sit. If a feature in the image has no size above and is not "
-              "listed as an assumption, ask me with choices before modelling it. Make the listed sizes editable "
-              "parameters, and finish with a short list of what you assumed.")]
+              "use it for the shape and where features sit. Small features you can see but that have no size above "
+              "(radii, chamfers): give them a sensible size and list each one as assumed. If a missing size would "
+              "change the overall size or how the part fits, ask me with choices first. Make the listed sizes "
+              "editable parameters, and finish with a short list of what you assumed.")]
     return "\n".join(lines)

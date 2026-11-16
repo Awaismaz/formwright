@@ -5,7 +5,7 @@ Routes (all org-scoped; the module must be unlocked: plan / add-on ``addon_image
   GET    /api/m/image2cad/uploads                    the organisation's uploads, newest first
   POST   /api/m/image2cad/uploads                    {filename, data_b64}; reading starts in the background
   GET    /api/m/image2cad/uploads/{id}               meta + read + review + computed state (needs, readiness)
-  PUT    /api/m/image2cad/uploads/{id}/review        save edits and answers; returns the recomputed state
+  POST   /api/m/image2cad/uploads/{id}/review        save edits and answers; returns the recomputed state
   POST   /api/m/image2cad/uploads/{id}/reread        read again (after a failure)
   POST   /api/m/image2cad/uploads/{id}/create        {project_id?, name?}: project + reference + agent hand-off
   GET    /api/m/image2cad/uploads/{id}/preview.png   preview raster
@@ -210,7 +210,7 @@ def get_upload(uid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     return _full(_dir(ctx, uid), ctx)
 
 
-@router.put("/uploads/{uid}/review")
+@router.post("/uploads/{uid}/review")
 def save_review(uid: str, body: dict[str, Any] = REVIEW_BODY, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     d = _dir(ctx, uid)
     _engineer(ctx)

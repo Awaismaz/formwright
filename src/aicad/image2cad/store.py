@@ -61,7 +61,7 @@ def create(data_dir: Path, org_id: str, user_id: str, filename: str, data: bytes
     fname = f"source.{EXT[kind]}"
     (d / fname).write_bytes(data)
     meta = {"id": uid, "name": safe_name(filename), "type": kind, "file": fname, "bytes": len(data),
-            "created_at": datetime.now(UTC).isoformat(timespec="seconds"), "created_by": user_id,
+            "created_at": datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds"), "created_by": user_id,
             "status": "reading", "error": None, "project_id": None, "method": None}
     write_json(d, "meta.json", meta)
     return d, meta

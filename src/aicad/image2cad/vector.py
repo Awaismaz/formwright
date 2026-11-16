@@ -291,7 +291,7 @@ def _name_views(views: list[dict[str, Any]], runs: list[dict[str, Any]], diag: f
                                               -(v["pbox"][2] - v["pbox"][0]) * (v["pbox"][3] - v["pbox"][1])))
         hub = scored[0]
     for i, v in enumerate(views):
-        v["name"] = v.get("label") or f"View {i + 1}"
+        v["name"] = re.sub(r"\s+SCALE\s+\S+$", "", v.get("label") or "") or f"View {i + 1}"
         if hub is not None and v["kind"] == "ortho" and not v.get("label"):
             if v is hub:
                 v["place"] = "centre of the layout"
