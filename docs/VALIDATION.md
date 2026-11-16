@@ -59,6 +59,18 @@ Principle: **renders and vision critique are signals; deterministic geometric ch
 
 `Recommended check` → `Preliminary estimate` (hand calc, stated assumptions) → `Verified calculation` (deterministic code, unit-tested, reviewed) → `Validated simulation` (external validated solver + correlation evidence). UI must show level; safety-critical outputs require named engineer sign-off.
 
+How the levels are used across the product (one vocabulary, `aicad.deliverables`, 2026-11-17):
+- **Measured from the model**: a deterministic measurement of the geometry (mesh is watertight, wall is 1.2 mm, hole is
+  Ø14 through). It states a fact about the model, not an engineering judgement. Print checks and DFM measurements use it.
+- **Recommended check** / **Preliminary estimate**: advice and unsigned calculations (DFM findings, calculators).
+- **Verified calculation** is reserved for a calculation set **signed by a named engineer on the current build**. The
+  badge itself says who checked: "Verified calculation · self-checked" (the signer authored items in the set) or
+  "Verified calculation · independent check". When the model changes after sign-off the set reads "Model changed
+  since sign-off: re-check" and drops to Preliminary estimate; the old signature stays in its history.
+- Every downstream output (drawing, DFM analysis, calculation sign-off, print export) records the build it was made
+  from; when the model changes it is badged "Model changed" with a one-click update, never silently replaced. Releases
+  (Rev A, B, …) freeze one build; later builds show "Draft: changes since Rev A".
+
 ## 5. Mesh Studio benchmark protocol (M5, not started)
 
 Same 15 prompts run through (a) procedural Blender scripts with render–critique loop and (b) ≥ 1 generative 3D service/model. Measure: human-rated prompt fidelity (blind, 1–5), editability (can a requested change be applied in ≤ 2 turns), watertightness/manifold rate, triangle count, wall time, cost per asset. Verify each service's terms before sending prompts.

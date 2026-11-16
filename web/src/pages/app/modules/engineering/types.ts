@@ -19,6 +19,8 @@ export interface CalcResult {
   calc_id: string; calc_name: string; calc_version: string; engine: string; inputs: Record<string, unknown>;
   steps: Step[]; outputs: Output[]; checks: Check[]; warnings: string[]; notes: string[]; references: string[];
   assumptions: string[]; verified_against: string[]; level: string; safety_factor: { required: number | null; source: string } | null;
+  /** load inputs still at the calculator's illustrative (textbook) default */
+  examples?: { key: string; label: string }[];
 }
 export interface Catalog {
   calculators: CalcSchema[]; units: Record<string, { canonical: string; label: string; units: UnitOpt[] }>;
@@ -27,7 +29,7 @@ export interface Catalog {
 }
 export interface Material { code: string; name: string; condition: string; basis: string; Sut_MPa: number | null; Sy_MPa: number | null; E_GPa: number; nu: number; fatigue_MPa?: number; fatigue_note?: string; source: string; version: string; note: string; brittle?: boolean }
 export interface Who { id: string; name: string }
-export interface Suggestion { calc_id: string; title: string; inputs: Record<string, unknown>; provenance: Record<string, string> }
+export interface Suggestion { calc_id: string; title: string; inputs: Record<string, unknown>; provenance: Record<string, string>; section?: boolean }
 export interface Hint { id: string; kind: string; severity: "high" | "medium" | "low"; title: string; detail: string; location: number[] | null; suggestion: string; calc?: string; prefill?: Record<string, number> }
 export interface ModelInfo {
   available: boolean; reason?: string; project?: { id: string; name: string }; ok?: boolean; part?: string; bbox?: number[];
@@ -36,12 +38,15 @@ export interface ModelInfo {
   mass?: { volume_mm3: number; mass_kg: number | null; com_mm: number[] | null; inertia_kg_mm2: number[][] | null; weight_N: number | null; density_source: string };
   recognition?: { summary?: string[]; stock?: { kind: string } }; hints?: Hint[]; suggestions?: Suggestion[]; geometry_error?: string | null;
 }
-export interface SetItem { id: string; calc_id: string; calc_version: string; title: string; raw_inputs: Record<string, unknown>; result: CalcResult; source: Record<string, string> | null; added_by: Who; added_at: string; edited_by?: Who; edited_at?: string }
-export interface Signoff { user_id: string; name: string; email: string; role: string; at: string; hash: string; statement: string; self_check: boolean; items: number }
+export interface BuildStamp { build_id: string | null; model_rev: string | null }
+export interface SetItem { id: string; calc_id: string; calc_version: string; title: string; raw_inputs: Record<string, unknown>; result: CalcResult; source: Record<string, string> | null; added_by: Who; added_at: string; edited_by?: Who; edited_at?: string;
+  confirmed?: string[]; unconfirmed?: { key: string; label: string }[]; model_changed?: boolean; build?: BuildStamp | null }
+export interface Signoff { user_id: string; name: string; email: string; role: string; at: string; hash: string; statement: string; self_check: boolean; items: number; build?: BuildStamp | null; facts?: string; loads_in_calcs?: boolean }
 export interface CalcSet {
   id: string; name: string; notes: string; conclusion: string; load_case_ids: string[]; items: SetItem[]; signoff: Signoff | null;
   created_at: string; created_by: Who; updated_at: string; updated_by: Who; history: { at: string; by: Who; event: string; detail: string }[];
-  status: { state: "signed" | "invalidated" | "unsigned"; hash: string; label: string; for_release: boolean }; level: string;
+  status: { state: "signed" | "model_changed" | "invalidated" | "unsigned"; hash: string; label: string; for_release: boolean; self_check: boolean; signed_on_rev: string | null; current_rev: string | null };
+  level: string; level_label: string; sign_statement: string;
 }
 export interface Load { name: string; type: string; value: number; unit: string; direction: string; location: string; basis: string; source: string; value_canonical?: number; unit_canonical?: string }
 export interface Support { type: string; location: string; note: string }
@@ -171,6 +176,23 @@ export function toInputs(c: CalcSchema, f: FormState): Record<string, unknown> {
     if (o && o.value.trim() !== "") out[p.key] = { value: num(o.value), unit: o.unit };
   }
   return out;
+}
+
+/** Load-type inputs whose schema default is an illustrative (textbook) value; mirrors core.LOAD_KINDS on the server. */
+export const LOAD_KINDS = new Set(["force", "moment", "line_load", "speed"]);
+export function isLoad(p: Param): boolean {
+  return p.kind === "table" ? (p.columns ?? []).some(c => LOAD_KINDS.has(c.kind)) : LOAD_KINDS.has(p.kind);
+}
+const nonZero = (v: unknown): boolean => {
+  if (Array.isArray(v)) return v.some(r => Object.values(r as Record<string, unknown>).some(nonZero));
+  if (v && typeof v === "object" && "value" in (v as object)) return nonZero((v as { value: unknown }).value);
+  const n = Number(v);
+  return v !== "" && v !== null && v !== undefined && Number.isFinite(n) && n !== 0;
+};
+/** Visible load inputs still equal to the calculator's example default (flag "example value: replace"). */
+export function exampleKeys(c: CalcSchema, f: FormState): string[] {
+  const init = initialForm(c);
+  return c.inputs.filter(p => isLoad(p) && visible(p, f) && p.default !== null && nonZero(init[p.key]) && JSON.stringify(init[p.key]) === JSON.stringify(f[p.key])).map(p => p.key);
 }
 
 /** Merge a pre-fill suggestion (API values) into a form. */

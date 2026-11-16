@@ -29,7 +29,8 @@ function DrawingSample() {
         <g stroke="#1F5FBF" strokeWidth=".8" fill="#1F5FBF" fontSize="9" fontFamily="Inter, sans-serif">
           <line x1="60" y1="45" x2="240" y2="45" /><text x="138" y="41" stroke="none">120</text>
           <line x1="250" y1="60" x2="250" y2="180" /><text x="254" y="124" stroke="none">80</text>
-          <line x1="110" y1="152" x2="190" y2="152" /><text x="140" y="164" stroke="none">40 ±0.1</text>
+          <line x1="110" y1="152" x2="190" y2="152" /><text x="144" y="164" stroke="none">40</text>
+          <line x1="190" y1="100" x2="205" y2="88" /><text x="207" y="88" stroke="none">4× R3</text>
           <text x="58" y="198" stroke="none">4× Ø6.6 THRU</text>
           <line x1="60" y1="240" x2="240" y2="240" /><text x="132" y="252" stroke="none">10</text>
         </g>
@@ -37,7 +38,7 @@ function DrawingSample() {
         <rect x="380" y="290" width="204" height="74" fill="none" stroke="#1d2330" />
         <g fontSize="8.5" fontFamily="Inter, sans-serif" fill="#1d2330">
           <text x="388" y="304" fontWeight="700">MOUNTING PLATE</text><text x="388" y="318">Material: Al 6061-T6 · Units: mm</text>
-          <text x="388" y="331">Scale 1:2 · Rev B · Sheet 1/1</text><text x="388" y="344" fill="#c43228" fontWeight="700">NOT APPROVED FOR MANUFACTURE</text>
+          <text x="388" y="331">Scale 1:1 · Draft · Sheet 1/1</text><text x="388" y="344" fill="#c43228" fontWeight="700">NOT APPROVED FOR MANUFACTURE</text>
           <text x="388" y="357" fill="#5b6475">Dims: ● spec  ○ inferred</text>
         </g>
       </svg>

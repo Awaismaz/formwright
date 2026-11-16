@@ -9,17 +9,20 @@ from __future__ import annotations
 
 import math
 
-TABLES_VERSION = "mfg-tables 1.0 (2026-11-16)"
+TABLES_VERSION = "mfg-tables 1.1 (2026-11-17)"
 VERIFY = "Typed from public references; verify against the standard and your shop before production."
 
-# ISO 273 clearance holes for bolts and screws: thread -> (fine, medium, coarse) hole diameter, mm.
+# ISO 273:1979 "Fasteners - Clearance holes for bolts and screws": thread -> (fine, medium, coarse) hole diameter,
+# mm. Values as tabulated in the standard (fine = H12, medium = H13, coarse = H14 tolerance class).
 ISO_273: dict[str, tuple[float, float, float]] = {
     "M1.6": (1.7, 1.8, 2.0), "M2": (2.2, 2.4, 2.6), "M2.5": (2.7, 2.9, 3.1), "M3": (3.2, 3.4, 3.6),
     "M4": (4.3, 4.5, 4.8), "M5": (5.3, 5.5, 5.8), "M6": (6.4, 6.6, 7.0), "M8": (8.4, 9.0, 10.0),
     "M10": (10.5, 11.0, 12.0), "M12": (13.0, 13.5, 14.5), "M14": (15.0, 15.5, 16.5), "M16": (17.0, 17.5, 18.5),
-    "M20": (21.0, 22.0, 24.0), "M24": (25.0, 26.0, 28.0), "M30": (31.0, 33.0, 35.0), "M36": (37.0, 39.0, 42.0),
+    "M18": (19.0, 20.0, 21.0), "M20": (21.0, 22.0, 24.0), "M22": (23.0, 24.0, 26.0), "M24": (25.0, 26.0, 28.0),
+    "M27": (28.0, 30.0, 32.0), "M30": (31.0, 33.0, 35.0), "M36": (37.0, 39.0, 42.0),
 }
-ISO_273_SOURCE = "ISO 273 clearance holes (fine / medium / coarse series)"
+ISO_273_SOURCE = "ISO 273:1979 clearance holes for bolts and screws (fine / medium / coarse series)"
+SERIES = ("fine", "medium", "coarse")
 
 # Tap drill diameters for ISO metric coarse threads (ISO 261 pitch), common workshop values (D - P), mm.
 TAP_DRILL: dict[str, float] = {
@@ -85,17 +88,68 @@ def nearest_stock_drill(d: float) -> float:
     return round(max(0.5, min(DRILL_MAX, cand)), 2)
 
 
+def clearance_matches(d: float) -> list[tuple[str, str]]:
+    """(thread, series) of every ISO 273 clearance hole equal to ``d``, e.g. [('M6', 'medium')]."""
+    return [(t, s) for t, vals in ISO_273.items() for s, v in zip(SERIES, vals, strict=True) if abs(d - v) <= MATCH_TOL]
+
+
+def tap_drill_matches(d: float) -> list[str]:
+    return [t for t, v in TAP_DRILL.items() if abs(d - v) <= MATCH_TOL]
+
+
+def clearance_thread(d: float) -> str | None:
+    """Thread whose ISO 273 range (fine to coarse) contains ``d``: Ø14 -> 'M12' (13 / 13.5 / 14.5)."""
+    for t, (f, _m, c) in ISO_273.items():
+        if f - MATCH_TOL <= d <= c + MATCH_TOL:
+            return t
+    return None
+
+
+def clearance_neighbours(d: float) -> tuple[tuple[str, str, float] | None, tuple[str, str, float] | None]:
+    """The tabulated clearance holes just below and just above ``d`` (thread, series, diameter)."""
+    rows = sorted(((v, t, s) for t, vals in ISO_273.items() for s, v in zip(SERIES, vals, strict=True)),
+                  key=lambda r: (r[0], list(ISO_273).index(r[1])))
+    lo = next(((t, s, v) for v, t, s in reversed(rows) if v < d - MATCH_TOL), None)
+    hi = next(((t, s, v) for v, t, s in rows if v > d + MATCH_TOL), None)
+    return lo, hi
+
+
 def match_standard_hole(d: float) -> list[str]:
     """Names of the standard holes a diameter matches, e.g. ['ISO 273 medium clearance for M6']."""
-    out: list[str] = []
-    for thread, (f, m, c) in ISO_273.items():
-        for series, v in (("fine", f), ("medium", m), ("coarse", c)):
-            if abs(d - v) <= MATCH_TOL:
-                out.append(f"ISO 273 {series} clearance for {thread}")
-    for thread, v in TAP_DRILL.items():
-        if abs(d - v) <= MATCH_TOL:
-            out.append(f"tap drill for {thread} coarse")
+    out = [f"ISO 273 {s} clearance for {t}" for t, s in clearance_matches(d)]
+    out += [f"tap drill for {t} coarse" for t in tap_drill_matches(d)]
     return out
+
+
+# Minimum inside bend radius for a 90 deg cold bend, as a multiple of the sheet thickness t, by material code:
+# list of (t_max mm, multiple). Aluminium: upper end of the ranges in The Aluminum Association, "Aluminum Standards
+# and Data", table "Approximate radii for 90-degree cold bend of sheet and plate" (thickness bands 1/32 in .. 1/2 in).
+# Steels and stainless: common press-brake practice for annealed / cold-rolled sheet (about 1 t). Screening values:
+# verify with your fabricator (grain direction, temper and tooling change them).
+BEND_SOURCE = ("Aluminum Association, Aluminum Standards and Data: approximate radii for 90° cold bend (aluminium); "
+               "common press-brake practice (steels, copper). Verify with your fabricator.")
+MIN_BEND_RADIUS: dict[str, list[tuple[float, float]]] = {
+    "al_6061": [(0.8, 1.0), (1.6, 1.5), (3.2, 2.0), (4.8, 3.0), (6.4, 4.0), (9.5, 4.5), (12.7, 5.0)],  # T6
+    "al_5052": [(0.8, 0.5), (1.6, 1.0), (3.2, 1.5), (4.8, 1.5), (6.4, 2.0), (9.5, 2.5), (12.7, 3.0)],  # H32
+    "al_7075": [(1.6, 4.0), (3.2, 5.0), (6.4, 6.0), (12.7, 7.0)],  # T6: not normally cold bent
+    "steel_1018": [(6.0, 1.0), (12.7, 1.5)],
+    "ss_304": [(6.0, 1.0), (12.7, 1.5)],
+    "ss_316": [(6.0, 1.0), (12.7, 1.5)],
+    "copper_c110": [(6.0, 0.5), (12.7, 1.0)],
+}
+
+
+def min_bend_radius(material_code: str, t: float) -> tuple[float, float] | None:
+    """(minimum inside radius in mm, multiple of t) for this material and thickness, or None when not tabulated."""
+    for t_max, k in MIN_BEND_RADIUS.get(material_code, []):
+        if t <= t_max + 1e-9:
+            return k * t, k
+    return None
+
+
+def nice_up(v: float, step: float = 0.5) -> float:
+    """Round up to the next ``step`` (a value a designer would type): 1.65 -> 2.0, 3.3 -> 3.5."""
+    return round(math.ceil(v / step - 1e-9) * step, 4)
 
 
 def fmt(v: float, nd: int = 2) -> str:

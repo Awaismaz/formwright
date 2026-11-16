@@ -12,6 +12,7 @@ from typing import Any, Literal
 from build123d import Shape
 from pydantic import BaseModel, Field
 
+from aicad import deliverables
 from aicad import materials as base_materials
 from aicad.manufacturing import ADVICE_LEVELS, ANALYSER_VERSION, matlib
 from aicad.manufacturing import cost as C
@@ -127,6 +128,39 @@ def _drivers(g: PartGeom, shop: ShopProfile, inputs: Inputs, lines: dict[str, An
     return out
 
 
+def screens(findings: list[dict[str, Any]], ranking: list[dict[str, Any]], mat: dict[str, Any],
+            ctx: R.Ctx) -> dict[str, dict[str, Any]]:
+    """Which rule groups are shown by default. A group is moved to "other screens" when the material excludes its
+    processes or (moulding / casting) none of them is shortlisted. A group with a critical finding is always shown."""
+    procs = set(mat["processes"])
+    score = {r["process"]: r["score"] if r["feasible"] else 0 for r in ranking}
+    out: dict[str, dict[str, Any]] = {}
+    for key in R.PROCESS_LABEL:
+        if key == "cnc_milling":
+            shown, why = "mill" in procs, f"{mat['name']} is not normally milled"
+        elif key == "cnc_turning":
+            shown, why = ctx.turn.turnable and "turn" in procs, "not a rotational part"
+        elif key == "sheet_metal":
+            shown, why = R._sheet_applies(ctx), "not a constant-thickness sheet part"
+        else:
+            allowed = bool({"mould", "cast"} & procs)
+            short = max(score.get("casting", 0), score.get("injection_moulding", 0)) >= 45
+            shown = allowed and short
+            why = (f"{mat['name']} is neither moulded nor cast" if not allowed else
+                   "casting and moulding are not shortlisted at this quantity")
+        if any(f["process"] == key and f["severity"] == "critical" for f in findings):
+            shown = True
+        out[key] = {"shown": bool(shown), "reason": None if shown else why}
+    return out
+
+
+def summary_counts(findings: list[dict[str, Any]], scr: dict[str, dict[str, Any]]) -> dict[str, int]:
+    """Severity counts across every shown process (never filtered by the process chip); critical always counted."""
+    keep = [f for f in findings if f["severity"] == "critical" or scr.get(f["process"], {}).get("shown", True)
+            or any(scr.get(a, {}).get("shown") for a in f.get("also") or [])]
+    return {s: sum(1 for f in keep if f["severity"] == s) for s in ("critical", "warning", "info")}
+
+
 def analyse_shape(shape: Shape, shop: ShopProfile, inputs: Inputs, topo: dict[str, Any] | None = None,
                   status_material: str | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     g = PartGeom(shape, topo)
@@ -141,11 +175,11 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
     hs = F.holes(g)
     ctx = R.Ctx(g=g, shop=shop, metal=bool(mat["metal"]), acc=acc, thick=th, holes=hs,
                 corners=F.corners(g, acc, hs), sharp=F.sharp_internal_corners(g, acc), pockets=F.pockets(g, acc),
-                turn=F.turning(g))
+                turn=F.turning(g), sheet=F.sheet_like(g, th), material=mat)
+    sheet = ctx.sheet
     ctx.mould_acc = F.accessibility(g, 1e9, 1e9)
     ctx.pull = R.choose_pull(g, ctx.mould_acc)
     findings, summary = R.run(ctx)
-    sheet = F.sheet_like(g, th)
     lines = C.models(g, shop, mat, acc, hs, ctx.turn, sheet, inputs.tolerance)
     unit_costs = {k: C.unit_cost(v, inputs.quantity) for k, v in lines.items()}
     draft_faces = sum(len(f["faces"]) for f in findings if f["rule"] == "MLD-01")
@@ -162,7 +196,8 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
     cost["primary"] = primary
     drivers = _drivers(g, shop, inputs, lines, findings, primary)
     walls = sorted(t.t for t in th if t.wall)
-    counts = {s: sum(1 for f in findings if f["severity"] == s) for s in ("critical", "warning", "info")}
+    scr = screens(findings, proc["ranking"], mat, ctx)
+    counts = summary_counts(findings, scr)
     density = float(mat["density_g_cm3"])
     return {
         "version": 1, "analyser": ANALYSER_VERSION, "tables": S.TABLES_VERSION,
@@ -188,6 +223,7 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
             "min_wall_mm": round(walls[0], 3) if walls else None, "pull_direction": ctx.pull,
         },
         "findings": findings,
+        "summary": counts, "screens": scr,
         "chk13": {"id": "CHK-13", "name": "DFM rules (advisory)", "gate": False, "counts": counts,
                   "rules": summary, "advice_level": ADVICE_LEVELS["check"]},
         "process": proc, "cost": cost, "drivers": drivers, "disclaimer": DISCLAIMER,
@@ -221,7 +257,7 @@ def analyse_workspace(ws: Path, shop: ShopProfile, inputs: Inputs, material_code
     if (out / "topo.json").is_file():
         topo = json.loads((out / "topo.json").read_text(encoding="utf-8"))
     g = PartGeom.from_step(out / "part.step", topo)
-    meta = {"fingerprint": status.get("fingerprint"), "build_id": status.get("build_id"), "part": status.get("part")}
+    meta = {**deliverables.build_stamp(ws, status), "fingerprint": status.get("fingerprint"), "part": status.get("part")}
     res = analyse_geom(g, shop, inputs, status.get("material"), meta)
     res["cache_key"] = key
     dest.parent.mkdir(parents=True, exist_ok=True)

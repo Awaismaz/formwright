@@ -107,6 +107,7 @@ class Work:
     checks: list[Check] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    sf_used: bool = False          # a check compared a result against the required safety factor
 
     def step(self, label: str, equation: str, substitution: str, value: float | str | None, unit: str = "",
              ref: str = "") -> float | str | None:
@@ -119,6 +120,7 @@ class Work:
                                    primary))
 
     def sf_check(self, label: str, achieved: float, required: float | None, source: str, basis: str) -> None:
+        self.sf_used = True
         passed = None if required is None else bool(achieved >= required - 1e-12)
         self.checks.append(Check(label, _clean(achieved), required, source, passed, basis))  # type: ignore[arg-type]
 
@@ -164,12 +166,23 @@ class Calculator:
 
 
 SF_PARAMS = [
-    Param("sf_required", "Required safety factor", "ratio", None, min=1.0, group="Safety factor",
-          help="The minimum factor of safety your design code, customer or company standard requires."),
-    Param("sf_source", "Safety factor source", "text", "", group="Safety factor",
-          help="Required. Where the required factor comes from, e.g. a design code clause, customer "
-               "specification or company standard. Results always show it next to the factor."),
+    Param("sf_required", "Required safety factor", "ratio", None, min=1.0, group="Safety factor", optional=True,
+          help="The minimum factor of safety your design code, customer or company standard requires. Needed "
+               "whenever the calculator checks a result against it."),
+    Param("sf_source", "Safety factor source", "text", "", group="Safety factor", optional=True,
+          help="Where the required factor comes from, e.g. a design code clause, customer specification or "
+               "company standard. Needed with the factor; results always show it next to the factor."),
 ]
+
+# Load inputs whose schema default is an illustrative textbook value (MAKE-19): a non-zero default of these kinds
+# is an *example*, flagged until the user replaces or confirms it. Sign-off is blocked while any remain.
+LOAD_KINDS = {"force", "moment", "line_load", "speed"}
+
+
+def _is_load(p: Param) -> bool:
+    if p.kind == "table":
+        return any(c.kind in LOAD_KINDS for c in p.columns or [])
+    return p.kind in LOAD_KINDS
 
 
 def _param_schema(p: Param) -> dict[str, Any]:
@@ -224,76 +237,79 @@ def parse_inputs(calc: Calculator, raw: dict[str, Any]) -> dict[str, Any]:
             v = None
         if v is None or v == "":
             if p.optional or p.kind == "bool":
-                out[p.key] = False if p.kind == "bool" else None
+                out[p.key] = False if p.kind == "bool" else ("" if p.kind == "text" else None)
                 continue
+            raise InputError(f"{p.label} is required")
+        out[p.key] = _convert(p, v)
+    return out
+
+
+def _convert(p: Param, v: Any) -> Any:
+    """One raw (non-empty) input value → canonical value, or InputError."""
+    if p.kind == "enum":
+        vals = [o["value"] for o in p.options or []]
+        if v not in vals:
+            raise InputError(f"{p.label}: choose one of {', '.join(vals)}")
+        return v
+    elif p.kind == "bool":
+        return bool(v)
+    elif p.kind == "text":
+        s = str(v).strip()
+        if not s and not p.optional:
             if p.key == "sf_source":
                 raise InputError("Safety factor source is required: say where the required factor comes from")
             raise InputError(f"{p.label} is required")
-        if p.kind == "enum":
-            vals = [o["value"] for o in p.options or []]
-            if v not in vals:
-                raise InputError(f"{p.label}: choose one of {', '.join(vals)}")
-            out[p.key] = v
-        elif p.kind == "bool":
-            out[p.key] = bool(v)
-        elif p.kind == "text":
-            s = str(v).strip()
-            if not s and not p.optional:
-                if p.key == "sf_source":
-                    raise InputError("Safety factor source is required: say where the required factor comes from")
-                raise InputError(f"{p.label} is required")
-            out[p.key] = s[:300]
-        elif p.kind == "table":
-            if not isinstance(v, list) or not v:
-                raise InputError(f"{p.label}: add at least one row")
-            if len(v) > 50:
-                raise InputError(f"{p.label}: at most 50 rows")
-            rows = []
-            for i, row in enumerate(v):
-                if not isinstance(row, dict):
-                    raise InputError(f"{p.label} row {i + 1}: invalid")
-                r: dict[str, Any] = {}
-                for c in p.columns or []:
-                    cv = row.get(c.key, c.default)
-                    if c.kind == "text":
-                        r[c.key] = str(cv or "")[:120]
-                    elif c.kind == "enum":
-                        vals = [o["value"] for o in c.options or []]
-                        if cv not in vals:
-                            raise InputError(f"{p.label} row {i + 1}: {c.label} must be one of {', '.join(vals)}")
-                        r[c.key] = cv
-                    else:
-                        if cv is None or cv == "" or (isinstance(cv, dict) and cv.get("value") in (None, "")):
-                            raise InputError(f"{p.label} row {i + 1}: {c.label} is required")
-                        try:
-                            x = units.quantity(c.kind, cv)
-                        except units.UnitError as e:
-                            raise InputError(f"{p.label} row {i + 1}, {c.label}: {e}") from e
-                        except (TypeError, ValueError) as e:
-                            raise InputError(f"{p.label} row {i + 1}: {c.label} must be a number") from e
-                        if not math.isfinite(x):
-                            raise InputError(f"{p.label} row {i + 1}: {c.label} must be finite")
-                        if c.min is not None and x < c.min:
-                            raise InputError(f"{p.label} row {i + 1}: {c.label} must be ≥ {c.min}")
-                        r[c.key] = x
-                rows.append(r)
-            out[p.key] = rows
-        else:
-            try:
-                x = units.quantity(p.kind, v)
-            except units.UnitError as e:
-                raise InputError(f"{p.label}: {e}") from e
-            except (TypeError, ValueError) as e:
-                raise InputError(f"{p.label} must be a number") from e
-            if not math.isfinite(x):
-                raise InputError(f"{p.label} must be a finite number")
-            if p.min is not None and (x < p.min or (p.exclusive_min and x <= p.min)):
-                raise InputError(f"{p.label} must be {'>' if p.exclusive_min else '≥'} {_fmt(p.min)} "
-                                 f"{units.KINDS[p.kind].label}".rstrip())
-            if p.max is not None and x > p.max:
-                raise InputError(f"{p.label} must be ≤ {_fmt(p.max)} {units.KINDS[p.kind].label}".rstrip())
-            out[p.key] = x
-    return out
+        return s[:300]
+    elif p.kind == "table":
+        if not isinstance(v, list) or not v:
+            raise InputError(f"{p.label}: add at least one row")
+        if len(v) > 50:
+            raise InputError(f"{p.label}: at most 50 rows")
+        rows = []
+        for i, row in enumerate(v):
+            if not isinstance(row, dict):
+                raise InputError(f"{p.label} row {i + 1}: invalid")
+            r: dict[str, Any] = {}
+            for c in p.columns or []:
+                cv = row.get(c.key, c.default)
+                if c.kind == "text":
+                    r[c.key] = str(cv or "")[:120]
+                elif c.kind == "enum":
+                    vals = [o["value"] for o in c.options or []]
+                    if cv not in vals:
+                        raise InputError(f"{p.label} row {i + 1}: {c.label} must be one of {', '.join(vals)}")
+                    r[c.key] = cv
+                else:
+                    if cv is None or cv == "" or (isinstance(cv, dict) and cv.get("value") in (None, "")):
+                        raise InputError(f"{p.label} row {i + 1}: {c.label} is required")
+                    try:
+                        x = units.quantity(c.kind, cv)
+                    except units.UnitError as e:
+                        raise InputError(f"{p.label} row {i + 1}, {c.label}: {e}") from e
+                    except (TypeError, ValueError) as e:
+                        raise InputError(f"{p.label} row {i + 1}: {c.label} must be a number") from e
+                    if not math.isfinite(x):
+                        raise InputError(f"{p.label} row {i + 1}: {c.label} must be finite")
+                    if c.min is not None and x < c.min:
+                        raise InputError(f"{p.label} row {i + 1}: {c.label} must be ≥ {c.min}")
+                    r[c.key] = x
+            rows.append(r)
+        return rows
+    else:
+        try:
+            x = units.quantity(p.kind, v)
+        except units.UnitError as e:
+            raise InputError(f"{p.label}: {e}") from e
+        except (TypeError, ValueError) as e:
+            raise InputError(f"{p.label} must be a number") from e
+        if not math.isfinite(x):
+            raise InputError(f"{p.label} must be a finite number")
+        if p.min is not None and (x < p.min or (p.exclusive_min and x <= p.min)):
+            raise InputError(f"{p.label} must be {'>' if p.exclusive_min else '≥'} {_fmt(p.min)} "
+                             f"{units.KINDS[p.kind].label}".rstrip())
+        if p.max is not None and x > p.max:
+            raise InputError(f"{p.label} must be ≤ {_fmt(p.max)} {units.KINDS[p.kind].label}".rstrip())
+        return x
 
 
 def _fmt(x: float) -> str:
@@ -313,6 +329,13 @@ def run(calc_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         if isinstance(e, InputError):
             raise
         raise InputError(str(e)) from e
+    if calc.safety_factor:
+        req, src = vals.get("sf_required"), (vals.get("sf_source") or "").strip()
+        if req is not None and not src:
+            raise InputError("Safety factor source is required: say where the required factor comes from")
+        if work.sf_used and req is None:
+            raise InputError("Enter the required safety factor and its source (design code, customer "
+                             "specification or company standard)")
     return {
         "calc_id": calc.id, "calc_name": calc.name, "calc_version": calc.version, "engine": ENGINE_VERSION,
         "inputs": vals,
@@ -324,8 +347,40 @@ def run(calc_id: str, raw: dict[str, Any]) -> dict[str, Any]:
         "verified_against": calc.verified_against,
         "level": "preliminary_estimate",
         "safety_factor": ({"required": vals.get("sf_required"), "source": vals.get("sf_source")}
-                          if calc.safety_factor else None),
+                          if calc.safety_factor and vals.get("sf_required") is not None else None),
+        "examples": example_inputs(calc, raw, vals),
     }
+
+
+def _same(a: Any, b: Any) -> bool:
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+        return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-12)
+    return a == b
+
+
+def example_inputs(calc: Calculator, raw: dict[str, Any], vals: dict[str, Any]) -> list[dict[str, str]]:
+    """Load inputs still at the calculator's illustrative default (MAKE-19). Zero defaults ("no load") are not
+    examples. Returns ``[{"key", "label"}]`` in schema order."""
+    out = []
+    for p in calc.inputs:
+        if not _is_load(p) or p.default in (None, "", 0, 0.0) or vals.get(p.key) is None:
+            continue
+        try:
+            dflt = _convert(p, p.default)
+        except InputError:
+            continue
+        if p.kind == "table":
+            nonzero = any(isinstance(x, (int, float)) and x for r in dflt for c, x in r.items()
+                          if any(cc.key == c and cc.kind in LOAD_KINDS for cc in p.columns or []))
+            if not nonzero:
+                continue
+        if _same(vals[p.key], dflt):
+            out.append({"key": p.key, "label": p.label})
+    return out
 
 
 def output(result: dict[str, Any], key: str) -> Any:

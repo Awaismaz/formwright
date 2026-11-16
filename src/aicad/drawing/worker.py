@@ -4,7 +4,7 @@ The web process never imports the kernel (same rule as the build worker). Only F
 here; no user script is executed (the worker reads the verified ``part.step`` / ``status.json``).
 
 Protocol (one JSON object per line):
-  parent -> worker  {"op": "generate", "out": str, "dest": str, "options": {...}, "meta": {...}}
+  parent -> worker  {"op": "generate", "out": str, "dest": str, "options": {...}, "meta": {...}, "edits": {...}}
   worker -> parent  {"ok": bool, "rc": int, "error": str | None, "result": {...}, "elapsed_s": float}
 """
 
@@ -39,7 +39,8 @@ def serve() -> None:
             if req.get("op") != "generate":
                 resp: dict[str, Any] = {"ok": False, "rc": 2, "error": f"unknown op {req.get('op')}"}
             else:
-                res = generate(Path(req["out"]), Path(req["dest"]), req.get("options") or {}, req.get("meta") or {})
+                res = generate(Path(req["out"]), Path(req["dest"]), req.get("options") or {}, req.get("meta") or {},
+                               req.get("edits"))
                 resp = {"ok": True, "rc": 0, "result": res}
         except DrawingInputError as e:
             resp = {"ok": False, "rc": 1, "error": str(e), "user_error": True}
@@ -73,9 +74,9 @@ def get_worker(key: str) -> DrawingWorker:
 
 
 async def generate(key: str, out: Path, dest: Path, options: dict[str, Any], meta: dict[str, Any],
-                   timeout: float = 120) -> dict[str, Any]:
+                   edits: dict[str, Any] | None = None, timeout: float = 120) -> dict[str, Any]:
     return await get_worker(key).request({"op": "generate", "out": str(out), "dest": str(dest), "options": options,
-                                          "meta": meta}, timeout)
+                                          "meta": meta, "edits": edits}, timeout)
 
 
 async def shutdown_all() -> None:

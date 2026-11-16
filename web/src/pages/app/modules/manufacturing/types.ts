@@ -1,15 +1,34 @@
 export type Severity = "critical" | "warning" | "info";
-export type ProcessKey = "cnc_milling" | "cnc_turning" | "moulding_casting";
+export type ProcessKey = "cnc_milling" | "cnc_turning" | "sheet_metal" | "moulding_casting";
 export type Tolerance = "general" | "fine" | "precision";
 
 export interface Finding {
   id: string; rule: string; process: ProcessKey; severity: Severity; title: string; measured: string; limit: string;
   value: number | null; rationale: string; fix: string; source: string; faces: number[]; features: string[];
   advice_level: string;
+  /** Plain description of where the finding is (feature name or geometry), never face ids. */
+  where?: string | null;
+  /** Other process views this finding belongs to (a milled keyway on a turned part). */
+  also?: ProcessKey[];
+  note?: string | null;
+  action?: FixAction | null;
+}
+export type FixAction =
+  | { kind: "param"; param: string; param_label?: string | null; from: number; to: number; unit: string; why?: string | null; label: string }
+  | { kind: "studio"; label: string; prompt: string }
+  | { kind: "note"; label: string; text: string };
+export interface Delta {
+  critical: { before: number; after: number }; warning: { before: number; after: number }; info: { before: number; after: number };
+  cost: { before: number | null; after: number | null; pct: number | null; process: string | null }; text: string;
+}
+export interface FixResult {
+  applied: { param: string; label: string; from: number; to: number; revision: number | null; finding: string };
+  delta: Delta; analysis: Analysis;
 }
 export interface RuleRow { rule: string; name: string; process: ProcessKey; status: "pass" | "flagged" | "not applicable"; findings: number; worst?: Severity | null }
 export interface Ranked {
   process: string; name: string; score: number; fit: string; feasible: boolean; confidence: "low" | "medium";
+  analysed?: boolean; critical?: number;
   pros: string[]; cons: string[]; unit_cost: number | null;
 }
 export interface CostProc {
@@ -27,7 +46,11 @@ export interface MatInfo {
 }
 export interface Analysis {
   analyser: string; tables: string; generated_at: string; cache_key: string; stale?: boolean;
-  build: { fingerprint?: { volume: number; bbox: number[] }; build_id?: string; part?: string };
+  build: { fingerprint?: { volume: number; bbox: number[] }; build_id?: string | number; part?: string; model_rev?: string | null };
+  freshness?: { state: "current" | "stale" | "missing"; made_from_rev: string | null; current_rev: string | null };
+  /** Severity counts across every process shown by default (never filtered by the process chip). */
+  summary?: Record<Severity, number>;
+  screens?: Record<ProcessKey, { shown: boolean; reason: string | null }>;
   project: { id: string; name: string };
   inputs: { quantity: number; material: string | null; tolerance: Tolerance };
   material: MatInfo & { how: string; library_version: string; price_used: number };
@@ -67,11 +90,11 @@ export interface ShopProfile {
 export interface ShopResp { profile: ShopProfile; is_default: boolean; can_edit: boolean; note: string; fingerprint: string }
 export interface MfgProject {
   id: string; name: string; thumbnail: string | null; built: boolean; material: string | null; updated_at: string;
-  analysed: boolean; counts: Record<Severity, number> | null;
+  analysed: boolean; counts: Record<Severity, number> | null; stale?: boolean;
 }
 
 export const PROCESS_LABEL: Record<ProcessKey, string> = {
-  cnc_milling: "Milling & drilling", cnc_turning: "Turning", moulding_casting: "Moulding & casting",
+  cnc_milling: "Milling & drilling", cnc_turning: "Turning", sheet_metal: "Sheet metal", moulding_casting: "Moulding & casting",
 };
 export const COST_NAMES: Record<string, string> = {
   cnc_milling: "CNC milling", cnc_turning: "CNC turning", sheet_metal: "Sheet metal", fdm: "3D print (FDM)",

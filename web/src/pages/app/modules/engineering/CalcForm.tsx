@@ -5,10 +5,18 @@ import { cx } from "@/lib/format";
 import { type CalcResult, type CalcSchema, type Catalog, type Column, type FormState, type FormVal, type Param, type UnitSystem, display, fmt, isUnitKind, LEVEL_TONE, UNITLESS, visible } from "./types";
 
 /* ------------------------------------------------------------------ advice level badge (ENG-007) */
-export function LevelBadge({ level, cat, className }: { level: string; cat: Catalog; className?: string }) {
+export function LevelBadge({ level, cat, className, label, selfCheck }: { level: string; cat: Catalog; className?: string; label?: string; selfCheck?: boolean }) {
   const l = cat.levels[level];
-  return <span title={l?.meaning} className={className}><Badge tone={LEVEL_TONE[level] ?? "neutral"}><Sigma className="h-3 w-3" />{l?.label ?? level}</Badge></span>;
+  const text = label ?? l?.label ?? level;
+  if (level === "verified_calculation" && selfCheck) {  // signed by an author of the set: amber outline, said in the badge itself
+    return <span title={`${l?.meaning ?? ""} The signer also authored calculations in this set (self-checked), so it is not an independent check.`} className={className}>
+      <span className="inline-flex items-center gap-1 rounded-full border border-warning/70 px-2 py-0.5 text-[11px] font-medium text-warning"><Sigma className="h-3 w-3" />{text}</span></span>;
+  }
+  return <span title={l?.meaning} className={className}><Badge tone={LEVEL_TONE[level] ?? "neutral"}><Sigma className="h-3 w-3" />{text}</Badge></span>;
 }
+
+/** A load from the project's load cases that can fill a calculator input of the same kind. */
+export interface LoadOption { label: string; kind: "force" | "moment"; value: number; unit: string }
 
 /* ------------------------------------------------------------------ schema-driven input form */
 function UnitInput({ value, onChange, units, disabled, label }: { value: { value: string; unit: string }; onChange: (v: { value: string; unit: string }) => void; units: { unit: string; label: string }[]; disabled?: boolean; label: string }) {
@@ -54,7 +62,12 @@ function TableInput({ p, rows, onChange, disabled }: { p: Param; rows: Record<st
   );
 }
 
-export function CalcForm({ calc, form, setForm, prov, disabled }: { calc: CalcSchema; form: FormState; setForm: (f: FormState) => void; prov?: Record<string, string> | null; disabled?: boolean }) {
+export function CalcForm({ calc, form, setForm, prov, disabled, examples = [], onConfirm, loads = [], onLoadPick }: {
+  calc: CalcSchema; form: FormState; setForm: (f: FormState) => void; prov?: Record<string, string> | null; disabled?: boolean;
+  /** load inputs still at their textbook example value and not confirmed by the user */
+  examples?: string[]; onConfirm?: (key: string) => void;
+  loads?: LoadOption[]; onLoadPick?: (key: string, l: LoadOption) => void;
+}) {
   const groups = useMemo(() => {
     const g: [string, Param[]][] = [];
     for (const p of calc.inputs) {
@@ -78,12 +91,20 @@ export function CalcForm({ calc, form, setForm, prov, disabled }: { calc: CalcSc
                 const v = form[p.key];
                 const from = prov?.[p.key];
                 const wide = p.kind === "table" || p.kind === "text";
+                const example = examples.includes(p.key);
+                const lcOpts = loads.filter(l => l.kind === p.kind);
                 return (
                   <div key={p.key} className={cx("space-y-1", wide && "sm:col-span-2")}>
                     <div className="flex items-center gap-1.5 text-[12.5px] font-medium">
                       <span>{p.label}{!p.optional && p.kind !== "bool" && <span className="text-danger" title="Required"> *</span>}</span>
                       {p.help && <span title={p.help} className="cursor-help text-muted"><Info className="h-3 w-3" /></span>}
-                      {from && <Badge tone="primary" className="ml-auto !py-0 !text-[10px]">from model</Badge>}
+                      {from && <Badge tone="primary" className="ml-auto !py-0 !text-[10px]">{from.startsWith("Load case") ? "from load case" : "from model"}</Badge>}
+                      {!from && lcOpts.length > 0 && onLoadPick && !disabled && (
+                        <select aria-label={`${p.label} from a load case`} className="ml-auto h-5 max-w-[150px] rounded border border-border bg-panel px-1 text-[10.5px] text-muted" value=""
+                          onChange={e => { const l = lcOpts[Number(e.target.value)]; if (l) onLoadPick(p.key, l); }}>
+                          <option value="">Use a load case…</option>
+                          {lcOpts.map((l, i) => <option key={i} value={i}>{l.label}</option>)}
+                        </select>)}
                     </div>
                     {p.kind === "enum" ? (
                       <select disabled={disabled} aria-label={p.label} className="input h-8 text-[13px]" value={String(v)} onChange={e => set(p.key, e.target.value)}>
@@ -101,6 +122,9 @@ export function CalcForm({ calc, form, setForm, prov, disabled }: { calc: CalcSc
                       <UnitInput label={p.label} disabled={disabled} value={v as { value: string; unit: string }} units={p.units ?? []} onChange={x => set(p.key, x)} />
                     )}
                     {from && <div className="text-[11px] leading-snug text-primary">{from}</div>}
+                    {example && <div className="flex items-center gap-1.5 text-[11px] leading-snug text-warning" data-example={p.key}>
+                      <AlertTriangle className="h-3 w-3 shrink-0" /><span>Example value: replace it with your load.</span>
+                      {onConfirm && !disabled && <button type="button" className="ml-auto shrink-0 underline" onClick={() => onConfirm(p.key)}>Keep this value</button>}</div>}
                   </div>
                 );
               })}
@@ -113,7 +137,7 @@ export function CalcForm({ calc, form, setForm, prov, disabled }: { calc: CalcSc
 }
 
 /* ------------------------------------------------------------------ results panel */
-export function ResultView({ r, cat, sys, compact }: { r: CalcResult; cat: Catalog; sys: UnitSystem; compact?: boolean }) {
+export function ResultView({ r, cat, sys, compact, levelLabel, selfCheck }: { r: CalcResult; cat: Catalog; sys: UnitSystem; compact?: boolean; levelLabel?: string; selfCheck?: boolean }) {
   const [open, setOpen] = useState(!compact);
   const lab = (k: string) => cat.units[k]?.label ?? "";
   const prim = r.outputs.filter(o => o.primary);
@@ -121,7 +145,7 @@ export function ResultView({ r, cat, sys, compact }: { r: CalcResult; cat: Catal
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <LevelBadge level={r.level} cat={cat} />
+        <LevelBadge level={r.level} cat={cat} label={levelLabel} selfCheck={selfCheck} />
         <span className="text-[11px] text-muted">{r.calc_name} · v{r.calc_version}</span>
       </div>
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
