@@ -140,6 +140,6 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-09 | Agent auth for anyone except the founder: Anthropic API key (or approved method) | Founder's Claude Code login (dev only) | Before the first external user (AGT-015) |
 | PD-10 | Container sandbox for agent-written code (Docker Desktop or WSL2) | Subprocess + tripwire (not a sandbox) | Before the first external user (SEC-004) |
 | PD-11 | Support and sales contact addresses | Placeholder `@formwright.dev` mailto links | Before launch |
-| PD-12 | Create the GitHub repo (private recommended): `gh` CLI not installed and repo creation via API was not permitted in the session | All work committed locally on `main`; remote `origin` preset to `https://github.com/Awaismaz/formwright.git` — create that empty repo on github.com, then `git push -u origin main` | Now |
+| PD-12 | GitHub repo | **Resolved 2026-11-16:** founder created private repo `github.com/Awaismaz/formwright`; `main` pushed and tracking `origin/main` | Done |
 | PD-13 | Toolbox catalogue scope and standards to license/verify (ISO table values typed from public references; verify before production) | 11 components, envelope-accurate, threads cosmetic | Before pilots |
 | PD-14 | Feature recognition depth: in-house heuristics vs a commercial FR library | In-house heuristics + agent rebuild with CHK-09 | When customers import complex parts |

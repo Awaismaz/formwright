@@ -40,7 +40,8 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 
 ## Machine notes (founder's Windows workstation)
 - `unset VIRTUAL_ENV` before `uv run`. Git Bash heredocs with quotes/backticks often break: write patch scripts
-  to a file and run them. `gh` CLI is not installed.
+  to a file and run them. `gh` CLI is not installed; plain `git push` works (Git Credential Manager).
+- Repo: https://github.com/Awaismaz/formwright (branch `main`).
 - SOLIDWORKS 2025, Creo 11 and Blender are installed locally (useful for manual cross-checks of exported STEP).
 - Puppeteer e2e: Radix menus/tabs need real pointer events.
 
