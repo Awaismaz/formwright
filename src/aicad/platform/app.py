@@ -24,6 +24,7 @@ from aicad.platform.routers import (
     journey,
     library,
     projects,
+    search,
     studio,
     team,
 )
@@ -112,7 +113,7 @@ def create_app() -> FastAPI:
         return resp
 
     for r in (auth.router, journey.router, team.router, billing.router, projects.router, studio.router, library.router,
-              admin.router, god.router):
+              admin.router, god.router, search.router):
         app.include_router(r)
     for r in module_routers():
         app.include_router(r)

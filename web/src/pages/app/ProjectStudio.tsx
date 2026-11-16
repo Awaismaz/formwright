@@ -20,6 +20,7 @@ import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
 import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
+import { SimilarPartsDialog } from "@/components/SimilarParts";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
@@ -39,7 +40,7 @@ export default function ProjectStudio() {
   const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
   const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset } | null>(null);
   const [planeOffset, setPlaneOffset] = useState("0");
-  const [dialog, setDialog] = useState<"import" | "toolbox" | null>(null);
+  const [dialog, setDialog] = useState<"import" | "toolbox" | "similar" | null>(null);
   const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
   const viewerApi = useRef<ViewerApi | null>(null);
   const [compare, setCompare] = useState<CompareState | null>(null);
@@ -143,6 +144,7 @@ export default function ProjectStudio() {
     else if (c.kind === "panel") { setPm(null); setTab(c.tab); if (c.extra === "com") setShowCom(true); }
     else if (c.kind === "import") setDialog("import");
     else if (c.kind === "toolbox") { setTbInit(null); setDialog("toolbox"); }
+    else if (c.kind === "similar") setDialog("similar");
   };
   const runCompare = async (base: number) => {
     try {
@@ -271,6 +273,7 @@ export default function ProjectStudio() {
         <p className="text-[13px] text-muted">The result is checked to be identical to suppressing it. If anything else would change, nothing is deleted and
           the feature stays suppressed. Then you can ask the design agent to remove it. Undo with <b>Revisions</b>.</p>
       </Modal>
+      <SimilarPartsDialog projectId={p.id} open={dialog === "similar"} onClose={() => setDialog(null)} />
       {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
       {dialog === "toolbox" && <Toolbox project={p} initial={tbInit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
 

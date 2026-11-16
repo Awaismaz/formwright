@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, FolderKanban, LayoutGrid, List, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FolderKanban, LayoutGrid, List, MoreHorizontal, Plus, Ruler, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { Project } from "@/lib/types";
@@ -9,6 +9,7 @@ import { ago } from "@/lib/format";
 import { Button, EmptyState, Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader, StatusBadge } from "@/components/ui";
 import ProjectCard, { ProjectStatus } from "@/components/ProjectCard";
 import NewProjectDialog from "@/components/NewProjectDialog";
+import { MatchRow, type Match } from "@/components/SimilarParts";
 import { cx } from "@/lib/format";
 
 export default function Projects() {
@@ -24,7 +25,12 @@ export default function Projects() {
   useEffect(() => { if (params.get("new") === "1") { setNewOpen(true); params.delete("new"); setParams(params, { replace: true }); } }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { try { localStorage.setItem("fw_pview", view); } catch { /* ignore */ } }, [view]);
 
-  const items = useMemo(() => (list.data?.items ?? []).filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.description.toLowerCase().includes(q.toLowerCase())), [list.data, q]);
+  const sizeQuery = /\d\s*(mm)?\s*[x×*]\s*\d/i.test(q);
+  const [debounced, setDebounced] = useState(q);
+  useEffect(() => { const t = setTimeout(() => setDebounced(q), 250); return () => clearTimeout(t); }, [q]);
+  const bySize = useQuery({ queryKey: ["search-size", debounced], enabled: sizeQuery && debounced === q,
+    queryFn: () => api.get<{ dims: number[] | null; items: Match[] }>(`/api/search/size?q=${encodeURIComponent(debounced)}`) });
+  const items = useMemo(() => (list.data?.items ?? []).filter(p => sizeQuery || !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.description.toLowerCase().includes(q.toLowerCase())), [list.data, q, sizeQuery]);
   const refresh = () => qc.invalidateQueries({ queryKey: ["projects"] });
   const setArch = async (p: Project, v: boolean) => {
     try { await api.patch(`/api/projects/${p.id}`, { archived: v }); toast.success(v ? "Project archived" : "Project restored"); refresh(); }
@@ -51,7 +57,7 @@ export default function Projects() {
       <PageHeader title="Projects" eyebrow={<StatusBadge status="live" />} subtitle="Each project holds a design conversation, its parametric model, checks, revisions and exports."
         actions={<Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <div className="relative w-full max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search projects" className="pl-9" /></div>
+        <div className="relative w-full max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, or by size: 120x80x10" className="pl-9" aria-label="Search projects by name or size" /></div>
         <div className="inline-flex rounded-lg border border-border bg-panel p-0.5 text-sm">
           {[["Active", false], ["Archived", true]].map(([l, v]) => (
             <button key={l as string} onClick={() => setArchived(v as boolean)} className={cx("rounded px-3 py-1", archived === v ? "bg-primary text-white" : "text-muted")}>{l as string}</button>))}
@@ -61,6 +67,17 @@ export default function Projects() {
           <button onClick={() => setView("list")} className={cx("rounded p-1.5", view === "list" ? "bg-panel2 text-text" : "text-muted")} aria-label="List view"><List className="h-4 w-4" /></button>
         </div>
       </div>
+      {sizeQuery && (
+        <section className="mb-6 rounded-xl border border-border bg-panel2/60 p-4">
+          <div className="mb-3 flex items-baseline gap-2">
+            <Ruler className="h-4 w-4 self-center text-primary" />
+            <h2 className="text-[14px] font-semibold">Parts sized like {bySize.data?.dims ? bySize.data.dims.map(d => +d.toFixed(2)).join(" × ") : "…"} mm</h2>
+            <span className="text-[12px] text-muted">any orientation · matched on the verified model's envelope</span>
+          </div>
+          {bySize.isLoading || debounced !== q ? <div className="py-3 text-sm text-muted">Searching…</div>
+            : !bySize.data?.items.length ? <p className="text-sm text-muted">No part in this workspace has that envelope yet.</p>
+            : <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{bySize.data.items.map(m => <MatchRow key={m.project.id} m={m} />)}</div>}
+        </section>)}
       {list.isLoading ? <PageLoader /> : items.length === 0 ? (
         <EmptyState icon={<FolderKanban className="h-6 w-6" />} title={q ? "No matching projects" : archived ? "No archived projects" : "No projects yet"}
           body={!q && !archived ? "Start with a template or a blank brief. The design agent will model, verify and show your part live." : undefined}

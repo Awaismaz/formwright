@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
   Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
-  Squircle, Upload, Wrench,
+  ScanSearch, Squircle, Upload, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Tip } from "@/components/ui";
@@ -14,7 +14,7 @@ export type Command =
   | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
-  | { kind: "import" } | { kind: "toolbox" };
+  | { kind: "import" } | { kind: "toolbox" } | { kind: "similar" };
 
 interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean; needsBody?: boolean }
 
@@ -73,6 +73,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     ],
     Library: [[
       { id: "toolbox", label: "Toolbox", icon: <Wrench className="h-5 w-5" />, tip: "Standard components (fasteners, bearings, gears…) from repeatable generators", cmd: { kind: "toolbox" } },
+      { id: "similar", label: "Similar Parts", icon: <ScanSearch className="h-5 w-5" />, tip: "Find parts you already made that look like this one: same envelope, proportions and holes", cmd: { kind: "similar" }, needsBody: true },
       { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
     ]],
   };
