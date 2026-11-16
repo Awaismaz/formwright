@@ -110,7 +110,7 @@ class WorkerUnavailable(RuntimeError):
 
 
 class Worker:
-    START_TIMEOUT_S = 120.0
+    START_TIMEOUT_S = 180.0  # a cold start on a loaded machine can take minutes
 
     def __init__(self, cmd: list[str] | None = None) -> None:
         self.proc: asyncio.subprocess.Process | None = None

@@ -13,8 +13,15 @@ layer below in one change. A feature that is only partly wired is worse than one
 - Add a branch to `_op(part, f, diag)`. It takes the current solid and the validated dict and returns the new solid.
 - Select topology **by location, never by index**: `edges_near(part, points)` and `faces_near(part, point, normal=...)`.
   Store picked points/normals in the dict, not ids.
-- When a selection resolves to nothing, raise `ValueError("... not found (geometry changed?)")`. `apply_manual` wraps it
-  as `manual feature '<name>' failed: ...`, the runner rolls back, and the UI shows the message.
+- Edge picks: send the edge's true middle (`edgeMid`) plus `edge_refs` (`edgeRef`: line direction / circle axis) and
+  resolve with `_resolve_edges`; face picks with `_resolve_face`. Ops listed in `REF_OPS` (studio.py) get `ref_bbox`
+  stamped server-side, so picks follow the body when a dimension changes (`fw._remaps`). Add new picking ops there.
+- When a selection resolves to nothing, raise a plain `ValueError("... was not found (the geometry changed)")`.
+  `apply_manual` no longer aborts the build: the feature is skipped and listed in `status.manual_errors` (a rebuild
+  error the tree offers to repair). `_apply_manual(strict=...)` refuses the change when the feature just added or
+  edited fails (`strict={id}`), or when suppress/delete breaks another feature (`strict="new"`).
+- Kernel exceptions must reach the user as plain words: raise `ValueError` with an engineering sentence (see
+  `_too_large`), and map anything else through `aicad.platform.plain.build_error`.
 - Use `diag` (the bbox diagonal) for "through all" depths. Do not hard-code sizes.
 - Sketch-based ops: reuse `_plane(spec)` and `sketch_region(profiles)`. Loops are normalised CCW, so the extrude
   direction is always out of the face (see `test_sketch_boss_always_extrudes_out_of_the_face`).
