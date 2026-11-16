@@ -109,7 +109,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | IO-004 | IO | 3MF export | P1 | Done | M2 | LT | Eng | IO-002 | Opens in a slicer; units preserved | 3MF with unit=millimeter, byte-identical rewrite, read-back volume match rel 1e-5 (`tests/test_print.py`) | Via 3D Print Prep exports; Studio also writes part.3mf |
 | IO-005 | IO | STEP import + validation (size limits, isolated parse) | P1 | Backlog | M2 | LT | Eng | SEC-005 | Malformed files rejected safely | — | |
 | IO-006 | IO | Assembly STEP export (hierarchy, placements) | P1 | Backlog | M3 | LT | Eng | ASM-001 | Reimport preserves tree & transforms | — | |
-| IO-007 | IO | DXF export of drawings/flat patterns | P2 | Backlog | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | — | ezdxf (MIT) candidate |
+| IO-007 | IO | DXF export of drawings/flat patterns | P2 | Done | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | DXF 1:1 via build123d ExportDXF (ezdxf, MIT) with layers | DXF dims are lines+text, not associative; DXF bytes not deterministic |
 | IO-008 | IO | Coordinate system + unit preservation tests across all formats | P0 | Backlog | M1 | MVP | Eng | IO-001 | Round-trip test matrix green | — | |
 
 ### PRN — 3D printing preparation
@@ -127,18 +127,18 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| DRW-001 | Drawing | HLR orthographic views (front/top/right) + iso to SVG | P0 | Backlog | M1 | MVP | Eng | CAD-001 | View extents match bbox (CHK-12) | — | |
-| DRW-002 | Drawing | Dimensions from spec features, tagged spec/inferred | P0 | Backlog | M1 | MVP | Eng | DRW-001 | Every spec dim appears once | — | R-TEC-03 |
-| DRW-003 | Drawing | Hole callouts (dia, depth, qty) | P0 | Backlog | M1 | MVP | Eng | DRW-002 | Callouts match census | — | |
-| DRW-004 | Drawing | Title block: material, units, scale, revision, "NOT APPROVED" banner | P0 | Backlog | M1 | MVP | Eng | DRW-001 | Fields populated from spec/run | — | |
-| DRW-005 | Drawing | PDF export (license-cleared library) | P0 | Backlog | M1 | MVP | Eng | DRW-001, LEG-002 | PDF renders identically to SVG | — | |
-| DRW-006 | Drawing | Layout/overlap check (no dimension collisions) | P1 | Backlog | M1 | MVP | Eng | DRW-002 | Zero bbox overlaps of text on fixtures | — | |
-| DRW-010 | Drawing | Section views | P1 | Backlog | M2 | LT | Eng | DRW-001 | Section of FX-03 correct | — | |
+| DRW-001 | Drawing | HLR orthographic views (front/top/right) + iso to SVG | P0 | Done | M1 | MVP | Eng | CAD-001 | View extents match bbox (CHK-12) | Exact HLR views (build123d project_to_viewport) front/top/right + iso; first/third angle; view extents = bbox within 0.01 mm (`tests/test_drawings.py`); docs/reports/drawings.md | Drawing Studio Live 2026-11-16 |
+| DRW-002 | Drawing | Dimensions from spec features, tagged spec/inferred | P0 | Done | M1 | MVP | Eng | DRW-001 | Every spec dim appears once | Overall/diameter/step-chain/hole-position/PCD dimensions tagged spec or inferred, legend on sheet | Spec tag by value+kind match |
+| DRW-003 | Drawing | Hole callouts (dia, depth, qty) | P0 | Done | M1 | MVP | Eng | DRW-002 | Callouts match census | Hole callouts from exact data: '4X Ø6.6 THRU', '6X Ø14 THRU / EQ SP ON PCD Ø120' | C'bore/C'sink called out as plain holes |
+| DRW-004 | Drawing | Title block: material, units, scale, revision, "NOT APPROVED" banner | P0 | Done | M1 | MVP | Eng | DRW-001 | Fields populated from spec/run | Title block (part, material, mm, scale, projection, rev, date, drawn by) + red NOT APPROVED FOR MANUFACTURE banner |  |
+| DRW-005 | Drawing | PDF export (license-cleared library) | P0 | Done | M1 | MVP | Eng | DRW-001, LEG-002 | PDF renders identically to SVG | PDF via reportlab (BSD); SVG native; downloads 200 | svglib rejected (LGPL) |
+| DRW-006 | Drawing | Layout/overlap check (no dimension collisions) | P1 | Done | M1 | MVP | Eng | DRW-002 | Zero bbox overlaps of text on fixtures | CHK-12: no text overlaps / text on geometry / out of frame; seeded overlap fails (test) |  |
+| DRW-010 | Drawing | Section views | P1 | Done | M2 | LT | Eng | DRW-001 | Section of FX-03 correct | Section A-A (X/Y/Z) with hatch and cutting-plane line; section area = shoelace hand value (test) |  |
 | DRW-011 | Drawing | Detail views | P2 | Backlog | M2 | LT | Eng | DRW-001 | | — | |
-| DRW-012 | Drawing | General tolerances block + per-dim tolerances from spec | P1 | Backlog | M2 | LT | Eng | DRW-002 | Only approved tolerances shown as such | — | |
+| DRW-012 | Drawing | General tolerances block + per-dim tolerances from spec | P1 | In Progress | M2 | LT | Eng | DRW-002 | Only approved tolerances shown as such | General tolerance block: 'Not specified' default, ISO 2768 class by name or custom text | Per-dimension tolerances not built |
 | DRW-013 | Drawing | GD&T frames where specified (never invented) | P2 | Backlog | M4 | LT | Eng | DRW-012 | Frames only from explicit input | — | |
 | DRW-014 | Drawing | BOM table on assembly drawings | P1 | Backlog | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | — | |
-| DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Backlog | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | — | §2.A bullet 5 |
+| DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Done | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | Out-of-date drawings regenerate; revision rows ('Regenerated: L 120→150'); byte-identical SVG for same model+options |  |
 | DRW-016 | Drawing | STEP-in → auto drawing (wedge W4 candidate) | P1 | Backlog | M2 | LT | Eng | IO-005, DRW-002 | Pilot-rated usefulness ≥ agreed bar | — | Inferred dims only, clearly labelled |
 
 ### ASM — assemblies
