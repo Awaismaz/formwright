@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, Lock, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -22,6 +22,7 @@ import { offsetPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { SimilarPartsDialog } from "@/components/SimilarParts";
+import { WhereUsed } from "./modules/assembly/WhereUsed";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
@@ -33,7 +34,7 @@ const MAKE: Record<string, Omit<MakeModule, "code">> = {
   print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
   engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
   assembly: { name: "Assemble", icon: <Boxes className="h-5 w-5" />, tip: "Mate with other parts, check clashes, fit ISO fasteners" },
-  mesh: { name: "Product Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
+  mesh: { name: "Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
 };
 
 /** Live input modules offered on the Library tab: they bring outside geometry into this part. */
@@ -73,8 +74,15 @@ export default function ProjectStudio() {
   const [delTarget, setDelTarget] = useState<string | null>(null);
 
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const owned = useMemo(() => new Set(me?.org?.god_unlock ? Object.keys(MAKE) : me?.org?.modules ?? []), [me?.org]);
   const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
-    .map(m => ({ code: m.code, ...MAKE[m.code]! })), [catalog.data]);
+    .map(m => {
+      const b = MAKE[m.code]!;
+      if (owned.has(m.code)) return { code: m.code, ...b };
+      // not in the plan: say so before the click instead of landing on a paywall (AMI-21)
+      return { code: m.code, ...b, tip: `Add-on, not in your plan yet. ${b.tip}`,
+        icon: <span className="relative">{b.icon}<Lock className="absolute -bottom-1 -right-1.5 h-3 w-3 rounded-sm bg-panel text-muted" /></span> };
+    }), [catalog.data, owned]);
   const libraryModules = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && LIBRARY[m.code])
     .map(m => ({ code: m.code, ...LIBRARY[m.code]! })), [catalog.data]);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
@@ -243,6 +251,7 @@ export default function ProjectStudio() {
             onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
             : <button onClick={() => setEditing(true)} className="max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
           <ProjectStatus p={p} />
+          {owned.has("assembly") && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
         </div>}
         right={<>
           <Tip content={leftOpen ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => setLeftOpen(!leftOpen)} className={cx("rounded p-1 hover:bg-text/5", leftOpen ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>

@@ -151,8 +151,8 @@ function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh }: {
 function MateRow({ m, canEdit, onMate, hoverMate, focusMate, onEdit }: { m: Mate } & TreeProps) {
   const bad = m.status === "conflict" || m.status === "unsatisfied" || m.status === "broken";
   const val = m.type === "distance" ? ` ${m.value ?? 0} mm` : m.type === "angle" ? ` ${m.value ?? 0}°` : "";
-  const side = (desc: string | undefined, name: string, lost: boolean | undefined) =>
-    lost ? <span className="font-medium text-danger">missing face · {name}</span> : <>{desc ?? "reference"} · {name}</>;
+  const side = (desc: string | undefined, lost: boolean | undefined) =>
+    lost ? <span className="font-medium text-danger">missing face</span> : <>{desc ?? "reference"}</>;
   const refs = `${m.a_lost ? "missing" : m.a_desc ?? ""} (${m.a_name}) ↔ ${m.b_lost ? "missing" : m.b_desc ?? ""} (${m.b_name})`;
   return (
     <div className={cx("group flex items-start gap-1.5 px-2 py-1 text-[12px]", focusMate === m.id ? "bg-primary-soft" : "hover:bg-text/[.04]",
@@ -163,7 +163,8 @@ function MateRow({ m, canEdit, onMate, hoverMate, focusMate, onEdit }: { m: Mate
         <span className={cx("block truncate font-medium", bad && "text-danger")}>{m.label}{val}
           {m.status === "conflict" && <span className="ml-1 font-normal">· off by {m.residual_mm?.toFixed(3)} mm / {m.residual_deg?.toFixed(2)}°, not applied</span>}
           {m.status === "broken" && <span className="ml-1 font-normal">· re-pick the missing face</span>}</span>
-        <span className="block truncate text-[11px] text-muted">{side(m.a_desc, m.a_name, m.a_lost)} ↔ {side(m.b_desc, m.b_name, m.b_lost)}</span>
+        <span className="block truncate text-[11px] text-text/80">{side(m.a_desc, m.a_lost)} ↔ {side(m.b_desc, m.b_lost)}</span>
+        <span className="block truncate text-[11px] text-muted">{m.a_name} ↔ {m.b_name}</span>
       </span>
       {m.status === "conflict" && <Tip content={`Conflicts with earlier mates (off by ${m.residual_mm?.toFixed(3)} mm / ${m.residual_deg?.toFixed(2)}°). It is not applied.`}><Ban className="h-3.5 w-3.5 text-danger" /></Tip>}
       {m.status === "broken" && <Tip content="The referenced face no longer exists after the part was updated."><AlertTriangle className="h-3.5 w-3.5 text-danger" /></Tip>}
