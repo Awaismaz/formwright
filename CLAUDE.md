@@ -16,7 +16,7 @@ The governing brief is `CLAUDE_CODE_AI_ENGINEERING_PLATFORM_MASTER_PROMPT.md`.
 2. Append a dated entry to `docs/SESSION_LOG.md`: done, verified how, not done, blocked, next step.
 3. Park any open founder decision as a new PD-xx row in `docs/DECISIONS.md` (with the default you used).
 4. Update `docs/CONTEXT.md` if a preference, decision or way of working changed.
-5. Run `pytest`, `ruff check src tests`, `cd web && npx tsc --noEmit && npx vite build`; commit and push.
+5. Run `pytest`, `ruff check src tests`, `cd web && npx tsc --noEmit && npm test && npx vite build`; commit and push.
 
 ## How to run and test
 - `unset VIRTUAL_ENV` before every `uv run` (a conda env leaks it on this machine).

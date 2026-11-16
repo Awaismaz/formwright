@@ -55,6 +55,11 @@ def _num(v: Any) -> str:
     return f"{v:g}" if isinstance(v, int) or abs(v) >= 1e-3 else f"{v:.3g}"
 
 
+def mass_g(st: dict[str, Any]) -> float | None:
+    """Mass in grams from the volume and the typical density of the named material (None if unknown)."""
+    return _mass_g(st)
+
+
 def _mass_g(st: dict[str, Any]) -> float | None:
     m = materials.get(materials.guess(st.get("material")))
     vol = (st.get("fingerprint") or {}).get("volume")

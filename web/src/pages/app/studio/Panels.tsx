@@ -11,6 +11,7 @@ import type { Topo } from "@/viewer/types";
 import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 import ChangeNotice from "./ChangeNotice";
 import HandoffCard from "./HandoffCard";
+import VariantsBar from "./Variants";
 
 /* ------------------------------------------------------------------ checks */
 export function ChecksPanel({ status }: { status?: BuildStatus }) {
@@ -340,7 +341,8 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
   const [notice, setNotice] = useState<number | null>(null);
   const items = q.data?.items ?? [];
   if (!items.length) return <p className="p-4 text-sm text-muted">Every build becomes a revision you can restore or compare.</p>;
-  return (
+  return (<>
+    <VariantsBar project={project} version={version} onCompare={onCompare} onChanged={onChanged} />
     <ul className="divide-y divide-border">
       {items.map((r, i) => (
         <li key={r.n} className={cx("flex items-center gap-2 px-3 py-2.5", comparing === r.n && "bg-primary-soft")}>
@@ -361,7 +363,7 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
         </li>))}
       <ChangeNotice projectId={project.id} n={notice} onClose={() => setNotice(null)} />
     </ul>
-  );
+  </>);
 }
 
 /* ------------------------------------------------------------------ files & source */

@@ -13,7 +13,7 @@ they are the project's memory across machines.
 unset VIRTUAL_ENV
 uv run pytest -q                       # ≈2–4 min, builds real CAD; must be all green
 uv run ruff check src tests
-cd web && npx tsc --noEmit && npx vite build && cd ..
+cd web && npx tsc --noEmit && npm test && npx vite build && cd ..   # npm test = vitest (sketch geometry)
 ```
 If the environment is missing (no uv, `.venv` or `node_modules`), use `dev-setup`. If a gate step can't run, say so
 explicitly in the session log and in the final message. Never report it as passed.
