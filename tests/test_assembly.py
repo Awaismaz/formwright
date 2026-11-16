@@ -305,9 +305,8 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]
     config.override_settings(config.Settings(
         env="development", data_dir=tmp_path / "data", database_url=f"sqlite:///{(tmp_path / 'db.sqlite').as_posix()}",
         app_url="http://testserver", superadmin_emails=("boss@example.com",), stripe_secret_key="", trial_tokens=300))
-    from aicad.platform.app import create_app
-
     from aicad.assembly import worker as aworker
+    from aicad.platform.app import create_app
 
     with TestClient(create_app()) as c:
         c.headers.update({"X-FW-CSRF": "1"})
