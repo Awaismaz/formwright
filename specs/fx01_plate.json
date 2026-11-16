@@ -1,0 +1,18 @@
+{
+  "part": "plate",
+  "provenance": "Original fixture authored for this project, 2026-11-16. No third-party design.",
+  "params": {
+    "length": 120.0,
+    "width": 80.0,
+    "thickness": 10.0,
+    "hole_diameter": 6.6,
+    "hole_edge_offset": 10.0,
+    "pocket_length": 40.0,
+    "pocket_width": 30.0,
+    "pocket_depth": 4.0,
+    "pocket_corner_radius": 3.0,
+    "top_chamfer": 1.0,
+    "material": "Al 6061-T6",
+    "name": "FX-01 mounting plate"
+  }
+}

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI CAD Live Viewer</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1d2330; --muted: #677085; --line: #dde1e8;
+    --pass: #1f8a4c; --fail: #c2362b; --accent: #2f6fde; --warn-bg: #fff4d6; --warn: #7a5600;
+    --viewport: #e9ecf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1a1e26; --text: #e6e9ef; --muted: #8f98ab; --line: #2a303b;
+      --pass: #4cc282; --fail: #ff6b5e; --accent: #6b9cff; --warn-bg: #3a2f10; --warn: #f5d27a;
+      --viewport: #161a21;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #app { display: grid; grid-template-columns: 1fr 340px; height: 100%; }
+  #view { position: relative; background: var(--viewport); min-height: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #toolbar { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  #toolbar button, #toolbar label { background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; }
+  #toolbar button:hover { border-color: var(--accent); }
+  #toolbar button.on { border-color: var(--accent); color: var(--accent); }
+  #section-row { position: absolute; left: 12px; bottom: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; display: none; gap: 8px;
+    align-items: center; }
+  #measure-out { position: absolute; right: 12px; bottom: 12px; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; display: none;
+    font-variant-numeric: tabular-nums; }
+  #live { position: absolute; top: 12px; right: 12px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--muted); }
+  #live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--pass); margin-right: 6px; vertical-align: middle; }
+  #live.flash .dot { background: var(--accent); }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; }
+  h1 { font-size: 16px; margin: 0 0 2px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 18px 0 6px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .banner { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 6px 8px;
+    font-size: 12px; font-weight: 600; margin-top: 10px; }
+  .overall { font-size: 15px; font-weight: 700; margin-top: 10px; }
+  .pass { color: var(--pass); } .fail { color: var(--fail); }
+  ul.checks { list-style: none; padding: 0; margin: 0; }
+  ul.checks li { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+  ul.checks li .tag { font-weight: 700; min-width: 38px; }
+  ul.checks li .d { color: var(--muted); font-size: 11.5px; word-break: break-word; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  td:last-child { text-align: right; }
+  a { color: var(--accent); }
+  .err { color: var(--fail); white-space: pre-wrap; font-weight: 600; }
+  @media (max-width: 760px) {
+    #app { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="toolbar">
+      <button data-view="iso">Iso</button>
+      <button data-view="front">Front</button>
+      <button data-view="top">Top</button>
+      <button data-view="right">Right</button>
+      <button id="btn-edges" class="on">Edges</button>
+      <button id="btn-wire">Wireframe</button>
+      <button id="btn-section">Section</button>
+      <button id="btn-measure">Measure</button>
+    </div>
+    <div id="live"><span class="dot"></span><span id="live-text">connecting…</span></div>
+    <div id="section-row">Section X <input id="section" type="range" min="0" max="1000" value="500"></div>
+    <div id="measure-out"></div>
+  </div>
+  <aside>
+    <h1 id="name">—</h1>
+    <div class="sub" id="material"></div>
+    <div class="banner">NOT APPROVED FOR MANUFACTURE — engineer review required</div>
+    <div class="overall" id="overall"></div>
+    <div class="err" id="error"></div>
+    <h2>Checks (deterministic, gating)</h2>
+    <ul class="checks" id="checks"></ul>
+    <h2>Measured (kernel)</h2>
+    <table id="measured"></table>
+    <h2>Parameters</h2>
+    <table id="params"></table>
+    <h2>Files</h2>
+    <div><a href="/files/part.step">part.step</a> · <a href="/files/part.stl">part.stl</a></div>
+    <div class="sub" style="margin-top:6px">Viewer mesh is tessellated from the re-imported STEP file.</div>
+    <h2>Run</h2>
+    <table id="run"></table>
+  </aside>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const view = document.getElementById("view");
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.localClippingEnabled = true;
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 1e6);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 1.6));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(3, 5, 4); scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.5); fill.position.set(-4, -2, -3); scene.add(fill);
+
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+scene.background = new THREE.Color(dark ? 0x161a21 : 0xe9ecf1);
+
+const clip = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
+const meshMat = new THREE.MeshStandardMaterial({
+  color: 0xb8c0cc, metalness: 0.35, roughness: 0.45, side: THREE.DoubleSide,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+});
+const edgeMat = new THREE.LineBasicMaterial({ color: dark ? 0x0b0d12 : 0x1d2330 });
+
+let model = null, edges = [], box = new THREE.Box3(), unitScale = 1, firstLoad = true;
+let lastBuild = null, status = null;
+const loader = new GLTFLoader();
+
+function resize() {
+  const r = view.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / Math.max(r.height, 1); camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+// glTF is Y-up. CAD (build123d) is Z-up; exporter maps CAD +Z -> glTF +Y, CAD +Y -> glTF -Z.
+const VIEWS = {
+  iso:   new THREE.Vector3(1, 0.9, 1.2),   // CAD (+X, -Y, +Z) octant
+  front: new THREE.Vector3(0, 0, 1),       // looking along CAD +Y
+  top:   new THREE.Vector3(0, 1, 0.0001),  // looking down CAD -Z
+  right: new THREE.Vector3(1, 0, 0),
+};
+function setView(name) {
+  const c = box.getCenter(new THREE.Vector3());
+  const r = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
+  const dir = VIEWS[name].clone().normalize();
+  const dist = r / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.08;
+  camera.position.copy(c).addScaledVector(dir, dist);
+  camera.near = dist / 100; camera.far = dist * 100; camera.updateProjectionMatrix();
+  controls.target.copy(c); controls.update();
+}
+document.querySelectorAll("[data-view]").forEach(b => b.onclick = () => setView(b.dataset.view));
+
+function clearModel() {
+  if (!model) return;
+  scene.remove(model);
+  model.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  edges = []; model = null;
+}
+
+function loadModel(buildId) {
+  loader.load(`/files/model.glb?b=${buildId}`, gltf => {
+    clearModel();
+    model = gltf.scene;
+    model.traverse(o => {
+      if (o.isMesh) {
+        o.material = meshMat;
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 25), edgeMat);
+        e.visible = document.getElementById("btn-edges").classList.contains("on");
+        o.add(e); edges.push(e);
+      }
+    });
+    scene.add(model);
+    box = new THREE.Box3().setFromObject(model);
+    const s = box.getSize(new THREE.Vector3());
+    const cadMax = Math.max(...(status?.fingerprint?.bbox ?? [1]));
+    unitScale = cadMax / Math.max(s.x, s.y, s.z); // scene units -> mm
+    updateSection();
+    if (firstLoad) { setView("iso"); firstLoad = false; }
+  }, undefined, err => { document.getElementById("error").textContent = "Model load failed: " + err; });
+}
+
+// --- toggles
+const tog = (id, fn) => { const b = document.getElementById(id);
+  b.onclick = () => { b.classList.toggle("on"); fn(b.classList.contains("on")); }; };
+tog("btn-edges", on => edges.forEach(e => e.visible = on));
+tog("btn-wire", on => { meshMat.wireframe = on; });
+const secRow = document.getElementById("section-row"), secIn = document.getElementById("section");
+function updateSection() {
+  const on = document.getElementById("btn-section").classList.contains("on");
+  meshMat.clippingPlanes = on ? [clip] : []; edgeMat.clippingPlanes = on ? [clip] : [];
+  meshMat.needsUpdate = edgeMat.needsUpdate = true;
+  clip.constant = THREE.MathUtils.lerp(box.min.x, box.max.x, secIn.value / 1000);
+}
+tog("btn-section", on => { secRow.style.display = on ? "flex" : "none"; updateSection(); });
+secIn.oninput = updateSection;
+
+// --- measure (point to point, on surface)
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+const measureOut = document.getElementById("measure-out");
+let measuring = false, pts = [], markers = [];
+const markerMat = new THREE.MeshBasicMaterial({ color: 0x2f6fde, depthTest: false });
+tog("btn-measure", on => { measuring = on; resetMeasure(); measureOut.style.display = on ? "block" : "none";
+  measureOut.textContent = on ? "Click two points on the part" : ""; });
+function resetMeasure() { markers.forEach(m => scene.remove(m)); markers = []; pts = []; }
+let downAt = null;
+renderer.domElement.addEventListener("pointerdown", e => downAt = [e.clientX, e.clientY]);
+renderer.domElement.addEventListener("pointerup", e => {
+  if (!measuring || !model || !downAt) return;
+  if (Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4) return; // was an orbit drag
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObject(model, true).find(h => h.object.isMesh);
+  if (!hit) return;
+  if (pts.length === 2) resetMeasure();
+  pts.push(hit.point.clone());
+  const rad = box.getBoundingSphere(new THREE.Sphere()).radius * 0.008;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(rad, 12, 8), markerMat);
+  m.position.copy(hit.point); m.renderOrder = 10; scene.add(m); markers.push(m);
+  if (pts.length === 2) {
+    const d = pts[0].distanceTo(pts[1]) * unitScale;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0x2f6fde, depthTest: false }));
+    line.renderOrder = 10; scene.add(line); markers.push(line);
+    measureOut.textContent = `Distance: ${d.toFixed(3)} mm (mesh pick, ±tessellation)`;
+  } else measureOut.textContent = "Click second point";
+});
+
+// --- panel
+const fmt = v => typeof v !== "number" ? v : Number.isInteger(v) ? v
+  : (v !== 0 && Math.abs(v) < 1e-3) ? v.toExponential(1) : v.toFixed(4);
+function rows(id, obj) {
+  document.getElementById(id).innerHTML = Object.entries(obj)
+    .map(([k, v]) => `<tr><td>${k}</td><td>${fmt(v)}</td></tr>`).join("");
+}
+function brief(d) {
+  const skip = new Set(["original", "reimported"]);
+  return Object.entries(d).filter(([k]) => !skip.has(k))
+    .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.map(fmt).join(" × ") :
+      (typeof v === "object" && v ? JSON.stringify(v) : fmt(v))}`).join(" · ");
+}
+function render(s) {
+  document.getElementById("name").textContent = s.part ?? "Build failed";
+  document.getElementById("material").textContent = s.material ?? "";
+  const ov = document.getElementById("overall");
+  ov.textContent = s.ok ? "ALL GATING CHECKS PASS" : "CHECKS FAILED";
+  ov.className = "overall " + (s.ok ? "pass" : "fail");
+  document.getElementById("error").textContent = s.error ?? "";
+  document.getElementById("checks").innerHTML = (s.checks ?? []).map(c =>
+    `<li><span class="tag ${c.passed ? "pass" : "fail"}">${c.passed ? "PASS" : "FAIL"}</span>
+     <span><b>${c.id}</b> ${c.name}<div class="d">${brief(c.detail)}</div></span></li>`).join("");
+  if (s.fingerprint) {
+    const f = s.fingerprint;
+    rows("measured", { "bbox X (mm)": f.bbox[0], "bbox Y (mm)": f.bbox[1], "bbox Z (mm)": f.bbox[2],
+      "volume (mm³)": f.volume, faces: f.faces, edges: f.edges, solids: f.solids });
+  }
+  if (s.params) rows("params", Object.fromEntries(Object.entries(s.params)
+    .filter(([k]) => !["name", "material"].includes(k))));
+  if (s.timings_s) rows("run", { ...Object.fromEntries(Object.entries(s.timings_s)
+    .map(([k, v]) => [k, v.toFixed(3)])), build123d: s.env.build123d, OCP: s.env["cadquery-ocp"] });
+}
+
+const liveEl = document.getElementById("live"), liveText = document.getElementById("live-text");
+async function poll() {
+  try {
+    const r = await fetch("/files/status.json", { cache: "no-store" });
+    if (r.ok) {
+      const s = await r.json();
+      if (s.build_id !== lastBuild) {
+        lastBuild = s.build_id; status = s; render(s);
+        if (!s.error) loadModel(s.build_id);
+        liveEl.classList.add("flash"); setTimeout(() => liveEl.classList.remove("flash"), 600);
+        liveText.textContent = "live · updated " + new Date().toLocaleTimeString();
+      }
+    }
+  } catch { liveText.textContent = "disconnected — is `aicad live` running?"; }
+  setTimeout(poll, 1000);
+}
+poll();
+
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
