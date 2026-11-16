@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bell, Check, CheckCircle2, Lock, Sparkles, Unlock } from "lucide-react";
@@ -10,6 +10,7 @@ import { money } from "@/lib/format";
 import { Badge, Button, Card, PageHeader, PageLoader, StatusBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import ModuleSample from "@/components/ModuleSamples";
+import { MODULE_APPS } from "./modules/registry";
 
 function useCatalog() {
   return useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
@@ -81,6 +82,8 @@ export function ModulePage() {
   const plansWith = cat.data.plans.filter(p => p.modules.includes(code) && !p.contact_sales);
   const onList = wl.data?.modules.includes(code);
   const fromProject = params.get("project");
+  const LiveApp = m.status === "live" ? MODULE_APPS[code] : undefined;
+  if (LiveApp && owned) return <Suspense fallback={<PageLoader />}><LiveApp code={code} projectId={fromProject} /></Suspense>;
 
   const join = async () => {
     setBusy("wl");

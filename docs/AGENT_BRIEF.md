@@ -21,12 +21,20 @@ the founder's call: pick a sensible default and list it under "Parked decisions"
 ## Boundaries (so parallel merges stay clean)
 - Work only inside your worktree. Commit to your branch. **Do not push and do not merge to main.**
 - Never touch `D:\AI CAD\formwright\data` (the founder's data) or the apps on ports 8765/8766.
-- Put your code in **new files** wherever possible: backend `src/aicad/<module>/...` plus
-  `src/aicad/platform/routers/<module>.py`; frontend `web/src/pages/app/<module>/...`; tests `tests/test_<module>.py`.
-- Shared files: additive one-line edits only. That means `src/aicad/platform/app.py` (include your router),
-  `web/src/App.tsx` (your routes), `src/aicad/platform/catalog.py` (only your module's entry: status/summary/bullets),
-  and nav entries if needed. **Do not edit Design Studio files** (`web/src/pages/app/ProjectStudio.tsx`, `studio/*`,
-  `fw.py`, `runner.py`) unless your brief says so; the master adds Studio entry points after merging.
+- Modules plug in **without editing shared files**:
+  - Backend: `src/aicad/<module_pkg>/...` for logic, and the API in `src/aicad/platform/routers/mod_<code>.py`
+    exposing `router = APIRouter(prefix="/api/m/<code>", ...)`. `app.py` auto-includes every `mod_*.py`.
+  - Frontend: `web/src/pages/app/modules/<code>/index.tsx` with a default export component taking
+    `ModuleAppProps` (`{ code, projectId }`, from `web/src/pages/app/modules/registry.ts`). It is auto-discovered and
+    rendered at `/app/modules/<code>` (optionally `?project=<id>`) once the module is `"live"` in the catalog and
+    unlocked for the workspace. Build it as a full page (project picker plus your workspace UI). Other files go in
+    the same folder.
+  - Tests: `tests/test_<code>.py`.
+- Shared-file edits allowed: your module's entry in `src/aicad/platform/catalog.py` (status/summary/bullets),
+  `pyproject.toml`/`uv.lock` via `uv add`, and `web/package.json` only if truly needed. **Do not edit Design Studio
+  files** (`ProjectStudio.tsx`, `pages/app/studio/*`, `fw.py`, `runner.py`, `routers/studio.py`) or `App.tsx` /
+  `AppLayout.tsx` / `Modules.tsx`. The master adds Studio entry points (e.g. "Open in Drawing Studio") after merging;
+  describe the ones you want in your report.
 - **Do not edit** `docs/PUNCH_LIST.md`, `docs/SESSION_LOG.md`, `docs/DECISIONS.md` or `docs/CONTEXT.md`. Instead write
   `docs/reports/<module>.md`: what was built, files, punch-list IDs with status and evidence, tests, walkthrough
   numbers, known limits, parked decisions (with the default you used).

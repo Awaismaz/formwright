@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -34,6 +35,23 @@ CSRF_EXEMPT = {"/api/billing/webhook"}
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
        "connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; "
        "base-uri 'self'; form-action 'self' https://checkout.stripe.com")
+
+
+def module_routers() -> list[Any]:
+    """Routers of product modules: every `aicad.platform.routers.mod_<code>` exposing `router` (auto-discovered,
+    so modules plug in without editing this file)."""
+    import importlib
+    import pkgutil
+
+    from aicad.platform import routers as pkg
+
+    out = []
+    for info in sorted(pkgutil.iter_modules(pkg.__path__), key=lambda i: i.name):
+        if info.name.startswith("mod_"):
+            mod = importlib.import_module(f"{pkg.__name__}.{info.name}")
+            if getattr(mod, "router", None) is not None:
+                out.append(mod.router)
+    return out
 
 
 def ensure_founder(credentials_file: Path) -> None:
@@ -95,6 +113,8 @@ def create_app() -> FastAPI:
 
     for r in (auth.router, journey.router, team.router, billing.router, projects.router, studio.router, library.router,
               admin.router, god.router):
+        app.include_router(r)
+    for r in module_routers():
         app.include_router(r)
 
     @app.get("/api/health")
