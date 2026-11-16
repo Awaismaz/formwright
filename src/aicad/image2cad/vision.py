@@ -60,8 +60,9 @@ other title-block fields are not sizes: leave them out of "missing"."""
 _BLOCK = re.compile(r"```(?:fw-read|json)?\s*\n(.*?)\n?```", re.DOTALL)
 
 
-async def run_agent(folder: Path, image: str) -> tuple[str, float | None]:
-    """One read-only vision turn. Returns (assistant text, estimated cost in USD)."""
+async def run_agent(folder: Path, image: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+    """One read-only vision turn. Returns (assistant text, estimated cost in USD). ``budget_usd``: hard cap for
+    the turn (the SDK stops it there), so a read can never spend more than the workspace holds."""
     from claude_agent_sdk import (
         AssistantMessage,
         ClaudeAgentOptions,
@@ -78,6 +79,8 @@ async def run_agent(folder: Path, image: str) -> tuple[str, float | None]:
         system_prompt={"type": "preset", "preset": "claude_code", "append": VISION_INSTRUCTIONS},
         setting_sources=[], max_turns=4, max_buffer_size=AGENT_BUFFER_BYTES,
         hooks={"PreToolUse": [HookMatcher(matcher="Read", hooks=[make_guard(folder)])]})
+    if budget_usd is not None:
+        opts.max_budget_usd = max(0.01, budget_usd)
     texts: list[str] = []
     cost: float | None = None
     async for msg in query(prompt=VISION_PROMPT.format(image=image), options=opts):
@@ -113,7 +116,12 @@ def _f(v: Any, lo: float = 0.0, hi: float = 1.0) -> float | None:
 
 
 def _s(v: Any, n: int = 160) -> str:
-    return " ".join(str(v or "").split())[:n]
+    """One-line text, at most n characters; a longer text ends at a word with an ellipsis (never mid-word)."""
+    t = " ".join(str(v or "").split())
+    if len(t) <= n:
+        return t
+    cut = t[:n - 1].rsplit(" ", 1)[0] if " " in t[:n - 1] else t[:n - 1]
+    return cut.rstrip(" ,;:") + "…"
 
 
 # colour-legend tags a reader copies from a sheet's legend, e.g. "(red: INFERRED)", "[blue = SPEC]", "- green: REF"
@@ -210,8 +218,10 @@ def vision_copy(folder: Path, image: str) -> str:
     return keep
 
 
-async def read_image(folder: Path, image: str = "preview.png") -> tuple[dict[str, Any] | None, float | None]:
+async def read_image(folder: Path, image: str = "preview.png",
+                     budget_usd: float | None = None) -> tuple[dict[str, Any] | None, float | None]:
     """(read dict or None when the answer had no usable block, cost in USD)."""
-    text, cost = await run_agent(folder, vision_copy(folder, image))
+    img = vision_copy(folder, image)
+    text, cost = await (run_agent(folder, img) if budget_usd is None else run_agent(folder, img, budget_usd=budget_usd))
     raw = parse_block(text)
     return (to_read(raw) if raw is not None else None), cost

@@ -564,8 +564,8 @@ function CreateBar({ f, st, uid, targetProject, disabled, onCreated }: {
       <div className="flex items-center gap-3">
         <span className="flex-1 text-[12px] leading-snug text-muted" data-testid="create-note">
           {!st.ready ? `${st.open} open item${st.open === 1 ? "" : "s"} to answer before modelling.`
-            : !enough ? <span className="text-warning">Building takes {about(e.build)}. Your workspace has {e.balance ?? 0}. <Link className="underline" to="/app/billing#tokens">Top up</Link></span>
-            : <>The design agent gets exactly the confirmed values and the drawing as a reference.{e && !e.unlimited && <> Build {about(e.build)}; you have {e.balance}.</>}</>}
+            : !enough ? <span className="text-warning">Building takes {about(e.build)}. Your workspace has {(e.balance ?? 0).toLocaleString("en-GB")}. <Link className="underline" to="/app/billing#tokens">Top up</Link></span>
+            : <>The design agent gets exactly the confirmed values and the drawing as a reference.{e && !e.unlimited && <> Build {about(e.build)}; you have {e.balance?.toLocaleString("en-GB")}.</>}</>}
         </span>
         <Button disabled={!can} loading={busy} onClick={() => void create()} data-testid="create-model" icon={<Sparkles className="h-4 w-4" />}
           title={e && !e.unlimited ? `Measured on recent builds: ${about(e.build)}` : undefined}>

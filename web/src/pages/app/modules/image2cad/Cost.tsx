@@ -26,7 +26,7 @@ export function CostStrip({ e }: { e: Estimate }) {
       <span aria-hidden>·</span>
       <span>Model build: <b className="font-semibold text-text">{about(e.build)}</b></span>
       {e.unlimited ? <span>· No token limit on this workspace</span>
-        : <span>· You have <b className="font-semibold tabular-nums text-text">{e.balance}</b>{short && <> · <Link className="pointer-events-auto underline" to="/app/billing#tokens">Top up to read images</Link></>}</span>}
+        : <span>· You have <b className="font-semibold tabular-nums text-text">{e.balance?.toLocaleString("en-GB")}</b>{short && <> · <Link className="pointer-events-auto underline" to="/app/billing#tokens">Top up to read images</Link></>}</span>}
     </div>
   );
 }

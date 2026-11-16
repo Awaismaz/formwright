@@ -39,6 +39,7 @@ from aicad.drawing import worker as dworker
 from aicad.image2cad import InputError, cost, review, roundtrip, store, vision
 from aicad.image2cad.extract import extract
 from aicad.image2cad.sniff import MAX_PDF_BYTES, TYPES, validate
+from aicad.platform import metering
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
 from aicad.platform.deps import Ctx, verified_ctx
@@ -194,6 +195,8 @@ async def _read_task(d: Path, org_id: str, user_id: str, god_tokens: bool) -> No
                 if org is None:
                     return
                 e = cost.estimate(get_settings().data_dir)["read"]
+                # hard cap: the read stops before it could spend more than the workspace holds (AMI-03)
+                budget = None if god_tokens else max(0, org.token_balance) * metering.USD_PER_TOKEN
                 if not god_tokens and org.token_balance < e["high"]:  # scanned PDFs: known only after opening
                     store.update_meta(d, status="failed", step=None,
                                       error="This PDF is a scan, so AI vision has to read it. "
@@ -202,7 +205,7 @@ async def _read_task(d: Path, org_id: str, user_id: str, god_tokens: bool) -> No
             finally:
                 db.close()
             try:
-                read, usd = await vision.read_image(d, "preview.png")
+                read, usd = await vision.read_image(d, "preview.png", budget_usd=budget)
             except Exception:
                 log.exception("vision read failed")
                 store.update_meta(d, status="failed", step=None,

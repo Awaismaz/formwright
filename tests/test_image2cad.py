@@ -496,9 +496,11 @@ def test_api_image_goes_through_vision_and_is_metered(app_client: Any, monkeypat
     from test_platform import signup
 
     calls: list[str] = []
+    budgets: list[float | None] = []
 
-    async def fake_agent(folder: Path, image: str) -> tuple[str, float]:
+    async def fake_agent(folder: Path, image: str, budget_usd: float | None = None) -> tuple[str, float]:
         assert (folder / image).is_file()
+        budgets.append(budget_usd)
         calls.append(image)
         return VISION_ANSWER, 0.05
 
@@ -515,6 +517,8 @@ def test_api_image_goes_through_vision_and_is_metered(app_client: Any, monkeypat
     needs = {n["id"]: n for n in full["state"]["needs"]}
     assert needs["reference"]["answered"] is False and "kind_d2" in needs and "missing_0" in needs
     assert c.get("/api/auth/me").json()["org"]["token_balance"] == before - 5  # $0.05 at $0.01 per token
+    # the read is capped at what the workspace holds, so it can never take the balance below zero (AMI-03)
+    assert budgets == [pytest.approx(before * 0.01)]
 
 
 def test_catalog_marks_image2cad_live_without_claims() -> None:
@@ -647,10 +651,17 @@ def test_runs_start_only_when_the_balance_covers_the_estimate(app_client: Any, t
     p = db.get(Project, pid)
     ws = workspace_for(p)
     assert p.name == "Test plate"  # AMI-24: named from the title block
+    # the hand-off run finishes: the platform's run record carries its real cost, recorded once into the estimate
+    from sqlalchemy import select
+
+    from aicad.platform.models import AgentRun
+
+    run = db.scalar(select(AgentRun).where(AgentRun.project_id == pid))
+    assert run is not None and run.status == "running"
+    assert c.get("/api/m/image2cad/estimate").json()["build"]["runs"] == 0      # still running: nothing recorded
+    run.status, run.cost_usd, run.tokens = "ok", 3.1, 310
+    db.commit()
     db.close()
-    # the hand-off run finishes: its real cost is recorded once and moves the estimate
-    (ws / ".fw").mkdir(parents=True, exist_ok=True)
-    (ws / ".fw" / "chat.jsonl").write_text(json.dumps({"type": "result", "cost_est_usd": 3.1}) + "\n", encoding="utf-8")
     e = c.get("/api/m/image2cad/estimate").json()["build"]
     assert (e["tokens"], e["high"], e["runs"]) == (293, 310, 1)
     assert c.get("/api/m/image2cad/estimate").json()["build"]["runs"] == 1  # settled once
@@ -733,3 +744,12 @@ def test_roundtrip_compare_hand_cases(formwright_pdf: Path) -> None:
     # inches: 3.937 in = 99.9998 mm (within the sheet's 0.01 mm), 0.315 in = 8.001 mm
     inch = roundtrip.compare([{"id": "a", "label": "3.937"}, {"id": "b", "label": "4X Ø.315 THRU"}], measured, "in")
     assert [r["status"] for r in inch["rows"]] == ["match", "match"] and inch["ok"]
+
+
+def test_long_vision_texts_end_at_a_word() -> None:
+    from aicad.image2cad.vision import _s
+
+    t = "ISO projection symbol in the title block PROJECTION field: concentric circles on the left, truncated cone outline"
+    assert _s(t, 200) == t
+    out = _s(t, 80)
+    assert len(out) <= 80 and out.endswith("…") and t.startswith(out[:-1]) and not out[:-1].endswith("concen")
