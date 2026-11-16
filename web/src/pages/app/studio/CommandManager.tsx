@@ -95,7 +95,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
         {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
         {TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
-          <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }}
+          <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }} data-tour={t === "Make" ? "make" : undefined}
             className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
         <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
           {right}

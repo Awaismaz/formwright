@@ -161,7 +161,7 @@ def _notify_read(user_id: str, d: Path) -> None:
     try:
         meta = store.read_json(d, "meta.json") or {}
         notify(db, user_id, f"{meta.get('name', 'Your image')} is read",
-               "The values are ready to review before modelling.", "/app/modules/image2cad")
+               "The values are ready to review before modelling.", f"/app/modules/image2cad?upload={meta.get('id', '')}")
         db.commit()
     finally:
         db.close()

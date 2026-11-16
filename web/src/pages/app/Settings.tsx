@@ -4,7 +4,7 @@ import { KeyRound, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { canManage, useSession } from "@/lib/session";
 import { Badge, Button, Card, Field, Input, PageHeader, Tab, TabList, TabPanel, Tabs, Toggle } from "@/components/ui";
-import { cx } from "@/lib/format";
+import { cx, PAGE } from "@/lib/format";
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -31,7 +31,7 @@ export default function Settings() {
   const setPref = (p: Record<string, unknown>) => run("pref", () => api.patch("/api/auth/profile", { preferences: p }), "Preferences saved");
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className={PAGE}>
       <PageHeader title="Settings" />
       <Tabs defaultValue="profile">
         <TabList className="mb-6"><Tab value="profile">Profile</Tab><Tab value="prefs">Preferences</Tab><Tab value="security">Security</Tab>{org && <Tab value="workspace">Workspace</Tab>}<Tab value="api">API & integrations</Tab></TabList>
@@ -49,12 +49,12 @@ export default function Settings() {
                 <button key={v} onClick={() => setPref({ theme: v })} className={cx("flex flex-col items-center gap-2 rounded-lg border p-3 text-sm", (prefs.theme ?? "light") === v ? "border-primary bg-primary-soft text-primary" : "border-border")}><I className="h-5 w-5" />{l}</button>))}
             </div>
           </Section>
-          <Section title="Units" desc="Default units for new designs and the status bar.">
+          <Section title="Units" desc="Sizes on project cards, the catalogue and size search; default units for new designs.">
             <div className="inline-flex rounded-lg border border-border p-1">{(["mm", "in"] as const).map(u =>
               <button key={u} onClick={() => setPref({ units: u })} className={cx("rounded px-4 py-1.5 text-sm", (prefs.units ?? "mm") === u ? "bg-primary text-white" : "text-muted")}>{u === "mm" ? "Millimetres" : "Inches"}</button>)}</div>
           </Section>
           <Section title="Notifications">
-            <div className="flex items-center justify-between"><div><div className="text-sm font-medium">Email me about billing & usage</div><div className="text-xs text-muted">Low tokens, receipts, failed payments</div></div>
+            <div className="flex items-center justify-between"><div><div className="text-sm font-medium">Email me about billing & usage</div><div className="text-xs text-muted">Failed payments and receipts. Run results and teammates' changes arrive in the bell.</div></div>
               <Toggle checked={prefs.notifications_email !== false} onChange={v => setPref({ notifications_email: v })} /></div>
           </Section>
         </TabPanel>

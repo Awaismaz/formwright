@@ -18,6 +18,7 @@ import Team from "@/pages/app/Team";
 import Settings from "@/pages/app/Settings";
 import Help from "@/pages/app/Help";
 import NotFound from "@/pages/NotFound";
+import NotFoundPanel from "@/components/NotFoundPanel";
 
 const ProjectStudio = lazy(() => import("@/pages/app/ProjectStudio"));
 const Admin = lazy(() => import("@/pages/admin/Admin"));
@@ -77,6 +78,7 @@ export default function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="help" element={<Help />} />
           <Route path="admin/*" element={<Admin />} />
+          <Route path="*" element={<NotFoundPanel />} />
         </Route>
         <Route path="*" element={<NotFound />} />
       </Routes>

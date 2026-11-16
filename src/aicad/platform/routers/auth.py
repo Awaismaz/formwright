@@ -226,6 +226,17 @@ def resend(request: Request, ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
     return {"ok": True}
 
 
+@router.post("/resend-verification-public")
+def resend_public(body: EmailIn, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """New confirmation link for someone who is signed out (an expired link). Never reveals whether an account exists."""
+    _rate_limit(f"resend-public:{client_ip(request)}")
+    user = db.scalar(select(User).where(User.email == normalize_email(body.email)))
+    if user is not None and not user.disabled and user.email_verified_at is None:
+        send_verification(db, user)
+        db.commit()
+    return {"ok": True}
+
+
 @router.get("/dev-mailbox")
 def dev_mailbox(ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
     """Development only: show the signed-in user's latest emails, so the journey works without SMTP."""

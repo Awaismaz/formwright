@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -87,11 +87,11 @@ export function Signup() {
     await api.post("/api/auth/signup", { name, email, password });
     try { if (plan) sessionStorage.setItem("fw_intended_plan", plan); } catch { /* ignore */ }
     await refresh();
-    toast.success("Account created — check your inbox to verify your email.");
-    nav(next && next.startsWith("/invite") ? next : "/verify-email", { replace: true });
+    toast.success("Account created. We sent a confirmation link to your email; you can start right away.");
+    nav(next && next.startsWith("/invite") ? next : "/onboarding", { replace: true });
   }); };
   return (
-    <AuthLayout title="Start your free trial" subtitle="300 tokens and 14 days of Design Studio. No credit card."
+    <AuthLayout title="Start your free trial" subtitle="1,000 tokens and every module for 14 days. No credit card."
       footer={<>Already have an account? <Link to={`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="link font-medium">Sign in</Link></>}>
       <form onSubmit={submit} className="space-y-4">
         <ErrorBox error={error} />
@@ -128,12 +128,32 @@ export function ForgotPassword() {
   );
 }
 
+/** A dead link (missing, expired or used) gets a way forward, not a disabled form. */
+export function LinkProblem({ title, body, action }: { title: string; body: string; action: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center rounded-xl border border-border bg-panel2 px-6 py-8 text-center">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-warning/10 text-warning"><LinkIcon className="h-6 w-6" /></div>
+      <div className="mt-4 font-medium">{title}</div>
+      <p className="mt-1 text-sm text-muted">{body}</p>
+      <div className="mt-5">{action}</div>
+    </div>
+  );
+}
+
 export function ResetPassword() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [password, setPassword] = useState("");
   const { busy, error, run } = useSubmit();
   const token = params.get("token") ?? "";
+  const dead = !token || /invalid or has expired/i.test(error ?? "");
+  if (dead) return (
+    <AuthLayout title="Reset your password" footer={<Link to="/login" className="link">Back to sign in</Link>}>
+      <LinkProblem title={token ? "This reset link has expired or was already used" : "This page needs the link from your reset email"}
+        body="Reset links work once and expire after 2 hours. Ask for a new one; it arrives in a minute."
+        action={<Link to="/forgot-password"><Button>Send a new link</Button></Link>} />
+    </AuthLayout>
+  );
   return (
     <AuthLayout title="Choose a new password" footer={<Link to="/login" className="link">Back to sign in</Link>}>
       <form onSubmit={e => { e.preventDefault(); run(async () => {
@@ -142,7 +162,7 @@ export function ResetPassword() {
       }); }} className="space-y-4">
         <ErrorBox error={error} />
         <Field label="New password" hint="At least 10 characters, with letters and numbers."><PasswordInput value={password} onChange={setPassword} autoComplete="new-password" /></Field>
-        <Button type="submit" className="w-full" size="lg" loading={busy} disabled={!token}>Update password</Button>
+        <Button type="submit" className="w-full" size="lg" loading={busy}>Update password</Button>
       </form>
     </AuthLayout>
   );

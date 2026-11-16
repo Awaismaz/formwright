@@ -30,3 +30,14 @@ export function initials(name: string) {
 }
 
 export const cx = (...a: (string | false | null | undefined)[]) => a.filter(Boolean).join(" ");
+
+/** A part envelope (mm) in the user's units: "120 × 80 × 10 mm" or "4.72 × 3.15 × 0.39 in". */
+export function size(bbox: number[] | undefined | null, units?: "mm" | "in") {
+  if (!bbox?.length) return "";
+  return units === "in"
+    ? `${bbox.map(n => (n / 25.4).toFixed(2).replace(/\.?0+$/, "")).join(" × ")} in`
+    : `${bbox.map(n => Math.round(n)).join(" × ")} mm`;
+}
+
+/** Page width shared by every platform page, so titles never jump sideways between nav items. */
+export const PAGE = "mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8";
