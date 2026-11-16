@@ -130,6 +130,31 @@ _SCRUB = [
 _Q_BLOCK = re.compile(r"```fw-questions\s*\n(.*?)\n?```", re.DOTALL)
 
 
+_R_BLOCK = re.compile(r"```fw-recognition\s*\n(.*?)\n?```", re.DOTALL)
+
+
+def extract_recognition(text: str) -> tuple[str, dict[str, Any] | None]:
+    """Pull the agent's AI feature-recognition result (```fw-recognition JSON) out of its message."""
+    import json as _json
+
+    found: dict[str, Any] | None = None
+    for m in _R_BLOCK.finditer(text):
+        try:
+            raw = _json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(raw, dict):
+            comp = raw.get("component") if isinstance(raw.get("component"), dict) else None
+            feats = [f for f in (raw.get("features") or []) if isinstance(f, dict) and f.get("name")][:200]
+            found = {"component": {k: scrub(str(v))[:300] for k, v in (comp or {}).items()} if comp else None,
+                     "features": [{"id": str(f.get("id", ""))[:40], "name": scrub(str(f["name"]))[:160],
+                                   "kind": str(f.get("kind", ""))[:60], "note": scrub(str(f.get("note", "")))[:400],
+                                   "params": {str(k)[:40]: v for k, v in (f.get("params") or {}).items()
+                                              if isinstance(v, (int, float, str, bool))} if isinstance(f.get("params"), dict) else {}}
+                                  for f in feats]}
+    return _R_BLOCK.sub("", text).strip(), found
+
+
 def extract_questions(text: str) -> tuple[str, list[dict[str, Any]]]:
     """Pull the agent's structured clarifying questions (a fenced ```fw-questions JSON block) out of its message.
     Returns (text without the block, validated questions). Malformed blocks are dropped from the text, never shown raw."""
@@ -289,7 +314,10 @@ class AgentSession:
         elif isinstance(msg, AssistantMessage):
             for b in msg.content:
                 if isinstance(b, TextBlock) and b.text.strip():
-                    text, questions = extract_questions(b.text)
+                    text, recog = extract_recognition(b.text)
+                    if recog is not None:
+                        self._save_recognition(recog)
+                    text, questions = extract_questions(text)
                     if text.strip():
                         self.publish({"type": "text", "text": scrub(text)})
                     if questions:
@@ -317,6 +345,18 @@ class AgentSession:
                           "duration_s": round(msg.duration_ms / 1000, 1),
                           "cost_est_usd": msg.total_cost_usd, **self.turn_meta})
             self.turn_meta = {}
+
+    def _save_recognition(self, recog: dict[str, Any]) -> None:
+        import json as _json
+
+        try:
+            st = _json.loads((self.out_dir / "status.json").read_text(encoding="utf-8"))
+            recog["build_id"] = st.get("build_id")
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            (self._state_dir / "recognition_ai.json").write_text(_json.dumps(recog), encoding="utf-8")
+            self.publish({"type": "recognition", "component": (recog.get("component") or {}).get("name")})
+        except (OSError, ValueError):
+            pass
 
     async def interrupt(self) -> None:
         if self.client and self.busy:

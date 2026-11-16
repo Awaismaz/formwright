@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PenLine, Scale, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { BuildStatus, Catalog, ManualFeature, Project } from "@/lib/types";
-import { num } from "@/lib/format";
+import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
+import { cx, num } from "@/lib/format";
 import { Input, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import Viewer3D, { type Tool, type ViewerApi } from "@/components/Viewer3D";
@@ -19,7 +19,7 @@ import CommandManager, { type Command } from "./studio/CommandManager";
 import SketchEditor from "./studio/SketchEditor";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
-import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel } from "./studio/Panels";
+import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
 
@@ -43,13 +43,19 @@ export default function ProjectStudio() {
   const [compare, setCompare] = useState<CompareState | null>(null);
   const [tab, setTab] = useState("tree");
   const [manualBusy, setManualBusy] = useState(false);
+  const [leftOpen, setLeftOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_left") !== "0"; } catch { return true; } });
+  const [chatOpen, setChatOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_chat") !== "0"; } catch { return true; } });
+  const setLeftOpen = (v: boolean) => { setLeftOpenS(v); try { localStorage.setItem("fw_studio_left", v ? "1" : "0"); } catch { /* */ } };
+  const setChatOpen = (v: boolean) => { setChatOpenS(v); try { localStorage.setItem("fw_studio_chat", v ? "1" : "0"); } catch { /* */ } };
+  const [recognizing, setRecognizing] = useState(false);
 
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
     queryFn: () => fetch(`/api/projects/${id}/files/status.json`).then(r => (r.ok ? (r.json() as Promise<BuildStatus>) : null)) });
   const manual = useQuery({ queryKey: ["manual", id, status.data?.build_id], enabled: hasBuilds, queryFn: () => api.get<{ features: ManualFeature[] }>(`/api/projects/${id}/manual`) });
-  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const recog = useQuery({ queryKey: ["recognition", id, status.data?.build_id], enabled: hasBuilds,
+    queryFn: () => api.get<{ recognition: Recognition | null }>(`/api/projects/${id}/recognition`) });
   const p = project.data;
   const st = status.data ?? undefined;
 
@@ -62,10 +68,9 @@ export default function ProjectStudio() {
   useEffect(() => { if (st?.build_id) setCompare(null); }, [st?.build_id]);
 
   const refresh = () => {
-    for (const k of ["status", "project", "manual", "revisions", "params"]) qc.invalidateQueries({ queryKey: [k, id] });
+    for (const k of ["status", "project", "manual", "revisions", "params", "recognition"]) qc.invalidateQueries({ queryKey: [k, id] });
     qc.invalidateQueries({ queryKey: ["me"] }); qc.invalidateQueries({ queryKey: ["projects"] });
   };
-  const previewMods = useMemo(() => (catalog.data?.modules ?? []).filter(m => ["drawings", "manufacturing", "engineering"].includes(m.code)), [catalog.data]);
   const selectKinds = useMemo<Pick["kind"][] | undefined>(() => (pm ? selectKindsFor(pm.op) : sk?.phase === "pick" ? ["face"] : undefined), [pm, sk]);
 
   const openSketchOn = (faceId: number) => {
@@ -108,6 +113,18 @@ export default function ProjectStudio() {
     catch (e) { if (prev) qc.setQueryData(key, prev); toast.error(e instanceof ApiError ? e.message : "Failed"); }
     finally { setManualBusy(false); }
   };
+  /** Recognize: snap to the iso view, run the exact geometric pass (instant), then let the AI classify it. */
+  const recognize = async () => {
+    setRecognizing(true); setTab("tree"); viewerApi.current?.setView("Iso");
+    try {
+      const r = await api.post<{ recognition: Recognition }>(`/api/projects/${id}/recognition/run`);
+      qc.setQueryData(["recognition", id, status.data?.build_id], r);
+      if (!chatOpen) setChatOpen(true);
+      try { await api.post(`/api/projects/${id}/recognition/ai`); toast.success("Geometry analysed — the design agent is classifying the features (see chat)"); }
+      catch (e) { toast.warning(e instanceof ApiError ? `Geometric recognition done. AI step unavailable: ${e.message}` : "Geometric recognition done; AI step unavailable"); }
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Recognition failed"); }
+    finally { setRecognizing(false); }
+  };
   const onCommand = (c: Command) => {
     if (c.kind === "feature") openPm(c.op, null, c.preset);
     else if (c.kind === "sketch") openPm("sketch");
@@ -133,32 +150,54 @@ export default function ProjectStudio() {
     ["params", <SlidersHorizontal className="h-3.5 w-3.5" />, "Params"], ["mass", <Scale className="h-3.5 w-3.5" />, "Mass"],
     ["revs", <History className="h-3.5 w-3.5" />, "Revisions"], ["files", <Download className="h-3.5 w-3.5" />, "Files"], ["src", <FileCode2 className="h-3.5 w-3.5" />, "Source"]];
 
+  const sidePanel = (<>
+          {pm ? (
+            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} onBusy={setManualBusy}
+              onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); refresh(); setTool("orbit"); }}
+              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
+          ) : (
+            <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+              <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]">
+                {tabs.map(([v, icon, label]) => <Tab key={v} compact value={v} title={label}>{icon}{tab === v && label}</Tab>)}
+              </TabList>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
+                  recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)}
+                  onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
+                  onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
+                  onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
+                <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
+                <TabPanel value="params"><ParamsPanel project={p} status={st} onChanged={refresh} /></TabPanel>
+                <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
+                <TabPanel value="revs"><RevisionsPanel project={p} onChanged={refresh} version={st?.build_id} onCompare={runCompare} comparing={compare?.base ?? null} /></TabPanel>
+                <TabPanel value="files"><FilesPanel project={p} status={st} /></TabPanel>
+                <TabPanel value="src"><SourcePanel project={p} version={st?.build_id} /></TabPanel>
+              </div>
+            </Tabs>)}
+</>);
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
-        <Link to="/app/projects" className="rounded p-1.5 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link>
-        {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-8 w-64"
-          onBlur={async () => { setEditing(false); if (name.trim() && name !== p.name) { await api.patch(`/api/projects/${p.id}`, { name }); refresh(); } }}
-          onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
-          : <button onClick={() => setEditing(true)} className="truncate rounded px-1.5 py-1 text-[15px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
-        <ProjectStatus p={p} />
-        <nav className="ml-4 hidden items-center gap-1 lg:flex" data-tour="studio-tabs">
-          <span className="inline-flex items-center gap-1.5 rounded bg-primary-soft px-2.5 py-1 text-[13px] font-medium text-primary"><Icon name="box" className="h-3.5 w-3.5" />Design</span>
-          {previewMods.map(m => (
-            <Link key={m.code} to={`/app/modules/${m.code}?project=${p.id}`} className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[13px] text-muted hover:bg-text/5 hover:text-text">
-              <Icon name={m.icon} className="h-3.5 w-3.5" />{m.name.replace(" Studio", "").replace(" Advisor", "")}<span className="rounded bg-accent/12 px-1 text-[9px] font-bold uppercase text-accent">Prev</span>
-            </Link>))}
-        </nav>
-        <div className="ml-auto flex items-center gap-2">
-          <Tip content="Studio tour" side="bottom"><button onClick={() => runTour(STUDIO_TOUR, "studio")} className="rounded p-1.5 text-muted hover:bg-text/5"><CircleHelp className="h-4 w-4" /></button></Tip>
-          {fp && <a href={`/api/projects/${p.id}/files/part.step`} className="inline-flex h-8 items-center gap-1.5 rounded bg-primary px-3 text-[13px] font-medium text-white hover:brightness-110"><Download className="h-4 w-4" />STEP</a>}
-        </div>
-      </div>
+      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool}
+        left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
+          <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className="rounded p-1 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
+          {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"
+            onBlur={async () => { setEditing(false); if (name.trim() && name !== p.name) { await api.patch(`/api/projects/${p.id}`, { name }); refresh(); } }}
+            onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
+            : <button onClick={() => setEditing(true)} className="max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
+          <ProjectStatus p={p} />
+        </div>}
+        right={<>
+          <Tip content={leftOpen ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => setLeftOpen(!leftOpen)} className={cx("rounded p-1 hover:bg-text/5", leftOpen ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>
+          <Tip content={chatOpen ? "Hide design agent" : "Show design agent"} side="bottom"><button onClick={() => setChatOpen(!chatOpen)} className={cx("rounded p-1 hover:bg-text/5", chatOpen ? "text-primary" : "text-muted")} aria-label="Toggle design agent"><PanelRight className="h-4 w-4" /></button></Tip>
+          <Tip content="Studio tour" side="bottom"><button onClick={() => runTour(STUDIO_TOUR, "studio")} className="rounded p-1 text-muted hover:bg-text/5"><CircleHelp className="h-4 w-4" /></button></Tip>
+          {fp && <Tip content="Download STEP (more formats in Files)" side="bottom"><a href={`/api/projects/${p.id}/files/part.step`} className="ml-1 inline-flex h-7 items-center gap-1.5 rounded bg-primary px-2.5 text-[12.5px] font-medium text-white hover:brightness-110"><Download className="h-3.5 w-3.5" />STEP</a></Tip>}
+        </>} />
 
-      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} />
-
-      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[370px_minmax(0,1fr)_340px] max-xl:grid-cols-[330px_minmax(0,1fr)] max-md:grid-cols-1">
-        <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }} />
+      <div className="grid min-h-0 min-w-0 flex-1 max-md:!grid-cols-1" style={{ gridTemplateColumns: `${leftOpen ? "330px " : ""}minmax(0,1fr)${chatOpen ? " 370px" : ""}` }}>
+        {leftOpen && <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-panel">
+          {sidePanel}
+        </aside>}
         <div className="relative min-h-[320px] min-w-0 overflow-hidden">
           <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/topo.json` : null} version={fp ? st?.build_id : `keep`}
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
@@ -195,31 +234,7 @@ export default function ProjectStudio() {
                 <div key={k} className="flex justify-between font-mono text-[11px]"><span>{k}</span><span>{String(v.from)} → {String(v.to)}</span></div>)}</div>}
             </div>)}
         </div>
-        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-panel max-xl:hidden">
-          {pm ? (
-            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} onBusy={setManualBusy}
-              onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); refresh(); setTool("orbit"); }}
-              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
-          ) : (
-            <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-              <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]">
-                {tabs.map(([v, icon, label]) => <Tab key={v} compact value={v} title={label}>{icon}{tab === v && label}</Tab>)}
-              </TabList>
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
-                  onAdd={op => openPm(op)} onEdit={f => openPm(f.op, f)}
-                  onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
-                  onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
-                  onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
-                <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
-                <TabPanel value="params"><ParamsPanel project={p} status={st} onChanged={refresh} /></TabPanel>
-                <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
-                <TabPanel value="revs"><RevisionsPanel project={p} onChanged={refresh} version={st?.build_id} onCompare={runCompare} comparing={compare?.base ?? null} /></TabPanel>
-                <TabPanel value="files"><FilesPanel project={p} status={st} /></TabPanel>
-                <TabPanel value="src"><SourcePanel project={p} version={st?.build_id} /></TabPanel>
-              </div>
-            </Tabs>)}
-        </aside>
+        {chatOpen && <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }} />}
       </div>
 
       {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}

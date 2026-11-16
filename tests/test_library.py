@@ -111,34 +111,55 @@ def test_toolbox_insert_creates_verified_editable_model(app_client: TestClient) 
     assert bad.status_code == 422
 
 
-def test_step_import_recognition_and_parametric_draft(app_client: TestClient) -> None:  # noqa: F811
+def test_step_import_is_exact_body_with_editable_recognised_features(app_client: TestClient) -> None:  # noqa: F811
     c = app_client
     signup(c, "step@x.com")
     pid = c.post("/api/projects", json={"name": "Imported plate"}).json()["id"]
     assert c.post(f"/api/projects/{pid}/import-step", json={"filename": "x.step", "data_b64": base64.b64encode(b"hello").decode()}).status_code == 415
-    data = _plate_step()
-    r = c.post(f"/api/projects/{pid}/import-step", json={"filename": "plate.step", "data_b64": base64.b64encode(data).decode()})
+    r = c.post(f"/api/projects/{pid}/import-step", json={"filename": "plate.step", "data_b64": base64.b64encode(_plate_step()).decode()})
     assert r.status_code == 200, r.text
     rec = r.json()["recognition"]
     assert any("2 × 2 grid" in line for line in rec["summary"])
     st = c.get(f"/api/projects/{pid}/files/status.json").json()
-    assert st["imported"] and st["fingerprint"]["volume"] == pytest.approx(_plate().volume, rel=1e-6)
-    assert c.get(f"/api/projects/{pid}/recognition").json()["stock"]["kind"] == "prismatic"
-    # manual feature on the imported (history-less) body
-    top = {"point": [5, 5, 10], "normal": [0, 0, 1]}
-    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "hole", "name": "Extra hole", "point": [30, 30, 10], "normal": [0, 0, 1], "d": 5, "depth": None}})
-    assert r.status_code == 200, r.text
-    _ = top
-    # deterministic parametric draft, verified against the original by CHK-09
-    r = c.post(f"/api/projects/{pid}/recognition/rebuild", json={"mode": "draft"})
+    # exact solid: identical volume, all gating checks pass, tree = recognised features + "Imported blank"
+    assert st["ok"] and st["imported"] and st["fingerprint"]["volume"] == pytest.approx(_plate().volume, rel=1e-9)
+    names = [f["name"] for f in st["features"]]
+    assert "Imported blank" in names and any("grid" in n for n in names) and any("PCD" in n for n in names)
+    topo = c.get(f"/api/projects/{pid}/files/topo.json").json()
+    owners = {f["feature"] for f in topo["faces"]}
+    assert "Imported blank" in owners and any(o and "grid" in o for o in owners)  # holes highlight as their own feature
+    editable = st["editable_params"]
+    assert {"HP1_D", "HP1_PCD", "HP2_D"} <= set(editable) and editable["HP2_D"] == pytest.approx(6.6)
+    # edit a recognised feature on the exact body: grid holes 6.6 -> 8.0 (fill and recut)
+    r = c.post(f"/api/projects/{pid}/params", json={"values": {"HP2_D": 8.0, "HP1_PCD": 34}})
     assert r.status_code == 200, r.text
     st = c.get(f"/api/projects/{pid}/files/status.json").json()
-    chk9 = next(x for x in st["checks"] if x["id"] == "CHK-09")
-    assert chk9["passed"] and chk9["detail"]["rel_err"] < 1e-5  # base vs original; manual hole kept on top
-    assert st["manual_features"] == 1
-    assert {"STOCK_X", "STOCK_Y", "STOCK_Z", "HOLE1_D", "HOLE2_D"} <= set(st["editable_params"])
-    prompt = c.post(f"/api/projects/{pid}/recognition/rebuild", json={"mode": "prompt"}).json()["prompt"]
-    assert "REFERENCE_STEP" in prompt and "pitch circle" in prompt
+    expect = _plate().volume - 4 * math.pi / 4 * (8.0 ** 2 - 6.6 ** 2) * 10
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(expect, rel=1e-6)
+    # manual feature on the imported body still works
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {"op": "hole", "name": "Extra hole", "point": [30, 30, 10], "normal": [0, 0, 1], "d": 5, "depth": None}})
+    assert r.status_code == 200, r.text
+    # geometric recognition of the current model (face ids follow the viewer)
+    rr = c.post(f"/api/projects/{pid}/recognition/run").json()["recognition"]
+    assert rr["build_id"] == c.get(f"/api/projects/{pid}/files/status.json").json()["build_id"]
+    assert c.get(f"/api/projects/{pid}/recognition").json()["recognition"]["faces"] == rr["faces"]
+
+
+def test_gear_is_recognised_as_a_component() -> None:
+    gear, _ = toolbox.build("spur_gear", M=3, Z=40, B=10, BORE=20)
+    rec = recognize(gear)
+    assert rec["component"]["kind"] == "spur_gear"
+    p = rec["component"]["params"]
+    assert p["teeth"] == 40 and p["module"] == 3.0 and p["tip_d"] == pytest.approx(126.0) and p["bore_d"] == pytest.approx(20.0)
+    assert "unrecognised" not in {f["id"] for f in rec["features"]}
+
+
+def test_agent_recognition_block_is_parsed() -> None:
+    from aicad.agent.session import extract_recognition
+
+    t = 'It is a gear.\n```fw-recognition\n{"component": {"name": "Spur gear", "kind": "gear", "confidence": "high"}, "features": [{"id": "teeth", "name": "40 involute teeth", "params": {"module": 3}}]}\n```'
+    clean, r = extract_recognition(t)
+    assert clean == "It is a gear." and r["component"]["name"] == "Spur gear" and r["features"][0]["params"] == {"module": 3}
 
 
 @pytest.mark.parametrize("clockwise", [False, True])

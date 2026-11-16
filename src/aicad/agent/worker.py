@@ -69,6 +69,13 @@ def serve() -> None:
                 rc = runner.main(Path(req["script"]), Path(req["out"]), determinism=bool(req.get("determinism", True)),
                                  fast=bool(req.get("fast", False)))
                 resp: dict[str, Any] = {"ok": True, "rc": rc}
+            elif req["op"] == "recognize":
+                from aicad.recognize import recognize
+
+                ns = runner._exec(Path(req["script"]), use_cache=True)
+                rec = recognize(ns["result"])
+                Path(req["out"]).write_text(json.dumps(rec), encoding="utf-8")
+                resp = {"ok": True, "rc": 0}
             elif req["op"] == "finalize":
                 resp = {"ok": True, "rc": runner.finalize(Path(req["out"]))}
             elif req["op"] == "diff":
@@ -154,6 +161,10 @@ async def build(key: str, script: Path, out: Path, determinism: bool = True, tim
     out.mkdir(parents=True, exist_ok=True)
     return await get_worker(key).request({"op": "build", "script": str(script), "out": str(out),
                                           "determinism": determinism, "fast": fast}, timeout)
+
+
+async def recognize(key: str, script: Path, out: Path, timeout: float = 300) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "recognize", "script": str(script), "out": str(out)}, timeout)
 
 
 async def finalize(key: str, out: Path, timeout: float = 180) -> dict[str, Any]:

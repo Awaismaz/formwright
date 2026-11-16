@@ -123,7 +123,7 @@ def export_topology(shape: Shape, path: Path, feature_log: list[dict[str, Any]] 
     # face provenance: earliest logged feature whose snapshot contains the face key
     first_feature: dict[tuple[Any, ...], str] = {}
     if feature_log:
-        for entry in feature_log:
+        for entry in sorted(feature_log, key=lambda e: e.get("kind") == "blank"):  # blank = residual, lowest priority
             for k in entry["keys"]:
                 first_feature.setdefault(k, entry["name"])
 

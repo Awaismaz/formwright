@@ -13,6 +13,9 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   orthographic views, sketch relations, Toolbox).
 - Does not want backend internals visible to users (no "Reading model.py"); plain engineering language only.
 - Wants everything (code, plans, feature list, context) in the GitHub repo and docs updated every session.
+- Imported/foreign geometry must stay EXACT and editable ("Imported blank" + resolved features); recognition should be
+  AI-driven (look at the part), not a brittle geometric recogniser that drops faces. Prefers compact UI with
+  collapsible panels (feature panel left, agent right, collapsible command bar, no wasted header space).
 
 ## Standing decisions (details in docs/DECISIONS.md)
 - Name/brand: **Formwright** (trademark unchecked, PD-01). SOLIDWORKS-like blue/grey theme (docs/BRAND.md).

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, Pencil, Plus, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, Pencil, ScanSearch, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
@@ -157,30 +157,80 @@ export function MassPanel({ project, status, showCom, onShowCom }: { project: Pr
 }
 
 /* ------------------------------------------------------------------ feature tree */
-export function TreePanel({ status, topo, manual, onHover, onAdd, onEdit, onToggle, onMove, onDelete, busy }: {
+export interface RecFeature { id: string; name: string; kind: string; count?: number; params: Record<string, unknown>; faces: number[] }
+export interface Recognition {
+  build_id?: number; faces: number; summary: string[]; features: RecFeature[];
+  component: { kind: string; name: string; params: Record<string, unknown> } | null;
+  ai?: { component: { name?: string; kind?: string; standard?: string; confidence?: string; description?: string } | null;
+         features: { id: string; name: string; kind: string; note: string; params: Record<string, unknown> }[] };
+}
+
+const fmtParams = (p: Record<string, unknown>) => Object.entries(p).filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
+  .slice(0, 4).map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? +v.toFixed(3) : String(v)}`).join(" · ");
+
+export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
-  onHover: (faces: number[]) => void; onAdd: (op: ManualFeature["op"]) => void; onEdit: (f: ManualFeature) => void;
+  onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
+  recognition: Recognition | null; onRecognize: () => void; recognizing: boolean;
 }) {
-  const agentFeats = (status?.features ?? []).filter(f => f.kind !== "manual");
+  const modelFeats = (status?.features ?? []).filter(f => f.kind !== "manual" && f.kind !== "edit");
   const facesOf = (name: string) => topo ? topo.faces.filter(f => f.feature === name).map(f => f.id) : [];
-  const ops: [ManualFeature["op"], string, string][] = [["fillet", "Fillet", "Select edges"], ["chamfer", "Chamfer", "Select edges"], ["hole", "Hole", "Select a planar face"], ["extrude", "Extrude / Cut", "Select a planar face"]];
+  const ai = recognition?.ai;
+  const aiName = (id: string) => ai?.features.find(f => f.id === id);
+  const comp = ai?.component?.name ? ai.component : recognition?.component;
+  const recFeats = (recognition?.features ?? []).filter(f => f.kind !== "body");
+  const extraAi = (ai?.features ?? []).filter(f => !recognition?.features.some(r => r.id === f.id));
+  const imported = !!(status as { imported?: boolean } | undefined)?.imported;
   return (
     <div className="p-3 text-[13px]">
-      <div className="label mb-1.5">Add feature (no AI)</div>
-      <div className="grid grid-cols-2 gap-1.5">
-        {ops.map(([op, l, hint]) => <Tip key={op} content={hint} side="bottom"><Button size="sm" variant="secondary" disabled={busy || !status?.fingerprint} icon={<Plus className="h-3.5 w-3.5" />} onClick={() => onAdd(op)}>{l}</Button></Tip>)}
+      <div className="mb-2 flex items-center gap-2">
+        <span className="label flex-1">Feature tree</span>
+        <Tip content="AI looks at standard views and the exact geometry, then classifies the part and its features" side="bottom">
+          <Button size="sm" variant="secondary" loading={recognizing} disabled={busy || !status?.fingerprint} icon={<Sparkles className="h-3.5 w-3.5 text-accent" />} onClick={onRecognize}>Recognize features</Button>
+        </Tip>
       </div>
-      <div className="label mb-1 mt-4 flex items-center gap-1"><Bot className="h-3.5 w-3.5" />Designed by agent</div>
-      {agentFeats.length === 0 ? <p className="text-[12px] text-muted">No named features recorded for this model yet.</p> :
-        <ul className="space-y-0.5">{agentFeats.map((f, i) => (
-          <li key={i} onMouseEnter={() => onHover(facesOf(f.name))} onMouseLeave={() => onHover([])}
-            className="flex items-center gap-2 rounded px-2 py-1 hover:bg-primary-soft">
-            <span className="text-[11px] text-muted">{i + 1}</span><span className="flex-1 truncate">{f.name}</span>
-            <span className="text-[10.5px] text-muted">{facesOf(f.name).length} faces</span>
-          </li>))}</ul>}
+      {modelFeats.length === 0 ? <p className="text-[12px] text-muted">No named features recorded for this model yet — use <b>Recognize features</b>.</p> :
+        <ul className="space-y-0.5">{modelFeats.map((f, i) => {
+          const blank = f.kind === "blank";
+          const n = facesOf(f.name).length;
+          return (
+            <li key={i} onMouseEnter={() => onHover(facesOf(f.name))} onMouseLeave={() => onHover([])}
+              className="flex items-center gap-2 rounded px-2 py-1 hover:bg-primary-soft">
+              {blank ? <Box className="h-3.5 w-3.5 shrink-0 text-muted" /> : imported ? <ScanSearch className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Bot className="h-3.5 w-3.5 shrink-0 text-muted" />}
+              <span className={cx("flex-1 truncate", blank && "italic")} title={blank ? "Exact imported solid. Geometry not resolved into features stays here; it can still be edited by the design agent or with manual features." : fmtParams(f.params)}>
+                {aiName(f.name)?.name ?? f.name}</span>
+              <span className="text-[10.5px] text-muted">{n} faces</span>
+            </li>);
+        })}</ul>}
+
+      {recognition && (
+        <div className="mt-4 rounded-lg border border-border bg-panel2/60 p-2.5">
+          <div className="label mb-1 flex items-center gap-1"><ScanSearch className="h-3.5 w-3.5" />Recognized {ai ? <Badge tone="primary" className="ml-1">AI</Badge> : <Badge className="ml-1">geometry</Badge>}</div>
+          {comp?.name && <div className="mb-1.5 rounded bg-panel px-2 py-1.5">
+            <div className="font-medium">{comp.name}</div>
+            {ai?.component?.description && <div className="text-[11.5px] text-muted">{ai.component.description}</div>}
+            {ai?.component?.confidence && <div className="text-[11px] text-muted">Confidence: {ai.component.confidence}{ai.component.standard ? ` · ${ai.component.standard}` : ""}</div>}
+          </div>}
+          <ul className="space-y-0.5">
+            {recFeats.map(f => {
+              const a = aiName(f.id);
+              const unrec = f.kind === "unrecognised";
+              return (
+                <li key={f.id} onMouseEnter={() => onHover(f.faces)} onMouseLeave={() => onHover([])} className="rounded px-2 py-1 hover:bg-primary-soft">
+                  <div className="flex items-center gap-2"><span className={cx("flex-1 truncate", unrec && "text-warning")}>{a?.name ?? (unrec ? `Imported blank (unresolved, ${f.faces.length} faces)` : f.name)}</span>
+                    <span className="text-[10.5px] text-muted">{f.faces.length} faces</span></div>
+                  {(a?.note || Object.keys(a?.params ?? f.params).length > 0) && <div className="truncate text-[11px] text-muted" title={a?.note}>{a?.note || fmtParams(a?.params ?? f.params)}</div>}
+                </li>);
+            })}
+            {extraAi.map(f => <li key={f.id} className="rounded px-2 py-1"><div className="truncate">{f.name}</div>
+              {(f.note || Object.keys(f.params).length > 0) && <div className="truncate text-[11px] text-muted" title={f.note}>{f.note || fmtParams(f.params)}</div>}</li>)}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-muted">Hover to highlight. Ask the design agent to change any of these — it edits the exact solid even where features are unresolved.</p>
+        </div>)}
+
       <div className="label mb-1 mt-4 flex items-center gap-1"><Pencil className="h-3.5 w-3.5" />Manual features</div>
-      {manual.length === 0 ? <p className="text-[12px] text-muted">Add fillets, chamfers, holes or sketch extrusions directly — they're applied after the agent's design and stay editable.</p> :
+      {manual.length === 0 ? <p className="text-[12px] text-muted">Use the command bar (Features / Sketch) to add features by hand — they stay editable here.</p> :
         <ul className="space-y-0.5">{manual.map((f, i) => (
           <li key={f.id} onMouseEnter={() => onHover(f.suppressed ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])}
             className={cx("group flex items-center gap-1 rounded px-2 py-1 hover:bg-primary-soft", f.suppressed && "opacity-50")}>
@@ -190,7 +240,7 @@ export function TreePanel({ status, topo, manual, onHover, onAdd, onEdit, onTogg
             <button disabled={busy || i === manual.length - 1} onClick={() => onMove(f, 1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" /></button>
             <button disabled={busy} onClick={() => onDelete(f)} className="rounded p-0.5 text-muted hover:text-danger" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
           </li>))}</ul>}
-      {(status?.manual_features ?? 0) > 0 && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With manual features, the size and volume checks are informational: they compare against the agent's hand calculation, which doesn't include your manual edits.</p>}
+      {(status?.manual_features ?? 0) > 0 && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With manual features, the size and volume checks are informational: they compare against the original expectation, which doesn't include your manual edits.</p>}
     </div>
   );
 }

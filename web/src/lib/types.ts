@@ -92,4 +92,5 @@ export type AgentEvent =
   | { type: "error"; text: string }
   | { type: "busy"; value: boolean }
   | { type: "questions"; questions: AgentQuestion[] }
+  | { type: "recognition"; component: string | null }
   | { type: "reset" };

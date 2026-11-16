@@ -89,7 +89,6 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   const [items, setItems] = useState<ChatItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState(() => { try { return sessionStorage.getItem(`fw_starter_${project.id}`) ?? ""; } catch { return ""; } });
-  const [model, setModel] = useState("");
   const [atts, setAtts] = useState<Att[]>([]);
   const [drag, setDrag] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -105,8 +104,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
       const ev = JSON.parse(m.data) as AgentEvent;
       if (ev.type === "hello") setBusy(ev.busy);
       if (ev.type === "busy") setBusy(ev.value);
-      if (ev.type === "system") setModel(ev.model);
-      if (ev.type === "tool_result" || ev.type === "result" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
+      if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
     };
     return () => es.close();
@@ -154,7 +152,6 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     <section className="flex min-h-0 flex-col border-r border-border bg-panel">
       <div className="flex h-11 items-center gap-2 border-b border-border px-3">
         <Sparkles className="h-4 w-4 text-accent" /><span className="text-sm font-semibold">Design agent</span>
-        {model && <span className="truncate text-[11px] text-muted">{model}</span>}
         <Tip content="New conversation (model files are kept)" side="bottom">
           <button className="ml-auto rounded p-1.5 text-muted hover:bg-text/5" onClick={() => api.post(`/api/projects/${project.id}/agent/reset`)}><RotateCcw className="h-4 w-4" /></button>
         </Tip>
@@ -166,7 +163,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             Include material, overall size, holes, fillets and anything that must not change. Attach a sketch or photo, or select faces and edges in the viewer and say what to do with them.
           </div>)}
         {items.map((i, n) => {
-          if (i.kind === "user") return <div key={n} className="ml-8 whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-white">{i.text.replace(/\n\n\[Selected in viewer:[\s\S]*$/, "").replace(/\n\n\[Reference image[\s\S]*$/, "")}
+          if (i.kind === "user") return <div key={n} className="ml-8 whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-white">{i.text.replace(/\n\n\[Selected in viewer:[\s\S]*$/, "").replace(/\n\n\[Reference image[\s\S]*$/, "").replace(/\n\n\[Recognition data[\s\S]*$/, "")}
             {/\[Selected in viewer:/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><MousePointer2 className="mr-1 inline h-3 w-3" />with viewer selection</div>}
             {/\[Reference image/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ImagePlus className="mr-1 inline h-3 w-3" />with reference image</div>}</div>;
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;

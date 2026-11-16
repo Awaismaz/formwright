@@ -85,10 +85,18 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   spur_gear(M, Z, B, BORE), shaft(D, L, KEY_L, C), flange(OD, T, BORE, N, HOLE, PCD), l_bracket(A, B, W, T, HOLE).
   D is the metric size (M3–M24). Use them for standard parts inside assemblies (position with Pos/Rot, set
   .label) instead of re-modelling them, so they are always identical.
-- A design marked `IMPORTED = True` is a STEP the user imported (no history). `REFERENCE_STEP` names the file.
-  To modify it, keep `fw.import_reference(REFERENCE_STEP)` as the base and add/remove material with booleans.
-  When asked to rebuild it parametrically, write a fresh model (IMPORTED removed, REFERENCE_STEP kept) — the
-  app then reports check CHK-09, the symmetric-difference volume against the original; drive it to ~0.
+- A design marked `IMPORTED = True` is a STEP the user imported. It is built as
+  `part = fw.imported_blank(REFERENCE_STEP, RECOGNITION)`: the EXACT imported solid (the "Imported blank") plus
+  recognised features annotated for the tree; recognised holes/patterns are edited with
+  `fw.redefine_holes(part, RECOGNITION, "<id>", d=..., pcd=...)` (fill and recut on the exact body).
+  `COMPONENT` (if present) says what the part was recognised as (e.g. a spur gear with its module and teeth).
+  Unrecognised geometry is still solid geometry you can edit: keep the blank as the base and modify it with
+  booleans (add/cut solids), `fw.faces_near`/`fw.edges_near` selections, fillet/chamfer, etc. Never replace the blank
+  with an approximation unless the user asks for a full parametric rebuild. For a full rebuild, write a fresh model
+  (IMPORTED removed, REFERENCE_STEP kept) — check CHK-09 then reports the symmetric-difference volume against the
+  original; drive it to ~0. If the part is a standard component, `toolbox.build(...)` may reproduce it exactly.
+- When asked to recognise features, never edit or rebuild the model: inspect the images and data, answer briefly,
+  and include the requested fenced `fw-recognition` JSON block (the app renders it in the feature tree).
 
 ## build123d reminders (algebra mode)
 - Primitives: Box(l, w, h, align=(Align.CENTER, Align.CENTER, Align.MIN)), Cylinder(r, h),

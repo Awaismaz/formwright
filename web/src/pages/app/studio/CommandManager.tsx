@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
-  ArrowDownToLine, ArrowUpFromLine, Box, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
+  ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
   Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
   Squircle, Upload, Wrench,
 } from "lucide-react";
@@ -20,9 +20,12 @@ interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: C
 
 const TABS = ["Features", "Sketch", "Evaluate", "View", "Library"] as const;
 
-export default function CommandManager({ onCommand, viewerRef, disabled, activeTool }: {
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
+  left?: ReactNode; right?: ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
+  const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
   const [, setTick] = useState(0);
   const viewer = viewerRef.current;
   const [tab, setTab] = useState<(typeof TABS)[number]>(() => { try { return (localStorage.getItem("fw_cm_tab") as (typeof TABS)[number]) || "Features"; } catch { return "Features"; } });
@@ -75,12 +78,20 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
 
   return (
     <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager">
-      <div className="flex items-end gap-0.5 border-b border-border bg-panel2 px-2 pt-1">
+      <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
+        {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
         {TABS.map(t => (
-          <button key={t} onClick={() => pick(t)}
-            className={cx("rounded-t px-3 py-1 text-[12px]", tab === t ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
+          <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }}
+            className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
+        <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
+          {right}
+          <Tip content={collapsed ? "Show command bar" : "Hide command bar"} side="bottom">
+            <button onClick={toggle} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text" aria-label="Toggle command bar">
+              {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}</button>
+          </Tip>
+        </div>
       </div>
-      <div className="flex h-[66px] items-stretch gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:thin]">
+      {!collapsed && <div className="flex h-[66px] items-stretch gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:thin]">
         {groups[tab].map((g, gi) => (
           <div key={gi} className="flex items-stretch gap-0.5">
             {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
@@ -96,7 +107,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
                 </Tip>);
             })}
           </div>))}
-      </div>
+      </div>}
     </div>
   );
 }

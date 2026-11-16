@@ -67,6 +67,72 @@ def import_reference(rel: str) -> Any:
     return import_step(project_file(rel))
 
 
+def _load_json(rel: str) -> Any:
+    import json
+    from pathlib import Path
+
+    return json.loads(Path(project_file(rel)).read_text(encoding="utf-8"))
+
+
+def imported_blank(ref: str, recognition: str | None = None) -> Any:
+    """The exact imported solid ("Imported blank") plus the recognised features as annotated, highlightable
+    entries of the feature tree. Geometry is never approximated: unrecognised faces simply stay in the blank."""
+    part = import_reference(ref)
+    if recognition:
+        try:
+            data = _load_json(recognition)
+        except (OSError, ValueError):
+            data = {}
+        for feat in data.get("features", []):
+            if feat.get("kind") in ("body", "unrecognised"):
+                continue
+            keys = {tuple(k) for k in feat.get("keys", [])}
+            clean = {k: v for k, v in (feat.get("params") or {}).items() if isinstance(v, (int, float, str, bool))}
+            _STATE["log"].append({"name": str(feat.get("name", "Feature")), "kind": str(feat.get("kind", "recognised")),
+                                  "keys": keys, "params": clean})
+    return feature("Imported blank", part, kind="blank")
+
+
+def redefine_holes(part: Any, recognition: str, feature_id: str, d: float | None = None, pcd: float | None = None) -> Any:
+    """Edit a recognised hole / hole pattern on the exact imported body: the original holes are filled and recut
+    at the new diameter (and pitch-circle diameter for circular patterns). Unchanged values leave the body untouched."""
+    data = _load_json(recognition)
+    feat = next((f for f in data.get("features", []) if f.get("id") == feature_id), None)
+    if feat is None or not feat.get("holes"):
+        raise ValueError(f"recognised feature '{feature_id}' not found")
+    holes = feat["holes"]
+    d0 = float(holes[0]["d"])
+    pcd0 = feat.get("params", {}).get("pcd")
+    new_d = d0 if d is None else float(d)
+    new_pcd = pcd0 if pcd is None or pcd0 is None else float(pcd)
+    if abs(new_d - d0) < 1e-9 and (pcd0 is None or abs(new_pcd - pcd0) < 1e-9):
+        return part
+    if new_d <= 0:
+        raise ValueError("hole diameter must be positive")
+    centre = feat.get("params", {}).get("center")
+
+    def cyl(r: float, h: float, start: Any, direction: Any) -> Any:
+        from build123d import Align
+
+        loc = Plane(origin=_v(start), z_dir=_v(direction)).location
+        return loc * Cylinder(r, h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    for h in holes:  # fill the originals exactly
+        part = part + cyl(d0 / 2, float(h["depth"]), h["open"], h["dir"])
+    for h in holes:
+        start = _v(h["open"])
+        if pcd0 and centre is not None and abs(new_pcd - pcd0) > 1e-9:
+            c = _v(centre)
+            ax = _v(h["dir"]).normalized()
+            rel = start - c
+            radial = rel - ax * rel.dot(ax)
+            start = start + radial * (new_pcd / pcd0 - 1)
+        ext = 0.01 if h.get("through") else 0.0
+        direction = _v(h["dir"]).normalized()
+        part = part - cyl(new_d / 2, float(h["depth"]) + 2 * ext, start - direction * ext, direction)
+    return feature(f"{feat.get('name', 'Holes')} (edited)", part, kind="edit", d=new_d)
+
+
 def face_key(f: Any) -> tuple[Any, ...]:
     """Identity of a face's *underlying surface* (plane equation, cylinder axis + radius ...), so a face that a
     later boolean merely trims is still attributed to the feature that created its surface."""

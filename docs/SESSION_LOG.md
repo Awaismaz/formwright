@@ -4,6 +4,39 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (h) — Exact STEP import, AI feature recognition, Studio layout
+
+Founder feedback: STEP import behaved like a geometric SOLIDWORKS-style recogniser that often fails (a gear came back
+with 100 unrecognised faces). Wanted: an exact equivalent solid that is always editable, unrecognised geometry kept as
+an "Imported blank", resolved features listed for the AI; AI-based recognition (it should look at the part) for imports
+and for existing models; tree without redundant add buttons; chat on the right, panel on the left, everything
+collapsible; remove the project header bar.
+
+### Done
+- **Exact import** (DS-018): model = `fw.imported_blank(...)` = the imported solid itself + recognised features as
+  tree entries (faces highlight). Recognised holes/patterns are parameters (Ø, PCD) edited by fill-and-recut on the exact
+  body; at default values the model is identical to the file. The approximate "parametric draft" was removed.
+- **Recognition** (DS-019): new rotational-repetition analysis (tolerance clustering + face orientation) recognises gear
+  teeth → spur gear with teeth, module, tip/root Ø, bore; per-face classification so face ids match the viewer;
+  recognition runs on any model (`/recognition/run`). **AI pass** (`/recognition/ai`): the agent reads the 4-view
+  render + geometry data, returns a `fw-recognition` block → component card and feature names in the tree.
+  Fixed a 50 s slowdown (shape area recomputed per face) → 1.3 s for a 1083-face gear.
+- **Layout** (DS-025): header bar removed; feature panel left, agent right; panels + command bar collapsible.
+- Agent prompt: imported parts are edited as solids (booleans/selections on the blank), never approximated.
+
+### Evidence
+- `pytest`: 82 passed; ruff clean; tsc + vite build OK.
+- Browser (founder login, throwaway project deleted): imported gear STEP → tree "Teeth (40 × circular pattern) 1080
+  faces / Bore Ø20 / Imported blank 2 faces"; Recognize features → AI: "Spur gear, 40 teeth, module 3 · ISO 53 · high";
+  hovering Teeth highlights all teeth; all panels + command bar collapse to a full-width viewer.
+
+### Not done / limits
+- Only holes/patterns are parameter-editable on imports; other recognised features are edited through the agent.
+- Gear phase/profile parameters are informational (no regeneration of teeth from parameters on an import yet).
+
+### Next
+DS-024 and: offer "Replace with Toolbox gear" when a recognised gear matches a generator (exactness checked by CHK-09).
+
 ## 2026-11-16 (g) — CommandManager, 2D sketcher, STEP import + recognition, Toolbox, choice questions
 
 Founder requests (autonomous, "do it completely and push"): hide agent internals; SOLIDWORKS-style command tab;

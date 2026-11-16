@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from aicad import toolbox
+from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
@@ -47,10 +48,6 @@ class MatchIn(BaseModel):
 class StepIn(BaseModel):
     filename: str
     data_b64: str
-
-
-class RebuildIn(BaseModel):
-    mode: str = "draft"  # "draft" (deterministic, no AI) | "prompt" (returns the agent prompt)
 
 
 @router.get("/toolbox")
@@ -127,6 +124,10 @@ def _safe_name(name: str) -> str:
 
 @router.post("/projects/{project_id}/import-step")
 async def import_step(project_id: str, body: StepIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Import a STEP as an exact solid ("Imported blank") and recognise its features on top of it. The model is
+    always geometrically identical to the file; recognised holes/patterns become editable parameters."""
+    from aicad.recognize import import_model
+
     p = _project(ctx, project_id)
     try:
         data = base64.b64decode(body.data_b64, validate=True)
@@ -139,62 +140,127 @@ async def import_step(project_id: str, body: StepIn, ctx: Ctx = Depends(verified
     ws = workspace_for(p)
     imp = ws / "imports"
     imp.mkdir(parents=True, exist_ok=True)
-    rel = f"imports/{_safe_name(body.filename)}_{hashlib.sha256(data).hexdigest()[:8]}.step"
+    stem = f"{_safe_name(body.filename)}_{hashlib.sha256(data).hexdigest()[:8]}"
+    rel, rec_rel = f"imports/{stem}.step", f"imports/{stem}.features.json"
     (ws / rel).write_bytes(data)
     name = Path(body.filename).stem[:80] or "Imported part"
-    src = (f'"""Imported STEP: {Path(body.filename).name} (no feature history).\n\n'
-           "Edit it with manual features (Features tab), ask the design agent to modify it, or use\n"
-           '"Rebuild as parametric" to turn the recognised features into an editable model.\n"""\n'
-           "from aicad import fw\n\n"
-           f"NAME = {name!r}\nMATERIAL = \"unspecified\"\nIMPORTED = True\nREFERENCE_STEP = {rel!r}\n\n"
-           'result = fw.feature("Imported body", fw.import_reference(REFERENCE_STEP))\n\nPARAMS = {}\n')
+    probe = ws / "_fw_import_probe.py"
+    probe.write_text(f"from aicad import fw\nresult = fw.import_reference({rel!r})\n", encoding="utf-8")
     try:
-        res = await install_model(p, ctx, src, strict=False, note=f"Imported **{Path(body.filename).name}**")
+        r = await worker.recognize(p.org_id, probe, ws / rec_rel)
+    finally:
+        probe.unlink(missing_ok=True)
+    if not r.get("ok"):
+        (ws / rel).unlink(missing_ok=True)
+        raise HTTPException(422, "The STEP file could not be read as a solid. Try exporting it again as AP214/AP242 solids.")
+    rec = json.loads((ws / rec_rel).read_text(encoding="utf-8"))
+    src = import_model(rec, name, rel, rec_rel, Path(body.filename).name)
+    n_feat = sum(1 for f in rec["features"] if f["kind"] not in ("body", "unrecognised"))
+    try:
+        res = await install_model(p, ctx, src, strict=False,
+                                  note=f"Imported **{Path(body.filename).name}** with {n_feat} recognised features")
     except HTTPException:
         (ws / rel).unlink(missing_ok=True)
+        (ws / rec_rel).unlink(missing_ok=True)
         raise
-    rec_p = ws / "out" / "recognition.json"
-    rec = json.loads(rec_p.read_text(encoding="utf-8")) if rec_p.is_file() else {}
-    if rec_p.is_file():
-        shutil.copy2(rec_p, imp / "recognition.json")
     audit(ctx.db, "project.step_imported", ctx.user, p.org_id, target=p.id, bytes=len(data))
     track(ctx.db, "step_imported", ctx.user, p.org_id, bytes=len(data))
     ctx.db.commit()
-    return {**res, "recognition": rec}
+    return {**res, "recognition": _slim(rec)}
 
 
-def _recognition(p: Project) -> dict[str, Any]:
+def _slim(rec: dict[str, Any]) -> dict[str, Any]:
+    """Recognition without the bulky internals (surface keys)."""
+    return {**rec, "features": [{k: v for k, v in f.items() if k != "keys"} for f in rec.get("features", [])]}
+
+
+def _read(f: Path) -> dict[str, Any] | None:
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else None
+
+
+def _current_recognition(p: Project) -> dict[str, Any] | None:
     ws = workspace_for(p)
-    for f in (ws / "imports" / "recognition.json", ws / "out" / "recognition.json"):
-        if f.is_file():
-            return json.loads(f.read_text(encoding="utf-8"))
-    raise HTTPException(404, "No imported STEP in this project")
+    st = _read(ws / "out" / "status.json") or {}
+    rec = _read(ws / "out" / "recognition.json")
+    if rec is None or rec.get("build_id") != st.get("build_id"):
+        return None
+    ai = _read(ws / ".fw" / "recognition_ai.json")
+    if ai and ai.get("build_id") == st.get("build_id"):
+        rec["ai"] = ai
+    return rec
 
 
 @router.get("/projects/{project_id}/recognition")
 def get_recognition(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return _recognition(_project(ctx, project_id))
+    rec = _current_recognition(_project(ctx, project_id))
+    return {"recognition": _slim(rec) if rec else None}
+
+
+@router.post("/projects/{project_id}/recognition/run")
+async def run_recognition(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Geometric feature recognition on the current model (no AI, no tokens). Face ids match the viewer."""
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    if not (ws / "model.py").is_file():
+        raise HTTPException(404, "Build a model first")
+    await wait_finalized(p.id)
+    st = _read(ws / "out" / "status.json") or {}
+    r = await worker.recognize(p.org_id, ws / "model.py", ws / "out" / "recognition.json")
+    if not r.get("ok"):
+        raise HTTPException(422, "Recognition failed on this model")
+    rec = json.loads((ws / "out" / "recognition.json").read_text(encoding="utf-8"))
+    rec["build_id"] = st.get("build_id")
+    (ws / "out" / "recognition.json").write_text(json.dumps(rec), encoding="utf-8")
+    track(ctx.db, "recognition_run", ctx.user, p.org_id, faces=rec.get("faces"))
+    ctx.db.commit()
+    return {"recognition": _slim(rec)}
+
+
+AI_RECOGNITION_ASK = (
+    "Identify what the part is (mechanical component type, standard if any) and name every feature with design intent "
+    "and key dimensions; explain any faces listed as not recognised. Do NOT change or rebuild the model. Reply with a "
+    "short summary for the engineer and a fenced fw-recognition JSON block: "
+    '{"component": {"name", "kind", "standard", "confidence": "high|medium|low", "description"}, '
+    '"features": [{"id" (reuse the ids below; new ids for features you find inside unrecognised/body faces), '
+    '"name", "kind", "params": {...}, "note"}]}.'
+)
+
+
+@router.post("/projects/{project_id}/recognition/ai")
+async def ai_recognition(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """AI recognition: the design agent looks at standard views of the part plus the geometric analysis and
+    classifies the component and its features (result arrives as a `recognition` event; uses tokens)."""
+    from aicad.platform.routers.projects import ChatIn, agent_chat
+
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    rec = _current_recognition(p)
+    if rec is None:
+        rec = (await run_recognition(project_id, ctx))["recognition"]
+    await wait_finalized(p.id)
+    views = ws / "out" / "views.png"
+    refs = ws / "refs"
+    refs.mkdir(exist_ok=True)
+    img = None
+    if views.is_file():
+        shutil.copy2(views, refs / "recognition_views.png")
+        img = "refs/recognition_views.png"
+    feats = [{k: f.get(k) for k in ("id", "name", "kind", "count", "params")} | {"faces": len(f["faces"])}
+             for f in rec.get("features", [])]
+    data = {k: rec.get(k) for k in ("bbox", "volume_mm3", "faces", "component", "unrecognised")} | {"features": feats}
+    where = f" and standard views are in {img} (read the image first)" if img else ""
+    prompt = ("Recognise the features of this part.\n\n[Recognition data: the geometric analysis of the current model "
+              f"is below{where}. {AI_RECOGNITION_ASK}\n```json\n{json.dumps(data)[:15000]}\n```]")
+    res = await agent_chat(project_id, ChatIn(prompt=prompt), ctx)
+    return {**res, "build_id": rec.get("build_id")}
 
 
 @router.post("/projects/{project_id}/recognition/rebuild")
-async def rebuild_parametric(project_id: str, body: RebuildIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    from aicad.recognize import agent_prompt, draft_model
+async def rebuild_parametric(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Ask the design agent to rebuild the part as a fully parametric model (CHK-09 compares it to the original)."""
+    from aicad.platform.routers.projects import ChatIn, agent_chat
+    from aicad.recognize import agent_prompt
 
     p = _project(ctx, project_id)
-    rec = _recognition(p)
-    if rec.get("error"):
-        raise HTTPException(422, f"Feature recognition failed on this file: {rec['error']}")
-    if body.mode == "prompt":
-        return {"prompt": agent_prompt(rec)}
-    src = draft_model(rec, p.name, rec.get("reference") or "")
-    cur = workspace_for(p) / "model.py"
-    if cur.is_file():  # keep the user's manual features (same coordinate frame as the original)
-        from aicad.agent.runner import MANUAL_START
-
-        old = cur.read_text(encoding="utf-8")
-        if MANUAL_START in old:
-            src = src.rstrip() + "\n\n\n" + old[old.index(MANUAL_START):]
-    res = await install_model(p, ctx, src, strict=False, note="Rebuilt the import as a parametric draft from recognised features")
-    audit(ctx.db, "project.recognition_rebuild", ctx.user, p.org_id, target=p.id)
-    ctx.db.commit()
-    return res
+    rec = _current_recognition(p) or (await run_recognition(project_id, ctx))["recognition"]
+    return await agent_chat(project_id, ChatIn(prompt=agent_prompt(rec)), ctx)

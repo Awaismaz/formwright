@@ -306,15 +306,6 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
         declared = ns.get("PARAMS") if isinstance(ns.get("PARAMS"), dict) else {}
         params = {str(k): v for k, v in declared.items() if isinstance(v, (int, float, str, bool))}
         export_topology(shape, out / "topo.json", ns.get("__fw_log__"))
-        if ns.get("IMPORTED"):
-            try:
-                from aicad.recognize import recognize
-
-                rec = recognize(shape)
-                rec["reference"] = ns.get("REFERENCE_STEP")
-                (out / "recognition.json").write_text(json.dumps(rec), encoding="utf-8")
-            except Exception as e:  # noqa: BLE001 - recognition is best effort
-                (out / "recognition.json").write_text(json.dumps({"error": f"{type(e).__name__}: {e}"}), encoding="utf-8")
         mass = mass_properties(shape)
         status.update(
             part=ns.get("NAME", script.stem), material=ns.get("MATERIAL", "unspecified"),
