@@ -111,11 +111,12 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       <FindingsTable rows={[["mesh", "Watertight, 1 shell", "ok", "—"], ["boss_ribs", "Wall 0.8 mm < 2 perimeters", "med", "Increase to 1.2 mm"], ["lid_lip", "Overhang 62° unsupported", "high", "Rotate 180° or add chamfer"], ["orientation", "Best: top face down", "ok", "Support area −71%"]]} />
     </SampleFrame>),
   mesh: () => (
-    <SampleFrame title="Mesh Studio — concept renders">
-      <div className="grid grid-cols-3 gap-3">{["Brushed steel", "Anodised blue", "Matte black"].map((m, i) => (
-        <div key={m} className="overflow-hidden rounded-lg border border-border"><div className="aspect-square" style={{ background: ["radial-gradient(circle at 35% 30%,#f2f4f7,#8d96a3 60%,#4a525e)", "radial-gradient(circle at 35% 30%,#9cc2ff,#2a5db0 60%,#122a55)", "radial-gradient(circle at 35% 30%,#7a7f88,#2b2e33 60%,#111)"][i] }} />
-          <div className="px-2 py-1.5 text-xs">{m}</div></div>))}</div>
-      <p className="mt-3 text-xs text-muted">Mesh outputs are for visualisation and are kept separate from precision B-rep CAD.</p>
+    <SampleFrame title="Mesh Studio: product renders of the demo Pipe Flange">
+      <div className="grid grid-cols-3 gap-3">{([["steel-dark", "Machined steel · Dark dramatic"], ["anodised-blue", "Anodised blue · Studio softbox"], ["black-oxide", "Black oxide · Technical white"]] as const).map(([f, m]) => (
+        <figure key={f} className="overflow-hidden rounded-lg border border-border">
+          <img src={`/samples/mesh-flange-${f}.jpg`} alt={`Demo Pipe Flange rendered in ${m}`} width={360} height={360} loading="lazy" className="block aspect-square w-full object-cover" />
+          <figcaption className="px-2 py-1.5 text-xs">{m}</figcaption></figure>))}</div>
+      <p className="mt-3 text-xs text-muted">Rendered by Formwright Mesh Studio (Blender Cycles) from a demo part, not from your data. Renders are visualisations of a tessellated mesh, kept separate from the exact CAD model.</p>
     </SampleFrame>),
 };
 
