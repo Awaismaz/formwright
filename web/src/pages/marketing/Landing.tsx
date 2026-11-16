@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight, BadgeCheck, Building2, Code2, FileCheck2, Fingerprint, GitBranch, LockKeyhole, MessageSquareText,
-  ShieldCheck, Sparkles, Wrench,
+  PackageCheck, ScanSearch, ShieldCheck, Sparkles, Wrench,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Catalog } from "@/lib/types";
@@ -17,10 +17,12 @@ const STEPS = [
 ];
 
 const DIFFS = [
-  { icon: BadgeCheck, title: "Verified, not guessed", body: "Every build passes deterministic geometry checks — valid solid, bounding box, analytic volume, STEP round-trip, repeatability. Pictures are never the proof." },
-  { icon: Code2, title: "Editable source you own", body: "Behind each part is readable parametric code with named dimensions. Change a number, rebuild, get the same answer every time." },
-  { icon: GitBranch, title: "Fits your existing CAD", body: "No rip-and-replace. Clean STEP into the tools your team already uses; drawings and assemblies follow on the roadmap." },
-  { icon: Fingerprint, title: "Honest by design", body: "Requirements, assumptions, measurements and inferences are labelled separately. Engineering sign-off always stays with your engineers." },
+  { icon: BadgeCheck, title: "Verified, not guessed", body: "Every build passes deterministic geometry checks: valid solid, bounding box, analytic volume, STEP round-trip, repeatability. Pictures are never the proof." },
+  { icon: Code2, title: "Edit without the AI toll", body: "Change a dimension, suppress or delete a feature, sketch and extrude by hand: instant, free, and the same answer every time. The agent is there when it helps, never as a toll booth." },
+  { icon: ScanSearch, title: "Reuse before you remodel", body: "Find parts you already made by shape or by size (type 120x80x10) across your workspace, with the reasons they match." },
+  { icon: PackageCheck, title: "Changes the shop can trust", body: "Every revision records what changed and why. One click hands the shop a verified pack: STEP, drawing, DFM report and change notice, with a SHA-256 manifest." },
+  { icon: GitBranch, title: "One part, every next step", body: "The drawing, manufacturability review, engineering calculations and 3D-print prep open straight on the part you just designed. Clean STEP into the CAD your team already uses." },
+  { icon: Fingerprint, title: "Honest by design", body: "Requirements, assumptions, measurements and inferences are labelled separately. Nothing is called validated without evidence; engineering sign-off stays with your engineers." },
 ];
 
 const FAQ = [
