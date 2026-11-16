@@ -34,6 +34,19 @@ function pickedAxis(sel: Pick[], topo: Topo | null): { origin: V3; dir: V3; labe
   return null;
 }
 
+type MirrorPlane = "Right" | "Front" | "Top" | "face";
+const PRINCIPAL: Record<Exclude<MirrorPlane, "face">, V3> = { Right: [1, 0, 0], Front: [0, 1, 0], Top: [0, 0, 1] };
+
+/** A square preview of a plane, centred on the model's projection onto it and sized to the model. */
+export function planePreview(origin: V3, normal: V3, topo: Topo | null): SketchPreview {
+  const l = Math.hypot(...normal) || 1; const n: V3 = [normal[0] / l, normal[1] / l, normal[2] / l];
+  const b = topo?.bbox ?? [-25, -25, -25, 25, 25, 25];
+  const c: V3 = [(b[0]! + b[3]!) / 2, (b[1]! + b[4]!) / 2, (b[2]! + b[5]!) / 2];
+  const d = (c[0] - origin[0]) * n[0] + (c[1] - origin[1]) * n[1] + (c[2] - origin[2]) * n[2];
+  const size = Math.max(b[3]! - b[0]!, b[4]! - b[1]!, b[5]! - b[2]!, 20) * 1.3;
+  return { origin: [c[0] - n[0] * d, c[1] - n[1] * d, c[2] - n[2] * d], normal: n, xDir: xDirFor(n), kind: "rect", w: size, h: size, cx: 0, cy: 0 };
+}
+
 export function xDirFor(n: V3): V3 {
   if (Math.abs(n[2]) > 0.9) return [1, 0, 0];
   const c: V3 = [n[1], -n[0], 0]; // n × Z
@@ -57,6 +70,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const pre = preset ?? {};
   const patKind0 = (e?.kind ?? (pre.kind as "linear" | "circular" | undefined) ?? "linear");
   const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
+    : op === "mirror" ? nextName("Mirror", manual)
     : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
   // feature pattern
   const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
@@ -91,7 +105,13 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [cy_, setCy] = useState(String(e?.sketch?.cy ?? 0));
   const [dist, setDist] = useState(String(e?.distance ?? 5));
   const [mode, setMode] = useState<"add" | "cut">(e?.mode ?? (pre.mode as "add" | "cut") ?? "add");
-  const [mirrorPlane, setMirrorPlane] = useState<"face" | "YZ" | "XZ" | "XY">("face");
+  const [mirrorWhat, setMirrorWhat] = useState<"features" | "body">(e ? (e.source?.length ? "features" : "body") : candidates.length ? "features" : "body");
+  const [mirrorPlane, setMirrorPlane] = useState<MirrorPlane>(() => {
+    if (!e?.plane) return "Right";
+    const n = e.plane.normal, o = e.plane.origin;
+    if (Math.hypot(...o) > 1e-9) return "face";
+    return (Object.entries(PRINCIPAL).find(([, v]) => Math.abs(Math.abs(v[0] * n[0] + v[1] * n[1] + v[2] * n[2]) - Math.hypot(...n)) < 1e-9)?.[0] as MirrorPlane | undefined) ?? "face";
+  });
   const [busy, setBusy] = useState(false);
 
   const edges = selection.filter(p => p.kind === "edge") as Extract<Pick, { kind: "edge" }>[];
@@ -115,11 +135,13 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     }
   }, [pattern, plane]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const mirrorPl = op !== "mirror" ? null : mirrorPlane === "face" ? (plane ? { origin: plane.origin, normal: plane.normal } : null) : { origin: [0, 0, 0] as V3, normal: PRINCIPAL[mirrorPlane] };
   useEffect(() => {
     if (op === "extrude" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind, w: num(w), h: num(h), r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 });
     else if (op === "hole" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind: "circle", r: num(size) / 2, cx: 0, cy: 0 });
+    else if (mirrorPl) onSketch(planePreview(mirrorPl.origin, mirrorPl.normal, topo));
     else onSketch(null);
-  }, [op, plane, kind, w, h, r, cx_, cy_, size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onSketch(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (op === "pattern" && picked) { setAxisKey("pick"); if (patKind === "circular") setAxOrigin(picked.origin.map(fmt) as [string, string, string]); } }, [picked?.label, patKind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -132,7 +154,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const ready = op === "pattern" ? sources.length > 0 && !!patDir() && num(patCount) >= 2
     : needsEdges ? (edges.length > 0 || !!e?.edges?.length)
     : op === "shell" ? (planarFaces.length > 0 || !!e?.faces?.length)
-    : op === "mirror" ? (mirrorPlane !== "face" || !!plane)
+    : op === "mirror" ? !!mirrorPl && (mirrorWhat === "body" || sources.length > 0)
     : !!plane;
 
   const submit = async () => {
@@ -152,9 +174,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
     } else if (op === "mirror") {
-      const pl = mirrorPlane === "face" ? { origin: plane!.origin, normal: plane!.normal }
-        : { origin: bbc, normal: mirrorPlane === "YZ" ? [1, 0, 0] : mirrorPlane === "XZ" ? [0, 1, 0] : [0, 0, 1] };
-      f = { ...f, plane: pl };
+      f = { ...f, plane: mirrorPl, source: mirrorWhat === "features" ? sources : null };
     } else {
       f = { ...f, plane, distance: num(dist), mode,
         sketch: kind === "rect" ? { kind, w: num(w), h: num(h), cx: num(cx_) || 0, cy: num(cy_) || 0 } : { kind, r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 } };
@@ -170,6 +190,16 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     finally { setBusy(false); onBusy(false); }
   };
 
+  const featurePicker = (label: string, verb: string) => (
+    <div className="rounded-lg border border-border bg-panel2 p-2.5">
+      <div className="label mb-1">{label}</div>
+      {candidates.length === 0 ? <p className="text-[12px] text-muted">Add a boss, cut, revolve or hole first. Fillets and shells are not {verb}.</p>
+        : <ul className="space-y-0.5">{candidates.map(m => (
+          <li key={m.id}><label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-text/5">
+            <input type="checkbox" checked={sources.includes(m.id)} onChange={ev => setSources(s => ev.target.checked ? [...s, m.id] : s.filter(x => x !== m.id))} />
+            <span className="flex-1 truncate text-[12.5px]">{m.name}</span><span className="text-[10.5px] text-muted">{FEATURE_LABEL[m.op]}</span></label></li>))}</ul>}
+    </div>
+  );
   const numField = (label: string, v: string, set: (s: string) => void, unit = "mm", hint?: string) => (
     <Field label={label} hint={hint}><div className="flex items-center gap-1.5"><Input value={v} onChange={ev => set(ev.target.value)} inputMode="decimal" className="h-8" /><span className="w-7 text-xs text-muted">{unit}</span></div></Field>
   );
@@ -188,15 +218,20 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
-        {op === "pattern" ? <>
+        {op === "mirror" ? <>
+          <div>{seg<"features" | "body">([["features", "Mirror features"], ["body", "Mirror body"]], mirrorWhat, setMirrorWhat)}</div>
+          {mirrorWhat === "features" ? featurePicker("Features to mirror", "mirrored")
+            : <p className="text-[12px] text-muted">The whole body is mirrored and joined to the original.</p>}
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
-            <div className="label mb-1">Features to pattern</div>
-            {candidates.length === 0 ? <p className="text-[12px] text-muted">Add a boss, cut, revolve or hole first. Fillets and shells are not patterned.</p>
-              : <ul className="space-y-0.5">{candidates.map(m => (
-                <li key={m.id}><label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-text/5">
-                  <input type="checkbox" checked={sources.includes(m.id)} onChange={ev => setSources(s => ev.target.checked ? [...s, m.id] : s.filter(x => x !== m.id))} />
-                  <span className="flex-1 truncate text-[12.5px]">{m.name}</span><span className="text-[10.5px] text-muted">{FEATURE_LABEL[m.op]}</span></label></li>))}</ul>}
+            <div className="label mb-1">Mirror plane</div>
+            <div className="mb-2">{seg<MirrorPlane>([["Right", "Right"], ["Front", "Front"], ["Top", "Top"], ["face", "Face"]], mirrorPlane, setMirrorPlane)}</div>
+            <p className="text-[12px] text-muted">{mirrorPlane !== "face" ? `${mirrorPlane} Plane through the origin. The blue rectangle shows it.`
+              : face && topo ? `${describe(face, topo)}: its plane is the mirror plane.`
+              : plane ? "Using the original plane. Click a planar face to change it." : "Click a planar face in the viewer."}</p>
           </div>
+          <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+        </> : op === "pattern" ? <>
+          {featurePicker("Features to pattern", "patterned")}
           <div>{seg<"linear" | "circular">([["linear", "Linear"], ["circular", "Circular"]], patKind, k => { setPatKind(k); if (!e) setName(nextName(k === "circular" ? "CirPattern" : "LPattern", manual)); })}</div>
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
             <div className="label mb-1">{patKind === "linear" ? "Direction" : "Axis"}</div>
@@ -209,14 +244,12 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
             : <>{numField("Total angle", patAngle, setPatAngle, "°", "360° spaces the instances equally around the axis")}{vec("Axis through point (X, Y, Z mm)", axOrigin, setAxOrigin)}</>}
         </> : <>
         <div className="rounded-lg border border-border bg-panel2 p-2.5">
-          <div className="label mb-1">{needsEdges ? "Edges" : op === "shell" ? "Faces to remove" : op === "mirror" ? "Mirror plane" : "Placement face"}</div>
-          {op === "mirror" && <div className="mb-2">{seg<"face" | "YZ" | "XZ" | "XY">([["face", "Picked face"], ["YZ", "YZ"], ["XZ", "XZ"], ["XY", "XY"]], mirrorPlane, setMirrorPlane)}</div>}
+          <div className="label mb-1">{needsEdges ? "Edges" : op === "shell" ? "Faces to remove" : "Placement face"}</div>
           {needsEdges ? (edges.length ? <ul className="space-y-0.5">{edges.map(p => <li key={p.id} className="flex items-center justify-between text-[12px]">{topo ? describe(p, topo) : `Edge ${p.id}`}
               <button onClick={() => onSelection(selection.filter(x => x !== p))} aria-label="Remove"><X className="h-3 w-3 text-muted" /></button></li>)}</ul>
             : <p className="text-[12px] text-muted">{e?.edges?.length ? `${e.edges.length} edge(s) from the original selection. Click edges to replace.` : "Click edges in the viewer (Ctrl+click for several)."}</p>)
           : op === "shell" ? (planarFaces.length ? <ul className="space-y-0.5">{planarFaces.map(p => <li key={p.id} className="text-[12px]">{topo ? describe(p, topo) : `Face ${p.id}`}</li>)}</ul>
               : <p className="text-[12px] text-muted">{e?.faces?.length ? `${e.faces.length} face(s) from the original selection.` : "Click the face(s) to open (Ctrl+click for several)."}</p>)
-          : op === "mirror" && mirrorPlane !== "face" ? <p className="text-[12px] text-muted">{mirrorPlane} plane through the model centre ({bbc.map(fmt).join(", ")}).</p>
           : (face && topo ? <p className="text-[12px]">{describe(face, topo)} — origin at the picked point</p>
               : <p className="text-[12px] text-muted">{plane ? "Using the original placement. Click a planar face to move it." : "Click a planar face in the viewer. The point you click becomes the origin."}</p>)}
         </div>

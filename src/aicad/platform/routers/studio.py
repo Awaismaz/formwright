@@ -278,6 +278,13 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     elif op == "mirror":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
+        if math.hypot(*out["plane"]["normal"]) < 1e-9:
+            raise HTTPException(422, "mirror plane: normal must not be zero")
+        src = f.get("source")
+        if src:  # mirror features (otherwise the whole body)
+            if not isinstance(src, list) or len(src) > 20:
+                raise HTTPException(422, "Choose 1–20 features to mirror")
+            out["source"] = [str(s)[:40] for s in src]
     elif op == "extrude":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}

@@ -382,6 +382,17 @@ def pattern_instances(tool: Any, f: dict[str, Any]) -> list[Any]:
     return out
 
 
+def _sources(f: dict[str, Any], done: dict[str, dict[str, Any]] | None, verb: str) -> list[dict[str, Any]]:
+    """Earlier, unsuppressed tool features a pattern or mirror refers to (by id)."""
+    sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
+    if not sources or any(s is None for s in sources):
+        raise ValueError(f"a {verb} feature is missing, suppressed or comes later in the tree")
+    for src in sources:
+        if src["op"] not in TOOL_OPS:
+            raise ValueError(f"'{src.get('name', src['op'])}' can't be {verb} (bosses, cuts, revolves, holes)")
+    return [s for s in sources if s is not None]
+
+
 def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any]] | None = None) -> Any:
     op = f["op"]
     if part is None and op not in BASE_OPS:
@@ -389,12 +400,7 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
     if op in TOOL_OPS:
         return _apply_tool(part, _tool(f, diag), _is_cut(f))
     if op == "pattern":
-        sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
-        if not sources or any(s is None for s in sources):
-            raise ValueError("a patterned feature is missing, suppressed or comes later in the tree")
-        for src in sources:
-            if src["op"] not in TOOL_OPS:
-                raise ValueError(f"'{src.get('name', src['op'])}' can't be patterned (bosses, cuts, revolves, holes)")
+        for src in _sources(f, done, "patterned"):
             for inst in pattern_instances(_tool(src, diag), f):
                 part = _apply_tool(part, inst, _is_cut(src))
         return part
@@ -418,6 +424,10 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
         return offset(part, amount=-float(f["t"]), openings=openings)
     if op == "mirror":
         pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
+        if f.get("source"):  # mirror features: each source's tool body, reflected, added or cut like the original
+            for src in _sources(f, done, "mirrored"):
+                part = _apply_tool(part, _moved(_tool(src, diag), lambda t: t.mirror(pl)), _is_cut(src))
+            return part
         return part + mirror(part, about=pl)
     raise ValueError(f"unknown manual operation {op!r}")
 

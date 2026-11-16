@@ -305,3 +305,63 @@ def test_revolved_part_from_scratch(app_client: TestClient) -> None:  # noqa: F8
     assert v == pytest.approx(math.pi * 300 * 30 - math.pi * (400 - 324) * 4, rel=1e-9)
     r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**rev, "axis": {"a": [0, 0], "b": [0, 0]}}})
     assert r.status_code == 422 and "centerline" in r.json()["detail"]
+
+
+# ----------------------------------------------------------------------------- DS-026 mirror, planes, draft, rib, sweep, loft
+
+TOP10 = {"origin": [0, 0, 10], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+
+
+def _block(c: TestClient, email: str, name: str) -> str:
+    """Hand-modelled 60 x 40 x 10 block on the Top plane (x -30..30, y -20..20, z 0..10)."""
+    signup(c, email)
+    pid = c.post("/api/projects", json={"name": name}).json()["id"]
+    base = {"op": "sketch", "name": "Base", "plane": TOP, "profiles": [_rect(-30, -20, 30, 20)], "distance": 10, "mode": "add"}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": base}).status_code == 200
+    return pid
+
+
+def _vol(c: TestClient, pid: str) -> float:
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"], st
+    return st["fingerprint"]["volume"]
+
+
+def test_mirror_features_about_a_principal_plane(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "mirrorfeat@x.com", "Mirror features")
+    ids = []
+    for f in ({"op": "sketch", "name": "Hole", "plane": TOP10, "profiles": [{"kind": "circle", "cx": 15, "cy": 5, "r": 3}],
+               "mode": "cut", "end": "through"},
+              {"op": "sketch", "name": "Lug", "plane": TOP10, "profiles": [_rect(18, -15, 26, -5)], "distance": 5, "mode": "add"},
+              {"op": "hole", "name": "Pin hole", "point": [20, 12, 10], "normal": [0, 0, 1], "d": 4, "depth": 6}):
+        r = c.post(f"/api/projects/{pid}/manual", json={"feature": f})
+        assert r.status_code == 200, r.text
+        ids.append(r.json()["features"][-1]["id"])
+    one_side = -math.pi * 9 * 10 + 8 * 10 * 5 - math.pi * 4 * 6
+    assert _vol(c, pid) == pytest.approx(24000 + one_side, rel=1e-9)
+    mir = {"op": "mirror", "name": "Mirror1", "source": ids, "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": mir})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(24000 + 2 * one_side, rel=1e-9)
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["fingerprint"]["bbox"] == pytest.approx([60, 40, 15], abs=1e-6)
+    feats = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    assert feats[-1]["source"] == ids
+    # editing it into a body mirror drops the feature list
+    mid = feats[-1]["id"]
+    r = c.patch(f"/api/projects/{pid}/manual/{mid}", json={"feature": {"source": None, "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}})
+    assert r.status_code == 200, r.text
+    assert "source" not in c.get(f"/api/projects/{pid}/manual").json()["features"][-1]
+    assert _vol(c, pid) == pytest.approx(2 * (24000 + one_side), rel=1e-9)
+    c.patch(f"/api/projects/{pid}/manual/{mid}", json={"feature": {"source": ids[:1], "plane": {"origin": [0, 0, 0], "normal": [1, 0, 0]}}})
+    assert _vol(c, pid) == pytest.approx(24000 + one_side - math.pi * 9 * 10, rel=1e-9)
+    # suppressing a mirrored feature fails cleanly and restores the model; non-tool features can't be mirrored
+    r = c.patch(f"/api/projects/{pid}/manual/{ids[0]}", json={"feature": {"suppressed": True}})
+    assert r.status_code == 422 and "mirrored feature" in r.json()["detail"]
+    ch = {"op": "chamfer", "name": "Edge break", "edges": [[30, 0, 10]], "d": 1}
+    chid = c.post(f"/api/projects/{pid}/manual", json={"feature": ch}).json()["features"][-1]["id"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**mir, "source": [chid]}})
+    assert r.status_code == 422 and "can't be mirrored" in r.json()["detail"]
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**mir, "plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}}})
+    assert r.status_code == 422
