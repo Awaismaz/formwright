@@ -213,7 +213,6 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
   rec?.dimensions.forEach(d => { if (d.hidden) return; if (d.aux) counts.ref++; else counts[d.tag]++; });
   rec?.callouts.forEach(c => { if (!c.hidden) c.lines.forEach(l => counts[l.tag]++); });
   const canEdit = st.can_edit && st.project.verified;
-  const sheetRev = rec?.sheet_rev ?? rec?.model_rev ?? "—";
 
   return (
     <div className="flex h-full flex-col">
@@ -222,9 +221,7 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
         actions={<DrawingActions pid={pid} rec={rec} canEdit={st.can_edit} verified={st.project.verified} stale={st.stale} busy={busy}
             onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : "Drawing regenerated from the latest build")} />}>
         {rec && <div className="flex items-center gap-1.5" data-testid="drawing-toolbar">
-          <Tip side="bottom" content={sheetRev === "DRAFT" ? "Not issued: the sheet carries a revision letter once you issue a release" : `Issued revision ${sheetRev}`}>
-            <span><Badge tone={sheetRev === "DRAFT" ? "neutral" : "success"}>Sheet {sheetRev === "DRAFT" ? "draft" : `rev ${sheetRev}`}</Badge></span></Tip>
-          <Badge>{rec.sheet.size} · {rec.sheet.scale}</Badge>
+          <Badge className="whitespace-nowrap">{rec.sheet.size} · {rec.sheet.scale}</Badge>
           {chk && <CheckBadge chk={chk} />}
         </div>}
       </ModuleHeader>
@@ -253,7 +250,7 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
         {/* side panel */}
         <aside className="flex w-[320px] shrink-0 flex-col border-r border-border bg-panel">
           <Tabs defaultValue="sheet" className="flex min-h-0 flex-1 flex-col">
-            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="title" compact>Title &amp; notes</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
+            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="title" compact>Notes</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
             <TabPanel value="sheet" className="min-h-0 flex-1 overflow-y-auto">
               <OptionsPanel opts={opts} change={change} disabled={!canEdit} customTol={customTol} setCustomTol={setCustomTol} rec={rec} />
               <div className="px-4 py-3.5"><Legend counts={counts} /></div>
@@ -286,7 +283,7 @@ function CheckBadge({ chk }: { chk: DrawingRecord["check"] }) {
   return (
     <Tip side="bottom" content={chk.passed ? "CHK-12 drawing consistency passed: tags, spec parameters, view extents vs model, each value against its own span, no text overlaps, hole callouts vs census." : chk.problems.join(" · ")}>
       <span data-testid="chk12">
-        <Badge tone={chk.passed ? "success" : "danger"}>{chk.passed ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}CHK-12 {chk.passed ? "passed" : "failed"}</Badge>
+        <Badge tone={chk.passed ? "success" : "danger"} className="whitespace-nowrap">{chk.passed ? <ShieldCheck className="h-3 w-3" /> : <ShieldAlert className="h-3 w-3" />}CHK-12 {chk.passed ? "passed" : "failed"}</Badge>
       </span>
     </Tip>
   );

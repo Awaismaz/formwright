@@ -493,6 +493,21 @@ def test_chained_values_sit_against_their_own_span(demos: dict[str, Path]) -> No
     assert p0 <= texts[pitch["id"]]["box"][0] and texts[pitch["id"]]["box"][2] <= p1
 
 
+def test_every_demo_sheet_passes_chk12_and_leaders_stay_short(demos: dict[str, Path], tmp_path: Path) -> None:
+    """Walkthrough regressions: on A4 the bracket's vertical "12.5" (outside the end of its chain) landed on the
+    horizontal "12" below the view because a new row did not check texts placed on other sides; and the R3 callout
+    leader ran diagonally across the whole side view because callouts always went above the view. A callout now goes
+    to the side nearest its feature, so no leader is longer than the view's own height plus the dimension rows."""
+    for name in ("l_bracket", "stepped_shaft", "pipe_flange", "mounting_plate"):
+        for size in ("A3", "A4"):
+            rec = generate(demos[name] / "out", tmp_path / f"{name}{size}", {"sheet": size}, DRAW_META)
+            assert rec["check"]["passed"], (name, size, rec["check"]["problems"])
+    sheet, _dims, _an = _pipeline(demos["l_bracket"], {"sheet": "A3"})
+    r3 = next(p for p in sheet["prims"] if p["t"] == "text" and p.get("kind") == "callout" and p["txt"] == "R3")
+    view = sheet["views"]["front"]["rect"]  # the side view holding the inside fillet
+    assert r3["box"][1] > (view[1] + view[3]) / 2  # the fillet is in the lower half of the view: text goes below
+
+
 def test_chk12_rejects_a_value_in_its_neighbours_span(demos: dict[str, Path]) -> None:
     """The strengthened CHK-12 fails the old placement: a chain value moved into the next span on the same line."""
     sheet, dims, an = _pipeline(demos["l_bracket"], {"sheet": "A3"})

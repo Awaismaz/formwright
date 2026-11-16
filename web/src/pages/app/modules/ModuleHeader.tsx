@@ -41,7 +41,7 @@ export function ModuleHeader({ code, icon, title, projectId, projectName, projec
       </div>
       {projectId && projects && onSwitch && <>
         <span className="mx-1 h-5 w-px bg-border" />
-        <select aria-label="Part" className="input h-8 w-52 py-0 text-[12.5px]" value={projectId} onChange={e => onSwitch(e.target.value || null)}>
+        <select aria-label="Part" className="input h-8 w-48 py-0 text-[12.5px]" value={projectId} onChange={e => onSwitch(e.target.value || null)}>
           {projects.filter(p => !p.disabled || p.id === projectId).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           {!projects.some(p => p.id === projectId) && <option value={projectId}>{projectName ?? "Loading…"}</option>}
         </select>
@@ -61,11 +61,11 @@ function StatusChips({ code, d, onRelease }: { code: MakeCode; d: Deliverables; 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       {d.build.model_rev && <Tip content="The model revision this module is looking at (each verified build of the part is a revision)" side="bottom">
-        <span><Badge>Model rev {d.build.model_rev}</Badge></span></Tip>}
+        <span><Badge className="whitespace-nowrap">Model rev {d.build.model_rev}</Badge></span></Tip>}
       {m?.state === "stale" && <Tip content={`The part changed after this ${OUTPUT[code]} was made${m.made_from_rev ? ` (model rev ${m.made_from_rev})` : ""}. It is kept as it was until you update it.`} side="bottom">
-        <span data-stale={code}><Badge tone="warning"><AlertTriangle className="h-3 w-3" />Model changed since this {OUTPUT[code]}</Badge></span></Tip>}
+        <span data-stale={code}><Badge tone="warning" className="whitespace-nowrap"><AlertTriangle className="h-3 w-3" />Model changed</Badge></span></Tip>}
       {chip && <Tip content={`${chip.tip} Click to open the release gate.`} side="bottom">
-        <button onClick={onRelease} data-action="release" className={cx("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-4 transition hover:brightness-95",
+        <button onClick={onRelease} data-action="release" className={cx("inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-4 transition hover:brightness-95",
           chip.tone === "success" ? "border-success/25 bg-success/10 text-success" : chip.tone === "warning" ? "border-warning/25 bg-warning/10 text-warning" : "border-border bg-panel2 text-muted hover:text-text")}>
           <Stamp className="h-3 w-3" />{chip.text}</button></Tip>}
     </div>

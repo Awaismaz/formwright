@@ -372,14 +372,21 @@ class ViewLayout:
             for d in ds:
                 placed = False
                 start = fam_row.get(d["family"], 0)
-                for r in range(start, len(rows) + 1):
-                    for c in self._dim_geometry(d, side, r, size, hull[d["family"]]):
-                        if r >= len(rows) or self._fits(c, rows[r]):
-                            while len(rows) <= r:
-                                rows.append([])
-                            rows[r].append(c)
-                            fam_row.setdefault(d["family"], r)
-                            placed = True
+                # an empty row must still keep clear of texts already placed on other sides (``reserved``), e.g. an
+                # outside value at the end of a vertical chain landing on a horizontal row below the view
+                for strict in (True, False):
+                    for r in range(start, len(rows) + (6 if strict else 1)):
+                        for c in self._dim_geometry(d, side, r, size, hull[d["family"]]):
+                            ok = self._fits(c, rows[r]) if r < len(rows) else (
+                                not strict or not any(boxes_overlap(c["tbox"], q, 0.5) for q in self.reserved))
+                            if ok:
+                                while len(rows) <= r:
+                                    rows.append([])
+                                rows[r].append(c)
+                                fam_row.setdefault(d["family"], r)
+                                placed = True
+                                break
+                        if placed:
                             break
                     if placed:
                         break
@@ -520,11 +527,31 @@ class ViewLayout:
         return 0.0 if not rows else FIRST_ROW + ROW * max(c["row"] for c in rows) + 4.5
 
     def place_callouts(self, callouts: list[dict[str, Any]], side: str, size: float) -> None:
-        """Leader + text for each hole group, beyond the dimension rows on ``side`` ('top' or 'bottom')."""
+        """Leader + text for each hole group or radius/chamfer, beyond the dimension rows above or below the view.
+
+        ``side`` is the default; a callout whose feature sits in the far half of the view goes to the other side, so
+        its leader stays short instead of running diagonally across the view."""
+        placed: list[list[float]] = [c["tbox"] for sd in ("top", "bottom") for c in self.rows.get(sd, [])] + list(self.reserved)
+        leaders: list[tuple[tuple[float, float], tuple[float, float]]] = []
+
+        def feature_y(c: dict[str, Any]) -> float:
+            pts = c.get("tips") or ([c["tip"]] if c.get("tip") is not None else [(h[0], h[1]) for h in c.get("holes") or []])
+            ys = [self.xy(u, v)[1] for u, v in pts]
+            return sum(ys) / len(ys) if ys else 0.0
+
+        groups: dict[str, list[dict[str, Any]]] = {"top": [], "bottom": []}
+        for c in callouts:
+            near = "top" if feature_y(c) < self.h / 2 else "bottom"
+            mid = abs(feature_y(c) - self.h / 2) < 0.1 * self.h  # near the middle: keep the default side
+            groups[side if mid else near].append(c)
+        for sd in ("top", "bottom"):
+            if groups[sd]:
+                self._place_callouts_side(groups[sd], sd, size, placed, leaders)
+
+    def _place_callouts_side(self, callouts: list[dict[str, Any]], side: str, size: float, placed: list[list[float]],
+                             leaders: list[tuple[tuple[float, float], tuple[float, float]]]) -> None:
         sign = 1 if side == "top" else -1
         base = self.side_extent(side) + (4.0 if self.rows.get(side) else 6.0)
-        placed: list[list[float]] = [c["tbox"] for c in self.rows.get(side, [])] + list(self.reserved)
-        leaders: list[tuple[tuple[float, float], tuple[float, float]]] = []
         row_y = base
         for c in sorted(callouts, key=lambda c: c["id"]):
             if c.get("tip") is not None:  # radius / chamfer: any of the arcs, nearest the text side first

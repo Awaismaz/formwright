@@ -151,11 +151,11 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
     if so:
         who = "self-checked (the signer also authored calculations in this set)" if so.get("self_check") \
             else "independent check (the signer did not author these calculations)"
-        cover += [[P("Signed by"), P(f"{so.get('name')} ({so.get('role')}) · {so.get('at')}")],
+        cover += [[P("Signed by"), P(f"{so.get('name')} ({so.get('role')}) · {str(so.get('at') or '').replace('T', ' ').replace('Z', ' UTC')}")],
                   [P("Check type"), P(who)],
                   [P("Signed on model"), P(f"revision {signed_rev or '—'}")],
                   [P("Statement"), P(f"“{so.get('statement')}”")]]
-        if so.get("facts"):
+        if so.get("facts") and so["facts"].strip().strip("“”\"") != (so.get("statement") or "").strip().strip("“”\""):
             cover.append([P("Recorded facts"), P(so["facts"])])
     cover.append([P("Content hash"), Paragraph(_e(st["hash"]), mono)])
     t = Table(cover, colWidths=[34 * mm, 148 * mm])

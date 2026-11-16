@@ -70,7 +70,8 @@ export function ReleaseDialog({ projectId, open, onOpenChange }: { projectId: st
     queryFn: () => api.get<Gate>(`/api/projects/${projectId}/release`) });
   const g = q.data;
   useEffect(() => { if (!open) { setNote(null); setLeave([]); } }, [open]);
-  const blocking = (g?.blocking ?? []).filter(b => !(b.leavable && leave.includes(b.leavable)));
+  const current = (g?.blocking ?? []).find(b => b.kind === "release");  // this exact model is already issued
+  const blocking = (g?.blocking ?? []).filter(b => b.kind !== "release" && !(b.leavable && leave.includes(b.leavable)));
   const left = (g?.blocking ?? []).filter(b => b.leavable && leave.includes(b.leavable));
   const issue = async () => {
     if (!g) return;
@@ -81,7 +82,7 @@ export function ReleaseDialog({ projectId, open, onOpenChange }: { projectId: st
       refreshDeliverables(qc, projectId);
       for (const k of ["drw", "drw-svg", "drw-projects"]) void qc.invalidateQueries({ queryKey: [k] });
       void q.refetch();
-      setNote(null); setLeave([]);
+      setNote(null); setLeave([]); onOpenChange(false);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "The revision could not be issued"); }
     finally { setBusy(false); }
   };
@@ -90,10 +91,13 @@ export function ReleaseDialog({ projectId, open, onOpenChange }: { projectId: st
       description="Freezes this exact model with its drawing, manufacturability report, signed calculations and print exports in one hashed pack. Later changes show as a draft until you issue the next revision."
       footer={g && <>
         <Button variant="secondary" onClick={() => onOpenChange(false)}>Close</Button>
-        {g.can_issue && <Button icon={<Stamp className="h-4 w-4" />} loading={busy} disabled={blocking.length > 0} onClick={() => void issue()} data-action="issue-release">Issue Rev {g.next_rev}</Button>}
+        {g.can_issue && <Button icon={<Stamp className="h-4 w-4" />} loading={busy} disabled={blocking.length > 0 || !!current} onClick={() => void issue()} data-action="issue-release">Issue Rev {g.next_rev}</Button>}
       </>}>
       {!g ? <div className="flex justify-center py-8"><Spinner /></div> : (
         <div className="space-y-4 text-[13px]">
+          {current && g.release && <div className="flex items-start gap-2 rounded border border-success/30 bg-success/5 px-3 py-2">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+            <span>Rev {g.release.rev} ({g.release.date}) is this exact model. Change the design to issue Rev {g.next_rev}; until then there is nothing new to issue.</span></div>}
           {blocking.length > 0 && (
             <div>
               <div className="label mb-1.5">Before you can issue</div>

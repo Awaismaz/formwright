@@ -124,10 +124,10 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
                   <button disabled={dis} onClick={() => { if (b.onClick) { b.onClick(); setTimeout(() => setTick(t => t + 1), 0); } else if (b.cmd) onCommand(b.cmd); }}
                     data-make={tab === "Make" ? b.id : undefined}
                     className={cx("relative flex flex-col items-center justify-center gap-1 rounded px-1 text-[10.5px] leading-tight transition disabled:opacity-35",
-                      tab === "Make" ? "w-[92px]" : "w-[74px]",
+                      tab === "Make" ? "min-w-[88px] max-w-[150px] px-2.5" : "w-[74px]",
                       b.active ? "bg-primary-soft text-primary ring-1 ring-primary/40" : "text-text hover:bg-primary-soft hover:text-primary")}>
                     {b.locked && <Lock className="absolute right-1 top-1 h-3 w-3 text-muted" aria-label="Add-on" />}
-                    <span className={b.locked ? "text-muted" : "text-primary"}>{b.icon}</span><span className="text-center">{b.label}</span>
+                    <span className={b.locked ? "text-muted" : "text-primary"}>{b.icon}</span><span className={cx("text-center", tab === "Make" && "whitespace-nowrap")}>{b.label}</span>
                     {b.status && <span className={cx("max-w-full truncate text-[9.5px] leading-none", b.status.tone === "warn" ? "font-semibold text-warning" : b.status.tone === "ok" ? "text-success" : "text-muted")}>{b.status.text}</span>}
                   </button>
                 </Tip>);
