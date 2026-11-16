@@ -5,19 +5,20 @@ import { Check, Coins, ImagePlus, Loader2, Lock, MousePointer2, RotateCcw, Send,
 import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { AgentEvent, Project } from "@/lib/types";
+import type { AgentEvent, AgentQuestion, Project } from "@/lib/types";
 import { cx, num } from "@/lib/format";
 import { Markdown } from "@/lib/markdown";
-import { Button, Tip } from "@/components/ui";
+import { Button, Modal, Tip } from "@/components/ui";
 import { agentDescriptor, describe } from "@/viewer/measure";
 import type { Pick, Topo } from "@/viewer/types";
 import { pickKey } from "@/viewer/types";
+import type { TbMatch } from "./Toolbox";
 
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
   | { kind: "user"; text: string } | { kind: "agent"; text: string } | { kind: "error"; text: string }
   | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string }
-  | { kind: "result"; ev: ResultEv };
+  | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] };
 
 function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
   switch (ev.type) {
@@ -28,11 +29,10 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
     case "tool": return [...items, { kind: "tool", id: ev.id, name: ev.name, brief: ev.brief, state: "run" }];
     case "tool_result": return items.map(i => i.kind === "tool" && i.id === ev.id ? { ...i, state: ev.is_error ? "bad" : "ok", result: ev.brief } : i);
     case "result": return [...items, { kind: "result", ev: ev as ResultEv }];
+    case "questions": return [...items, { kind: "questions", questions: ev.questions }];
     default: return items;
   }
 }
-
-const TOOL_LABEL: Record<string, string> = { build_model: "Build & verify", Write: "Write", Edit: "Edit", Read: "Read", Glob: "Search files", Grep: "Search", TodoWrite: "Plan", WebFetch: "Read docs" };
 
 interface Att { name: string; mime: string; data_b64: string; url: string }
 
@@ -44,9 +44,46 @@ async function toAtt(f: File): Promise<Att> {
   return { name: f.name || "pasted.png", mime: f.type, data_b64: btoa(bin), url: URL.createObjectURL(f) };
 }
 
-export default function Chat({ project, topo, selection, onSelectionChange, onActivity }: {
+/** Clarifying questions from the agent as clickable choices. Submits "question: answer" lines. */
+function Questions({ qs, active, onSubmit }: { qs: AgentQuestion[]; active: boolean; onSubmit: (text: string) => void }) {
+  const [sel, setSel] = useState<Record<string, string[]>>(() => Object.fromEntries(qs.map(q => [q.id, q.default ? [q.default] : []])));
+  const [other, setOther] = useState<Record<string, string>>({});
+  const [sent, setSent] = useState(false);
+  const toggle = (q: AgentQuestion, o: string) => setSel(s => {
+    const cur = s[q.id] ?? [];
+    return { ...s, [q.id]: q.multi ? (cur.includes(o) ? cur.filter(x => x !== o) : [...cur, o]) : [o] };
+  });
+  const answer = (q: AgentQuestion) => [...(sel[q.id] ?? []), ...(other[q.id]?.trim() ? [other[q.id]!.trim()] : [])];
+  const complete = qs.every(q => answer(q).length > 0);
+  const live = active && !sent;
+  return (
+    <div className="rounded-lg border border-primary/30 bg-primary-soft/40 px-3 py-2.5">
+      {qs.map(q => (
+        <div key={q.id} className="mb-2.5 last:mb-1">
+          <div className="mb-1.5 text-[12.5px] font-medium">{q.question}{q.multi && <span className="ml-1 font-normal text-muted">(choose any)</span>}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {q.options.map(o => {
+              const on = (sel[q.id] ?? []).includes(o);
+              return <button key={o} disabled={!live} onClick={() => toggle(q, o)}
+                className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", on ? "border-primary bg-primary text-white" : "border-border bg-panel hover:border-primary hover:text-primary", !live && !on && "opacity-50")}>{o}</button>;
+            })}
+            {q.other && live && <input value={other[q.id] ?? ""} onChange={e => setOther({ ...other, [q.id]: e.target.value })} placeholder="Other…"
+              onFocus={() => !q.multi && setSel(s => ({ ...s, [q.id]: [] }))}
+              className="h-[26px] w-28 rounded-full border border-border bg-panel px-2.5 text-[12px] outline-none focus:border-primary" />}
+          </div>
+        </div>))}
+      {live && <div className="mt-1 flex justify-end">
+        <Button size="sm" disabled={!complete} icon={<Send className="h-3.5 w-3.5" />}
+          onClick={() => { setSent(true); onSubmit(qs.map(q => `${q.question} ${answer(q).join(", ")}`).join("\n")); }}>Send answers</Button></div>}
+    </div>
+  );
+}
+
+export default function Chat({ project, topo, selection, onSelectionChange, onActivity, onToolbox }: {
   project: Project; topo: Topo | null; selection: Pick[]; onSelectionChange: (p: Pick[]) => void; onActivity: () => void;
+  onToolbox?: (m?: TbMatch) => void;
 }) {
+  const [offer, setOffer] = useState<{ prompt: string; matches: TbMatch[] } | null>(null);
   const { me } = useSession();
   const nav = useNavigate();
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -69,7 +106,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
       if (ev.type === "hello") setBusy(ev.busy);
       if (ev.type === "busy") setBusy(ev.value);
       if (ev.type === "system") setModel(ev.model);
-      if (ev.type === "tool_result" || ev.type === "result" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature)/.test(ev.text))) onActivity();
+      if (ev.type === "tool_result" || ev.type === "result" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
     };
     return () => es.close();
@@ -83,13 +120,20 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     }
   };
 
-  const send = async () => {
-    let t = text.trim(); if ((!t && !atts.length) || busy) return;
+  const send = async (override?: string, skipToolbox = false) => {
+    let t = (override ?? text).trim(); if ((!t && !atts.length) || busy) return;
     if (!t) t = "Model the part shown in the attached reference image(s).";
+    // A standard component? Offer the Toolbox (repeatable generator) — the user decides; the agent stays available.
+    if (!override && !skipToolbox && !selection.length && !atts.length && onToolbox) {
+      try {
+        const m = await api.post<{ matches: TbMatch[] }>("/api/toolbox/match", { prompt: t });
+        if (m.matches.length) { setOffer({ prompt: t, matches: m.matches }); return; }
+      } catch { /* matching is optional */ }
+    }
     if (selection.length && topo) t += "\n\n[Selected in viewer: " + selection.map((p, i) => `(${i + 1}) ${agentDescriptor(p, topo)}`).join("; ") + "]";
     try {
       await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
-      setText(""); setAtts([]); onSelectionChange([]);
+      if (!override || skipToolbox) { setText(""); setAtts([]); onSelectionChange([]); }
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
@@ -126,12 +170,13 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             {/\[Selected in viewer:/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><MousePointer2 className="mr-1 inline h-3 w-3" />with viewer selection</div>}
             {/\[Reference image/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ImagePlus className="mr-1 inline h-3 w-3" />with reference image</div>}</div>;
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;
+          if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={n === items.length - 1 && !busy} onSubmit={a => send(a)} />;
           if (i.kind === "error") return <div key={n} className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-danger">{i.text}</div>;
           if (i.kind === "tool") return (
-            <div key={n} className="flex items-start gap-2 px-1 text-[12px] text-muted" title={i.result}>
+            <div key={n} className="flex items-start gap-2 px-1 text-[12px] text-muted">
               <span className="mt-0.5">{i.state === "run" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : i.state === "ok" ? <Check className="h-3.5 w-3.5 text-success" /> : <X className="h-3.5 w-3.5 text-danger" />}</span>
-              <span><b className="font-medium text-text">{TOOL_LABEL[i.name] ?? i.name}</b> {i.brief}
-                {i.name === "build_model" && i.result && <span className={cx("ml-1", i.result.includes("PASS") ? "text-success" : "text-danger")}>— {i.result}</span>}</span>
+              <span><span className="text-text">{i.brief}</span>
+                {i.result && <span className={cx("ml-1", /passed/.test(i.result) ? "text-success" : "text-warning")}>— {i.result}</span>}</span>
             </div>);
           return (
             <div key={n} className="flex flex-wrap items-center justify-center gap-x-2 border-b border-dashed border-border pb-2 text-[11px] text-muted">
@@ -177,10 +222,24 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             </Tip>
             <span className="flex-1 text-[11px] text-muted">{unlimited ? "Unlimited tokens (God mode)" : est.data ? `≈ ${est.data.typical} tokens (${est.data.low}–${est.data.high}) · balance ${num(me?.org?.token_balance)}` : ""} · <span className="kbd">Ctrl ↵</span></span>
             {busy ? <Button size="sm" variant="secondary" icon={<Square className="h-3.5 w-3.5" />} onClick={() => api.post(`/api/projects/${project.id}/agent/interrupt`)}>Stop</Button>
-              : <Button size="sm" icon={<Send className="h-3.5 w-3.5" />} onClick={send} disabled={!text.trim() && !atts.length}>Send</Button>}
+              : <Button size="sm" icon={<Send className="h-3.5 w-3.5" />} onClick={() => send()} disabled={!text.trim() && !atts.length}>Send</Button>}
           </div>
         </>}
       </div>
+      {offer && (
+        <Modal open onOpenChange={v => !v && setOffer(null)} title="A standard component fits this request"
+          description="Toolbox components come from repeatable generators: the same sizes always give the identical, verified model — instantly and without using tokens."
+          footer={<Button variant="secondary" icon={<Sparkles className="h-4 w-4" />} onClick={() => { const p = offer.prompt; setOffer(null); send(p, true); }}>Continue with custom design</Button>}>
+          <div className="space-y-2">
+            {offer.matches.map(m => (
+              <button key={m.code} onClick={() => { setOffer(null); setText(""); onToolbox?.(m); }}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 text-left hover:border-primary hover:bg-primary-soft">
+                <span><span className="block text-[13.5px] font-medium">Use Toolbox: {m.title}</span>
+                  <span className="text-[12px] text-muted">{m.standard}{m.prefilled.length ? ` · sizes read from your request: ${m.prefilled.join(", ")}` : " · default sizes, adjust before creating"}</span></span>
+                <span className="text-[12px] font-medium text-primary">Choose →</span>
+              </button>))}
+          </div>
+        </Modal>)}
     </section>
   );
 }

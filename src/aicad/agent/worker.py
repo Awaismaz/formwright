@@ -66,8 +66,11 @@ def serve() -> None:
             req = json.loads(line)
             t0 = time.perf_counter()
             if req["op"] == "build":
-                rc = runner.main(Path(req["script"]), Path(req["out"]), determinism=bool(req.get("determinism", True)))
+                rc = runner.main(Path(req["script"]), Path(req["out"]), determinism=bool(req.get("determinism", True)),
+                                 fast=bool(req.get("fast", False)))
                 resp: dict[str, Any] = {"ok": True, "rc": rc}
+            elif req["op"] == "finalize":
+                resp = {"ok": True, "rc": runner.finalize(Path(req["out"]))}
             elif req["op"] == "diff":
                 resp = {"ok": True, "rc": 0, **_diff(Path(req["a"]), Path(req["b"]), Path(req["out"]))}
             elif req["op"] == "render":
@@ -146,10 +149,15 @@ def get_worker(key: str) -> Worker:
     return w
 
 
-async def build(key: str, script: Path, out: Path, determinism: bool = True, timeout: float = 180) -> dict[str, Any]:
+async def build(key: str, script: Path, out: Path, determinism: bool = True, timeout: float = 180,
+                fast: bool = False) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
     return await get_worker(key).request({"op": "build", "script": str(script), "out": str(out),
-                                          "determinism": determinism}, timeout)
+                                          "determinism": determinism, "fast": fast}, timeout)
+
+
+async def finalize(key: str, out: Path, timeout: float = 180) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "finalize", "out": str(out)}, timeout)
 
 
 async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float = 60) -> dict[str, Any]:

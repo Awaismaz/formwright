@@ -1,0 +1,48 @@
+# Project context (portable memory)
+
+This file carries the working context that otherwise lives only in a Claude Code session, so work can continue
+from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
+
+## Founder and way of working
+- Founder: mechanical design engineer building Formwright as a venture; validated the concept with Claude Code
+  and insists the in-app agent has Claude Code-level agentic power (Claude Agent SDK, not plain chat).
+- Prefers autonomy: "make the best judgement; if a decision is truly mine, park it and keep building".
+- Wants a production-grade, user-centric product (customer journey, guided tours, billing, God mode for demos),
+  then module-by-module depth. **Current priority: mature the Design Studio before other modules.**
+- Familiar with SOLIDWORKS: expects native CAD conventions (CommandManager, PropertyManager, feature tree,
+  orthographic views, sketch relations, Toolbox).
+- Does not want backend internals visible to users (no "Reading model.py"); plain engineering language only.
+- Wants everything (code, plans, feature list, context) in the GitHub repo and docs updated every session.
+
+## Standing decisions (details in docs/DECISIONS.md)
+- Name/brand: **Formwright** (trademark unchecked, PD-01). SOLIDWORKS-like blue/grey theme (docs/BRAND.md).
+- Stack: Python 3.12 (uv), FastAPI, SQLAlchemy (SQLite now), build123d 0.13 / OCP 7.9 (OCCT), React 18 + TS +
+  Vite + Tailwind + Radix + TanStack Query + three.js. Agent: Claude Agent SDK (`aicad.agent.session`).
+- Dev-only agent auth via the founder's Claude Code subscription login (no API charges in development).
+- Tokens: plans include tokens, top-ups/add-ons purchasable; God-mode accounts have unlimited tokens.
+- Founder login is a superadmin with God mode (credentials in `data/ADMIN_CREDENTIALS.txt`, never committed).
+- Toolbox generators are deterministic and versioned (`aicad/toolbox.py`, `VERSION`); bump the version on any
+  geometry change so old models stay reproducible.
+
+## Architecture in one screen
+- `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
+  `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),
+  `worker.py` (warm per-org build worker).
+- `src/aicad/fw.py` — helper lib used by model scripts: feature provenance, selections, manual features
+  (fillet, chamfer, hole/patterns, extrude, sketch profiles, shell, mirror), imported STEP reference.
+- `src/aicad/topo.py` exact B-rep topology for the viewer; `recognize.py` STEP feature recognition + parametric
+  draft; `toolbox.py` standard components; `checks.py` deterministic checks.
+- `src/aicad/platform/` — FastAPI app, models, routers (`projects`, `studio` = manual features/materials/compare,
+  `library` = Toolbox/STEP import/recognition, auth, billing, admin, god, team, journey).
+- `web/src/pages/app/ProjectStudio.tsx` — Studio shell; `studio/` CommandManager, FeatureManager (PropertyManager),
+  SketchEditor (2D constraint sketcher, solver in `web/src/sketch/model.ts`), Chat, Panels, Toolbox, StepImport.
+  Viewer engine in `web/src/viewer/` (Z-up, ortho default, B-rep edges, snapping, section caps).
+
+## Machine notes (founder's Windows workstation)
+- `unset VIRTUAL_ENV` before `uv run`. Git Bash heredocs with quotes/backticks often break: write patch scripts
+  to a file and run them. `gh` CLI is not installed.
+- SOLIDWORKS 2025, Creo 11 and Blender are installed locally (useful for manual cross-checks of exported STEP).
+- Puppeteer e2e: Radix menus/tabs need real pointer events.
+
+## Where things stand
+See `docs/PUNCH_LIST.md` (DS-* rows for the Studio) and the latest `docs/SESSION_LOG.md` entry.

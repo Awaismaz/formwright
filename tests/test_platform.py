@@ -32,9 +32,9 @@ def app_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         app_url="http://testserver", superadmin_emails=(ADMIN,), stripe_secret_key="", trial_tokens=300))
     from aicad.platform.app import create_app
 
-    c = TestClient(create_app())
-    c.headers.update({"X-FW-CSRF": "1"})
-    yield c
+    with TestClient(create_app()) as c:  # one persistent event loop, like the real server (background tasks run)
+        c.headers.update({"X-FW-CSRF": "1"})
+        yield c
     from aicad.agent import worker
 
     for w in worker._workers.values():  # test-only cleanup: event loops of TestClient are short-lived

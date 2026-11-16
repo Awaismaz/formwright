@@ -14,25 +14,57 @@ from typing import Any
 
 from build123d import (
     Align,
+    Axis,
     Circle,
     Cylinder,
+    Face,
+    Line,
     Location,
     Plane,
     Polygon,
     Pos,
     Rectangle,
+    ThreePointArc,
     Vector,
+    Wire,
     chamfer,
     extrude,
     fillet,
+    mirror,
+    offset,
 )
 
-_STATE: dict[str, Any] = {"log": [], "manual": 0}
+_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
 
 
 def reset() -> None:
     _STATE["log"] = []
     _STATE["manual"] = 0
+
+
+def set_base(folder: Any) -> None:
+    """Project folder of the running model (set by the runner)."""
+    from pathlib import Path
+
+    _STATE["base"] = Path(folder).resolve()
+
+
+def project_file(rel: str) -> str:
+    """Absolute path of a file inside the project (e.g. an imported STEP under imports/). Cannot escape it."""
+    from pathlib import Path
+
+    base = _STATE.get("base") or Path.cwd()
+    p = (Path(base) / rel).resolve()
+    if base not in p.parents:
+        raise ValueError("file must be inside the project")
+    return str(p)
+
+
+def import_reference(rel: str) -> Any:
+    """Load an imported STEP file from the project as a solid (no feature history)."""
+    from build123d import import_step
+
+    return import_step(project_file(rel))
 
 
 def face_key(f: Any) -> tuple[Any, ...]:
@@ -139,6 +171,52 @@ def _sketch(spec: dict[str, Any]) -> Any:
     raise ValueError(f"unknown sketch kind {k!r}")
 
 
+def _profile_face(prof: dict[str, Any]) -> Any:
+    if prof["kind"] == "circle":
+        return Pos(float(prof["cx"]), float(prof["cy"])) * Circle(float(prof["r"]))
+    segs = list(prof["segs"])
+    # Orient the loop counter-clockwise so the face normal is the sketch plane's +Z (extrude direction is
+    # then always "out of the face", whatever direction the user drew the loop in).
+    area2 = sum(float(segs[i]["a"][0]) * float(segs[i]["b"][1]) - float(segs[i]["b"][0]) * float(segs[i]["a"][1])
+                for i in range(len(segs)))
+    for s in segs:
+        if s["type"] == "arc":  # add the arc's bulge (triangle a-m-b) to the signed area
+            (ax, ay), (mx, my), (bx, by) = s["a"], s["m"], s["b"]
+            area2 += (float(ax) * float(my) - float(mx) * float(ay)) + (float(mx) * float(by) - float(bx) * float(my)) \
+                - (float(ax) * float(by) - float(bx) * float(ay))
+    if area2 < 0:
+        segs = [{**s, "a": s["b"], "b": s["a"]} for s in reversed(segs)]
+    edges = []
+    for sg in segs:
+        a = (float(sg["a"][0]), float(sg["a"][1]))
+        b = (float(sg["b"][0]), float(sg["b"][1]))
+        if sg["type"] == "arc":
+            edges.append(ThreePointArc(a, (float(sg["m"][0]), float(sg["m"][1])), b))
+        else:
+            edges.append(Line(a, b))
+    return Face(Wire(edges))
+
+
+def sketch_region(profiles: list[dict[str, Any]]) -> Any:
+    """Faces from closed profiles; loops nested an odd number of times are holes (even-odd rule)."""
+    faces = [_profile_face(p) for p in profiles]
+    faces.sort(key=lambda f: -f.area)
+    depth = []
+    for i, f in enumerate(faces):
+        c = f.center()
+        depth.append(sum(1 for g in faces[:i] if g.area > f.area and g.distance_to(c) < 1e-9))
+    region = None
+    for f, d in zip(faces, depth, strict=True):
+        if d % 2 == 0:
+            region = f if region is None else region + f
+    for f, d in zip(faces, depth, strict=True):
+        if d % 2 == 1 and region is not None:
+            region = region - f
+    if region is None:
+        raise ValueError("sketch has no closed profile")
+    return region
+
+
 def _op(part: Any, f: dict[str, Any], diag: float) -> Any:
     op = f["op"]
     if op == "fillet":
@@ -157,13 +235,36 @@ def _op(part: Any, f: dict[str, Any], diag: float) -> Any:
         plane = Plane(origin=_v(f["point"]), z_dir=n)
         tool = plane * Cylinder(float(f["d"]) / 2, depth, align=(Align.CENTER, Align.CENTER, Align.MAX))
         count = int(f.get("count", 1))
+        if count > 1 and f.get("pattern") == "circular":
+            centre = _v(f["center"])
+            ax = Axis(centre, n)
+            for i in range(count):
+                part = part - tool.rotate(ax, 360.0 * i / count)
+            return part
         if count > 1:
             step = _v(f.get("step", (0, 0, 0)))
-            tools = [Location(step * i) * tool for i in range(count)]
-            for t in tools:
-                part = part - t
+            for i in range(count):
+                part = part - Location(step * i) * tool
             return part
         return part - tool
+    if op == "shell":
+        openings = []
+        for fc in f["faces"]:
+            found = faces_near(part, fc["point"], normal=fc.get("normal"))
+            if not found:
+                raise ValueError("a face to remove was not found (geometry changed?)")
+            openings += found
+        return offset(part, amount=-float(f["t"]), openings=openings)
+    if op == "sketch":
+        plane = _plane(f["plane"])
+        region = plane * sketch_region(f["profiles"])
+        d = float(f["distance"])
+        if f.get("mode", "add") == "cut":
+            return part - extrude(region, amount=-d)
+        return part + extrude(region, amount=d)
+    if op == "mirror":
+        pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
+        return part + mirror(part, about=pl)
     if op == "extrude":
         plane = _plane(f["plane"])
         sk = plane * _sketch(f["sketch"])

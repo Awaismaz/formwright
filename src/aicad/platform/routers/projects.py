@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api", tags=["projects"])
 
 FILES = {"model.glb": "model/gltf-binary", "status.json": "application/json", "part.step": "application/step",
          "part.stl": "model/stl", "views.png": "image/png", "topo.json": "application/json",
-         "part.3mf": "model/3mf"}
+         "part.3mf": "model/3mf", "recognition.json": "application/json"}
 DOWNLOADS = {"part.step", "part.stl", "part.3mf"}
 
 TEMPLATES = [
@@ -167,7 +167,7 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
             ws = workspace_for(p)
             if ev["type"] == "tool_result":
                 sp = ws / "out" / "status.json"
-                if sp.is_file() and ev.get("brief", "").startswith(("Overall", "BUILD")):
+                if sp.is_file() and ev.get("build"):
                     st = json.loads(sp.read_text(encoding="utf-8"))
                     p.last_status = {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error",
                                                             "build_id", "params")}
@@ -333,6 +333,8 @@ async def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_c
     if name not in FILES:
         raise HTTPException(404)
     ws = workspace_for(p)
+    if name in DOWNLOADS or name in ("model.glb", "views.png"):
+        await wait_finalized(p.id)
     f = ws / "out" / name
     if not f.is_file() and name in ("topo.json", "part.3mf") and (ws / "model.py").is_file()             and (ws / "out" / "status.json").is_file() and not (_sessions.get(p.id) and _sessions[p.id].busy):
         await _rebuild(p, ws, determinism=False)  # one-time upgrade of projects built before these outputs existed
@@ -375,21 +377,56 @@ def _status_summary(st: dict[str, Any]) -> dict[str, Any]:
     return {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
 
 
+_finalizing: dict[str, asyncio.Task[None]] = {}
+
+
 async def _render_later(p: Project, ws: Path) -> None:
     stl = ws / "out" / "part.stl"
     if stl.is_file():
         await worker.render(p.org_id, stl, ws / "out" / "views.png", p.name)
 
 
-async def _rebuild(p: Project, ws: Path, determinism: bool) -> dict[str, Any]:
-    """Build on the warm worker (no interpreter/kernel start-up); the 4-view PNG renders in the background
-    because the live viewer uses the GLB, not the PNG."""
-    res = await worker.build(p.org_id, ws / "model.py", ws / "out", determinism=determinism)
-    if res.get("rc") == -1:
-        raise HTTPException(504, f"Rebuild failed: {res.get('error')}")
-    t = asyncio.create_task(_render_later(p, ws))
+async def _finalize_later(p: Project, ws: Path, rev: int | None = None) -> None:
+    """Exports + STEP round-trip for a fast build, then render; completes the revision snapshot."""
+    try:
+        await worker.finalize(p.org_id, ws / "out")
+        if rev is not None:
+            d = ws / "revisions" / str(rev)
+            if d.is_dir():
+                for f in ("part.step", "status.json"):
+                    if (ws / "out" / f).is_file():
+                        shutil.copy2(ws / "out" / f, d / f)
+        await _render_later(p, ws)
+    except Exception:
+        import logging
+
+        logging.getLogger("aicad.projects").exception("finalize failed")
+
+
+def schedule_finalize(p: Project, ws: Path, rev: int | None = None) -> None:
+    t = asyncio.create_task(_finalize_later(p, ws, rev))
+    _finalizing[p.id] = t
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
+
+
+async def wait_finalized(project_id: str) -> None:
+    t = _finalizing.get(project_id)
+    if t is not None and not t.done():
+        await asyncio.shield(t)
+
+
+async def _rebuild(p: Project, ws: Path, determinism: bool, fast: bool = False) -> dict[str, Any]:
+    """Build on the warm worker. fast=True returns as soon as geometry/topology/validity are ready; exports,
+    round-trip check and the 4-view render complete in the background (call schedule_finalize after snapshot)."""
+    await wait_finalized(p.id)
+    res = await worker.build(p.org_id, ws / "model.py", ws / "out", determinism=determinism, fast=fast)
+    if res.get("rc") == -1:
+        raise HTTPException(504, f"Rebuild failed: {res.get('error')}")
+    if not fast:
+        t = asyncio.create_task(_render_later(p, ws))
+        _tasks.add(t)
+        t.add_done_callback(_tasks.discard)
     return _read_status(ws)
 
 
@@ -419,7 +456,8 @@ async def restore_revision(project_id: str, n: int, ctx: Ctx = Depends(verified_
     if not src.is_file():
         raise HTTPException(404)
     shutil.copy2(src, ws / "model.py")
-    st = await _rebuild(p, ws, determinism=False)  # the revision was verified when first built
+    st = await _rebuild(p, ws, determinism=False, fast=True)  # the revision was verified when first built
+    schedule_finalize(p, ws)
     p.last_status = _status_summary(st)
     p.updated_at = utcnow()
     audit(ctx.db, "project.revision_restored", ctx.user, p.org_id, target=p.id, revision=n)
@@ -485,12 +523,13 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         changes[name] = {"from": editable[name], "to": val}
     if not changes:
         return {"ok": True, "changed": {}}
+    await wait_finalized(p.id)  # never snapshot while background exports are writing
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
     if (ws / "out").is_dir():
         shutil.copytree(ws / "out", backup)
     f.write_text(new, encoding="utf-8")
-    st = await _rebuild(p, ws, determinism=False)
+    st = await _rebuild(p, ws, determinism=False, fast=True)
     if not st.get("ok"):
         f.write_text(src, encoding="utf-8")
         if backup.is_dir():
@@ -504,6 +543,7 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     p.builds += 1
     p.updated_at = utcnow()
     rev = _snapshot(p, ws)
+    schedule_finalize(p, ws, rev)
     audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
     ctx.db.commit()
     if s:

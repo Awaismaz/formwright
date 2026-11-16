@@ -29,6 +29,8 @@ from aicad.platform.routers.projects import (
     _sessions,
     _snapshot,
     _status_summary,
+    schedule_finalize,
+    wait_finalized,
     workspace_for,
 )
 from aicad.platform.services import audit
@@ -109,7 +111,7 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch"}
 
 
 def read_manual(src: str) -> list[dict[str, Any]]:
@@ -169,7 +171,53 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         out["depth"] = _num(f["depth"], "depth", 0.01, 1e5) if f.get("depth") else None
         if f.get("count") and int(f["count"]) > 1:
             out["count"] = min(int(f["count"]), 100)
-            out["step"] = _pt(f.get("step"), "step")
+            if f.get("pattern") == "circular":
+                out["pattern"] = "circular"
+                out["center"] = _pt(f.get("center"), "pattern centre")
+            else:
+                out["step"] = _pt(f.get("step"), "step")
+    elif op == "shell":
+        faces = f.get("faces") or []
+        if not 1 <= len(faces) <= 50:
+            raise HTTPException(422, "Select 1–50 faces to remove")
+        out["faces"] = [{"point": _pt(x.get("point"), "face point"), "normal": _pt(x.get("normal"), "face normal")}
+                        for x in faces]
+        out["t"] = _num(f.get("t"), "thickness", 0.01, 1e4)
+    elif op == "sketch":
+        pl = f.get("plane") or {}
+        out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal"),
+                        "x_dir": _pt(pl.get("x_dir"), "plane x direction")}
+        profs = f.get("profiles") or []
+        if not 1 <= len(profs) <= 100:
+            raise HTTPException(422, "The sketch needs 1–100 closed profiles")
+        clean = []
+        for pr in profs:
+            if pr.get("kind") == "circle":
+                clean.append({"kind": "circle", "cx": _num(pr.get("cx"), "cx"), "cy": _num(pr.get("cy"), "cy"),
+                              "r": _num(pr.get("r"), "radius", 0.001, 1e5)})
+            elif pr.get("kind") == "loop":
+                segs = pr.get("segs") or []
+                if not 1 <= len(segs) <= 2000:
+                    raise HTTPException(422, "Profile has too many segments")
+                cs = []
+                for sg in segs:
+                    t = "arc" if sg.get("type") == "arc" else "line"
+                    item = {"type": t, "a": [_num(v, "x") for v in sg["a"]], "b": [_num(v, "y") for v in sg["b"]]}
+                    if t == "arc":
+                        item["m"] = [_num(v, "arc mid") for v in sg["m"]]
+                    cs.append(item)
+                clean.append({"kind": "loop", "segs": cs})
+            else:
+                raise HTTPException(422, "Unknown profile")
+        out["profiles"] = clean
+        out["distance"] = _num(f.get("distance"), "distance", 0.001, 1e5)
+        out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))  # full sketch (constraints, dimensions) for re-editing
+    elif op == "mirror":
+        pl = f.get("plane") or {}
+        out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
     elif op == "extrude":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
@@ -210,19 +258,21 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
     new_feats = mutate([dict(x) for x in feats])
+    await wait_finalized(p.id)  # never snapshot while background exports are writing
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
     if (ws / "out").is_dir():
         shutil.copytree(ws / "out", backup)
     f.write_text(write_manual(src, new_feats), encoding="utf-8")
-    st = await _rebuild(p, ws, determinism=False)
+    st = await _rebuild(p, ws, determinism=False, fast=True)
     if st.get("error") or not st.get("fingerprint"):
         f.write_text(src, encoding="utf-8")
         if backup.is_dir():
             shutil.rmtree(ws / "out", ignore_errors=True)
             backup.rename(ws / "out")
         raise HTTPException(422, f"{st.get('error') or 'Build failed'} — the previous model was restored.")
-    gating_fail = [c["id"] for c in st.get("checks", []) if c["gating"] and not c["passed"]]
+    # Manual edits are gated on geometric validity only; size/volume vs the agent's estimate stay informational.
+    gating_fail = [c["id"] for c in st.get("checks", []) if c["id"] in ("CHK-02", "CHK-03") and not c["passed"]]
     if gating_fail:
         f.write_text(src, encoding="utf-8")
         if backup.is_dir():
@@ -234,11 +284,12 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     p.builds += 1
     p.updated_at = utcnow()
     rev = _snapshot(p, ws)
+    schedule_finalize(p, ws, rev)
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
     if s:
         s.publish({"type": "text", "text": f"Manual feature {action} without AI (revision {rev})."})
-    return {"ok": True, "features": new_feats, "revision": rev}
+    return {"ok": True, "features": new_feats, "revision": rev, "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
 class FeatureIn(BaseModel):
@@ -315,6 +366,7 @@ class CompareIn(BaseModel):
 async def compare(project_id: str, body: CompareIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     p = _project(ctx, project_id)
     ws = workspace_for(p)
+    await wait_finalized(p.id)
     a = ws / "revisions" / str(body.base) / "part.step"
     b = (ws / "revisions" / str(body.target) / "part.step") if body.target else ws / "out" / "part.step"
     if not a.is_file() or not b.is_file():

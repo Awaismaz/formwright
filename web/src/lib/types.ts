@@ -58,12 +58,15 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch"; name: string; suppressed: boolean;
+  faces?: { point: [number, number, number]; normal: [number, number, number] }[]; t?: number;
+  pattern?: "circular"; center?: [number, number, number];
   edges?: [number, number, number][]; r?: number; d?: number;
   point?: [number, number, number]; normal?: [number, number, number]; depth?: number | null; count?: number; step?: [number, number, number];
   plane?: { origin: [number, number, number]; normal: [number, number, number]; x_dir?: [number, number, number] };
   sketch?: { kind: "rect" | "circle" | "poly"; w?: number; h?: number; r?: number; cx?: number; cy?: number };
   distance?: number; mode?: "add" | "cut";
+  profiles?: unknown[]; editor?: unknown;
 }
 
 export interface Project {
@@ -74,6 +77,8 @@ export interface Project {
 }
 
 export interface Template { code: string; name: string; icon: string; prompt: string }
+
+export interface AgentQuestion { id: string; question: string; options: string[]; multi: boolean; other: boolean; default: string | null }
 
 export type AgentEvent =
   | { type: "hello"; busy: boolean }
@@ -86,4 +91,5 @@ export type AgentEvent =
       auth: string | null; tokens_charged?: number; token_balance?: number }
   | { type: "error"; text: string }
   | { type: "busy"; value: boolean }
+  | { type: "questions"; questions: AgentQuestion[] }
   | { type: "reset" };

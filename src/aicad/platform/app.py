@@ -15,7 +15,17 @@ from aicad.platform.catalog import seed_catalog
 from aicad.platform.config import ROOT, get_settings
 from aicad.platform.db import init_engine, session_factory, utcnow
 from aicad.platform.models import User
-from aicad.platform.routers import admin, auth, billing, god, journey, projects, studio, team
+from aicad.platform.routers import (
+    admin,
+    auth,
+    billing,
+    god,
+    journey,
+    library,
+    projects,
+    studio,
+    team,
+)
 from aicad.platform.security import hash_password
 
 WEB_DIST = ROOT / "web" / "dist"
@@ -83,7 +93,7 @@ def create_app() -> FastAPI:
             resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return resp
 
-    for r in (auth.router, journey.router, team.router, billing.router, projects.router, studio.router,
+    for r in (auth.router, journey.router, team.router, billing.router, projects.router, studio.router, library.router,
               admin.router, god.router):
         app.include_router(r)
 

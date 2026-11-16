@@ -7,6 +7,7 @@ when no ANTHROPIC_API_KEY is present. Production must switch to API-key auth (RI
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -71,11 +72,97 @@ def make_guard(root: Path) -> Any:
     return guard
 
 
-def _brief(d: dict[str, Any], limit: int = 160) -> str:
-    if "file_path" in d:
-        return Path(str(d["file_path"])).name
-    s = ", ".join(f"{k}={str(v)[:60]}" for k, v in d.items() if k not in ("content", "new_string", "old_string"))
-    return s[:limit]
+import re as _re
+
+# ---------------------------------------------------------------- user-facing wording
+# Users never see internal file names, tool names, libraries or model identifiers.
+
+
+def friendly_step(name: str, inp: dict[str, Any]) -> str:
+    """Plain-language description of an agent step."""
+    n = name.replace("mcp__cad__", "")
+    path = str(inp.get("file_path") or inp.get("path") or "")
+    is_ref = "refs/" in path.replace("\\", "/")
+    if n == "build_model":
+        return "Building and verifying the part"
+    if n == "Read":
+        return "Studying the reference image" if is_ref else "Reviewing the current design"
+    if n == "Write":
+        return "Drafting the design"
+    if n == "Edit":
+        return "Updating the design"
+    if n in ("Glob", "Grep"):
+        return "Looking through the project"
+    if n == "TodoWrite":
+        return "Planning the design steps"
+    if n == "WebFetch":
+        return "Checking engineering reference material"
+    return "Working on the design"
+
+
+def friendly_result(name: str, text: str, is_error: bool) -> str:
+    n = name.replace("mcp__cad__", "")
+    t = text.strip()
+    if n == "build_model":
+        if t.startswith("Overall gating checks: PASS"):
+            return "All checks passed"
+        if t.startswith("Overall gating checks: FAIL"):
+            return "Some checks failed — revising"
+        if t.startswith("BUILD FAILED") or is_error:
+            return "Build error — fixing it"
+        return ""
+    return "Couldn't complete this step — trying another way" if is_error else ""
+
+
+_SCRUB = [
+    (_re.compile(r"`?\bmodel\.py\b`?"), "the design"),
+    (_re.compile(r"`?\bbuild_model\b`?"), "the build"),
+    (_re.compile(r"`?\bmcp__cad__\w+`?"), "the build"),
+    (_re.compile(r"`?\brefs/[\w.-]+`?"), "the reference image"),
+    (_re.compile(r"\bbuild123d\b", _re.IGNORECASE), "the CAD kernel"),
+    (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual)\b`?"), "the design tools"),
+    (_re.compile(r"\bPARAM_META\b"), "parameter limits"),
+    (_re.compile(r"\bEXPECTED\b"), "expected values"),
+    (_re.compile(r"\bPARAMS\b"), "parameters"),
+]
+
+
+_Q_BLOCK = re.compile(r"```fw-questions\s*\n(.*?)\n?```", re.DOTALL)
+
+
+def extract_questions(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Pull the agent's structured clarifying questions (a fenced ```fw-questions JSON block) out of its message.
+    Returns (text without the block, validated questions). Malformed blocks are dropped from the text, never shown raw."""
+    import json as _json
+
+    out: list[dict[str, Any]] = []
+    for m in _Q_BLOCK.finditer(text):
+        try:
+            raw = _json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(raw, dict):
+            raw = raw.get("questions", [])
+        if not isinstance(raw, list):
+            continue
+        for i, q in enumerate(raw[:6]):
+            if not isinstance(q, dict) or not isinstance(q.get("question"), str):
+                continue
+            opts = [str(o)[:120] for o in (q.get("options") or []) if isinstance(o, (str, int, float))][:8]
+            if not opts:
+                continue
+            out.append({"id": str(q.get("id") or f"q{len(out) + 1}")[:40], "question": scrub(q["question"][:300]),
+                        "options": [scrub(o) for o in opts], "multi": bool(q.get("multi", False)),
+                        "other": bool(q.get("other", True)),
+                        "default": str(q["default"])[:120] if q.get("default") is not None else None})
+            _ = i
+    return _Q_BLOCK.sub("", text).strip(), out
+
+
+def scrub(text: str) -> str:
+    for rx, rep_ in _SCRUB:
+        text = rx.sub(rep_, text)
+    return text
 
 
 class AgentSession:
@@ -92,7 +179,8 @@ class AgentSession:
         self.busy = False
         self.session_id: str | None = None
         self.auth: str | None = None
-        self.turn_meta: dict[str, Any] = {}  # merged into the next result event (e.g. rev_before for undo)
+        self.turn_meta: dict[str, Any] = {}
+        self._tool_names: dict[str, str] = {}  # merged into the next result event (e.g. rev_before for undo)
         self._state_dir = self.workspace / ".fw"
         self._load()
 
@@ -184,8 +272,12 @@ class AgentSession:
             await client.query(prompt)
             async for msg in client.receive_response():
                 self._handle(msg)
-        except Exception as e:  # noqa: BLE001 - surface every agent failure in the UI
-            self.publish({"type": "error", "text": f"{type(e).__name__}: {e}"})
+        except Exception:
+            import logging
+
+            logging.getLogger("aicad.agent").exception("agent run failed")
+            self.publish({"type": "error", "text": "The design agent hit a problem and stopped. Your model and files are "
+                                                   "unchanged — please try again."})
         finally:
             self.busy = False
             self.publish({"type": "busy", "value": False})
@@ -193,15 +285,19 @@ class AgentSession:
     def _handle(self, msg: Any) -> None:
         if isinstance(msg, SystemMessage) and msg.subtype == "init":
             self.auth = msg.data.get("apiKeySource")
-            self.publish({"type": "system", "model": msg.data.get("model"),
-                          "auth": "subscription login" if self.auth == "none" else f"API key ({self.auth})"})
+            self.publish({"type": "system", "model": "Formwright design agent"})
         elif isinstance(msg, AssistantMessage):
             for b in msg.content:
                 if isinstance(b, TextBlock) and b.text.strip():
-                    self.publish({"type": "text", "text": b.text})
+                    text, questions = extract_questions(b.text)
+                    if text.strip():
+                        self.publish({"type": "text", "text": scrub(text)})
+                    if questions:
+                        self.publish({"type": "questions", "questions": questions})
                 elif isinstance(b, ToolUseBlock):
-                    self.publish({"type": "tool", "id": b.id, "name": b.name.replace("mcp__cad__", ""),
-                                  "brief": _brief(b.input)})
+                    self._tool_names[b.id] = b.name
+                    self.publish({"type": "tool", "id": b.id, "name": "build" if "build_model" in b.name else "step",
+                                  "brief": friendly_step(b.name, b.input or {})})
         elif isinstance(msg, UserMessage) and isinstance(msg.content, list):
             for b in msg.content:
                 if isinstance(b, ToolResultBlock):
@@ -210,15 +306,16 @@ class AgentSession:
                         text = b.content
                     elif isinstance(b.content, list):
                         text = " ".join(c.get("text", "") for c in b.content if isinstance(c, dict))
-                    first = text.strip().splitlines()[0][:200] if text.strip() else ""
-                    self.publish({"type": "tool_result", "id": b.tool_use_id,
-                                  "is_error": bool(b.is_error), "brief": first})
+                    name = self._tool_names.get(b.tool_use_id, "")
+                    self.publish({"type": "tool_result", "id": b.tool_use_id, "is_error": bool(b.is_error),
+                                  "brief": friendly_result(name, text, bool(b.is_error)),
+                                  "build": "build_model" in name})
         elif isinstance(msg, ResultMessage):
             self.session_id = msg.session_id
             self._persist_session()
             self.publish({"type": "result", "subtype": msg.subtype, "turns": msg.num_turns,
                           "duration_s": round(msg.duration_ms / 1000, 1),
-                          "cost_est_usd": msg.total_cost_usd, "auth": self.auth, **self.turn_meta})
+                          "cost_est_usd": msg.total_cost_usd, **self.turn_meta})
             self.turn_meta = {}
 
     async def interrupt(self) -> None:

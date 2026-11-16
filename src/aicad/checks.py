@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from build123d import Edge, Shape
+from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Cylinder
 from OCP.TopAbs import TopAbs_EDGE
@@ -43,7 +44,9 @@ def free_edge_count(shape: Shape) -> int:
     for f in shape.faces():
         exp = TopExp_Explorer(f.wrapped, TopAbs_EDGE)
         while exp.More():
-            uses[Edge(TopoDS.Edge(exp.Current()))] += 1
+            e = TopoDS.Edge(exp.Current())
+            if not BRep_Tool.Degenerated_s(e):  # sphere/cone poles are degenerate, not free edges
+                uses[Edge(e)] += 1
             exp.Next()
     return sum(1 for n in uses.values() if n != 2)
 

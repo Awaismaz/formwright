@@ -1,0 +1,102 @@
+import { useState, type ReactNode } from "react";
+import {
+  ArrowDownToLine, ArrowUpFromLine, Box, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
+  Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
+  Squircle, Upload, Wrench,
+} from "lucide-react";
+import { cx } from "@/lib/format";
+import { Tip } from "@/components/ui";
+import type { ViewerApi } from "@/components/Viewer3D";
+import type { DisplayMode, ViewName } from "@/viewer/types";
+
+export type Command =
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror"; preset?: Record<string, unknown> }
+  | { kind: "sketch" }
+  | { kind: "tool"; tool: "measure" | "select" }
+  | { kind: "panel"; tab: string; extra?: "com" }
+  | { kind: "import" } | { kind: "toolbox" };
+
+interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean }
+
+const TABS = ["Features", "Sketch", "Evaluate", "View", "Library"] as const;
+
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool }: {
+  onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
+}) {
+  const [, setTick] = useState(0);
+  const viewer = viewerRef.current;
+  const [tab, setTab] = useState<(typeof TABS)[number]>(() => { try { return (localStorage.getItem("fw_cm_tab") as (typeof TABS)[number]) || "Features"; } catch { return "Features"; } });
+  const pick = (t: (typeof TABS)[number]) => { setTab(t); try { localStorage.setItem("fw_cm_tab", t); } catch { /* */ } };
+  const views: ViewName[] = ["Iso", "Front", "Top", "Right", "Back", "Left", "Bottom"];
+  const displays: [DisplayMode, string, ReactNode][] = [["shaded-edges", "Shaded + edges", <Box className="h-5 w-5" />], ["shaded", "Shaded", <Package className="h-5 w-5" />],
+    ["hidden", "Hidden lines", <Grid3x3 className="h-5 w-5" />], ["wireframe", "Wireframe", <Diamond className="h-5 w-5" />]];
+
+  const groups: Record<(typeof TABS)[number], Btn[][]> = {
+    Features: [[
+      { id: "boss", label: "Extruded Boss", icon: <ArrowUpFromLine className="h-5 w-5" />, tip: "Add material: sketch on a planar face and extrude", cmd: { kind: "feature", op: "extrude", preset: { mode: "add" } } },
+      { id: "cut", label: "Extruded Cut", icon: <ArrowDownToLine className="h-5 w-5" />, tip: "Remove material: sketch on a planar face and cut", cmd: { kind: "feature", op: "extrude", preset: { mode: "cut" } } },
+      { id: "hole", label: "Hole", icon: <CircleDot className="h-5 w-5" />, tip: "Simple, blind or through hole on a planar face", cmd: { kind: "feature", op: "hole" } },
+    ], [
+      { id: "fillet", label: "Fillet", icon: <Squircle className="h-5 w-5" />, tip: "Round selected edges", cmd: { kind: "feature", op: "fillet" } },
+      { id: "chamfer", label: "Chamfer", icon: <Diamond className="h-5 w-5" />, tip: "Bevel selected edges", cmd: { kind: "feature", op: "chamfer" } },
+      { id: "shell", label: "Shell", icon: <Package className="h-5 w-5" />, tip: "Hollow the part, removing the selected faces", cmd: { kind: "feature", op: "shell" } },
+    ], [
+      { id: "linpat", label: "Linear Pattern", icon: <Grid3x3 className="h-5 w-5" />, tip: "Pattern of holes along a direction", cmd: { kind: "feature", op: "hole", preset: { pattern: "linear" } } },
+      { id: "cirpat", label: "Circular Pattern", icon: <RotateCw className="h-5 w-5" />, tip: "Pattern of holes around an axis", cmd: { kind: "feature", op: "hole", preset: { pattern: "circular" } } },
+      { id: "mirror", label: "Mirror", icon: <FlipHorizontal2 className="h-5 w-5" />, tip: "Mirror the body about a face or principal plane", cmd: { kind: "feature", op: "mirror" } },
+    ]],
+    Sketch: [[
+      { id: "sketch", label: "Sketch", icon: <PenLine className="h-5 w-5" />, tip: "Open a 2D sketch on a planar face (lines, arcs, circles, dimensions, constraints)", cmd: { kind: "sketch" } },
+    ], [
+      { id: "rect", label: "Rectangle", icon: <RectangleHorizontal className="h-5 w-5" />, tip: "Quick rectangle boss/cut on a face", cmd: { kind: "feature", op: "extrude", preset: { kind: "rect" } } },
+      { id: "circ", label: "Circle", icon: <Circle className="h-5 w-5" />, tip: "Quick circular boss/cut on a face", cmd: { kind: "feature", op: "extrude", preset: { kind: "circle" } } },
+    ]],
+    Evaluate: [[
+      { id: "measure", label: "Measure", icon: <Ruler className="h-5 w-5" />, tip: "Snap measurement", cmd: { kind: "tool", tool: "measure" }, active: activeTool === "measure" },
+      { id: "select", label: "Select", icon: <MousePointer2 className="h-5 w-5" />, tip: "Select faces and edges for the agent", cmd: { kind: "tool", tool: "select" }, active: activeTool === "select" },
+    ], [
+      { id: "mass", label: "Mass Properties", icon: <Scale className="h-5 w-5" />, tip: "Mass, centre of mass, inertia", cmd: { kind: "panel", tab: "mass", extra: "com" } },
+      { id: "section", label: "Section View", icon: <Scissors className="h-5 w-5" />, tip: "Cut through the part", onClick: () => viewer?.toggleSection(), active: viewer?.section },
+      { id: "checks", label: "Checks", icon: <ShieldCheck className="h-5 w-5" />, tip: "Geometry verification results", cmd: { kind: "panel", tab: "checks" } },
+      { id: "compare", label: "Compare", icon: <GitCompare className="h-5 w-5" />, tip: "Compare revisions", cmd: { kind: "panel", tab: "revs" } },
+    ]],
+    View: [
+      views.map(v => ({ id: v, label: v, icon: <Eye className="h-5 w-5" />, tip: `${v} view`, onClick: () => viewer?.setView(v) })),
+      [{ id: "fit", label: "Zoom to Fit", icon: <Maximize className="h-5 w-5" />, tip: "Fit the model in the window", onClick: () => viewer?.setView("Iso") },
+       { id: "ortho", label: viewer?.ortho ? "Orthographic" : "Perspective", icon: <Box className="h-5 w-5" />, tip: "Toggle orthographic / perspective", onClick: () => viewer?.setOrtho(!viewer.ortho), active: !viewer?.ortho }],
+      displays.map(([m, l, i]) => ({ id: m, label: l, icon: i, tip: l, onClick: () => viewer?.setDisplay(m), active: viewer?.display === m })),
+    ],
+    Library: [[
+      { id: "toolbox", label: "Toolbox", icon: <Wrench className="h-5 w-5" />, tip: "Standard components (fasteners, bearings, gears…) from repeatable generators", cmd: { kind: "toolbox" } },
+      { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
+    ]],
+  };
+  const isEdit = (b: Btn) => !!b.cmd && (b.cmd.kind === "feature" || b.cmd.kind === "sketch");
+
+  return (
+    <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager">
+      <div className="flex items-end gap-0.5 border-b border-border bg-panel2 px-2 pt-1">
+        {TABS.map(t => (
+          <button key={t} onClick={() => pick(t)}
+            className={cx("rounded-t px-3 py-1 text-[12px]", tab === t ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
+      </div>
+      <div className="flex h-[66px] items-stretch gap-1 overflow-x-auto px-2 py-1 [scrollbar-width:thin]">
+        {groups[tab].map((g, gi) => (
+          <div key={gi} className="flex items-stretch gap-0.5">
+            {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
+            {g.map(b => {
+              const dis = b.disabled || (disabled && isEdit(b));
+              return (
+                <Tip key={b.id} content={dis && isEdit(b) ? "Build a model first (ask the agent, use the Toolbox or import a STEP)" : b.tip} side="bottom">
+                  <button disabled={dis} onClick={() => { if (b.onClick) { b.onClick(); setTimeout(() => setTick(t => t + 1), 0); } else if (b.cmd) onCommand(b.cmd); }}
+                    className={cx("flex w-[74px] flex-col items-center justify-center gap-1 rounded px-1 text-[10.5px] leading-tight transition disabled:opacity-35",
+                      b.active ? "bg-primary-soft text-primary ring-1 ring-primary/40" : "text-text hover:bg-primary-soft hover:text-primary")}>
+                    <span className="text-primary">{b.icon}</span><span className="text-center">{b.label}</span>
+                  </button>
+                </Tip>);
+            })}
+          </div>))}
+      </div>
+    </div>
+  );
+}

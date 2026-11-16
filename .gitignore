@@ -10,3 +10,7 @@ workspace/
 data/
 web/node_modules/
 web/dist/
+.claude/
+*.tmp.*
+.out_backup/
+web/*.tsbuildinfo

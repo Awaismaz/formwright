@@ -4,6 +4,53 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (g) — CommandManager, 2D sketcher, STEP import + recognition, Toolbox, choice questions
+
+Founder requests (autonomous, "do it completely and push"): hide agent internals; SOLIDWORKS-style command tab;
+faster manual add/suppress; full 2D sketcher + more features; STEP import editable by agent or manually; feature
+recognition → parametric rebuild; Toolbox of repeatable standard components with a popup offering Toolbox vs
+custom design; agent questions as clickable choices; put all context in the repo and push.
+
+### Done (punch list DS-010, DS-010b, DS-014..DS-023)
+- **Plain-language agent progress** (DS-014): tool steps and results are translated server-side; file names,
+  tools, code and model ids never reach the UI.
+- **CommandManager ribbon** (DS-015): Features / Sketch / Evaluate / View / Library tabs drive every manual workflow.
+- **Faster manual edits** (DS-016): optimistic suppress/delete/reorder with rollback, non-blocking "Rebuilding…"
+  pill, build time in the toast; fast path + base-geometry cache from (e).
+- **2D sketcher** (DS-017): line chains, rectangle, circle, centre arc, Smart Dimension (inline edit), relations
+  H/V/∥/⊥/=/tangent/concentric/point-on/fix, auto H/V, snapping to sketch points and face vertices, drag with
+  live solve, undo/redo, DOF status; exit to boss/cut; re-edit from the tree. Bug found in browser test and fixed:
+  clockwise loops extruded into the part — loops are now oriented CCW (regression test added).
+- **Shell, mirror** (DS-023).
+- **STEP import** (DS-018) + **feature recognition** (DS-019): stock, holes (Ø, depth, through), grid / linear /
+  circular patterns, bosses, fillets, chamfers; deterministic parametric draft (keeps manual features) or agent
+  rebuild; new check **CHK-09** = symmetric-difference volume vs the original (draft of a drilled plate:
+  rel. err < 1e-5).
+- **Toolbox** (DS-020/021): 11 deterministic, versioned generators with analytic EXPECTED; all pass checks incl.
+  byte-identical STEP. Found and fixed: OCCT numbers assembly occurrences with a process-wide counter (STEP bytes
+  differed on a warm worker) → ids renumbered after export; sphere pole edges were counted as free edges.
+  Chat requests matching a component open a popup: "Use Toolbox: Hex bolt ISO 4017 M8×40" or "Continue with
+  custom design".
+- **Choice questions** (DS-022): agent emits a `fw-questions` block → chips + Other → one-click answers.
+- **Repo context**: `CLAUDE.md` (session start/end ritual) and `docs/CONTEXT.md` (portable memory).
+
+### Evidence
+- `pytest`: 78 passed (full suite) + new `tests/test_library.py` (8 tests); ruff clean; `tsc` + `vite build` OK.
+- Browser walkthrough (puppeteer, founder login, throwaway project deleted after): Toolbox flange created in
+  0.52 s (Verified); Sketch tab → pick top face → rectangle → Exit sketch → boss: bbox 150×150×26 mm, 16 faces;
+  Toolbox popup on "I need an M8x40 hex bolt" with sizes pre-filled; Import STEP dialog opens; no console errors.
+
+### Not done / limits
+- Live agent run producing choice questions not yet exercised in the browser (parser unit-tested).
+- Sketcher: no trim/offset/splines/construction toggle, no reference planes; recognition is heuristic
+  (pockets/slots/freeform left to the agent). Toolbox threads are cosmetic; bearing is an envelope model.
+
+### Decisions parked
+PD-12 GitHub remote (gh CLI not installed), PD-13 Toolbox standards verification, PD-14 recognition depth.
+
+### Next
+DS-024: revolve/sweep, pattern any feature, sketch trim/offset, reference planes, assemblies with Toolbox parts.
+
 ## 2026-11-16 (f) — Design Studio maturity: B-rep viewer, measurement, manual features
 
 **Founder request:** mature Design Studio before other modules, building everything on the list. Added during the session: CAD orthographic default with perspective toggle (DS-012), and a fix for wireframe showing triangles (DS-013).

@@ -10,6 +10,16 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "./ui";
 
 export type Tool = "orbit" | "measure" | "select";
 
+export interface ViewerApi {
+  setView: (v: ViewName) => void;
+  setDisplay: (m: DisplayMode) => void;
+  toggleSection: () => void;
+  setOrtho: (ortho: boolean) => void;
+  display: DisplayMode;
+  section: boolean;
+  ortho: boolean;
+}
+
 interface Props {
   topoUrl: string | null;
   version?: number | string;
@@ -25,6 +35,7 @@ interface Props {
   onTopo?: (t: Topo | null) => void;
   empty?: ReactNode;
   className?: string;
+  apiRef?: { current: ViewerApi | null };
 }
 
 const DISPLAY: { mode: DisplayMode; label: string }[] = [
@@ -38,7 +49,7 @@ function useStored<T>(key: string, init: T): [T, (v: T) => void] {
 }
 
 export default function Viewer3D(props: Props) {
-  const { topoUrl, version, tool, onToolChange, selection, onSelectionChange, selectKinds, highlightFaces, com, sketch, compare, onTopo, empty, className } = props;
+  const { topoUrl, version, tool, onToolChange, selection, onSelectionChange, selectKinds, highlightFaces, com, sketch, compare, onTopo, empty, className, apiRef } = props;
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<CadViewer | null>(null);
   const [topo, setTopo] = useState<Topo | null>(null);
@@ -107,6 +118,11 @@ export default function Viewer3D(props: Props) {
   useEffect(() => { eng.current?.setOverlay(compare?.added ?? null, compare?.removed ?? null); eng.current?.setGhost(!!compare); }, [compare, topo]);
   useEffect(() => { eng.current?.setHiddenParts(hidden); }, [hidden, topo]);
   useEffect(() => { eng.current?.setExplode(explode); }, [explode, topo]);
+
+  if (apiRef) apiRef.current = {
+    setView: (v) => eng.current?.setView(v), setDisplay, toggleSection: () => setSection(!section),
+    setOrtho: (o) => setProj({ ...proj, ortho: o }), display, section, ortho: proj.ortho,
+  };
 
   const result: MeasureResult | null = useMemo(() => (topo && tool === "measure" ? measure(mpicks, topo) : null), [mpicks, topo, tool]);
   useEffect(() => { eng.current?.setMeasureLine(result?.line?.[0] ?? null, result?.line?.[1] ?? null); }, [result]);

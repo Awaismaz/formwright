@@ -183,3 +183,54 @@ def test_chat_history_and_session_persist(tmp_path: Path) -> None:
     s3 = AgentSession(tmp_path)
     assert s3.history == [] and s3.session_id is None
     assert json.loads(json.dumps(s3.history)) == []
+
+
+def test_shell_mirror_and_circular_pattern(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "ops@x.com")
+    box = ("from build123d import *\nfrom aicad import fw\nL = 40.0\nPARAMS = dict(L=L)\n"
+           "result = fw.feature('Block', Box(L, 30, 20, align=(Align.CENTER, Align.CENTER, Align.MIN)))\n"
+           "EXPECTED = {'bbox': [L, 30, 20], 'volume': L * 30 * 20, 'solids': 1}\n")
+    pid, _ = _project_with_model(c, box)
+    shell = {"op": "shell", "name": "Shell", "faces": [{"point": [0, 0, 20], "normal": [0, 0, 1]}], "t": 2}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": shell}).status_code == 200
+    v = c.get(f"/api/projects/{pid}/files/status.json").json()["fingerprint"]["volume"]
+    assert v == pytest.approx(40 * 30 * 20 - 36 * 26 * 18, rel=1e-3)
+    sid = c.get(f"/api/projects/{pid}/manual").json()["features"][0]["id"]
+    assert c.delete(f"/api/projects/{pid}/manual/{sid}").status_code == 200
+    pat = {"op": "hole", "name": "Bolt circle", "point": [10, 0, 20], "normal": [0, 0, 1], "d": 3,
+           "count": 6, "pattern": "circular", "center": [0, 0, 20]}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": pat}).status_code == 200
+    v2 = c.get(f"/api/projects/{pid}/files/status.json").json()["fingerprint"]["volume"]
+    assert v2 == pytest.approx(40 * 30 * 20 - 6 * math.pi * 1.5 ** 2 * 20, rel=1e-6)
+    mir = {"op": "mirror", "name": "Mirror", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": mir}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["fingerprint"]["bbox"][0] == pytest.approx(80, abs=1e-6) and st["ok"]
+
+
+def test_sketch_feature_with_hole_and_arc(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "sketch@x.com")
+    box = ("from build123d import *\nfrom aicad import fw\nL = 60.0\nPARAMS = dict(L=L)\n"
+           "result = fw.feature('Block', Box(L, 40, 10, align=(Align.CENTER, Align.CENTER, Align.MIN)))\n"
+           "EXPECTED = {'bbox': [L, 40, 10], 'volume': L * 40 * 10, 'solids': 1}\n")
+    pid, _ = _project_with_model(c, box)
+    # 20 x 10 rectangle with a semicircular end (R5) and a Ø4 hole inside, extruded 5 mm on the top face
+    loop = {"kind": "loop", "segs": [
+        {"type": "line", "a": [-10, -5], "b": [10, -5]},
+        {"type": "arc", "a": [10, -5], "m": [15, 0], "b": [10, 5]},
+        {"type": "line", "a": [10, 5], "b": [-10, 5]},
+        {"type": "line", "a": [-10, 5], "b": [-10, -5]}]}
+    hole = {"kind": "circle", "cx": 0, "cy": 0, "r": 2}
+    feat = {"op": "sketch", "name": "Boss sketch", "distance": 5, "mode": "add",
+            "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "x_dir": [1, 0, 0]},
+            "profiles": [loop, hole], "editor": {"points": [], "entities": [], "constraints": []}}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": feat})
+    assert r.status_code == 200, r.text
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    area = 20 * 10 + math.pi * 25 / 2 - math.pi * 4
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(60 * 40 * 10 + area * 5, rel=1e-6)
+    assert st["fingerprint"]["bbox"][2] == pytest.approx(15)
+    saved = c.get(f"/api/projects/{pid}/manual").json()["features"][0]
+    assert saved["editor"] == {"points": [], "entities": [], "constraints": []}

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Scale, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PenLine, Scale, SlidersHorizontal, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -9,12 +9,16 @@ import type { BuildStatus, Catalog, ManualFeature, Project } from "@/lib/types";
 import { num } from "@/lib/format";
 import { Input, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import Viewer3D, { type Tool } from "@/components/Viewer3D";
+import Viewer3D, { type Tool, type ViewerApi } from "@/components/Viewer3D";
 import { ProjectStatus } from "@/components/ProjectCard";
 import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
-import FeatureManager from "./studio/FeatureManager";
+import FeatureManager, { selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
+import CommandManager, { type Command } from "./studio/CommandManager";
+import SketchEditor from "./studio/SketchEditor";
+import StepImport from "./studio/StepImport";
+import Toolbox from "./studio/Toolbox";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
@@ -31,7 +35,11 @@ export default function ProjectStudio() {
   const [hl, setHl] = useState<number[]>([]);
   const [showCom, setShowCom] = useState(false);
   const [sketch, setSketch] = useState<SketchPreview | null>(null);
-  const [pm, setPm] = useState<{ op: ManualFeature["op"]; editing: ManualFeature | null } | null>(null);
+  const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
+  const [sk, setSk] = useState<{ phase: "pick" } | { phase: "edit"; plane: { origin: V3; normal: V3; x_dir: V3 }; faceId: number | null; editing: ManualFeature | null } | null>(null);
+  const [dialog, setDialog] = useState<"import" | "toolbox" | null>(null);
+  const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
+  const viewerApi = useRef<ViewerApi | null>(null);
   const [compare, setCompare] = useState<CompareState | null>(null);
   const [tab, setTab] = useState("tree");
   const [manualBusy, setManualBusy] = useState(false);
@@ -58,15 +66,55 @@ export default function ProjectStudio() {
     qc.invalidateQueries({ queryKey: ["me"] }); qc.invalidateQueries({ queryKey: ["projects"] });
   };
   const previewMods = useMemo(() => (catalog.data?.modules ?? []).filter(m => ["drawings", "manufacturing", "engineering"].includes(m.code)), [catalog.data]);
-  const selectKinds = useMemo<Pick["kind"][] | undefined>(() => (pm ? (pm.op === "fillet" || pm.op === "chamfer" ? ["edge"] : ["face"]) : undefined), [pm]);
+  const selectKinds = useMemo<Pick["kind"][] | undefined>(() => (pm ? selectKindsFor(pm.op) : sk?.phase === "pick" ? ["face"] : undefined), [pm, sk]);
 
-  const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null) => {
-    setPm({ op, editing: ed }); setTool("select");
-    setSelection(s => s.filter(x => (op === "fillet" || op === "chamfer" ? x.kind === "edge" : x.kind === "face")));
+  const openSketchOn = (faceId: number) => {
+    const f = topo?.faces[faceId];
+    if (!f || f.type !== "plane" || !f.normal) { toast.error("Pick a flat (planar) face to sketch on."); setSelection([]); return; }
+    setSk({ phase: "edit", plane: { origin: f.center, normal: f.normal, x_dir: xDirFor(f.normal) }, faceId, editing: null });
+    setSelection([]); setTool("orbit");
   };
-  const manualCall = async (fn: () => Promise<unknown>, ok: string) => {
+  const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
+    if (op === "sketch") {
+      if (ed?.plane) {
+        const pl = ed.plane; const n = pl.normal as V3;
+        const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6
+          && Math.abs((f.center[0] - pl.origin[0]) * n[0] + (f.center[1] - pl.origin[1]) * n[1] + (f.center[2] - pl.origin[2]) * n[2]) < 1e-4)?.id ?? null;
+        setSk({ phase: "edit", plane: { origin: pl.origin, normal: n, x_dir: (pl.x_dir ?? xDirFor(n)) as V3 }, faceId, editing: ed });
+      } else {
+        const face = selection.find(x => x.kind === "face");
+        if (face) openSketchOn(face.id); else { setSk({ phase: "pick" }); setTool("select"); setSelection([]); }
+      }
+      setPm(null); return;
+    }
+    setSk(null); setPm({ op, editing: ed, preset }); setTool("select");
+    const kinds = selectKindsFor(op);
+    setSelection(s => s.filter(x => kinds.includes(x.kind)));
+  };
+  // Sketch: as soon as a face is picked, open the sketcher on it
+  useEffect(() => {
+    if (sk?.phase !== "pick") return;
+    const face = selection.find(x => x.kind === "face");
+    if (face) openSketchOn(face.id);
+  }, [selection, sk]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Optimistic tree update: apply locally first so the tree reacts instantly, then rebuild in the background. */
+  const manualCall = async (fn: () => Promise<unknown>, ok: string, optimistic?: (l: ManualFeature[]) => ManualFeature[]) => {
+    const key = ["manual", id, status.data?.build_id];
+    const prev = qc.getQueryData<{ features: ManualFeature[] }>(key);
+    if (optimistic && prev) qc.setQueryData(key, { features: optimistic(prev.features) });
     setManualBusy(true);
-    try { await fn(); toast.success(ok); refresh(); } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setManualBusy(false); }
+    try { const t0 = performance.now(); await fn(); toast.success(`${ok} · ${((performance.now() - t0) / 1000).toFixed(1)} s`); refresh(); }
+    catch (e) { if (prev) qc.setQueryData(key, prev); toast.error(e instanceof ApiError ? e.message : "Failed"); }
+    finally { setManualBusy(false); }
+  };
+  const onCommand = (c: Command) => {
+    if (c.kind === "feature") openPm(c.op, null, c.preset);
+    else if (c.kind === "sketch") openPm("sketch");
+    else if (c.kind === "tool") { setPm(null); setSk(null); setTool(tool === c.tool ? "orbit" : c.tool); }
+    else if (c.kind === "panel") { setPm(null); setTab(c.tab); if (c.extra === "com") setShowCom(true); }
+    else if (c.kind === "import") setDialog("import");
+    else if (c.kind === "toolbox") { setTbInit(null); setDialog("toolbox"); }
   };
   const runCompare = async (base: number) => {
     try {
@@ -107,14 +155,32 @@ export default function ProjectStudio() {
         </div>
       </div>
 
+      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} />
+
       <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[370px_minmax(0,1fr)_340px] max-xl:grid-cols-[330px_minmax(0,1fr)] max-md:grid-cols-1">
-        <Chat project={p} topo={topo} selection={pm ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} />
+        <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }} />
         <div className="relative min-h-[320px] min-w-0 overflow-hidden">
           <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/topo.json` : null} version={fp ? st?.build_id : `keep`}
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
-            compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo}
-            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Your model appears here after the first build.</div>} />
+            compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
+            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, or start from
+              <div className="mt-3 flex justify-center gap-2">
+                <button onClick={() => { setTbInit(null); setDialog("toolbox"); }} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Toolbox component</button>
+                <button onClick={() => setDialog("import")} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Import STEP</button>
+              </div></div>} />
+          {sk?.phase === "pick" && (
+            <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-primary/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
+              <PenLine className="h-4 w-4 text-primary" />Select a flat face to sketch on
+              <button onClick={() => { setSk(null); setTool("orbit"); }} className="ml-1 text-muted hover:text-text" aria-label="Cancel sketch"><X className="h-4 w-4" /></button>
+            </div>)}
+          {manualBusy && (
+            <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-panel/95 px-3 py-1 text-[12px] text-muted shadow-card">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />Rebuilding…
+            </div>)}
+          {sk?.phase === "edit" && (
+            <SketchEditor key={sk.editing?.id ?? "new"} project={p} topo={topo} plane={sk.plane} faceId={sk.faceId} editing={sk.editing}
+              onDone={() => { setSk(null); refresh(); }} onCancel={() => setSk(null)} />)}
           {st?.error && (
             <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-danger/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
               <b className="text-danger">Last build failed</b> — showing the last successful geometry.{project.data?.agent?.busy ? " The agent is working on it." : ""}
@@ -131,7 +197,7 @@ export default function ProjectStudio() {
         </div>
         <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-panel max-xl:hidden">
           {pm ? (
-            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}`} project={p} op={pm.op} editing={pm.editing} topo={topo} selection={selection}
+            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} onBusy={setManualBusy}
               onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); refresh(); setTool("orbit"); }}
               onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
           ) : (
@@ -142,9 +208,9 @@ export default function ProjectStudio() {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
                   onAdd={op => openPm(op)} onEdit={f => openPm(f.op, f)}
-                  onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed")}
-                  onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered"); }}
-                  onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`)} /></TabPanel>
+                  onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
+                  onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
+                  onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
                 <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
                 <TabPanel value="params"><ParamsPanel project={p} status={st} onChanged={refresh} /></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
@@ -155,6 +221,9 @@ export default function ProjectStudio() {
             </Tabs>)}
         </aside>
       </div>
+
+      {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
+      {dialog === "toolbox" && <Toolbox project={p} initial={tbInit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
 
       <div className="flex h-7 shrink-0 items-center gap-4 border-t border-border bg-panel2 px-3 text-[11.5px] text-muted">
         <span>{st?.part ?? p.name}</span>
