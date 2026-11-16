@@ -62,6 +62,9 @@ def _tiny(monkeypatch: pytest.MonkeyPatch, frames: int = 6) -> None:
                                                    "samples_cpu": 2, "bounces": 2})
     monkeypatch.setitem(presets.QUALITY, "turntable", {"label": "Turntable", "res": (64, 48), "samples_gpu": 2,
                                                        "samples_cpu": 1, "bounces": 2, "frames": frames, "fps": 12})
+    monkeypatch.setitem(presets.QUALITY, "turntable_draft", {"label": "Quick turntable", "res": (48, 36),
+                                                             "samples_gpu": 2, "samples_cpu": 1, "bounces": 2,
+                                                             "frames": 3, "fps": 6})
 
 
 def _wait(get, timeout: float = 240.0) -> dict:
@@ -392,6 +395,10 @@ def test_final_turntable_and_exports_produce_their_files(tmp_path: Path, monkeyp
     gif = Image.open(service.file_path(ws, tt["id"], "turntable.gif"))
     assert gif.n_frames == 6
     assert "turntable.mp4" in tt["files"] and tt["files"]["turntable.mp4"]["bytes"] > 500
+    dr = service.request_render(ws, "Box", scene.Options(finish="abs", quality="turntable_draft"), "o", "u")
+    dr = _wait(lambda: service.job_view(ws, dr["id"], ""))
+    assert dr["state"] == "done" and dr["kind"] == "turntable" and dr["frames"] == 3, dr
+    assert Image.open(service.file_path(ws, dr["id"], "turntable.gif")).n_frames == 3
     ex = service.request_export(ws, "Box", "abs", "red", "o", "u")
     ex = _wait(lambda: service.job_view(ws, ex["id"], ""))
     assert ex["state"] == "done" and {"part.glb", "part_obj.zip", "part.stl"} <= set(ex["files"])
@@ -404,7 +411,8 @@ def test_final_turntable_and_exports_produce_their_files(tmp_path: Path, monkeyp
     assert np.allclose(m.v.max(axis=0) - m.v.min(axis=0), [40, 20, 10], atol=1e-3)
     assert service.file_path(ws, ex["id"], "part.glb").read_bytes()[:4] == b"glTF"
     listing = service.list_jobs(ws, "")
-    assert {j["id"] for j in listing["renders"]} == {fin["id"], tt["id"]} and listing["exports"][0]["id"] == ex["id"]
+    assert {j["id"] for j in listing["renders"]} == {fin["id"], tt["id"], dr["id"]}
+    assert listing["exports"][0]["id"] == ex["id"]
     assert service.delete_job(ws, fin["id"]) and service.job_view(ws, fin["id"], "") is None
 
 
@@ -669,6 +677,9 @@ def test_api_auth_scoping_paywall_and_flow(app_client: TestClient, tmp_path: Pat
         assert c.get(f"/api/m/mesh/projects/{pid}/jobs/{jid}/files/..%2F..%2Fout%2Fpart.step").status_code == 404
         assert c.get(f"/api/m/mesh/projects/{pid}/jobs").json()["previews"][0]["id"] == jid
     assert c.get(f"/api/m/mesh/projects/{pid}/jobs/zzz").status_code == 404
+    for bad in ("aaaaaaaaaaaa", "..%2F..", "zzz"):  # unknown or malformed assembly ids
+        assert c.get(f"/api/m/mesh/assemblies/{bad}").status_code == 404
+        assert c.post(f"/api/m/mesh/assemblies/{bad}/renders", json={}).status_code in (404, 405)  # never served
     # another workspace sees nothing
     c.post("/api/auth/logout")
     signup(c, "other-mesh@x.com", workspace="Other Co")
@@ -689,3 +700,78 @@ def test_catalog_marks_mesh_live_with_honest_copy() -> None:
 def test_disclosure_states_visualisation_only() -> None:
     assert "Visualisation only" in DISCLOSURE and "not the exact model" in DISCLOSURE
     assert post.coverage_bbox  # used by the walkthrough
+
+
+# ------------------------------------------------------------------ assembly renders (AMI-I4)
+def _fake_assembly(tmp: Path) -> tuple[Path, dict]:
+    """An org part cache with two parts (only what a render reads: part.step, meta.json, info.json) and an
+    assembly placing the block on the plate."""
+    from aicad.assembly import service as asm
+    from aicad.assembly import store, xform
+
+    root = tmp / "assemblies" / "org1"
+    for key, shape, name, material in (("p_plate_1", Box(60, 40, 10), "Plate", "Aluminium 6061-T6"),
+                                       ("p_block_1", Box(20, 20, 20), "Block", "ABS black")):
+        d = store.part_dir(root, key)
+        d.mkdir(parents=True)
+        export_step(shape, str(d / "part.step"))
+        bb = shape.bounding_box()
+        store.write_json(d / "meta.json", {"key": key, "kind": "project", "project_id": key[2:-2], "build_id": 1,
+                                           "name": name, "material": material})
+        store.write_json(d / "info.json", {"bbox": [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z],
+                                           "center": [0.0, 0.0, 0.0], "volume": shape.volume})
+    doc = store.new_doc("Plate assembly", "org1", "u1", None)
+    asm.add_instance(root, doc, "p_plate_1")
+    asm.add_instance(root, doc, "p_block_1", xform.to12(xform.translate((0.0, 0.0, 15.0))))
+    store.save(root, doc)
+    return root, doc
+
+
+def test_assembly_scene_places_every_instance_with_its_own_finish(tmp_path: Path) -> None:
+    from aicad.meshstudio import assembly_render
+
+    root, doc = _fake_assembly(tmp_path)
+    ws = assembly_render.workspace(tmp_path, "org1", doc["id"])
+    ps = {p["name"]: p for p in assembly_render.parts(root, doc)}
+    assert (ps["Plate"]["finish"], ps["Block"]["finish"], ps["Block"]["colour"]) == ("anodised", "abs", "black")
+    dev = {"available": True, "device": "GPU", "backend": "OPTIX"}
+    its, meshes, tri = assembly_render.items(root, ws, doc, 0.0)
+    assert len(its) == 2 and len(meshes) == 2 and tri == 24  # two boxes, 12 triangles each
+    spec = scene.build_assembly_spec(its, scene.Options(camera="front", pose="as_modelled"), dev, "A", {})
+    assert [m["id"] for m in spec["materials"]] == ["anodised", "abs"] and spec["parts"][1]["material"] == 1
+    # hand check: the block's top centre (0, 0, 10) local -> (0, 0, 25) mm in the assembly; the scene centres the
+    # assembly and rests it on the floor (assembly z from -5 to 25), so it lands at (0, 0, 0.030) m
+    m = np.asarray(spec["parts"][1]["matrix"])
+    assert np.allclose(m @ [0, 0, 0.010, 1], [0, 0, 0.030, 1], atol=1e-7)
+    # exploded half way: the unmated block moves radially away from the assembly centre, by half its full offset
+    full = __import__("aicad.assembly.service", fromlist=["explode"]).explode(root, doc)
+    half, _, _ = assembly_render.items(root, ws, doc, 0.5)
+    moved = np.asarray(half[1]["T"])[:3, 3] - np.asarray(its[1]["T"])[:3, 3]
+    assert np.allclose(moved, np.asarray(full[doc["instances"][1]["id"]]) * 0.5)
+    # a hidden instance is left out
+    doc["instances"][1]["visible"] = False
+    assert len(assembly_render.items(root, ws, doc, 0.0)[0]) == 1
+    assert assembly_render.signature(doc) != assembly_render.signature({**doc, "instances": doc["instances"][:1] + [
+        {**doc["instances"][1], "visible": True}]})
+
+
+@needs_blender
+def test_assembly_render_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad.meshstudio import assembly_render
+
+    _tiny(monkeypatch)
+    root, doc = _fake_assembly(tmp_path)
+    ws = assembly_render.workspace(tmp_path, "org1", doc["id"])
+    o = scene.Options(lighting="studio", camera="iso", transparent=True)
+    v = assembly_render.request(ws, root, doc, o, 0.5, "org1", "u1")
+    v = _wait(lambda: service.job_view(ws, v["id"], ""))
+    assert v["state"] == "done", v
+    assert "exploded 50 %" in v["label"] and v["options"]["explode"] == 0.5 and v["stale"] is False
+    spec = json.loads((service.file_path(ws, v["id"], "render.png").parent / "spec.json").read_text())
+    assert len(spec["parts"]) == 2
+    assert Image.open(service.file_path(ws, v["id"], "render.png")).size == (96, 72)
+    again = assembly_render.request(ws, root, doc, o, 0.5, "org1", "u1")
+    assert again["cached"]
+    # moving a part makes the render an earlier revision of the assembly
+    doc["instances"][1]["T"][11] = 40.0
+    assert assembly_render.info(ws, root, doc, "")["previews"][0]["stale"] is True

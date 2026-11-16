@@ -128,6 +128,39 @@ def build_spec(geom: dict[str, Any], hull_mm: np.ndarray, opts: Options, device:
     return spec
 
 
+def build_assembly_spec(items: list[dict[str, Any]], opts: Options, device: dict[str, Any], name: str,
+                        outputs: dict[str, Any]) -> dict[str, Any]:
+    """Scene for an assembly (AMI-I4). `items`, one per visible instance: {"name", "hull_mm" (part-local convex
+    hull, mm), "T" (4x4 part -> assembly, mm, explode offset included), "geom" (index of its mesh file on the
+    command line), "finish", "colour"}. Framing, lights and floor come from the union of the placed parts; each
+    instance gets its own object (instances of one part share the mesh) and the material of its finish."""
+    if not items:
+        raise ValueError("The assembly has no visible parts to render.")
+    world = np.vstack([np.asarray(it["hull_mm"], float) @ np.asarray(it["T"])[:3, :3].T + np.asarray(it["T"])[:3, 3]
+                       for it in items])
+    spec = build_spec({"bbox_mm": [float(x) for x in world.max(axis=0) - world.min(axis=0)]}, world, opts, device,
+                      name, outputs)
+    root = np.asarray(spec["object"]["matrix"], float)
+    mats: list[dict[str, Any]] = []
+    index: dict[tuple[str, str | None], int] = {}
+    parts = []
+    for it in items:
+        key = (it["finish"], it.get("colour"))
+        if key not in index:
+            m = presets.resolve_finish(*key)
+            m["label"] = presets.FINISHES[key[0]]["label"]
+            index[key] = len(mats)
+            mats.append(m)
+        tm = np.array(it["T"], float)
+        tm[:3, 3] *= 0.001  # meshes are in metres
+        world_m = root @ tm
+        parts.append({"name": str(it["name"])[:60], "geom": int(it["geom"]), "material": index[key],
+                      "matrix": [[round(float(x), 7) for x in row] for row in world_m]})
+    spec["parts"] = parts
+    spec["materials"] = mats
+    return spec
+
+
 def export_spec(name: str, finish: str, colour: str | None, outputs: dict[str, Any]) -> dict[str, Any]:
     mat = presets.resolve_finish(finish, colour)
     mat["label"] = presets.FINISHES[finish]["label"]

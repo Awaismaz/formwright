@@ -243,35 +243,40 @@ def _meta(job: dict[str, Any], name: str, geom: dict[str, Any]) -> dict[str, Any
 
 
 def _execute_render(ws: Path, d: Path, job: dict[str, Any], name: str, opts: scene.Options,
-                    dev: dict[str, Any]) -> None:
+                    dev: dict[str, Any], stage: Any = None) -> None:
+    """Render one job. `stage(outputs) -> (spec, mesh files, triangles, png metadata)` builds the scene; by default
+    the project's verified part (assemblies pass their own, see `assembly_render`)."""
     t0 = time.monotonic()
     try:
         _update(d, job, state="running", phase="Preparing the visualisation mesh", started_at=jobs.now(),
                 progress=0.01)
-        geom = geometry_for(ws)
-        npz = mesh_root(ws) / "geom" / geom["file"]
-        kind = opts.quality
+        kind = "turntable" if presets.is_turntable(opts.quality) else opts.quality
         outputs: dict[str, Any] = {"image": "raw.png"}
         if kind == "final":
             outputs["blend"] = "scene.blend"
         if kind == "turntable":
             outputs = {"frames_dir": "frames", "blend": "scene.blend"}
-        spec = scene.build_spec(geom, _hull_mm(npz), opts, dev, name, outputs)
+        if stage is None:
+            geom = geometry_for(ws)
+            npz = mesh_root(ws) / "geom" / geom["file"]
+            spec = scene.build_spec(geom, _hull_mm(npz), opts, dev, name, outputs)
+            meshes, triangles, meta = [npz], geom["triangles"], _meta(job, name, geom)
+        else:
+            spec, meshes, triangles, meta = stage(outputs)
         (d / "spec.json").write_text(json.dumps(spec, indent=1, sort_keys=True), encoding="utf-8")
         (d / "scene.py").write_text(scene.build_script(spec), encoding="utf-8")
         frames = spec["turntable"]["frames"] if spec.get("turntable") else 1
         cold = spec["render"]["device"] == "GPU" and not runner.is_warm(dev)
         _update(d, job, phase="Preparing the GPU (first render on this server)" if cold else "Starting the renderer",
-                progress=0.03, triangles=geom["triangles"], warming=cold, frames=frames,
+                progress=0.03, triangles=triangles, warming=cold, frames=frames,
                 device={"engine": "Cycles", "device": spec["render"]["device"], "backend": spec["render"]["backend"],
                         "gpu": dev.get("gpu") if spec["render"]["device"] == "GPU" else None,
                         "samples": spec["render"]["samples"]}, size=spec["render"]["res"])
         hi = 0.85 if kind == "turntable" else 0.97
-        res = runner.run(d / "scene.py", d, mesh_root(ws), [str(d), str(npz)], TIMEOUTS[kind],
+        res = runner.run(d / "scene.py", d, mesh_root(ws), [str(d), *(str(m) for m in meshes)], TIMEOUTS[kind],
                          on_progress=_Progress(d, job, 0.04, hi), frames=frames)
         if spec["render"]["device"] == "GPU":
             runner.mark_warm(dev, res.get("startup_s"))
-        meta = _meta(job, name, geom)
         bg = spec["post"]["background"]
         made = ["render.png", "thumb.jpg"]
         if kind == "turntable":

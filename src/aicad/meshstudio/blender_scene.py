@@ -1,6 +1,6 @@
 """Formwright Mesh Studio scene script. Runs ONLY inside a separate Blender process:
 
-    blender -b --factory-startup --python scene.py -- <job_dir> <geometry.npz>
+    blender -b --factory-startup --python scene.py -- <job_dir> <geometry.npz> [<geometry.npz> ...]
 
 It is never imported by Formwright (Blender is GPL; we only drive it from the command line). The SPEC line below is
 replaced with the job's preset values by `aicad.meshstudio.scene.build_script`, so each job folder holds a
@@ -19,7 +19,8 @@ SPEC = {}  # @@SPEC@@
 
 ARGV = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 JOB = os.path.abspath(ARGV[0])
-GEOM = os.path.abspath(ARGV[1])
+GEOMS = [os.path.abspath(a) for a in ARGV[1:]]  # one mesh per distinct part (assemblies share them)
+GEOM = GEOMS[0]
 
 
 def out_path(name):
@@ -40,10 +41,10 @@ sc.unit_settings.system = "METRIC"
 sc.unit_settings.length_unit = "MILLIMETERS"
 
 
-def build_part():
-    d = np.load(GEOM)
+def build_mesh(path, name="Part"):
+    d = np.load(path)
     v, f, n = d["v"], d["f"], d["n"]
-    me = bpy.data.meshes.new("Part")
+    me = bpy.data.meshes.new(name)
     me.vertices.add(len(v))
     me.vertices.foreach_set("co", v.ravel())
     me.loops.add(f.size)
@@ -54,9 +55,32 @@ def build_part():
     me.validate(clean_customdata=False)
     me.shade_smooth()
     me.normals_split_custom_set(n.astype(np.float64).reshape(-1, 3))
-    ob = bpy.data.objects.new(SPEC["object"]["name"], me)
+    return me
+
+
+def build_part():
+    ob = bpy.data.objects.new(SPEC["object"]["name"], build_mesh(GEOM))
     sc.collection.objects.link(ob)
     return ob
+
+
+def build_assembly(pivot):
+    """One object per placed instance; instances of the same part share one mesh, each with its own finish."""
+    mats = [make_material(m, False) for m in SPEC["materials"]]
+    meshes = {}
+    for p in SPEC["parts"]:
+        if p["geom"] not in meshes:
+            meshes[p["geom"]] = build_mesh(GEOMS[p["geom"]], "Part %d" % p["geom"])
+        me = meshes[p["geom"]]
+        if not me.materials:
+            me.materials.append(mats[p["material"]])
+        ob = bpy.data.objects.new(p["name"], me)
+        sc.collection.objects.link(ob)
+        ob.material_slots[0].link = "OBJECT"
+        ob.material_slots[0].material = mats[p["material"]]
+        ob.parent = pivot
+        set_matrix(ob, p["matrix"])
+        ob["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
 
 
 def node(nt, kind, loc, **inputs):
@@ -323,9 +347,11 @@ def expose_and_write(exr_paths, png_paths):
 
 def main():
     mode = SPEC["mode"]
-    part = build_part()
+    assembly = bool(SPEC.get("parts"))
+    part = None if assembly else build_part()
     simple = mode == "export"
-    part.data.materials.append(make_material(SPEC["material"], simple))
+    if part is not None:
+        part.data.materials.append(make_material(SPEC["material"], simple))
     if mode == "export":
         bpy.ops.object.select_all(action="DESELECT")
         part.select_set(True)
@@ -347,9 +373,12 @@ def main():
     pivot = bpy.data.objects.new("Turntable", None)
     sc.collection.objects.link(pivot)
     pivot.location = SPEC["pivot"]
-    part.parent = pivot
-    set_matrix(part, SPEC["object"]["matrix"])
-    part["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
+    if assembly:
+        build_assembly(pivot)
+    else:
+        part.parent = pivot
+        set_matrix(part, SPEC["object"]["matrix"])
+        part["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
     build_world(SPEC["lighting"]["world"])
     build_lights(SPEC["lighting"]["lights"])
     build_floor(SPEC["floor"])

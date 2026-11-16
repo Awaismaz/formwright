@@ -60,12 +60,12 @@ function HighlightNote({ j }: { j: Job }) {
   return null;
 }
 
-export function Gallery({ pid, items, canEdit, onChanged, onUse, onRerender }: {
-  pid: string; items: Job[]; canEdit: boolean; onChanged: () => void; onUse: (j: Job) => void; onRerender: (j: Job) => void;
+export function Gallery({ base, items, canEdit, onChanged, onUse, onRerender }: {
+  base: string; items: Job[]; canEdit: boolean; onChanged: () => void; onUse: (j: Job) => void; onRerender: (j: Job) => void;
 }) {
   const [open, setOpen] = useState<Job | null>(null);
   const del = async (j: Job) => {
-    try { await api.del(`/api/m/mesh/projects/${pid}/jobs/${j.id}`); onChanged(); if (open?.id === j.id) setOpen(null); }
+    try { await api.del(`${base}/jobs/${j.id}`); onChanged(); if (open?.id === j.id) setOpen(null); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Delete failed"); }
   };
   if (!items.length) return (
@@ -129,11 +129,11 @@ export function Gallery({ pid, items, canEdit, onChanged, onUse, onRerender }: {
   );
 }
 
-export function Exports({ pid, items, canEdit, busy, onExport, onChanged, onRerender, finishLabel }: {
-  pid: string; items: Job[]; canEdit: boolean; busy: boolean; onExport: () => void; onChanged: () => void; onRerender: (j: Job) => void; finishLabel: string;
+export function Exports({ base, items, canEdit, busy, onExport, onChanged, onRerender, finishLabel }: {
+  base: string; items: Job[]; canEdit: boolean; busy: boolean; onExport: () => void; onChanged: () => void; onRerender: (j: Job) => void; finishLabel: string;
 }) {
   const del = async (j: Job) => {
-    try { await api.del(`/api/m/mesh/projects/${pid}/jobs/${j.id}`); onChanged(); }
+    try { await api.del(`${base}/jobs/${j.id}`); onChanged(); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Delete failed"); }
   };
   return (
@@ -169,8 +169,7 @@ const ICON: Record<MeshCheck["status"], JSX.Element> = {
   fail: <XCircle className="h-4 w-4 text-danger" />, info: <Info className="h-4 w-4 text-muted" />,
 };
 
-export function MeshPanel({ info }: { info: ProjectInfo }) {
-  const m = info.mesh;
+export function MeshPanel({ info, mesh: m }: { info: ProjectInfo; mesh: NonNullable<ProjectInfo["mesh"]> }) {
   return (
     <div className="p-3 text-[13px]">
       <div className="rounded-md border border-warning/30 bg-warning/5 p-2.5 text-[12px]"><b>Visualisation mesh, not the exact model.</b> {info.disclosure}</div>
