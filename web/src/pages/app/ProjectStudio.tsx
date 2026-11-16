@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { Icon } from "@/components/icons";
 import Viewer3D, { type Tool, type ViewerApi } from "@/components/Viewer3D";
 import NotFoundPanel from "@/components/NotFoundPanel";
 import { ProjectStatus } from "@/components/ProjectCard";
+import { useDeliverables } from "@/components/Release";
 import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
@@ -28,10 +29,10 @@ interface CompareState { base: number; added: Topo | null; removed: Topo | null;
 
 /** Downstream modules offered on the Make tab when they are Live: each opens the module on this part. */
 const MAKE: Record<string, Omit<MakeModule, "code">> = {
-  drawings: { name: "Drawing", icon: <FileText className="h-5 w-5" />, tip: "Generate the manufacturing drawing of this part" },
-  manufacturing: { name: "DFM Review", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
-  print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
-  engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
+  drawings: { name: "Drawing Studio", icon: <FileText className="h-5 w-5" />, tip: "Generate the manufacturing drawing of this part" },
+  manufacturing: { name: "Manufacturing Advisor", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
+  print: { name: "3D Print Prep", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
+  engineering: { name: "Engineering Advisor", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
   assembly: { name: "Assemble", icon: <Boxes className="h-5 w-5" />, tip: "Mate with other parts, check clashes, fit ISO fasteners" },
   mesh: { name: "Product Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
 };
@@ -70,11 +71,24 @@ export default function ProjectStudio() {
   const [recognizing, setRecognizing] = useState(false);
   const [featureChips, setFeatureChips] = useState<string[]>([]);
   const [chatRequest, setChatRequest] = useState<{ id: number; text: string } | null>(null);
+  const [search, setSearch] = useSearchParams();
+  useState(() => { const ask = search.get("ask"); if (ask) try { sessionStorage.setItem(`fw_starter_${id}`, ask.slice(0, 4000)); } catch { /* */ } });
+  useEffect(() => {
+    if (!search.has("ask")) return;
+    setChatOpen(true);
+    const n = new URLSearchParams(search); n.delete("ask"); setSearch(n, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [delTarget, setDelTarget] = useState<string | null>(null);
 
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const deliv = useDeliverables(id);
   const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
-    .map(m => ({ code: m.code, ...MAKE[m.code]! })), [catalog.data]);
+    .map(m => {
+      const d = deliv.data?.modules[m.code as "drawings"];  // one status line per output (MAKE-15)
+      const status = d && { text: d.label, tone: d.state === "stale" ? "warn" as const : d.state === "missing" ? "muted" as const : "ok" as const };
+      const locked = !(me?.org?.modules.includes(m.code) || me?.org?.god_unlock);  // MAKE-21
+      return { code: m.code, ...MAKE[m.code]!, status: status || undefined, locked };
+    }), [catalog.data, deliv.data, me?.org]);
   const libraryModules = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && LIBRARY[m.code])
     .map(m => ({ code: m.code, ...LIBRARY[m.code]! })), [catalog.data]);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });

@@ -19,12 +19,14 @@ from aicad.manufacturing.rules import PROCESS_LABEL
 
 SEV_COLOR = {"critical": "#c62828", "warning": "#b26a00", "info": "#1f5fa8"}
 MAX_VIEWS = 12
+SEV_RANK = {"critical": 0, "warning": 1, "info": 2}
 
 
 # ----------------------------------------------------------------------------- views
 def render_view(topo: dict[str, Any], highlight: list[int] | None = None, px: int = 520,
-                view: tuple[float, float, float] = (1.0, -1.0, 0.8)) -> bytes:
-    """PNG of the part (orthographic iso, z-buffered, with model edges) with the given topo face ids highlighted."""
+                view: tuple[float, float, float] = (1.0, -1.0, 0.8), focus: bool = False) -> bytes:
+    """PNG of the part (orthographic iso, z-buffered, with model edges) with the given topo face ids highlighted.
+    ``focus`` zooms onto the highlighted faces (with surrounding context) so a small feature is visible."""
     ss = 2  # supersampling for anti-aliasing
     W, H = px * ss, int(px * 0.75) * ss
     hl = set(highlight or [])
@@ -41,6 +43,14 @@ def render_view(topo: dict[str, Any], highlight: list[int] | None = None, px: in
     sx, sy = allp @ right, allp @ up
     span = max(float(sx.max() - sx.min()) / (W * 0.88), float(sy.max() - sy.min()) / (H * 0.88), 1e-9)
     cx, cy = float(sx.max() + sx.min()) / 2, float(sy.max() + sy.min()) / 2
+    hfaces = [f for f in faces if f["id"] in hl]
+    if focus and hfaces:
+        hp = np.vstack([np.array(f["pos"], dtype=float).reshape(-1, 3) for f in hfaces])
+        hx, hy = hp @ right, hp @ up
+        w = max(2.4 * float(np.ptp(hx)), 0.3 * float(np.ptp(sx)))
+        h = max(2.4 * float(np.ptp(hy)), 0.3 * float(np.ptp(sy)))
+        span = max(min(w / (W * 0.88), span), min(h / (H * 0.88), span), 1e-9)
+        cx, cy = float(hx.max() + hx.min()) / 2, float(hy.max() + hy.min()) / 2
 
     def proj(p: np.ndarray) -> np.ndarray:
         return np.stack([(p @ right - cx) / span + W / 2, H / 2 - (p @ up - cy) / span, p @ cam], axis=-1)
@@ -103,17 +113,40 @@ def _png(img: np.ndarray, px: int, ss: int) -> bytes:
     return buf.getvalue()
 
 
+ISO = np.array([1.0, -1.0, 0.8])
+
+
+def _facing(topo: dict[str, Any], ids: list[int]) -> tuple[float, float, float]:
+    """A view direction that looks at the highlighted faces (their area-weighted outward normal, tilted towards the
+    standard isometric so the part stays recognisable)."""
+    hl = set(ids)
+    n = np.zeros(3)
+    for f in topo.get("faces", []):
+        if f["id"] not in hl or not f.get("idx"):
+            continue
+        pos = np.array(f["pos"], dtype=float).reshape(-1, 3)
+        tri = pos[np.array(f["idx"], dtype=int).reshape(-1, 3)]
+        n += np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]).sum(axis=0)
+    iso = ISO / np.linalg.norm(ISO)
+    if np.linalg.norm(n) < 1e-9:
+        return tuple(iso)  # type: ignore[return-value]
+    v = n / np.linalg.norm(n) + 0.45 * iso
+    if abs(float(v[2])) > 0.98 * float(np.linalg.norm(v)):  # straight down an axis: keep some tilt
+        v = v + np.array([0.3, -0.3, 0.0])
+    return tuple(v / np.linalg.norm(v))  # type: ignore[return-value]
+
+
 def _views(a: dict[str, Any], topo: dict[str, Any] | None) -> tuple[bytes | None, dict[str, bytes]]:
     if not topo:
         return None, {}
     overview = render_view(topo, [], 640)
     nfaces = len(topo.get("faces", []))
     out: dict[str, bytes] = {}
-    for f in a["findings"]:
+    for f in _shown(a)[0]:
         if len(out) >= MAX_VIEWS:
             break
         if f["faces"] and len(f["faces"]) < max(2, 0.6 * nfaces):
-            out[f["id"]] = render_view(topo, f["faces"], 420)
+            out[f["id"]] = render_view(topo, f["faces"], 480, view=_facing(topo, f["faces"]), focus=True)
     return overview, out
 
 
@@ -126,9 +159,44 @@ def _money(v: float | None, cur: str) -> str:
     return "—" if v is None else f"{cur} {v:,.2f}"
 
 
+def _summary(a: dict[str, Any]) -> dict[str, int]:
+    return a.get("summary") or a["chk13"]["counts"]
+
+
 def _counts(a: dict[str, Any]) -> str:
-    c = a["chk13"]["counts"]
-    return f"{c['critical']} critical, {c['warning']} warnings, {c['info']} notes"
+    c = _summary(a)
+    pl = lambda n, w: f"{n} {w}{'' if n == 1 else 's'}"
+    return f"{c['critical']} critical, {pl(c['warning'], 'warning')}, {pl(c['info'], 'note')}"
+
+
+def _shown(a: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(findings of the shortlisted processes, findings of the other screens)."""
+    scr = a.get("screens") or {}
+
+    def shown(f: dict[str, Any]) -> bool:
+        return f["severity"] == "critical" or scr.get(f["process"], {}).get("shown", True) or any(
+            scr.get(x, {}).get("shown") for x in f.get("also") or [])
+
+    return [f for f in a["findings"] if shown(f)], [f for f in a["findings"] if not shown(f)]
+
+
+def _sections(main: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Process sections, the ones holding a critical finding first."""
+    worst = {k: min((SEV_RANK[f["severity"]] for f in main if f["process"] == k), default=9) for k in PROCESS_LABEL}
+    return sorted(PROCESS_LABEL.items(), key=lambda kv: (worst[kv[0]], list(PROCESS_LABEL).index(kv[0])))
+
+
+def where(f: dict[str, Any]) -> str:
+    """Feature name from the design tree, else a plain geometric description; never face ids."""
+    return ", ".join(f.get("features") or []) or f.get("where") or "whole part"
+
+
+def _model_line(a: dict[str, Any]) -> str:
+    b = a.get("build") or {}
+    rev = b.get("model_rev")
+    bid = str(b.get("build_id") or "")
+    return (f"model rev {rev}" if rev else "model") + (f" · build …{bid[-8:]}" if bid else "") + \
+        f" · analysed {a['generated_at'].replace('T', ' ').replace('Z', ' UTC')}"
 
 
 # ----------------------------------------------------------------------------- HTML
@@ -140,9 +208,9 @@ h1{font-size:22px;margin:0}h2{font-size:15px;margin:26px 0 8px;border-bottom:2px
 .meta{color:#566270;font-size:12px}.lvl{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;
 background:#e8eef7;color:#1f5fa8;font-weight:600}
 table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #d6dbe1;padding:5px 7px;text-align:left;
-vertical-align:top}th{background:#f2f4f7}
+vertical-align:top}th{background:#f2f4f7}td.id{white-space:nowrap;font-family:monospace;font-size:11px}
 .f{border:1px solid #d6dbe1;border-left:4px solid #999;border-radius:6px;padding:10px 12px;margin:10px 0;
-display:flex;gap:14px;page-break-inside:avoid}.f img{width:210px;height:auto;border:1px solid #e3e6ea;border-radius:4px}
+display:flex;gap:14px;page-break-inside:avoid}.f img{width:260px;height:auto;border:1px solid #e3e6ea;border-radius:4px}
 .sev{font-size:11px;font-weight:700;text-transform:uppercase}.small{font-size:11px;color:#566270}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media print{.wrap{padding:0}h2{page-break-after:avoid}}
@@ -154,47 +222,57 @@ def build_html(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None
     cur = a["cost"]["currency"]
     b64 = lambda png: "data:image/png;base64," + base64.b64encode(png).decode()
     p = a["part"]
+    main, other = _shown(a)
+    scr = a.get("screens") or {}
     h: list[str] = [(f"<!doctype html><html><head><meta charset='utf-8'><title>Manufacturability report · "
                     f"{_e(project_name)}</title><style>{CSS}</style></head><body><div class='wrap'>")]
     h.append("<div class='banner'>NOT APPROVED FOR MANUFACTURE · Advisory DFM screening · Costs: "
              "relative estimate, not a quote</div>")
     h.append(f"<h1 style='margin-top:14px'>Manufacturability report: {_e(project_name)}</h1>")
-    h.append(f"<div class='meta'>Generated {_e(a['generated_at'])} · analyser {_e(a['analyser'])} · "
-             f"{_e(a['tables'])} · build {_e((a.get('build') or {}).get('build_id') or '—')}</div>")
+    h.append(f"<div class='meta'>{_e(_model_line(a))} · {_e(a['analyser'])} · {_e(a['tables'])}</div>")
     h.append("<div class='grid' style='margin-top:14px'><div>")
     if overview:
         h.append(f"<img src='{b64(overview)}' style='width:100%;border:1px solid #e3e6ea;border-radius:6px'>")
     h.append("</div><div><table>")
+    top = a["process"]["ranking"][0]
     rows = [("Envelope", " × ".join(f"{x:g}" for x in p["bbox"]) + " mm"), ("Volume", f"{p['volume_mm3']:,.0f} mm³"),
             ("Material", f"{a['material']['name']} ({a['material']['how']})"), ("Mass", f"{p['mass_kg']:.3f} kg"),
             ("Quantity", f"{a['inputs']['quantity']:,}"), ("Tolerance class", a["inputs"]["tolerance"]),
-            ("Shop profile", a["shop"]["name"]), ("CHK-13 (advisory)", _counts(a)),
-            ("Top process", a["process"]["ranking"][0]["name"] + " · " + a["process"]["ranking"][0]["fit"])]
+            ("Shop profile", a["shop"]["name"]), ("Findings (all processes)", _counts(a)),
+            ("Top process", f"{top['name']} · {top['fit']}")]
     h += [f"<tr><th>{_e(k)}</th><td>{_e(v)}</td></tr>" for k, v in rows]
     h.append("</table></div></div>")
 
     h.append(f"<h2>Findings <span class='lvl'>{_e(a['chk13']['advice_level'])}</span></h2>")
-    for proc, label in PROCESS_LABEL.items():
-        fs = [f for f in a["findings"] if f["process"] == proc]
-        if not fs:
-            continue
-        h.append(f"<h3 style='font-size:13px;margin:14px 0 4px'>{_e(label)}</h3>")
-        for f in fs:
-            col = SEV_COLOR[f["severity"]]
-            img = f"<img src='{b64(views[f['id']])}'>" if f["id"] in views else ""
-            feats = ", ".join(f["features"]) or "—"
-            h.append(f"<div class='f' style='border-left-color:{col}'>{img}<div>"
-                     f"<div class='sev' style='color:{col}'>{_e(f['severity'])} · {_e(f['rule'])} · {_e(f['id'])}</div>"
-                     f"<div style='font-weight:600;font-size:13.5px'>{_e(f['title'])}</div>"
-                     f"<div><b>Measured:</b> {_e(f['measured'])} &nbsp; <b>Limit:</b> {_e(f['limit'])}</div>"
-                     f"<div style='margin-top:4px'>{_e(f['rationale'])}</div>"
-                     f"<div style='margin-top:4px'><b>Suggested fix:</b> {_e(f['fix'])}</div>"
-                     f"<div class='small' style='margin-top:4px'>Feature: {_e(feats)} · Faces: "
-                     f"{_e(', '.join(map(str, f['faces'])) or '—')} · Source: {_e(f['source'])}</div></div></div>")
-    h.append("<h2>CHK-13 rule summary</h2><table><tr><th>Rule</th><th>Check</th><th>Process</th><th>Result</th></tr>")
+
+    def finding_html(f: dict[str, Any]) -> str:
+        col = SEV_COLOR[f["severity"]]
+        img = f"<img src='{b64(views[f['id']])}'>" if f["id"] in views else ""
+        return (f"<div class='f' style='border-left-color:{col}'>{img}<div>"
+                f"<div class='sev' style='color:{col}'>{_e(f['severity'])}</div>"
+                f"<div style='font-weight:600;font-size:13.5px'>{_e(f['title'])}</div>"
+                f"<div><b>Where:</b> {_e(where(f))}</div>"
+                f"<div><b>Measured:</b> {_e(f['measured'])} &nbsp; <b>Limit:</b> {_e(f['limit'])}</div>"
+                f"<div style='margin-top:4px'>{_e(f['rationale'])}</div>"
+                f"<div style='margin-top:4px'><b>Suggested fix:</b> {_e(f['fix'])}</div>"
+                f"<div class='small' style='margin-top:4px'>Source: {_e(f['source'])} · rule {_e(f['rule'])}</div>"
+                "</div></div>")
+
+    for proc, label in _sections(main):
+        fs = [f for f in main if f["process"] == proc]
+        if fs:
+            h.append(f"<h3 style='font-size:13px;margin:14px 0 4px'>{_e(label)}</h3>")
+            h += [finding_html(f) for f in fs]
+    if other:
+        h.append("<h2>Other screens (processes not shortlisted)</h2><p class='small'>"
+                 + _e("; ".join(f"{PROCESS_LABEL[k]}: {v['reason']}" for k, v in scr.items() if not v.get("shown")))
+                 + "</p><ul class='small'>" + "".join(
+                     f"<li>{_e(f['severity'])}: {_e(f['title'])} ({_e(f['measured'])})</li>" for f in other) + "</ul>")
+    h.append("<h2>Rules run (advisory, not a gate)</h2><table><tr><th>Rule</th><th>Check</th><th>Process</th>"
+             "<th>Result</th></tr>")
     for r in a["chk13"]["rules"]:
-        h.append(f"<tr><td>{_e(r['rule'])}</td><td>{_e(r['name'])}</td><td>{_e(PROCESS_LABEL[r['process']])}</td>"
-                 f"<td>{_e(r['status'])}</td></tr>")
+        h.append(f"<tr><td class='id'>{_e(r['rule'])}</td><td>{_e(r['name'])}</td>"
+                 f"<td>{_e(PROCESS_LABEL[r['process']])}</td><td>{_e(r['status'])}</td></tr>")
     h.append("</table>")
 
     h.append(f"<h2>Process recommendation <span class='lvl'>{_e(a['process']['advice_level'])}</span></h2>")
@@ -224,8 +302,7 @@ def build_html(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None
         h.append("<h2>Cost drivers and suggestions</h2><ol>")
         for d in a["drivers"]:
             sv = f" (≈ {_money(d['saving_per_unit'], cur)} per part)" if d.get("saving_per_unit") else ""
-            fc = f" · faces {', '.join(map(str, d['faces']))}" if d["faces"] else ""
-            h.append(f"<li><b>{_e(d['title'])}</b>{_e(sv)}. {_e(d['rationale'])}<span class='small'>{_e(fc)}</span></li>")
+            h.append(f"<li><b>{_e(d['title'])}</b>{_e(sv)}. {_e(d['rationale'])}</li>")
         h.append("</ol>")
     m = a["material"]
     h.append("<h2>Material and provenance</h2><table>")
@@ -291,19 +368,21 @@ def build_pdf(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None)
     grid = TableStyle([("FONT", (0, 0), (-1, -1), font, 7.6), ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d6dbe1")),
                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f2f4f7")), ("VALIGN", (0, 0), (-1, -1), "TOP")])
     overview, views = _views(a, topo)
+    main, other = _shown(a)
+    scr = a.get("screens") or {}
     cur = a["cost"]["currency"]
     story: list[Any] = [P("NOT APPROVED FOR MANUFACTURE · Advisory DFM screening · Costs: relative estimate, "
                           "not a quote", ban), Spacer(1, 6),
                         P(f"Manufacturability report: {project_name}", h1),
-                        P(f"Generated {a['generated_at']} · {a['analyser']} · {a['tables']}", sm), Spacer(1, 6)]
+                        P(f"{_model_line(a)} · {a['analyser']} · {a['tables']}", sm), Spacer(1, 6)]
     p = a["part"]
+    top = a["process"]["ranking"][0]
     info = [[P("Envelope"), P(" × ".join(f"{x:g}" for x in p["bbox"]) + " mm")],
             [P("Material"), P(f"{a['material']['name']} ({a['material']['how']})")],
             [P("Mass"), P(f"{p['mass_kg']:.3f} kg")], [P("Quantity"), P(f"{a['inputs']['quantity']:,}")],
             [P("Tolerance class"), P(a["inputs"]["tolerance"])], [P("Shop profile"), P(a["shop"]["name"])],
-            [P("CHK-13 (advisory)"), P(_counts(a))],
-            [P("Top process"), P(a["process"]["ranking"][0]["name"] + " · " + a["process"]["ranking"][0]["fit"])]]
-    t_info = Table(info, colWidths=[30 * mm, 62 * mm])
+            [P("Findings (all processes)"), P(_counts(a))], [P("Top process"), P(f"{top['name']} · {top['fit']}")]]
+    t_info = Table(info, colWidths=[32 * mm, 60 * mm])
     t_info.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d6dbe1"))]))
     if overview:
         story.append(Table([[Image(io.BytesIO(overview), width=84 * mm, height=63 * mm), t_info]],
@@ -311,30 +390,27 @@ def build_pdf(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None)
     else:
         story.append(t_info)
     story.append(P(f"Findings ({a['chk13']['advice_level']})", h2))
-    for proc, label in PROCESS_LABEL.items():
-        fs = [f for f in a["findings"] if f["process"] == proc]
+    for proc, label in _sections(main):
+        fs = [f for f in main if f["process"] == proc]
         if not fs:
             continue
         story.append(P(label, ParagraphStyle("h3", parent=st, fontName=bold, spaceBefore=4)))
         for f in fs:
-            txt = [Paragraph(f"<font color='{SEV_COLOR[f['severity']]}'><b>{_e(f['severity'].upper())}</b></font> · "
-                             f"{_e(f['rule'])} · {_e(f['id'])}", st),
-                   Paragraph(f"<b>{_e(f['title'])}</b>", st),
+            txt = [Paragraph(f"<font color='{SEV_COLOR[f['severity']]}'><b>{_e(f['severity'].upper())}</b></font>", st),
+                   Paragraph(f"<b>{_e(f['title'])}</b>", st), P("Where: " + where(f)),
                    P(f"Measured: {f['measured']}   Limit: {f['limit']}"), P(f["rationale"]),
-                   P("Suggested fix: " + f["fix"]),
-                   P(f"Feature: {', '.join(f['features']) or '—'} · Faces: {', '.join(map(str, f['faces'])) or '—'}"
-                     f" · Source: {f['source']}", sm)]
-            img = Image(io.BytesIO(views[f["id"]]), width=40 * mm, height=30 * mm) if f["id"] in views else ""
-            row = Table([[img, txt]], colWidths=[43 * mm, 139 * mm])
+                   P("Suggested fix: " + f["fix"]), P(f"Source: {f['source']} · rule {f['rule']}", sm)]
+            img = Image(io.BytesIO(views[f["id"]]), width=56 * mm, height=42 * mm) if f["id"] in views else ""
+            row = Table([[img, txt]], colWidths=[59 * mm, 123 * mm] if img else [2 * mm, 180 * mm])
             row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                      ("LINEBEFORE", (0, 0), (0, 0), 2.5, colors.HexColor(SEV_COLOR[f["severity"]])),
                                      ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#d6dbe1"))]))
             story += [KeepTogether([row]), Spacer(1, 3)]
-    story.append(P("CHK-13 rule summary", h2))
-    rows = [[P("Rule"), P("Check"), P("Process"), P("Result")]] + [
-        [P(r["rule"]), P(r["name"]), P(PROCESS_LABEL[r["process"]]), P(r["status"])] for r in a["chk13"]["rules"]]
-    t = Table(rows, colWidths=[24 * mm, 82 * mm, 46 * mm, 30 * mm], repeatRows=1)
-    t.setStyle(grid)
+    story.append(P("Rules run (advisory, not a gate)", h2))
+    rows = [["Rule", P("Check"), P("Process"), P("Result")]] + [
+        [r["rule"], P(r["name"]), P(PROCESS_LABEL[r["process"]]), P(r["status"])] for r in a["chk13"]["rules"]]
+    t = Table(rows, colWidths=[24 * mm, 86 * mm, 44 * mm, 28 * mm], repeatRows=1)
+    t.setStyle(grid)  # rule ids are plain strings: they never wrap mid-id
     story.append(t)
     story.append(P(f"Process recommendation ({a['process']['advice_level']})", h2))
     rows = [[P("Process"), P("Score"), P("Fit"), P("For"), P("Against")]] + [
@@ -357,6 +433,10 @@ def build_pdf(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None)
         for i, d in enumerate(a["drivers"], 1):
             sv = f" (≈ {_money(d['saving_per_unit'], cur)} per part)" if d.get("saving_per_unit") else ""
             story.append(P(f"{i}. {d['title']}{sv}. {d['rationale']}"))
+    if other:
+        story.append(P("Appendix: other screens (processes not shortlisted)", h2))
+        story.append(P("; ".join(f"{PROCESS_LABEL[k]}: {v['reason']}" for k, v in scr.items() if not v.get("shown")), sm))
+        story += [P(f"• {f['severity']}: {f['title']} ({f['measured']})", sm) for f in other]
     m = a["material"]
     story.append(P("Material and provenance", h2))
     for k in ("density_g_cm3", "machining_class", "processes", "price_per_kg"):
@@ -364,18 +444,19 @@ def build_pdf(a: dict[str, Any], project_name: str, topo: dict[str, Any] | None)
         story.append(P(f"{k.replace('_', ' ')}: {v} ({m['provenance'][k]})", sm))
     story += [P("Disclaimer", h2), P(a["disclaimer"])]
     buf = io.BytesIO()
+    model = _model_line(a).split(" · analysed")[0]
 
     def _footer(canvas: Any, doc: Any) -> None:
         canvas.saveState()
         canvas.setFont(font, 7)
         canvas.setFillColor(colors.HexColor("#566270"))
-        canvas.drawString(14 * mm, 8 * mm, f"Formwright Manufacturing Advisor · {project_name} · advisory, not approved "
-                                           "for manufacture · relative estimate, not a quote")
+        canvas.drawString(14 * mm, 8 * mm, f"Formwright Manufacturing Advisor · {project_name} · {model} · "
+                                           "advisory: not approved for manufacture, not a quote")
         canvas.drawRightString(196 * mm, 8 * mm, f"page {doc.page}")
         canvas.restoreState()
 
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=14 * mm, rightMargin=14 * mm, topMargin=12 * mm,
                             bottomMargin=14 * mm, title=f"Manufacturability report · {project_name}",
-                            author="Formwright")
+                            author="Formwright", invariant=1)
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     return buf.getvalue()

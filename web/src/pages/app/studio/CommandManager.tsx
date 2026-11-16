@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
-  Cone, Fence, Layers2, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
+  Cone, Fence, Layers2, Lock, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
   ScanSearch, Squircle, Triangle, Upload, Waypoints, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
@@ -16,12 +16,18 @@ export type Command =
   | { kind: "panel"; tab: string; extra?: "com" }
   | { kind: "import" } | { kind: "toolbox" } | { kind: "similar" };
 
-interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean; needsBody?: boolean }
+interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean; needsBody?: boolean; status?: MakeModule["status"]; locked?: boolean }
 
 const TABS = ["Features", "Sketch", "Evaluate", "View", "Library", "Make"] as const;
 
 /** Downstream modules shown on the Make tab (only the Live ones are passed in). */
-export interface MakeModule { code: string; name: string; icon: ReactNode; tip: string }
+export interface MakeModule {
+  code: string; name: string; icon: ReactNode; tip: string;
+  /** One-line state of this module's output for the current part (Make tab), e.g. "Rev A" or "Model changed · update". */
+  status?: { text: string; tone: "ok" | "warn" | "muted" };
+  /** Not in the workspace's plan: shown with a lock, opens the add-on page. */
+  locked?: boolean;
+}
 
 export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [] }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
@@ -87,7 +93,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "similar", label: "Similar Parts", icon: <ScanSearch className="h-5 w-5" />, tip: "Find parts you already made that look like this one: same envelope, proportions and holes", cmd: { kind: "similar" }, needsBody: true },
       { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
     ], ...(library.length ? [library.map(m => ({ id: m.code, label: m.name, icon: m.icon, tip: m.tip, onClick: () => onMake?.(m.code) })) as Btn[]] : [])],
-    Make: [make.map(m => ({ id: m.code, label: m.name, icon: m.icon, tip: m.tip, onClick: () => onMake?.(m.code), disabled })) as Btn[]],
+    Make: [make.map(m => ({ id: m.code, label: m.name, icon: m.icon, onClick: () => onMake?.(m.code), disabled: disabled && !m.locked, status: m.locked ? undefined : m.status, locked: m.locked,
+      tip: m.locked ? `Add-on, not in your plan yet: ${m.tip}. Opens the add-on page.` : m.status ? `${m.tip}. Now: ${m.status.text}` : m.tip })) as Btn[]],
   };
 
   return (
@@ -96,7 +103,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
         {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
         {TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
           <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }} data-tour={t === "Make" ? "make" : undefined}
-            className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}</button>))}
+            className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}
+            {t === "Make" && make.some(m => m.status?.tone === "warn") && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle" title="An output is out of date with the model" />}</button>))}
         <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
           {right}
           <Tip content={collapsed ? "Show command bar" : "Hide command bar"} side="bottom">
@@ -114,9 +122,13 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
               return (
                 <Tip key={b.id} content={dis && b.needsBody ? "Needs a solid first: start with Extruded or Revolved Boss, ask the agent, use the Toolbox or import a STEP" : b.tip} side="bottom">
                   <button disabled={dis} onClick={() => { if (b.onClick) { b.onClick(); setTimeout(() => setTick(t => t + 1), 0); } else if (b.cmd) onCommand(b.cmd); }}
-                    className={cx("flex w-[74px] flex-col items-center justify-center gap-1 rounded px-1 text-[10.5px] leading-tight transition disabled:opacity-35",
+                    data-make={tab === "Make" ? b.id : undefined}
+                    className={cx("relative flex flex-col items-center justify-center gap-1 rounded px-1 text-[10.5px] leading-tight transition disabled:opacity-35",
+                      tab === "Make" ? "min-w-[88px] max-w-[150px] px-2.5" : "w-[74px]",
                       b.active ? "bg-primary-soft text-primary ring-1 ring-primary/40" : "text-text hover:bg-primary-soft hover:text-primary")}>
-                    <span className="text-primary">{b.icon}</span><span className="text-center">{b.label}</span>
+                    {b.locked && <Lock className="absolute right-1 top-1 h-3 w-3 text-muted" aria-label="Add-on" />}
+                    <span className={b.locked ? "text-muted" : "text-primary"}>{b.icon}</span><span className={cx("text-center", tab === "Make" && "whitespace-nowrap")}>{b.label}</span>
+                    {b.status && <span className={cx("max-w-full truncate text-[9.5px] leading-none", b.status.tone === "warn" ? "font-semibold text-warning" : b.status.tone === "ok" ? "text-success" : "text-muted")}>{b.status.text}</span>}
                   </button>
                 </Tip>);
             })}

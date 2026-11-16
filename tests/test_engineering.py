@@ -556,3 +556,121 @@ def test_api_project_link_signoff_and_invalidation(app_client: TestClient) -> No
     signup(c, "other@x.com", workspace="Other Co")
     _unlock(c)
     assert c.get(f"/api/m/engineering/projects/{pid}/sets").status_code == 404
+
+
+# ----------------------------------------------------------------------------- audit fixes (MAKE-02/04/19/20/23/24)
+def test_safety_factor_needed_only_when_a_check_is_produced() -> None:
+    """MAKE-24: a beam without a yield strength produces no strength check, so it needs no safety factor."""
+    base = {"L": 200, "section": "rect", "b": 20, "h": 10, "E": 207000, "loads": [{"P": 100, "a": 200}]}
+    r = run("beam", base)
+    assert r["checks"] == [] and r["safety_factor"] is None
+    # hand check (cantilever, tip load): sigma = P*L*(h/2)/I = 100*200*5 / (20*10^3/12) = 60.0 MPa
+    assert output(r, "sigma_max") == pytest.approx(60.0, rel=1e-9)
+    with pytest.raises(InputError, match="Enter the required safety factor and its source"):
+        run("beam", {**base, "Sy": 276})
+    assert run("beam", {**base, "Sy": 276, **SF})["checks"][0]["required"] == 2.0
+
+
+def test_textbook_default_loads_are_flagged_as_examples() -> None:
+    """MAKE-19: Ma = 70 N*m and Tm = 45 N*m are the Shigley Prob. 7-1 values, not the user's loads."""
+    r = run("shaft_fatigue", {"d": 25, **SF})
+    assert [e["key"] for e in r["examples"]] == ["Ma", "Tm"]
+    r = run("shaft_fatigue", {"d": 25, "Ma": {"value": 80, "unit": "N*m"}, **SF})
+    assert [e["key"] for e in r["examples"]] == ["Tm"]
+    # zero defaults ("no load") are not examples; tables compare row by row
+    assert run("beam", {"L": 200, "section": "rect", "b": 20, "h": 10, "E": 207000})["examples"][0]["key"] == "loads"
+    assert run("beam", {"L": 200, "section": "rect", "b": 20, "h": 10, "E": 207000,
+                        "loads": [{"P": 100, "a": 150}]})["examples"] == []
+
+
+def test_shaft_critical_sections_from_the_model() -> None:
+    """MAKE-23: the stepped-shaft demo (D2 = 25, KW = 6, KD = 3.5, KL = 30) gives a keyway section and a shoulder,
+    with first-iteration Kt from Shigley Table 7-1 (end-mill keyseat 2.14 / 3.0; sharp shoulder 2.7 / 2.2)."""
+    from aicad.engineering import project
+
+    rec, sharp, hints = _review_of("stepped_shaft.py")
+    kw = project.keyway(rec, sharp)
+    assert kw == {"d": 25.0, "w": 6.0, "depth": 3.5, "length": 30.0}
+    info = {"recognition": rec, "sharp_edges": sharp, "hints": hints, "material": {"name": "Steel 1045"},
+            "mechanical": {"Sut_MPa": 565, "Sy_MPa": 310, "E_GPa": 205, "source": "test", "basis": "min"}}
+    sec = [s for s in project.suggestions(info) if s["calc_id"] == "shaft_fatigue"]
+    key = next(s for s in sec if s["title"].startswith("Keyway"))
+    assert key["inputs"]["d"]["value"] == 25.0 and (key["inputs"]["Kt"], key["inputs"]["Kts"]) == (2.14, 3.0)
+    assert "Table 7-1" in key["provenance"]["Kt"]
+    sh = next(s for s in sec if s["title"].startswith("Shoulder"))
+    assert sh["inputs"]["d"]["value"] == 20.0 and (sh["inputs"]["Kt"], sh["inputs"]["Kts"]) == (2.7, 2.2)
+    for s in sec:   # every suggestion runs as-is once a safety factor is given
+        run("shaft_fatigue", {**s["inputs"], **SF})
+
+
+def _pdf_text(data: bytes) -> str:
+    pdfium = pytest.importorskip("pypdfium2")
+    doc = pdfium.PdfDocument(data)
+    return "\n".join(doc[i].get_textpage().get_text_range() for i in range(len(doc)))
+
+
+def test_api_signoff_binds_to_the_model_and_exports_a_package(app_client: TestClient) -> None:  # noqa: F811
+    """MAKE-02 (model binding), MAKE-04 (facts, load cases), MAKE-19 (examples block sign-off), MAKE-20 (PDF)."""
+    import json as _json
+
+    from aicad.engineering import report, store
+
+    c = app_client
+    signup(c, "binding@x.com", name="Ada Lovelace")
+    _unlock(c)
+    pid, ws = _project_with_model(c, (DEMO / "mounting_plate.py").read_text(encoding="utf-8"))
+    assert store.deliverable_summary(ws)["state"] == "missing"
+    cs = c.post(f"/api/m/engineering/projects/{pid}/sets", json={"name": "Pins"}).json()
+    base = {"d": 6, "n_pins": 1, "planes": "1", "Sy": 640, **SF}
+    cs = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/items",
+                json={"calc_id": "pin_shear", "inputs": base, "source": {"d": "hole 6 mm"}}).json()
+    item = cs["items"][0]
+    assert item["build"]["build_id"] and [e["key"] for e in item["unconfirmed"]] == ["F"]
+    assert "with no load cases linked" in cs["sign_statement"]
+    sign = {"statement": cs["sign_statement"], "confirm": True}
+    r = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/signoff", json=sign)
+    assert r.status_code == 422 and "load cases" in r.json()["detail"]
+    r = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/signoff", json={**sign, "loads_in_calcs": True})
+    assert r.status_code == 422 and "example load values" in r.json()["detail"]
+    assert "Total shear load F" in r.json()["detail"]
+    # confirming the example (keeping 1000 N deliberately) is recorded and lifts the block
+    cs = c.patch(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/items/{item['id']}",
+                 json={"calc_id": "pin_shear", "inputs": base, "source": {"d": "hole 6 mm"}, "confirmed": ["F"]}).json()
+    assert cs["items"][0]["unconfirmed"] == [] and cs["items"][0]["confirmed"] == ["F"]
+    cs = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/signoff",
+                json={**sign, "loads_in_calcs": True}).json()
+    assert cs["status"]["state"] == "signed" and cs["status"]["label"] == "Verified calculation · self-checked"
+    assert cs["level"] == "verified_calculation" and cs["signoff"]["build"]["build_id"]
+    assert "with no load cases linked" in cs["signoff"]["facts"]
+    summ = store.deliverable_summary(ws)
+    assert summ["state"] == "current" and summ["signed"] == 1 and summ["signed_sets"] == [cs["id"]]
+    # the PDF package carries the hash, the level and the provenance of every input
+    pdf = c.get(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/report.pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and pdf.content.rstrip().endswith(b"%%EOF")
+    text = _pdf_text(pdf.content)
+    flat = "".join(text.split())
+    assert cs["status"]["hash"] in flat
+    assert "Verifiedcalculation·self-checked" in flat and "Examplevaluekeptandconfirmed" in flat
+    assert report.build_pdf(ws, cs["id"], "Plate") == report.build_pdf(ws, cs["id"], "Plate")  # deterministic
+    # the part changes: the signature is intact, but the set is no longer verified for this model
+    stp = ws / "out" / "status.json"
+    st = _json.loads(stp.read_text(encoding="utf-8"))
+    st.update(build_id=int(st["build_id"]) + 1, step_sha256="0" * 64)
+    stp.write_text(_json.dumps(st), encoding="utf-8")
+    cs2 = c.get(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}").json()
+    assert cs2["status"]["state"] == "model_changed" and not cs2["status"]["for_release"]
+    assert cs2["status"]["label"] == "Model changed since sign-off: re-check"
+    assert cs2["level"] == "preliminary_estimate" and cs2["signoff"]["name"] == "Ada Lovelace"
+    assert cs2["items"][0]["model_changed"] and cs2["items"][0]["result"]["level"] == "preliminary_estimate"
+    assert store.deliverable_summary(ws)["state"] == "stale"
+    assert "Modelchangedsincesign-off" in "".join(_pdf_text(report.build_pdf(ws, cs["id"], "Plate")).split())
+    listing = c.get("/api/m/engineering/projects").json()["items"]
+    assert listing[0]["model_changed"] == 1 and listing[0]["signed"] == 0
+    # re-signing needs the model-derived inputs refreshed on the current build
+    r = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/signoff", json={**sign, "loads_in_calcs": True})
+    assert r.status_code == 422 and "earlier model revision" in r.json()["detail"]
+    c.patch(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/items/{item['id']}",
+            json={"calc_id": "pin_shear", "inputs": {**base, "F": 800}, "source": {"d": "hole 6 mm"}})
+    cs3 = c.post(f"/api/m/engineering/projects/{pid}/sets/{cs['id']}/signoff",
+                 json={**sign, "loads_in_calcs": True}).json()
+    assert cs3["status"]["state"] == "signed"

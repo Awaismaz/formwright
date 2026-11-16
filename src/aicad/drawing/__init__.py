@@ -12,7 +12,7 @@ Pipeline (all deterministic, no AI):
 Only geometry.py and render.to_dxf import the CAD kernel; the rest is plain Python and unit-testable quickly.
 """
 
-VERSION = "1.0.0"
+VERSION = "1.1.1"  # 1.1.1: callouts on the side nearest the feature; 1.1: turned parts axis-horizontal, radius/chamfer callouts, MAKE-01 placement, edits, releases
 
 
 class DrawingInputError(ValueError):

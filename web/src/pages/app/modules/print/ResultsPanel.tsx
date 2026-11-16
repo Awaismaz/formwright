@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, FileBox, Info, RotateCcw, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, FileBox, Info, PenTool, RotateCcw, Wrench, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Badge, Button, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import type { Check, ExportFile, Orientation, Report, Settings, Status } from "./types";
 import type { Src } from "./index";
+import { studioAskUrl } from "../fixit";
 
 const ICON: Record<Status, JSX.Element> = {
   pass: <CheckCircle2 className="h-4 w-4 text-success" />, warn: <AlertTriangle className="h-4 w-4 text-warning" />,
@@ -29,7 +32,26 @@ function value(c: Check): string {
   return `${f(v, Number.isInteger(v) && d === 0 ? 0 : d)} ${c.unit}`;
 }
 
-function CheckRow({ c }: { c: Check }) {
+const where = (c: Check) => {
+  const feats = [...new Set((c.regions ?? []).map(r => r.feature).filter(Boolean))].slice(0, 3);
+  return feats.length ? ` (at ${feats.join(", ")})` : "";
+};
+/** A plain request for the design agent when a finding can only be fixed in the model (not by orientation). */
+export function fixPrompt(c: Check, process: string): string | null {
+  if (c.status === "pass" || c.status === "info") return null;
+  const lim = typeof c.limit === "number" ? c.limit : null;
+  const v = typeof c.value === "number" ? c.value : null;
+  switch (c.id) {
+    case "PP-08": return `For ${process} 3D printing, thicken the walls that are thinner than ${lim ?? "the minimum"} mm${v !== null ? ` (thinnest ${f(v, 2)} mm)` : ""}${where(c)} to at least ${lim ?? "the minimum"} mm. Keep the outside size and every other feature unchanged.`;
+    case "PP-09": return `For ${process} 3D printing, widen the gaps and slots narrower than ${lim ?? "the minimum"} mm${where(c)} to at least ${lim ?? "the minimum"} mm so they do not fuse. Keep everything else unchanged.`;
+    case "PP-10": return `For ${process} 3D printing, the holes smaller than Ø${lim ?? "the minimum"} mm will print undersize. If they are functional, keep them in the model but tell me which ones should be drilled after printing; otherwise enlarge them to at least Ø${lim ?? "the minimum"} mm.`;
+    case "PP-11": return `For ${process} 3D printing, make the pins and bosses thinner than Ø${lim ?? "the minimum"} mm at least Ø${lim ?? "the minimum"} mm, or add a fillet at their base. Keep everything else unchanged.`;
+    case "PP-12": return `For ${process} 3D printing, remove or enlarge the loose features smaller than ${lim ?? "the minimum"} mm. Keep everything else unchanged.`;
+    default: return null;
+  }
+}
+
+function CheckRow({ c, fixUrl }: { c: Check; fixUrl?: string | null }) {
   const [open, setOpen] = useState(false);
   const more = (c.regions && c.regions.length > 0) || (c.items && c.items.length > 0);
   return (
@@ -46,6 +68,7 @@ function CheckRow({ c }: { c: Check }) {
             <span className="rounded bg-text/[.05] px-1.5 py-0.5">{c.level}</span>
             {c.limit_is_assumption && c.limit !== null && <span className="rounded bg-accent/10 px-1.5 py-0.5 text-accent">limit is an assumption</span>}
             {more && <button onClick={() => setOpen(!open)} className="inline-flex items-center gap-0.5 text-primary hover:underline">{open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}Details</button>}
+            {fixUrl && <Link to={fixUrl} className="ml-auto inline-flex items-center gap-1 rounded border border-primary/30 px-1.5 py-0.5 text-primary hover:bg-primary-soft" title="Opens the Design Studio with this request written in the chat, for you to review and send" data-fix={c.id}><PenTool className="h-3 w-3" />Fix in Studio</Link>}
           </div>
           {open && c.regions && <ul className="mt-1.5 space-y-0.5 text-[11.5px]">
             {c.regions.slice(0, 10).map((r, i) => <li key={i} className="flex justify-between gap-2"><span className="truncate">{r.feature ?? (r.face !== undefined ? `Face ${r.face + 1}` : `Region ${i + 1}`)}</span><span className="tabular-nums text-muted">{f(r.min_mm, 2)} mm · {f(r.area_mm2, 0)} mm²</span></li>)}
@@ -100,6 +123,7 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
   const [tab, setTab] = useState("checks");
   const [exports, setExports] = useState<ExportFile[]>(report.exports);
   const [busy, setBusy] = useState<string | null>(null);
+  const qc = useQueryClient();
   useEffect(() => setExports(report.exports), [report.exports]);
   const ocs = orient?.checks ?? [];
   const all = [...report.checks, ...ocs];
@@ -118,7 +142,8 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
         format, rotation: orient.rotation, tolerance: settings.tolerance, printer_mm: report.process.printer_mm,
         label: `#${orient.rank} ${orient.label}`, tag: orient.id, process: report.process.code,
       });
-      setExports(x => [{ name: r.name, bytes: r.bytes, format: r.format }, ...x.filter(y => y.name !== r.name)]);
+      setExports(x => [{ name: r.name, bytes: r.bytes, format: r.format, state: "current", made_from_rev: r.made_from_rev, label: r.label }, ...x.filter(y => y.name !== r.name)]);
+      if (src.kind === "projects") void qc.invalidateQueries({ queryKey: ["deliverables", src.id] });
       toast.success(`${format.toUpperCase()} ready: ${r.name}`, { description: r.volume_match ? "Reloaded and checked: same volume, millimetres." : undefined });
       window.location.assign(r.url);
     } catch (err) { toast.error(err instanceof ApiError ? err.message : "Export failed"); } finally { setBusy(null); }
@@ -138,11 +163,12 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
       <div className={cx("border-b border-border px-4 py-3", status === "fail" ? "bg-danger/5" : status === "warn" ? "bg-warning/5" : "bg-success/5")} data-testid="print-summary">
         <div className="flex items-center gap-2">
           {ICON[status]}
-          <div className="text-[14px] font-semibold">{status === "pass" ? "Ready to slice" : status === "warn" ? "Printable, with points to check" : "Fix before printing"}</div>
+          <div className="text-[14px] font-semibold">{status === "pass" ? "Geometry checks passed" : status === "warn" ? "Printable, with points to check" : "Fix before printing"}</div>
           <Badge tone={TONE[status]} className="ml-auto">{fails} fail · {warns} check</Badge>
         </div>
         <p className="mt-1 text-[11.5px] text-muted">{report.process.name} · {report.material?.name ?? "no material"} · {report.source.triangles.toLocaleString()} triangles
           {report.source.tolerance_mm !== undefined && <> · tolerance {report.source.tolerance_mm} mm (measured {f(report.source.deviation?.max_mm, 4)} mm)</>}</p>
+        {report.design_material?.metal && <p className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-warning" data-testid="print-design-material"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />Design material: {report.design_material.name}. This print is a form and fit model, not a functional part.</p>}
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
@@ -167,7 +193,8 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
             </div>
           )}
           <div className="px-4 pb-1 pt-3 label">Mesh and geometry</div>
-          <div>{report.checks.map(c => <CheckRow key={c.id} c={c} />)}</div>
+          <div>{report.checks.map(c => { const fp = src.kind === "projects" && canEdit ? fixPrompt(c, report.process.name) : null;
+            return <CheckRow key={c.id} c={c} fixUrl={fp ? studioAskUrl(src.id, fp) : null} />; })}</div>
           {orient && <>
             <div className="px-4 pb-1 pt-3 label">For orientation #{orient.rank} · {orient.label}</div>
             <div>{ocs.map(c => <CheckRow key={c.id} c={c} />)}</div>
@@ -206,12 +233,15 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
               <Button size="sm" variant="secondary" icon={<Download className="h-4 w-4" />} disabled={!orient} loading={busy === "stl"} onClick={() => doExport("stl")}>STL</Button>
             </div> : <p className="mt-2 text-[12px] text-muted">Viewers can download existing exports. Ask an engineer to create new ones.</p>}
             {exports.length > 0 && <ul className="mt-3 divide-y divide-border rounded border border-border">
-              {exports.map(x => (
-                <li key={x.name} className="flex items-center gap-2 px-2.5 py-1.5 text-[12px]">
-                  <FileBox className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="min-w-0 flex-1 truncate">{x.name}</span>
+              {exports.map(x => { const old = x.state === "outdated"; return (
+                <li key={x.name} className={cx("flex items-center gap-2 px-2.5 py-1.5 text-[12px]", old && "bg-text/[.03]")} data-export-state={x.state ?? "current"}>
+                  <FileBox className={cx("h-3.5 w-3.5 shrink-0", old ? "text-muted/60" : "text-muted")} />
+                  <span className="min-w-0 flex-1"><span className={cx("block truncate", old && "text-muted line-through decoration-muted/50")}>{x.name}</span>
+                    {old && <span className="block text-[11px] text-warning">{x.made_from_rev ? `From model rev ${x.made_from_rev}` : "From an earlier model"}: outdated, the part has changed. Export again.</span>}</span>
                   <span className="text-muted">{kb(x.bytes)}</span>
-                  <a className="link" href={`/api/m/print/${src.kind}/${src.id}/files/${encodeURIComponent(x.name)}`}>Download</a>
-                </li>))}
+                  {old ? <span className="cursor-not-allowed text-muted/60" title="Made from an earlier version of the part">Download</span>
+                    : <a className="link" href={`/api/m/print/${src.kind}/${src.id}/files/${encodeURIComponent(x.name)}`}>Download</a>}
+                </li>); })}
             </ul>}
             <p className="mt-3 text-[11px] leading-relaxed text-muted">STL has no units; slicers assume millimetres. 3MF stores millimetres explicitly. Check the result in your slicer before printing.</p>
           </div>

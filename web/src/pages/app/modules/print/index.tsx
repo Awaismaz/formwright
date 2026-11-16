@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ModuleHeader } from "../ModuleHeader";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Box as BoxIcon, FolderOpen, Printer, Upload } from "lucide-react";
+import { FolderOpen, Printer, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { Project } from "@/lib/types";
-import { Button, EmptyState, PageLoader, Spinner, StatusBadge } from "@/components/ui";
+import { Button, EmptyState, PageLoader, Spinner } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import type { Presets, Report, Settings, UploadMeta } from "./types";
 import { PrintViewport } from "./Viewport";
@@ -77,21 +78,17 @@ export default function PrintPrep({ projectId }: ModuleAppProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border bg-panel px-4 py-2">
-        {projectId ? <Link to={`/app/projects/${projectId}`} className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-text"><ArrowLeft className="h-4 w-4" />Back to project</Link>
-          : <Link to="/app/modules" className="inline-flex items-center gap-1 text-[13px] text-muted hover:text-text"><ArrowLeft className="h-4 w-4" />Modules</Link>}
-        <div className="h-5 w-px bg-border" />
-        <div className="flex items-center gap-2"><Printer className="h-4 w-4 text-primary" /><h1 className="text-[15px] font-semibold">3D Print Prep</h1><StatusBadge status="live" /></div>
-        {src && <div className="flex min-w-0 items-center gap-2 rounded border border-border bg-panel2 px-2.5 py-1 text-[13px]">
-          {src.kind === "projects" ? <BoxIcon className="h-3.5 w-3.5 text-muted" /> : <Upload className="h-3.5 w-3.5 text-muted" />}
-          <span className="max-w-[260px] truncate font-medium">{srcName ?? report?.source.name ?? "…"}</span>
-          <span className="text-muted">{src.kind === "projects" ? "verified model" : "uploaded mesh"}</span>
-        </div>}
-        <div className="ml-auto flex items-center gap-2">
-          {src && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change source</Button>}
+      <ModuleHeader code="print" icon={<Printer className="h-4 w-4" />} title="3D Print Prep" projectId={src?.kind === "projects" ? src.id : null} projectName={srcName}
+        projects={projects.data?.items.filter(p => p.builds > 0 && p.last_status?.ok).map(p => ({ id: p.id, name: p.name }))}
+        onSwitch={id => choose(id ? { kind: "projects", id } : null)}
+        actions={<>
+          {src?.kind === "uploads" && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change source</Button>}
           {canEdit && <Button size="sm" variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploadOpen(true)}>Upload mesh</Button>}
-        </div>
-      </header>
+        </>}>
+        {src?.kind === "uploads" && <div className="flex min-w-0 items-center gap-2 rounded border border-border bg-panel2 px-2.5 py-1 text-[12.5px]">
+          <Upload className="h-3.5 w-3.5 text-muted" /><span className="max-w-[260px] truncate font-medium">{srcName ?? report?.source.name ?? "…"}</span>
+          <span className="text-muted">uploaded mesh</span></div>}
+      </ModuleHeader>
 
       {!src ? (
         <div className="min-h-0 flex-1 overflow-y-auto">

@@ -3,6 +3,9 @@
 Scores start at 50 and move with quantity, material, size, geometry signals, tolerance and the relative cost
 estimate. Every adjustment is listed as a reason, so the ranking can be argued with. Confidence is never "high":
 this is screening advice for a conversation with a supplier.
+
+Two caps keep the ranking honest (MAKE-11): a process whose own rules were not run here (polymer printing) is never
+better than "Possible: not analysed", and a process with an open critical finding is never better than "Possible".
 """
 
 from __future__ import annotations
@@ -40,6 +43,10 @@ TOL: dict[str, dict[str, int]] = {
     "precision": {"cnc_milling": -5, "cnc_turning": -5, "sheet_metal": -40, "fdm": -40, "sla": -30, "sls": -40,
                   "casting": -30, "injection_moulding": -25},
 }
+# Processes whose DFM rules run in this module (rules.PROCESS_LABEL keys). Printing is checked in 3D Print Prep.
+RULES_FOR = {"cnc_milling": "cnc_milling", "cnc_turning": "cnc_turning", "sheet_metal": "sheet_metal",
+             "casting": "moulding_casting", "injection_moulding": "moulding_casting"}
+CAP = 60  # best score while a process is not analysed or has an open critical finding ("Possible")
 MAT_PROC = {"cnc_milling": "mill", "cnc_turning": "turn", "sheet_metal": "sheet", "fdm": "fdm", "sla": "sla",
             "sls": "sls", "casting": "cast", "injection_moulding": "mould"}
 
@@ -54,7 +61,9 @@ def rank(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], quantity: int, tol
     dims = g.size.tolist()
     procs = set(mat["processes"])
     crit = {p: sum(1 for f in findings if f["process"] == p and f["severity"] == "critical")
-            for p in ("cnc_milling", "cnc_turning", "moulding_casting")}
+            for p in ("cnc_milling", "cnc_turning", "sheet_metal", "moulding_casting")}
+    crit_secondary = {p: sum(1 for f in findings if p in (f.get("also") or []) and f["severity"] == "critical")
+                      for p in crit}
     cheapest = min(unit_costs.values()) if unit_costs else None
     out = []
     for p, pname in NAMES.items():
@@ -112,8 +121,10 @@ def rank(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], quantity: int, tol
                                       for m in lathes):
                     score -= 40
                     cons.append("Exceeds every lathe in your shop profile")
-                if crit["cnc_turning"]:
-                    score -= min(30, 10 * crit["cnc_turning"])
+                if crit_secondary["cnc_turning"]:
+                    score -= 5
+                    cons.append(f"{crit_secondary['cnc_turning']} critical finding(s) in the secondary milling "
+                                "operation to resolve")
         elif p == "sheet_metal":
             if not sheet.sheet_like:
                 feasible = False
@@ -123,13 +134,8 @@ def rank(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], quantity: int, tol
                 score += 15
                 conf = "medium"
                 pros.append(f"Constant {sheet.thickness:g} mm thickness over {100 * sheet.frac:.0f} % of the surface")
-                part = [f for f in g.faces if f.kind == "cylinder" and (f.sweep or 0) < 6.28]
-                inner = sum(1 for f in part if f.concave)
-                outer = sum(1 for f in part if f.concave is False)
-                if inner > outer:
-                    cons.append("Some bends have no outer radius in the model; a formed bend has an outer radius of "
-                                "about inner radius + thickness")
-                cons.append("Check bend radii, bend reliefs and the flat pattern with the fabricator (not analysed)")
+                cons.append("Bend radius and outer radius are checked; the flat pattern, bend reliefs and "
+                            "hole-to-bend distances are not analysed")
         elif p in ("fdm", "sla", "sls"):
             pr = shop.printers(p)
             if pr and not any(_fits(dims, m.travel_mm) for m in pr):
@@ -159,10 +165,22 @@ def rank(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], quantity: int, tol
             score += bonus
             if rel > 0.999:
                 pros.append(f"Lowest relative unit cost at {quantity:,} parts (estimate)")
+        analysed = p in RULES_FOR
+        n_crit = crit.get(RULES_FOR.get(p, ""), 0)
+        if feasible and not analysed:
+            cons.append("Printability is not analysed here: open 3D Print Prep for wall, overhang and support checks")
+            score = min(score, CAP)
+            conf = "low"
+        if feasible and n_crit:
+            cons.append(f"{n_crit} critical finding{'s' if n_crit > 1 else ''} to resolve before this process fits")
+            score = min(score, CAP)
+            conf = "low"
         score = max(0, min(100, score)) if feasible else 0
-        fit = "Not suitable" if not feasible else "Good fit" if score >= 70 else "Possible" if score >= 45 \
+        fit = "Not suitable" if not feasible else "Possible: not analysed" if not analysed and score >= 45 \
+            else "Good fit" if score >= 70 else "Possible" if score >= 45 \
             else "Poor fit"
-        out.append({"process": p, "name": pname, "score": score, "fit": fit, "feasible": feasible,
+        out.append({"process": p, "name": pname, "score": score, "fit": fit, "feasible": feasible, "analysed": analysed,
+                    "critical": n_crit if feasible else 0,
                     "confidence": conf, "pros": pros, "cons": cons, "unit_cost": unit_costs.get(p)})
     out.sort(key=lambda r: (-r["score"], list(NAMES).index(r["process"])))
     return {"advice_level": ADVICE_LEVELS["check"], "ranking": out, "assumptions": [
