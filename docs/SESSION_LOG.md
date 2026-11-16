@@ -4,6 +4,40 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (l): Wave 1 merged (Drawing, Manufacturing, Engineering Live), change notice, handoff pack, wave 2 launched
+
+### Done
+- **Merged wave-1 modules** after reading each report:
+  - Drawing Studio (DRW-001..006, 010, 015, IO-007; CHK-12);
+  - Manufacturing Advisor (MFG-001, 010, 013..018, 020; CHK-13);
+  - Engineering Advisor (ENG-001..008, 010..012; 10 calculators vs Shigley/ISO examples).
+  Dependency conflicts were resolved (pint + reportlab); details in `docs/reports/*.md`.
+- **Change notice (DS-029 / O-2)**: each revision records why and who; a deterministic what-changed diff; notice
+  with before/after views, CURRENT/SUPERSEDED stamp, copy-as-text and A4 print. The deferred 4-view render now
+  attaches to its revision.
+- **Shop handoff pack (PLT-013 / O-4)**: verified zip per revision with SHA-256 manifest; stale outputs left out;
+  missing ones point to the module that makes them.
+- Honesty copy: the tour and the landing FAQ now follow the catalog; a Live-but-locked module page says "What it
+  does" and offers unlocking; the Files panel's drawing card links to the Live Drawing Studio.
+- Wave 2 launched: Assembly Studio (with fastener auto-fit), Image & Drawing to CAD (ambiguity checklist),
+  Mesh Studio (Blender product render studio). Agent brief gained "Shared machine rules".
+
+### Evidence
+- Full suite on merged main (before Drawing): 166 passed. After the Drawing merge: drawings + platform 32 passed;
+  ruff, tsc and vite clean.
+- New tests: `test_changes.py` (diff lines, API why/what, superseded), `test_handoff.py` (contents, manifest hashes,
+  stale exclusion).
+- Browser (port 8766, 0 errors):
+  - notice for OD 150→160: +38,955.7 mm³ (= π(80²−75²)·16), +305.8 g at 7.85 g/cm³;
+  - print layout one A4 page with before/after views;
+  - handoff card with a current drawing and missing DFM; zip 182 KB.
+
+### Parked
+PD-19 (manufacturing defaults), PD-20 (engineering sign-off policy), PD-21 (drawing defaults).
+
+### Next
+Merge the Studio agent (DS-026) and wave 2 as they report; O-3 design variants once the Studio branch has landed.
+
 ## 2026-11-16 (k): Tree actions without AI, Find similar parts, 3D Print Prep merged, Make tab
 
 Founder (between away periods): fix chat tables; make the feature tree useful (suppress, delete, ask agent);
