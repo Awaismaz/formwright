@@ -94,8 +94,41 @@ pack and the four demo sheets (in `$W\sheets\`) were rendered and read back.
   - the release dialog showing "already issued" as a blocker straight after issuing;
   - the calculation PDF printing the statement twice.
 
+## Walkthrough numbers (second run, after merging `main`, fresh data; `$W\w1.log`, 0 console/page errors)
+- **Drawings:**
+  - bracket A3 1:1, CHK-12 passed;
+  - shaft A3 2:1 and A4 1:1, both passed;
+  - all four demos × A3/A4 pass CHK-12 (`$W\sheets\`).
+- **DFM:**
+  - shaft: 1 critical (square keyway), turning 85;
+  - bracket: 2 critical (sheet-metal bend rules), sheet metal 60 "Possible";
+  - flange: Ø14 is a warning, "not a standard clearance hole".
+- **Engineering:**
+  - shaft set signed "Verified calculation · self-checked";
+  - after D1 20→18 it reads `model_changed`, "Model changed since sign-off: re-check", Preliminary estimate.
+- **Print:**
+  - a plate export `…_r1_fdm-o1.3mf`, then L 120→140, reads "Exports from model rev 1 · outdated";
+  - the shaft's #1 orientation is laid down (25 mm tall).
+- **Release:**
+  - Rev A issued from the Studio's handoff card: model rev 2, note "Initial issue";
+  - the frozen pack holds the model, the issue drawing, the change notice, the README and the manifest;
+  - after W 80→90 the gate offers Rev B, blocked only by the stale drawing, with the suggested note "W 80 → 90". The header reads "Model changed" and "Draft since Rev A".
+- **DFM "Add to drawing":** the bracket's drawing notes now hold "BREAK ALL SHARP EDGES 0.2-0.5 MM UNLESS OTHERWISE SPECIFIED.".
+- **Fix in Studio:** `?ask=` put the prompt in the chat box, did not send it, and removed itself from the URL.
+- **Fixed from the screenshots:**
+  - the R3 leader crossing the bracket view;
+  - the "12"/"12.5" overlap on A4;
+  - Make-tab labels wrapping over their status;
+  - module-header chips wrapping and overlapping;
+  - a second sheet-rev chip that repeated the release chip;
+  - the release dialog showing "already issued" as a blocker straight after issuing;
+  - the calculation PDF printing the statement twice.
+
 ## Gate
-- Full suite `uv run pytest -q`: see final note.
+- Full suite `uv run pytest -q` after merging `main`: **393 passed, 1 failed**, 28 min 51 s. The machine was loaded at the time (the walkthrough and other agents were running).
+  - The failure was `tests/test_changes.py::test_change_notice_api_records_what_and_why`. Its message was cut off at "T…", most likely a timeout.
+  - It passes when run alone (27.7 s), and it does not touch the files changed here.
+- Module suites: release, handoff, drawings, manufacturing, engineering and print all pass.
 - `ruff check src tests`: clean.
 - `tsc --noEmit`: clean.
 - `npm test`: 20 passed.
