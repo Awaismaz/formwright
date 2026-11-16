@@ -16,7 +16,8 @@ import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
 import FeatureManager, { selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
 import CommandManager, { type Command } from "./studio/CommandManager";
-import SketchEditor from "./studio/SketchEditor";
+import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
+import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
@@ -36,7 +37,8 @@ export default function ProjectStudio() {
   const [showCom, setShowCom] = useState(false);
   const [sketch, setSketch] = useState<SketchPreview | null>(null);
   const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
-  const [sk, setSk] = useState<{ phase: "pick" } | { phase: "edit"; plane: { origin: V3; normal: V3; x_dir: V3 }; faceId: number | null; editing: ManualFeature | null } | null>(null);
+  const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset } | null>(null);
+  const [planeOffset, setPlaneOffset] = useState("0");
   const [dialog, setDialog] = useState<"import" | "toolbox" | null>(null);
   const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
   const viewerApi = useRef<ViewerApi | null>(null);
@@ -73,26 +75,32 @@ export default function ProjectStudio() {
   };
   const selectKinds = useMemo<Pick["kind"][] | undefined>(() => (pm ? selectKindsFor(pm.op) : sk?.phase === "pick" ? ["face"] : undefined), [pm, sk]);
 
-  const openSketchOn = (faceId: number) => {
+  const openSketchOn = (faceId: number, preset?: SketchPreset) => {
     const f = topo?.faces[faceId];
     if (!f || f.type !== "plane" || !f.normal) { toast.error("Pick a flat (planar) face to sketch on."); setSelection([]); return; }
-    setSk({ phase: "edit", plane: { origin: f.center, normal: f.normal, x_dir: xDirFor(f.normal) }, faceId, editing: null });
+    setSk({ phase: "edit", plane: { origin: f.center, normal: f.normal, x_dir: xDirFor(f.normal) }, faceId, editing: null, preset });
     setSelection([]); setTool("orbit");
   };
+  const openSketchOnPlane = (name: RefPlane, preset?: SketchPreset, offset = 0) => {
+    const off = Number.isFinite(offset) ? offset : 0;
+    setPm(null); setSk({ phase: "edit", plane: offsetPlane(name, off), faceId: null, editing: null, preset }); setSelection([]); setTool("orbit");
+  };
   const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
-    if (op === "sketch") {
+    if (op === "revolve" && !ed) { openPm("sketch", null, { feature: "revolve", ...(preset ?? {}) }); return; }
+    if (op === "sketch" || op === "revolve") {
       if (ed?.plane) {
         const pl = ed.plane; const n = pl.normal as V3;
         const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6
           && Math.abs((f.center[0] - pl.origin[0]) * n[0] + (f.center[1] - pl.origin[1]) * n[1] + (f.center[2] - pl.origin[2]) * n[2]) < 1e-4)?.id ?? null;
         setSk({ phase: "edit", plane: { origin: pl.origin, normal: n, x_dir: (pl.x_dir ?? xDirFor(n)) as V3 }, faceId, editing: ed });
       } else {
+        const sp = preset as SketchPreset | undefined;
         const face = selection.find(x => x.kind === "face");
-        if (face) openSketchOn(face.id); else { setSk({ phase: "pick" }); setTool("select"); setSelection([]); }
+        if (face && topo?.faces[face.id]?.type === "plane") openSketchOn(face.id, sp); else { setSk({ phase: "pick", preset: sp }); setTool("select"); setSelection([]); }
       }
       setPm(null); return;
     }
-    setSk(null); setPm({ op, editing: ed, preset }); setTool("select");
+    setSk(null); setPm({ op: op as FeatureOp, editing: ed, preset }); setTool("select");
     const kinds = selectKindsFor(op);
     setSelection(s => s.filter(x => kinds.includes(x.kind)));
   };
@@ -100,7 +108,7 @@ export default function ProjectStudio() {
   useEffect(() => {
     if (sk?.phase !== "pick") return;
     const face = selection.find(x => x.kind === "face");
-    if (face) openSketchOn(face.id);
+    if (face) openSketchOn(face.id, sk.preset);
   }, [selection, sk]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Optimistic tree update: apply locally first so the tree reacts instantly, then rebuild in the background. */
@@ -127,7 +135,7 @@ export default function ProjectStudio() {
   };
   const onCommand = (c: Command) => {
     if (c.kind === "feature") openPm(c.op, null, c.preset);
-    else if (c.kind === "sketch") openPm("sketch");
+    else if (c.kind === "sketch") openPm("sketch", null, c.preset);
     else if (c.kind === "tool") { setPm(null); setSk(null); setTool(tool === c.tool ? "orbit" : c.tool); }
     else if (c.kind === "panel") { setPm(null); setTab(c.tab); if (c.extra === "com") setShowCom(true); }
     else if (c.kind === "import") setDialog("import");
@@ -152,7 +160,7 @@ export default function ProjectStudio() {
 
   const sidePanel = (<>
           {pm ? (
-            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} onBusy={setManualBusy}
+            <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} manual={mf} onBusy={setManualBusy}
               onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); refresh(); setTool("orbit"); }}
               onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
           ) : (
@@ -162,7 +170,7 @@ export default function ProjectStudio() {
               </TabList>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
-                  recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)}
+                  recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)} onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
@@ -203,14 +211,17 @@ export default function ProjectStudio() {
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
-            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, or start from
-              <div className="mt-3 flex justify-center gap-2">
+            empty={<div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                <button onClick={() => openPm("sketch", null, { feature: "extrude", mode: "add" })} className="pointer-events-auto rounded-md border border-primary/50 bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary hover:border-primary">Sketch on a plane</button>
                 <button onClick={() => { setTbInit(null); setDialog("toolbox"); }} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Toolbox component</button>
                 <button onClick={() => setDialog("import")} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Import STEP</button>
               </div></div>} />
           {sk?.phase === "pick" && (
             <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-primary/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
-              <PenLine className="h-4 w-4 text-primary" />Select a flat face to sketch on
+              <PenLine className="h-4 w-4 text-primary" />{fp ? "Select a flat face, or a plane:" : "Choose a sketch plane:"}
+              {(["Front", "Top", "Right"] as RefPlane[]).map(n => <button key={n} data-plane={n} onClick={() => openSketchOnPlane(n, sk.preset, Number(planeOffset))} className="rounded border border-border px-2 py-0.5 font-medium hover:border-primary hover:text-primary">{n}</button>)}
+              <label className="flex items-center gap-1 text-muted">offset<Input value={planeOffset} onChange={e => setPlaneOffset(e.target.value)} className="h-6 w-14 px-1 text-right" inputMode="decimal" aria-label="Plane offset" />mm</label>
               <button onClick={() => { setSk(null); setTool("orbit"); }} className="ml-1 text-muted hover:text-text" aria-label="Cancel sketch"><X className="h-4 w-4" /></button>
             </div>)}
           {manualBusy && (
@@ -218,7 +229,8 @@ export default function ProjectStudio() {
               <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />Rebuilding…
             </div>)}
           {sk?.phase === "edit" && (
-            <SketchEditor key={sk.editing?.id ?? "new"} project={p} topo={topo} plane={sk.plane} faceId={sk.faceId} editing={sk.editing}
+            <SketchEditor key={sk.editing?.id ?? "new"} project={p} topo={fp ? topo : null} plane={sk.plane} faceId={sk.faceId} editing={sk.editing}
+              preset={sk.preset} hasBody={!!fp} existing={mf}
               onDone={() => { setSk(null); refresh(); }} onCancel={() => setSk(null)} />)}
           {st?.error && (
             <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-danger/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">

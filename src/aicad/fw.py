@@ -32,6 +32,7 @@ from build123d import (
     fillet,
     mirror,
     offset,
+    revolve,
 )
 
 _STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
@@ -283,8 +284,120 @@ def sketch_region(profiles: list[dict[str, Any]]) -> Any:
     return region
 
 
-def _op(part: Any, f: dict[str, Any], diag: float) -> Any:
+TOOL_OPS = {"sketch", "extrude", "revolve", "hole"}
+BASE_OPS = {"sketch", "extrude", "revolve"}  # can create the first solid of a hand-modelled part
+
+
+def _sketch_axis(plane: Plane, axis: dict[str, Any]) -> Axis:
+    """Axis through two points given in sketch (u, v) coordinates of `plane`."""
+    a = plane.from_local_coords((float(axis["a"][0]), float(axis["a"][1])))
+    b = plane.from_local_coords((float(axis["b"][0]), float(axis["b"][1])))
+    d = Vector(b) - Vector(a)
+    if d.length < 1e-9:
+        raise ValueError("the revolve axis has zero length")
+    return Axis(Vector(a), d)
+
+
+def _extrude_region(region: Any, f: dict[str, Any], diag: float) -> Any:
+    """Solid swept from a placed region with the feature's end condition (blind, mid-plane, through all)."""
+    d = float(f.get("distance") or 0)
+    end = f.get("end", "blind")
+    sign = -1.0 if f.get("mode", "add") == "cut" else 1.0
+    if f.get("reverse"):
+        sign = -sign
+    if end == "through":
+        return extrude(region, amount=sign * diag * 2)
+    if d <= 0:
+        raise ValueError("distance must be positive")
+    if end == "mid":
+        return extrude(region, amount=d / 2, both=True)
+    return extrude(region, amount=sign * d)
+
+
+def _tool(f: dict[str, Any], diag: float) -> Any:
+    """The solid(s) a sketch / extrude / revolve / hole feature adds or removes, independent of the body."""
     op = f["op"]
+    if op == "sketch":
+        plane = _plane(f["plane"])
+        return _extrude_region(plane * sketch_region(f["profiles"]), f, diag)
+    if op == "extrude":
+        plane = _plane(f["plane"])
+        return _extrude_region(plane * _sketch(f["sketch"]), f, diag)
+    if op == "revolve":
+        plane = _plane(f["plane"])
+        region = plane * sketch_region(f["profiles"])
+        angle = float(f.get("angle", 360))
+        if not 0 < angle <= 360:
+            raise ValueError("revolve angle must be between 0 and 360 degrees")
+        return revolve(region, axis=_sketch_axis(plane, f["axis"]), revolution_arc=angle)
+    if op == "hole":
+        n = _v(f["normal"]).normalized()
+        depth = float(f["depth"]) if f.get("depth") else diag * 2
+        plane = Plane(origin=_v(f["point"]), z_dir=n)
+        tool = plane * Cylinder(float(f["d"]) / 2, depth, align=(Align.CENTER, Align.CENTER, Align.MAX))
+        count = int(f.get("count", 1))
+        if count > 1 and f.get("pattern") == "circular":
+            ax = Axis(_v(f["center"]), n)
+            return [tool.rotate(ax, 360.0 * i / count) for i in range(count)]
+        if count > 1:
+            step = _v(f.get("step", (0, 0, 0)))
+            return [Location(step * i) * tool for i in range(count)]
+        return tool
+    raise ValueError(f"operation {op!r} has no tool body")
+
+
+def _is_cut(f: dict[str, Any]) -> bool:
+    return f["op"] == "hole" or f.get("mode") == "cut"
+
+
+def _apply_tool(part: Any, tool: Any, cut: bool) -> Any:
+    for t in tool if isinstance(tool, list) else [tool]:
+        if part is None:
+            if cut:
+                raise ValueError("a cut needs an existing solid; start the part with a boss or revolve")
+            part = t
+        else:
+            part = part - t if cut else part + t
+    return part
+
+
+def _moved(tool: Any, fn: Any) -> Any:
+    return [fn(t) for t in tool] if isinstance(tool, list) else fn(tool)
+
+
+def pattern_instances(tool: Any, f: dict[str, Any]) -> list[Any]:
+    """Copies 1..count-1 of a tool body for a linear or circular feature pattern (the original is copy 0)."""
+    count = int(f["count"])
+    out = []
+    if f.get("kind") == "circular":
+        ax = Axis(_v(f["axis"]["origin"]), _v(f["axis"]["dir"]))
+        total = float(f.get("angle", 360))
+        step = total / count if abs(total - 360) < 1e-9 else total / max(count - 1, 1)
+        for i in range(1, count):
+            out.append(_moved(tool, lambda t, a=step * i: t.rotate(ax, a)))
+    else:
+        step = _v(f["step"])
+        for i in range(1, count):
+            out.append(_moved(tool, lambda t, k=i: Location(step * k) * t))
+    return out
+
+
+def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any]] | None = None) -> Any:
+    op = f["op"]
+    if part is None and op not in BASE_OPS:
+        raise ValueError("this feature needs an existing solid; start the part with a boss or revolve")
+    if op in TOOL_OPS:
+        return _apply_tool(part, _tool(f, diag), _is_cut(f))
+    if op == "pattern":
+        sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
+        if not sources or any(s is None for s in sources):
+            raise ValueError("a patterned feature is missing, suppressed or comes later in the tree")
+        for src in sources:
+            if src["op"] not in TOOL_OPS:
+                raise ValueError(f"'{src.get('name', src['op'])}' can't be patterned (bosses, cuts, revolves, holes)")
+            for inst in pattern_instances(_tool(src, diag), f):
+                part = _apply_tool(part, inst, _is_cut(src))
+        return part
     if op == "fillet":
         edges = edges_near(part, f["edges"])
         if not edges:
@@ -295,24 +408,6 @@ def _op(part: Any, f: dict[str, Any], diag: float) -> Any:
         if not edges:
             raise ValueError("no edges found at the picked locations (geometry changed?)")
         return chamfer(edges, float(f["d"]))
-    if op == "hole":
-        n = _v(f["normal"]).normalized()
-        depth = float(f["depth"]) if f.get("depth") else diag * 2
-        plane = Plane(origin=_v(f["point"]), z_dir=n)
-        tool = plane * Cylinder(float(f["d"]) / 2, depth, align=(Align.CENTER, Align.CENTER, Align.MAX))
-        count = int(f.get("count", 1))
-        if count > 1 and f.get("pattern") == "circular":
-            centre = _v(f["center"])
-            ax = Axis(centre, n)
-            for i in range(count):
-                part = part - tool.rotate(ax, 360.0 * i / count)
-            return part
-        if count > 1:
-            step = _v(f.get("step", (0, 0, 0)))
-            for i in range(count):
-                part = part - Location(step * i) * tool
-            return part
-        return part - tool
     if op == "shell":
         openings = []
         for fc in f["faces"]:
@@ -321,39 +416,45 @@ def _op(part: Any, f: dict[str, Any], diag: float) -> Any:
                 raise ValueError("a face to remove was not found (geometry changed?)")
             openings += found
         return offset(part, amount=-float(f["t"]), openings=openings)
-    if op == "sketch":
-        plane = _plane(f["plane"])
-        region = plane * sketch_region(f["profiles"])
-        d = float(f["distance"])
-        if f.get("mode", "add") == "cut":
-            return part - extrude(region, amount=-d)
-        return part + extrude(region, amount=d)
     if op == "mirror":
         pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
         return part + mirror(part, about=pl)
-    if op == "extrude":
-        plane = _plane(f["plane"])
-        sk = plane * _sketch(f["sketch"])
-        d = float(f["distance"])
-        if f.get("mode", "add") == "cut":
-            return part - extrude(sk, amount=-d)
-        return part + extrude(sk, amount=d)
     raise ValueError(f"unknown manual operation {op!r}")
 
 
+def _diag(part: Any, features: list[dict[str, Any]]) -> float:
+    """Length that is 'through all' for this part."""
+    if part is not None:
+        bb = part.bounding_box()
+        return math.sqrt(bb.size.X ** 2 + bb.size.Y ** 2 + bb.size.Z ** 2) or 100.0
+    ext = 0.0  # hand-modelled part: size from the sketches' extent
+    for f in features:
+        for c in (f.get("plane") or {}).get("origin") or f.get("point") or []:
+            ext = max(ext, abs(float(c)))
+        for pr in f.get("profiles", []):
+            r = float(pr.get("r", 0))
+            pts = [(pr.get("cx", 0), pr.get("cy", 0))] if pr.get("kind") == "circle" else [sg["a"] for sg in pr.get("segs", [])]
+            for u, v in pts:
+                ext = max(ext, abs(float(u)) + r, abs(float(v)) + r)
+        ext = max(ext, float(f.get("distance") or 0))
+    return max(4 * ext, 100.0)
+
+
 def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
-    """Apply user-authored manual features in order. Suppressed features are skipped."""
+    """Apply user-authored manual features in order; suppressed ones are skipped. `part` may be None for a part
+    modelled entirely by hand: the first boss or revolve then creates the body."""
     if not features:
         return part
-    bb = part.bounding_box()
-    diag = math.sqrt(bb.size.X ** 2 + bb.size.Y ** 2 + bb.size.Z ** 2) or 100.0
+    diag = _diag(part, features)
+    done: dict[str, dict[str, Any]] = {}
     for f in features:
         if f.get("suppressed"):
             continue
         try:
-            part = _op(part, f, diag)
+            part = _op(part, f, diag, done)
         except Exception as e:
             raise ValueError(f"manual feature '{f.get('name', f.get('op'))}' failed: {e}") from e
+        done[str(f.get("id", ""))] = f
         feature(str(f.get("name") or f["op"]), part, kind="manual", op=f["op"], id=str(f.get("id", "")))
         _STATE["manual"] += 1
     return part

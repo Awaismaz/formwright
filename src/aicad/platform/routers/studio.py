@@ -111,7 +111,15 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern"}
+BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
+
+NAME = {name!r}
+MATERIAL = "Aluminium 6061-T6"
+PARAMS = {{}}
+
+result = None  # the first boss or revolve in the feature tree creates the body
+'''
 
 
 def read_manual(src: str) -> list[dict[str, Any]]:
@@ -152,6 +160,59 @@ def _pt(v: Any, name: str) -> list[float]:
     return [_num(c, name) for c in v]
 
 
+def _pt2(v: Any, name: str) -> list[float]:
+    if not isinstance(v, (list, tuple)) or len(v) != 2:
+        raise HTTPException(422, f"{name}: expected [u, v]")
+    return [_num(c, name) for c in v]
+
+
+def _sketch_plane(pl: dict[str, Any]) -> dict[str, Any]:
+    out = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal"),
+           "x_dir": _pt(pl.get("x_dir"), "plane x direction")}
+    n, x = out["normal"], out["x_dir"]
+    if math.hypot(*n) < 1e-9 or math.hypot(*x) < 1e-9 or abs(sum(a * b for a, b in zip(n, x, strict=True))) > 1e-6 * math.hypot(*n) * math.hypot(*x):
+        raise HTTPException(422, "sketch plane: normal and x direction must be non-zero and perpendicular")
+    return out
+
+
+def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
+    if not 1 <= len(profs) <= 100:
+        raise HTTPException(422, "The sketch needs 1–100 closed profiles")
+    clean: list[dict[str, Any]] = []
+    for pr in profs:
+        if pr.get("kind") == "circle":
+            clean.append({"kind": "circle", "cx": _num(pr.get("cx"), "cx"), "cy": _num(pr.get("cy"), "cy"),
+                          "r": _num(pr.get("r"), "radius", 0.001, 1e5)})
+        elif pr.get("kind") == "loop":
+            segs = pr.get("segs") or []
+            if not 1 <= len(segs) <= 2000:
+                raise HTTPException(422, "Profile has too many segments")
+            cs = []
+            for sg in segs:
+                t = "arc" if sg.get("type") == "arc" else "line"
+                item = {"type": t, "a": _pt2(sg.get("a"), "point"), "b": _pt2(sg.get("b"), "point")}
+                if t == "arc":
+                    item["m"] = _pt2(sg.get("m"), "arc mid")
+                cs.append(item)
+            clean.append({"kind": "loop", "segs": cs})
+        else:
+            raise HTTPException(422, "Unknown profile")
+    return clean
+
+
+def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
+    """Extrude end condition: blind (distance), mid-plane (distance split both ways) or through all (cuts)."""
+    end = f.get("end", "blind")
+    if end not in ("blind", "mid", "through"):
+        raise HTTPException(422, "End condition must be blind, mid-plane or through all")
+    if end == "through" and out["mode"] != "cut":
+        raise HTTPException(422, "Through all applies to cuts only")
+    out["end"] = end
+    out["distance"] = _num(f.get("distance") or 1, "distance", 0.001, 1e5) if end == "through" \
+        else _num(f.get("distance"), "distance", 0.001, 1e5)
+    out["reverse"] = bool(f.get("reverse"))
+
+
 def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     op = f.get("op")
     if op not in OPS:
@@ -183,38 +244,37 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         out["faces"] = [{"point": _pt(x.get("point"), "face point"), "normal": _pt(x.get("normal"), "face normal")}
                         for x in faces]
         out["t"] = _num(f.get("t"), "thickness", 0.01, 1e4)
-    elif op == "sketch":
-        pl = f.get("plane") or {}
-        out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal"),
-                        "x_dir": _pt(pl.get("x_dir"), "plane x direction")}
-        profs = f.get("profiles") or []
-        if not 1 <= len(profs) <= 100:
-            raise HTTPException(422, "The sketch needs 1–100 closed profiles")
-        clean = []
-        for pr in profs:
-            if pr.get("kind") == "circle":
-                clean.append({"kind": "circle", "cx": _num(pr.get("cx"), "cx"), "cy": _num(pr.get("cy"), "cy"),
-                              "r": _num(pr.get("r"), "radius", 0.001, 1e5)})
-            elif pr.get("kind") == "loop":
-                segs = pr.get("segs") or []
-                if not 1 <= len(segs) <= 2000:
-                    raise HTTPException(422, "Profile has too many segments")
-                cs = []
-                for sg in segs:
-                    t = "arc" if sg.get("type") == "arc" else "line"
-                    item = {"type": t, "a": [_num(v, "x") for v in sg["a"]], "b": [_num(v, "y") for v in sg["b"]]}
-                    if t == "arc":
-                        item["m"] = [_num(v, "arc mid") for v in sg["m"]]
-                    cs.append(item)
-                clean.append({"kind": "loop", "segs": cs})
-            else:
-                raise HTTPException(422, "Unknown profile")
-        out["profiles"] = clean
-        out["distance"] = _num(f.get("distance"), "distance", 0.001, 1e5)
+    elif op in ("sketch", "revolve"):
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        out["profiles"] = _profiles(f.get("profiles") or [])
         out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+        if op == "sketch":
+            _end_condition(f, out)
+        else:
+            ax = f.get("axis") or {}
+            out["axis"] = {"a": _pt2(ax.get("a"), "axis start"), "b": _pt2(ax.get("b"), "axis end")}
+            if math.dist(out["axis"]["a"], out["axis"]["b"]) < 1e-6:
+                raise HTTPException(422, "Draw a centerline in the sketch to revolve about")
+            out["angle"] = _num(f.get("angle", 360), "angle", 0.01, 360)
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))  # full sketch (constraints, dimensions) for re-editing
+    elif op == "pattern":
+        src = f.get("source") or []
+        if not isinstance(src, list) or not 1 <= len(src) <= 20:
+            raise HTTPException(422, "Choose 1–20 features to pattern")
+        out["source"] = [str(s)[:40] for s in src]
+        out["count"] = int(_num(f.get("count"), "instances", 2, 200))
+        if f.get("kind") == "circular":
+            ax = f.get("axis") or {}
+            out.update(kind="circular", axis={"origin": _pt(ax.get("origin"), "axis point"), "dir": _pt(ax.get("dir"), "axis direction")},
+                       angle=_num(f.get("angle", 360), "total angle", 0.01, 360))
+            if math.hypot(*out["axis"]["dir"]) < 1e-9:
+                raise HTTPException(422, "axis direction: must not be zero")
+        else:
+            out.update(kind="linear", step=_pt(f.get("step"), "spacing"))
+            if math.hypot(*out["step"]) < 1e-6:
+                raise HTTPException(422, "spacing: must not be zero")
     elif op == "mirror":
         pl = f.get("plane") or {}
         out["plane"] = {"origin": _pt(pl.get("origin"), "plane origin"), "normal": _pt(pl.get("normal"), "plane normal")}
@@ -239,8 +299,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             out["sketch"] = {"kind": "poly", "pts": [[_num(a, "u"), _num(b, "v")] for a, b in pts]}
         else:
             raise HTTPException(422, "Sketch must be rect, circle or poly")
-        out["distance"] = _num(f.get("distance"), "distance", 0.001, 1e5)
         out["mode"] = "cut" if f.get("mode") == "cut" else "add"
+        _end_condition(f, out)
     return out
 
 
@@ -253,8 +313,10 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
         raise HTTPException(409, "The agent is working — try again when it finishes")
     ws = workspace_for(p)
     f = ws / "model.py"
-    if not f.is_file():
-        raise HTTPException(404, "Build a model first (ask the agent), then add manual features")
+    fresh = not f.is_file()
+    if fresh:  # modelling from scratch: start a blank hand-modelled part
+        ws.mkdir(parents=True, exist_ok=True)
+        f.write_text(BLANK_MODEL.format(name=p.name), encoding="utf-8")
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
     new_feats = mutate([dict(x) for x in feats])
@@ -266,7 +328,7 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     f.write_text(write_manual(src, new_feats), encoding="utf-8")
     st = await _rebuild(p, ws, determinism=False, fast=True)
     if st.get("error") or not st.get("fingerprint"):
-        f.write_text(src, encoding="utf-8")
+        f.unlink() if fresh else f.write_text(src, encoding="utf-8")
         if backup.is_dir():
             shutil.rmtree(ws / "out", ignore_errors=True)
             backup.rename(ws / "out")
@@ -274,7 +336,7 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     # Manual edits are gated on geometric validity only; size/volume vs the agent's estimate stay informational.
     gating_fail = [c["id"] for c in st.get("checks", []) if c["id"] in ("CHK-02", "CHK-03") and not c["passed"]]
     if gating_fail:
-        f.write_text(src, encoding="utf-8")
+        f.unlink() if fresh else f.write_text(src, encoding="utf-8")
         if backup.is_dir():
             shutil.rmtree(ws / "out", ignore_errors=True)
             backup.rename(ws / "out")

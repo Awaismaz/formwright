@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
-  Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
+  Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
   Squircle, Upload, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
@@ -10,13 +10,13 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror"; preset?: Record<string, unknown> }
-  | { kind: "sketch" }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern"; preset?: Record<string, unknown> }
+  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
   | { kind: "import" } | { kind: "toolbox" };
 
-interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean }
+interface Btn { id: string; label: string; icon: ReactNode; tip: string; cmd?: Command; onClick?: () => void; active?: boolean; disabled?: boolean; needsBody?: boolean }
 
 const TABS = ["Features", "Sketch", "Evaluate", "View", "Library"] as const;
 
@@ -36,23 +36,25 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
 
   const groups: Record<(typeof TABS)[number], Btn[][]> = {
     Features: [[
-      { id: "boss", label: "Extruded Boss", icon: <ArrowUpFromLine className="h-5 w-5" />, tip: "Add material: sketch on a planar face and extrude", cmd: { kind: "feature", op: "extrude", preset: { mode: "add" } } },
-      { id: "cut", label: "Extruded Cut", icon: <ArrowDownToLine className="h-5 w-5" />, tip: "Remove material: sketch on a planar face and cut", cmd: { kind: "feature", op: "extrude", preset: { mode: "cut" } } },
-      { id: "hole", label: "Hole", icon: <CircleDot className="h-5 w-5" />, tip: "Simple, blind or through hole on a planar face", cmd: { kind: "feature", op: "hole" } },
+      { id: "boss", label: "Extruded Boss/Base", icon: <ArrowUpFromLine className="h-5 w-5" />, tip: "Sketch on a plane or planar face, then extrude to add material", cmd: { kind: "sketch", preset: { feature: "extrude", mode: "add" } } },
+      { id: "revolve", label: "Revolved Boss/Base", icon: <RotateCw className="h-5 w-5" />, tip: "Sketch a profile and a centerline, then revolve it", cmd: { kind: "sketch", preset: { feature: "revolve", mode: "add" } } },
+      { id: "cut", label: "Extruded Cut", icon: <ArrowDownToLine className="h-5 w-5" />, tip: "Sketch, then cut: blind, mid plane or through all", cmd: { kind: "sketch", preset: { feature: "extrude", mode: "cut" } }, needsBody: true },
+      { id: "revcut", label: "Revolved Cut", icon: <RefreshCcwDot className="h-5 w-5" />, tip: "Sketch a profile and a centerline, then revolve it to remove material (grooves)", cmd: { kind: "sketch", preset: { feature: "revolve", mode: "cut" } }, needsBody: true },
+      { id: "hole", label: "Hole", icon: <CircleDot className="h-5 w-5" />, tip: "Simple, blind or through hole on a planar face (optionally patterned)", cmd: { kind: "feature", op: "hole" }, needsBody: true },
     ], [
-      { id: "fillet", label: "Fillet", icon: <Squircle className="h-5 w-5" />, tip: "Round selected edges", cmd: { kind: "feature", op: "fillet" } },
-      { id: "chamfer", label: "Chamfer", icon: <Diamond className="h-5 w-5" />, tip: "Bevel selected edges", cmd: { kind: "feature", op: "chamfer" } },
-      { id: "shell", label: "Shell", icon: <Package className="h-5 w-5" />, tip: "Hollow the part, removing the selected faces", cmd: { kind: "feature", op: "shell" } },
+      { id: "fillet", label: "Fillet", icon: <Squircle className="h-5 w-5" />, tip: "Round selected edges", cmd: { kind: "feature", op: "fillet" }, needsBody: true },
+      { id: "chamfer", label: "Chamfer", icon: <Diamond className="h-5 w-5" />, tip: "Bevel selected edges", cmd: { kind: "feature", op: "chamfer" }, needsBody: true },
+      { id: "shell", label: "Shell", icon: <Package className="h-5 w-5" />, tip: "Hollow the part, removing the selected faces", cmd: { kind: "feature", op: "shell" }, needsBody: true },
     ], [
-      { id: "linpat", label: "Linear Pattern", icon: <Grid3x3 className="h-5 w-5" />, tip: "Pattern of holes along a direction", cmd: { kind: "feature", op: "hole", preset: { pattern: "linear" } } },
-      { id: "cirpat", label: "Circular Pattern", icon: <RotateCw className="h-5 w-5" />, tip: "Pattern of holes around an axis", cmd: { kind: "feature", op: "hole", preset: { pattern: "circular" } } },
-      { id: "mirror", label: "Mirror", icon: <FlipHorizontal2 className="h-5 w-5" />, tip: "Mirror the body about a face or principal plane", cmd: { kind: "feature", op: "mirror" } },
+      { id: "linpat", label: "Linear Pattern", icon: <Grid3x3 className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes along a direction", cmd: { kind: "feature", op: "pattern", preset: { kind: "linear" } }, needsBody: true },
+      { id: "cirpat", label: "Circular Pattern", icon: <RotateCw className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes around an axis", cmd: { kind: "feature", op: "pattern", preset: { kind: "circular" } }, needsBody: true },
+      { id: "mirror", label: "Mirror", icon: <FlipHorizontal2 className="h-5 w-5" />, tip: "Mirror the body about a face or principal plane", cmd: { kind: "feature", op: "mirror" }, needsBody: true },
     ]],
     Sketch: [[
       { id: "sketch", label: "Sketch", icon: <PenLine className="h-5 w-5" />, tip: "Open a 2D sketch on a planar face (lines, arcs, circles, dimensions, constraints)", cmd: { kind: "sketch" } },
     ], [
-      { id: "rect", label: "Rectangle", icon: <RectangleHorizontal className="h-5 w-5" />, tip: "Quick rectangle boss/cut on a face", cmd: { kind: "feature", op: "extrude", preset: { kind: "rect" } } },
-      { id: "circ", label: "Circle", icon: <Circle className="h-5 w-5" />, tip: "Quick circular boss/cut on a face", cmd: { kind: "feature", op: "extrude", preset: { kind: "circle" } } },
+      { id: "rect", label: "Quick Rectangle", icon: <RectangleHorizontal className="h-5 w-5" />, tip: "Quick rectangle boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "rect" } }, needsBody: true },
+      { id: "circ", label: "Quick Circle", icon: <Circle className="h-5 w-5" />, tip: "Quick circular boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "circle" } }, needsBody: true },
     ]],
     Evaluate: [[
       { id: "measure", label: "Measure", icon: <Ruler className="h-5 w-5" />, tip: "Snap measurement", cmd: { kind: "tool", tool: "measure" }, active: activeTool === "measure" },
@@ -74,7 +76,6 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "import", label: "Import STEP", icon: <Upload className="h-5 w-5" />, tip: "Import a STEP file, recognise its features and rebuild it as a parametric model", cmd: { kind: "import" } },
     ]],
   };
-  const isEdit = (b: Btn) => !!b.cmd && (b.cmd.kind === "feature" || b.cmd.kind === "sketch");
 
   return (
     <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager">
@@ -96,9 +97,9 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
           <div key={gi} className="flex items-stretch gap-0.5">
             {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
             {g.map(b => {
-              const dis = b.disabled || (disabled && isEdit(b));
+              const dis = b.disabled || (disabled && !!b.needsBody);
               return (
-                <Tip key={b.id} content={dis && isEdit(b) ? "Build a model first (ask the agent, use the Toolbox or import a STEP)" : b.tip} side="bottom">
+                <Tip key={b.id} content={dis && b.needsBody ? "Needs a solid first: start with Extruded or Revolved Boss, ask the agent, use the Toolbox or import a STEP" : b.tip} side="bottom">
                   <button disabled={dis} onClick={() => { if (b.onClick) { b.onClick(); setTimeout(() => setTick(t => t + 1), 0); } else if (b.cmd) onCommand(b.cmd); }}
                     className={cx("flex w-[74px] flex-col items-center justify-center gap-1 rounded px-1 text-[10.5px] leading-tight transition disabled:opacity-35",
                       b.active ? "bg-primary-soft text-primary ring-1 ring-primary/40" : "text-text hover:bg-primary-soft hover:text-primary")}>

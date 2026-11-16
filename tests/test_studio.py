@@ -234,3 +234,74 @@ def test_sketch_feature_with_hole_and_arc(app_client: TestClient) -> None:  # no
     assert st["fingerprint"]["bbox"][2] == pytest.approx(15)
     saved = c.get(f"/api/projects/{pid}/manual").json()["features"][0]
     assert saved["editor"] == {"points": [], "entities": [], "constraints": []}
+
+
+# ----------------------------------------------------------------------------- modelling from scratch (DS-024)
+
+TOP = {"origin": [0, 0, 0], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+FRONT = {"origin": [0, 0, 0], "normal": [0, -1, 0], "x_dir": [1, 0, 0]}
+
+
+def _rect(x0: float, y0: float, x1: float, y1: float) -> dict:
+    pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    return {"kind": "loop", "segs": [{"type": "line", "a": list(pts[i]), "b": list(pts[(i + 1) % 4])} for i in range(4)]}
+
+
+def test_part_modelled_from_scratch_with_pattern(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "scratch@x.com")
+    pid = c.post("/api/projects", json={"name": "Hand flange"}).json()["id"]
+    # a cut cannot start a part; the project stays empty
+    cut0 = {"op": "sketch", "plane": TOP, "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": 5}], "distance": 5, "mode": "cut"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": cut0})
+    assert r.status_code == 422 and "start the part with a boss" in r.json()["detail"]
+    assert c.get(f"/api/projects/{pid}/manual").json()["features"] == []
+    # base boss on the Top plane, mid-plane: disc R50 x 10 centred on Z=0
+    base = {"op": "sketch", "name": "Base", "plane": TOP, "profiles": [{"kind": "circle", "cx": 0, "cy": 0, "r": 50}],
+            "distance": 10, "mode": "add", "end": "mid"}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": base}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(math.pi * 2500 * 10, rel=1e-9)
+    assert st["fingerprint"]["bbox"] == pytest.approx([100, 100, 10], abs=1e-6)
+    # through-all cut, then a circular pattern of it (6 holes)
+    top = {"origin": [0, 0, 5], "normal": [0, 0, 1], "x_dir": [1, 0, 0]}
+    hole = {"op": "sketch", "name": "Bolt hole", "plane": top, "profiles": [{"kind": "circle", "cx": 35, "cy": 0, "r": 4}],
+            "mode": "cut", "end": "through"}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": hole})
+    assert r.status_code == 200, r.text
+    hid = r.json()["features"][-1]["id"]
+    pat = {"op": "pattern", "name": "Bolt circle", "source": [hid], "kind": "circular", "count": 6,
+           "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": pat}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["fingerprint"]["volume"] == pytest.approx(math.pi * 2500 * 10 - 6 * math.pi * 16 * 10, rel=1e-9)
+    assert [f["name"] for f in st["features"]][-3:] == ["Base", "Bolt hole", "Bolt circle"]
+    # suppressing the source hole makes the pattern fail cleanly and restores the model
+    feats = c.get(f"/api/projects/{pid}/manual").json()["features"]
+    r = c.patch(f"/api/projects/{pid}/manual/{feats[1]['id']}", json={"feature": {"suppressed": True}})
+    assert r.status_code == 422 and "patterned feature" in r.json()["detail"]
+    # invalid inputs
+    bad = [{**pat, "count": 1}, {**pat, "axis": {"origin": [0, 0, 0], "dir": [0, 0, 0]}},
+           {**base, "end": "through"}, {**base, "plane": {**TOP, "x_dir": [0, 0, 1]}}]
+    for b in bad:
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": b}).status_code == 422
+
+
+def test_revolved_part_from_scratch(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "revolve@x.com")
+    pid = c.post("/api/projects", json={"name": "Bushing"}).json()["id"]
+    # tube r 10..20, h 30 revolved about the sketch Y axis of the Front plane (world Z), plus a 90 degree segment
+    rev = {"op": "revolve", "name": "Bushing", "plane": FRONT, "profiles": [_rect(10, 0, 20, 30)],
+           "axis": {"a": [0, 0], "b": [0, 1]}, "angle": 360, "mode": "add"}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": rev}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(math.pi * (400 - 100) * 30, rel=1e-9)
+    assert st["fingerprint"]["bbox"] == pytest.approx([40, 40, 30], abs=1e-6)
+    groove = {"op": "revolve", "name": "Groove", "plane": FRONT, "profiles": [_rect(18, 10, 20, 14)],
+              "axis": {"a": [0, 0], "b": [0, 1]}, "angle": 360, "mode": "cut"}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": groove}).status_code == 200
+    v = c.get(f"/api/projects/{pid}/files/status.json").json()["fingerprint"]["volume"]
+    assert v == pytest.approx(math.pi * 300 * 30 - math.pi * (400 - 324) * 4, rel=1e-9)
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**rev, "axis": {"a": [0, 0], "b": [0, 0]}}})
+    assert r.status_code == 422 and "centerline" in r.json()["detail"]

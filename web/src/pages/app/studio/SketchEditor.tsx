@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownToLine, ArrowUpFromLine, Check, Circle as CircleIcon, CircleDashed, Equal, Grid2x2, Lock, MousePointer2,
-  Pencil, RectangleHorizontal, Redo2, Ruler, Spline, Trash2, Undo2, X,
+  ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Check, Circle as CircleIcon, CircleDashed, Equal, Grid2x2, Lock, MousePointer2,
+  Pencil, RectangleHorizontal, Redo2, RotateCw, Ruler, SeparatorVertical, Spline, SquareDashed, Trash2, Undo2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -9,33 +9,41 @@ import type { ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Button, Input, Tip } from "@/components/ui";
 import { clone, profiles, solve, uid, type SConstraint, type SEntity, type Sketch, type SPoint } from "@/sketch/model";
+import { nextName, planeName, type PlaneDef } from "@/viewer/planes";
 import type { Topo, V3 } from "@/viewer/types";
 
-type ToolT = "select" | "line" | "rect" | "circle" | "arc" | "dim";
+type ToolT = "select" | "line" | "centerline" | "rect" | "circle" | "arc" | "dim";
 type Sel = { kind: "pt" | "ent"; id: string };
 type NoId<T> = T extends unknown ? Omit<T, "id"> : never;
-interface PlaneDef { origin: V3; normal: V3; x_dir: V3 }
+export interface SketchPreset { feature?: "extrude" | "revolve"; mode?: "add" | "cut" }
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const crossV = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const EMPTY: Sketch = { points: [], entities: [], constraints: [] };
 
-export default function SketchEditor({ project, topo, plane, faceId, editing, onDone, onCancel }: {
+export default function SketchEditor({ project, topo, plane, faceId, editing, preset, hasBody, existing, onDone, onCancel }: {
   project: Project; topo: Topo | null; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null;
+  preset?: SketchPreset; hasBody: boolean; existing: ManualFeature[];
   onDone: () => void; onCancel: () => void;
 }) {
   const yDir = useMemo(() => crossV(plane.normal, plane.x_dir), [plane]);
   const to2 = (p: V3): [number, number] => { const d: V3 = [p[0] - plane.origin[0], p[1] - plane.origin[1], p[2] - plane.origin[2]]; return [dot(d, plane.x_dir), dot(d, yDir)]; };
-  // reference geometry: edges of the face being sketched on
+  const onPlane = (p: V3) => Math.abs(dot([p[0] - plane.origin[0], p[1] - plane.origin[1], p[2] - plane.origin[2]], plane.normal)) < 1e-4;
+  // reference geometry: edges of the picked face, or (on a reference plane) every model edge lying in the plane
+  const refEdges = useMemo(() => {
+    if (!topo) return [] as number[];
+    if (faceId !== null) return topo.faces[faceId]!.edges;
+    return topo.edges.filter(e => e.verts.length > 0 && e.verts.every(v => onPlane(topo.vertices[v]!)) && (() => { const p = e.pts; for (let i = 0; i < p.length; i += 3) if (!onPlane([p[i]!, p[i + 1]!, p[i + 2]!])) return false; return true; })()).map(e => e.id);
+  }, [topo, faceId]); // eslint-disable-line react-hooks/exhaustive-deps
   const ref = useMemo(() => {
-    if (!topo || faceId === null) return [] as [number, number][][];
-    return topo.faces[faceId]!.edges.map(eid => { const p = topo.edges[eid]!.pts; const out: [number, number][] = []; for (let i = 0; i < p.length; i += 3) out.push(to2([p[i]!, p[i + 1]!, p[i + 2]!])); return out; });
-  }, [topo, faceId]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!topo) return [] as [number, number][][];
+    return refEdges.map(eid => { const p = topo.edges[eid]!.pts; const out: [number, number][] = []; for (let i = 0; i < p.length; i += 3) out.push(to2([p[i]!, p[i + 1]!, p[i + 2]!])); return out; });
+  }, [topo, refEdges]); // eslint-disable-line react-hooks/exhaustive-deps
   const refVerts = useMemo(() => {
-    if (!topo || faceId === null) return [] as [number, number][];
-    const ids = new Set<number>(); topo.faces[faceId]!.edges.forEach(e => topo.edges[e]!.verts.forEach(v => ids.add(v)));
+    if (!topo) return [] as [number, number][];
+    const ids = new Set<number>(); refEdges.forEach(e => topo.edges[e]!.verts.forEach(v => ids.add(v)));
     return [...ids].map(v => to2(topo.vertices[v]!));
-  }, [topo, faceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [topo, refEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const initial = (editing?.editor as Sketch | undefined) ?? EMPTY;
   const [sk, setSk] = useState<Sketch>(() => clone(initial));
@@ -46,8 +54,14 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
   const [pending, setPending] = useState<string[]>([]); // point ids placed by the active tool
   const [cursor, setCursor] = useState<[number, number] | null>(null);
   const [dimEdit, setDimEdit] = useState<{ cid: string; x: number; y: number; value: string } | null>(null);
-  const [mode, setMode] = useState<"add" | "cut">(editing?.mode ?? "add");
+  const [mode, setMode] = useState<"add" | "cut">(editing?.mode ?? preset?.mode ?? "add");
+  const [kind, setKind] = useState<"extrude" | "revolve">(editing ? (editing.op === "revolve" ? "revolve" : "extrude") : preset?.feature ?? "extrude");
+  const [end, setEnd] = useState<"blind" | "mid" | "through">(editing?.end ?? "blind");
+  const [reverse, setReverse] = useState(!!editing?.reverse);
+  const [angle, setAngle] = useState(String(editing?.angle ?? 360));
   const [dist, setDist] = useState(String(editing?.distance ?? 10));
+  useEffect(() => { if (!hasBody) setMode("add"); }, [hasBody]);
+  useEffect(() => { if (mode === "add" && end === "through") setEnd("blind"); }, [mode, end]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; dof: number }>({ ok: true, dof: 0 });
   const svg = useRef<SVGSVGElement>(null);
@@ -159,6 +173,14 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
       return;
     }
     const s = clone(sk);
+    if (tool === "centerline") {
+      const id = getPoint(s, p);
+      if (!pending.length) { setSk(s); setPending([id]); return; }
+      if (id === pending[0]) return;
+      const ln: SEntity = { id: uid("e"), type: "line", p1: pending[0]!, p2: id, construction: true };
+      s.entities.push(ln); inferHV(s, ln); commit(s); setPending([]);
+      return;
+    }
     if (tool === "line") {
       const id = getPoint(s, p);
       if (pending.length) {
@@ -236,6 +258,9 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
     { label: "Concentric", icon: <CircleDashed className="h-4 w-4" />, can: curves.length === 2, run: () => rel({ type: "concentric", e1: curves[0]!.id, e2: curves[1]!.id }) },
     { label: "Point on line/arc", icon: <span className="text-[11px] font-bold">•/</span>, can: selPts.length === 1 && selEnts.length === 1, run: () => rel(selEnts[0]!.type === "line" ? { type: "onLine", pt: selPts[0]!, line: selEnts[0]!.id } : { type: "onCircle", pt: selPts[0]!, ent: selEnts[0]!.id }) },
     { label: "Fix", icon: <Lock className="h-4 w-4" />, can: selPts.length >= 1, run: () => selPts.forEach(pt => rel({ type: "fix", pt })) },
+    { label: "Construction geometry (toggle)", icon: <SquareDashed className="h-4 w-4" />, can: selEnts.length >= 1, run: () => {
+      const s = clone(sk); const ids = new Set(selEnts.map(e => e.id));
+      s.entities.forEach(e => { if (ids.has(e.id)) e.construction = !e.construction; }); commit(s, false); } },
   ];
   const del = () => {
     if (!sel.length) return;
@@ -251,22 +276,34 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
   const redo = () => { if (!fut.length) return; setHist(h => [...h, sk]); setSk(fut[0]!); setFut(f => f.slice(1)); };
 
   const prof = useMemo(() => profiles(sk), [sk]);
+  const centerline = sk.entities.find(e => e.type === "line" && e.construction) as Extract<SEntity, { type: "line" }> | undefined;
   const finish = async () => {
     if (!prof.loops.length) { toast.error("Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return; }
-    const d = Number(dist); if (!(d > 0)) { toast.error("Enter a positive distance"); return; }
+    const base = kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
+    const common = { name: editing && editing.op === (kind === "revolve" ? "revolve" : "sketch") ? editing.name : nextName(base, existing),
+      suppressed: editing?.suppressed ?? false, plane, profiles: prof.loops, mode, editor: sk };
+    let feature: Record<string, unknown>;
+    if (kind === "revolve") {
+      if (!centerline) { toast.error("Draw a centerline to revolve about (Centerline tool)."); return; }
+      const a = Number(angle); if (!(a > 0 && a <= 360)) { toast.error("Revolve angle must be between 0 and 360°"); return; }
+      const p1 = P(centerline.p1), p2 = P(centerline.p2);
+      feature = { op: "revolve", ...common, axis: { a: [p1.x, p1.y], b: [p2.x, p2.y] }, angle: a };
+    } else {
+      const d = Number(dist); if (end !== "through" && !(d > 0)) { toast.error("Enter a positive distance"); return; }
+      feature = { op: "sketch", ...common, distance: end === "through" ? 1 : d, end, reverse };
+    }
     setBusy(true);
-    const feature = { op: "sketch", name: editing?.name ?? (mode === "cut" ? "Sketch cut" : "Sketch boss"), suppressed: editing?.suppressed ?? false,
-      plane, profiles: prof.loops, distance: d, mode, editor: sk };
     try {
       const t0 = performance.now();
       if (editing) await api.patch(`/api/projects/${project.id}/manual/${editing.id}`, { feature });
       else await api.post(`/api/projects/${project.id}/manual`, { feature });
-      toast.success(`${feature.name} ${editing ? "updated" : "added"} · ${((performance.now() - t0) / 1000).toFixed(1)} s`); onDone();
+      toast.success(`${String(feature.name)} ${editing ? "updated" : "added"} · ${((performance.now() - t0) / 1000).toFixed(1)} s`); onDone();
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Feature failed"); } finally { setBusy(false); }
   };
 
   // ------------------------------------------------------------------ render
   const tools: [ToolT, string, React.ReactNode][] = [["select", "Select / drag", <MousePointer2 className="h-4 w-4" />], ["line", "Line (chain; Esc to stop)", <Pencil className="h-4 w-4" />],
+    ["centerline", "Centerline (construction; the revolve axis)", <SeparatorVertical className="h-4 w-4" />],
     ["rect", "Corner rectangle", <RectangleHorizontal className="h-4 w-4" />], ["circle", "Circle", <CircleIcon className="h-4 w-4" />], ["arc", "Centre-point arc (centre, start, end CCW)", <Spline className="h-4 w-4" />],
     ["dim", "Smart Dimension (line, circle/arc, or two points)", <Ruler className="h-4 w-4" />]];
   const selIds = new Set(sel.map(x => x.id));
@@ -274,7 +311,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
     if (!cursor || !pending.length) return null;
     const a = sk.points.find(p => p.id === pending[0]); if (!a) return null;
     const [, q] = snap(cursor, sk);
-    if (tool === "line") return <line x1={scr([a.x, a.y])[0]} y1={scr([a.x, a.y])[1]} x2={scr(q)[0]} y2={scr(q)[1]} className="stroke-primary" strokeDasharray="4 3" />;
+    if (tool === "line" || tool === "centerline") return <line x1={scr([a.x, a.y])[0]} y1={scr([a.x, a.y])[1]} x2={scr(q)[0]} y2={scr(q)[1]} className="stroke-primary" strokeDasharray={tool === "centerline" ? "10 3 2 3" : "4 3"} />;
     if (tool === "rect") { const [x1, y1] = scr([a.x, a.y]), [x2, y2] = scr(q); return <rect x={Math.min(x1, x2)} y={Math.min(y1, y2)} width={Math.abs(x2 - x1)} height={Math.abs(y2 - y1)} className="fill-none stroke-primary" strokeDasharray="4 3" />; }
     if (tool === "circle") { const [x1, y1] = scr([a.x, a.y]); return <circle cx={x1} cy={y1} r={Math.hypot(q[0] - a.x, q[1] - a.y) * view.s} className="fill-none stroke-primary" strokeDasharray="4 3" />; }
     return null;
@@ -284,7 +321,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-[#f7f9fc] dark:bg-[#161a21]">
       <div className="flex flex-wrap items-center gap-1 border-b border-border bg-panel px-2 py-1.5">
-        <span className="mr-2 text-[13px] font-semibold">Sketch</span>
+        <span className="mr-2 text-[13px] font-semibold">Sketch{planeName(plane) ? <span className="ml-1 font-normal text-muted">on {planeName(plane)}</span> : faceId !== null ? <span className="ml-1 font-normal text-muted">on face</span> : null}</span>
         {tools.map(([t, l, i]) => <Tip key={t} content={l} side="bottom"><button onClick={() => { setTool(t); setPending([]); }} className={cx("rounded p-1.5", tool === t ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")} aria-label={l}>{i}</button></Tip>)}
         <span className="mx-1 h-5 w-px bg-border" />
         {relations.map(r => <Tip key={r.label} content={r.label} side="bottom"><button disabled={!r.can} onClick={r.run} className="flex h-7 min-w-7 items-center justify-center rounded px-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-30" aria-label={r.label}>{r.icon}</button></Tip>)}
@@ -335,12 +372,24 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, on
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-border bg-panel px-3 py-2">
-        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{prof.loops.length} closed profile(s)</span>
+        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{prof.loops.length} closed profile(s){kind === "revolve" && (centerline ? " · axis: centerline" : <span className="text-warning"> · draw a centerline</span>)}</span>
         <div className="ml-auto inline-flex overflow-hidden rounded border border-border text-[12.5px]">
-          <button onClick={() => setMode("add")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "add" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Boss</button>
-          <button onClick={() => setMode("cut")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "cut" ? "bg-primary text-white" : "text-muted")}><ArrowDownToLine className="h-3.5 w-3.5" />Cut</button>
+          <button onClick={() => setKind("extrude")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "extrude" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Extrude</button>
+          <button onClick={() => setKind("revolve")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "revolve" ? "bg-primary text-white" : "text-muted")}><RotateCw className="h-3.5 w-3.5" />Revolve</button>
         </div>
-        <label className="flex items-center gap-1.5 text-[12.5px]">{mode === "add" ? "Distance" : "Depth"}<Input value={dist} onChange={e => setDist(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" />mm</label>
+        <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
+          <button onClick={() => setMode("add")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "add" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Boss</button>
+          <Tip content={hasBody ? "Remove material" : "A cut needs an existing solid. Start with a boss."} side="top">
+            <button disabled={!hasBody} onClick={() => setMode("cut")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", mode === "cut" ? "bg-primary text-white" : "text-muted")}><ArrowDownToLine className="h-3.5 w-3.5" />Cut</button>
+          </Tip>
+        </div>
+        {kind === "extrude" ? <>
+          <select value={end} onChange={e => setEnd(e.target.value as typeof end)} className="h-8 rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="End condition">
+            <option value="blind">Blind</option><option value="mid">Mid Plane</option>{mode === "cut" && <option value="through">Through All</option>}
+          </select>
+          {end !== "through" && <label className="flex items-center gap-1.5 text-[12.5px]">{mode === "add" ? "Distance" : "Depth"}<Input value={dist} onChange={e => setDist(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" />mm</label>}
+          {end !== "mid" && <Tip content="Reverse direction" side="top"><button onClick={() => setReverse(!reverse)} className={cx("rounded border p-1.5", reverse ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>}
+        </> : <label className="flex items-center gap-1.5 text-[12.5px]">Angle<Input value={angle} onChange={e => setAngle(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" />°</label>}
         <Button size="sm" loading={busy} onClick={finish} icon={<Check className="h-4 w-4" />}>{editing ? "Update" : "Exit sketch & create"}</Button>
         <Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
       </div>

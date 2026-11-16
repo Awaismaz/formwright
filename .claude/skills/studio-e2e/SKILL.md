@@ -33,7 +33,18 @@ PNGs**: a run with no errors does not prove the screen is right.
 
 Chrome: `C:/Program Files/Google/Chrome/Application/chrome.exe` (Edge also works: `C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`).
 
+Faster path for new flows: `lib.mjs` (in this folder) exports `start()`, which returns `{ page, api, clickAt, clickText,
+shot, sleep, finish }` already logged in. `example-revolve.mjs` shows a full Studio flow, including calibrating sketch
+mm↔px from the sketcher's cursor readout and waiting for builds. Copy both next to your script.
+
 ## Gotchas
+- **Never wait for `networkidle0` on a project page.** The Studio keeps an agent event stream open, so it never goes
+  idle. Use `waitUntil: "domcontentloaded"` plus `waitForSelector("[data-tour=command-manager]")`, and wait for
+  concrete UI (sketcher closed: `waitForSelector("svg.touch-none", { hidden: true })`; panel gone: "Add feature"
+  hidden).
+- Text selectors can hit the wrong element: the tree lists "Front/Top/Right Plane" and the viewer has "Front/Top"
+  view buttons. Prefer stable attributes (`button[data-plane=Top]`, `aria-label`).
+- Fetching `files/status.json` before the first build returns 404, which shows up as a console error.
 - Every non-GET API call needs header `X-FW-CSRF: 1`, or the response is 403 "Missing CSRF header" (`api()` in the
   template adds it).
 - Radix menus and tabs ignore synthetic `el.click()`. Use real pointer events: `clickAt(selector)` moves the mouse to

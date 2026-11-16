@@ -58,7 +58,10 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern"; name: string; suppressed: boolean;
+  end?: "blind" | "mid" | "through"; reverse?: boolean;
+  axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
+  source?: string[]; kind?: "linear" | "circular";
   faces?: { point: [number, number, number]; normal: [number, number, number] }[]; t?: number;
   pattern?: "circular"; center?: [number, number, number];
   edges?: [number, number, number][]; r?: number; d?: number;

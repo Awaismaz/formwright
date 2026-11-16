@@ -264,6 +264,8 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
         tripwire(source)
         ns = _exec(script, use_cache=fast)
         shape = ns["result"]
+        if shape is None:
+            raise ScriptRejected("the part has no solid yet: add a boss or revolve feature first")
         if not isinstance(shape, Shape):
             raise ScriptRejected(f"`result` is {type(shape).__name__}, expected a build123d Shape")
         t_build = time.perf_counter() - t0

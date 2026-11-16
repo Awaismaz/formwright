@@ -60,7 +60,8 @@ async function steps() {
   const projects = (await api("GET", "/api/projects")).body?.items ?? [];
   const demo = projects.find(p => p.name.startsWith("Demo ·")) ?? projects[0];
   if (!demo) throw new Error("no project to open");
-  await page.goto(`${BASE}/app/projects/${demo.id}`, { waitUntil: "networkidle0" });
+  await page.goto(`${BASE}/app/projects/${demo.id}`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-tour=command-manager]");
   await idle();
   await shot("01-studio");
   const st = await api("GET", `/api/projects/${demo.id}/files/status.json`);

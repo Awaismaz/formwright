@@ -1,15 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Info, X } from "lucide-react";
+import { ArrowLeftRight, Check, Info, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
-import { Button, Field, Input } from "@/components/ui";
+import { Button, Field, Input, Tip } from "@/components/ui";
 import { describe, edgeMid } from "@/viewer/measure";
+import { FEATURE_LABEL, nextName } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
-export type FeatureOp = Exclude<ManualFeature["op"], "sketch">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror" };
+export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve">;
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern" };
+const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole"]);
+type AxisKey = "X" | "Y" | "Z" | "pick";
+const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
+
+/** Direction (and a point on it) from a picked straight edge, circular edge or cylindrical/conical face. */
+function pickedAxis(sel: Pick[], topo: Topo | null): { origin: V3; dir: V3; label: string } | null {
+  if (!topo) return null;
+  for (const p of sel) {
+    if (p.kind === "edge") {
+      const e = topo.edges[p.id]; if (!e) continue;
+      if (e.type === "line") { const q = e.pts; const a: V3 = [q[0]!, q[1]!, q[2]!], b: V3 = [q[q.length - 3]!, q[q.length - 2]!, q[q.length - 1]!];
+        const d: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]; const l = Math.hypot(...d) || 1; return { origin: a, dir: [d[0] / l, d[1] / l, d[2] / l], label: `Edge (${fmt(e.length)} mm)` }; }
+      if (e.type === "circle" && e.center && e.axis) return { origin: e.center, dir: e.axis, label: `Axis of circular edge R${fmt(e.radius ?? 0)}` };
+    }
+    if (p.kind === "face") {
+      const f = topo.faces[p.id];
+      if (f && (f.type === "cylinder" || f.type === "cone") && f.axis) return { origin: f.axis_point ?? f.center, dir: f.axis, label: `Axis of ${f.type === "cylinder" ? `cylinder R${fmt(f.radius ?? 0)}` : "cone"}` };
+      if (f?.type === "plane" && f.normal) return { origin: f.center, dir: f.normal, label: "Normal of the picked face" };
+    }
+  }
+  return null;
+}
 
 export function xDirFor(n: V3): V3 {
   if (Math.abs(n[2]) > 0.9) return [1, 0, 0];
@@ -19,19 +42,41 @@ export function xDirFor(n: V3): V3 {
 }
 
 export function selectKindsFor(op: FeatureOp): Pick["kind"][] {
-  return op === "fillet" || op === "chamfer" ? ["edge"] : ["face"];
+  return op === "fillet" || op === "chamfer" ? ["edge"] : op === "pattern" ? ["edge", "face"] : ["face"];
 }
 
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
 const fmt = (v: number) => String(+v.toFixed(3));
 
-export default function FeatureManager({ project, op, editing, preset, topo, selection, onSelection, onSketch, onDone, onCancel, onBusy }: {
+export default function FeatureManager({ project, op, editing, preset, topo, selection, manual, onSelection, onSketch, onDone, onCancel, onBusy }: {
   project: Project; op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown>; topo: Topo | null; selection: Pick[];
+  manual: ManualFeature[];
   onSelection: (p: Pick[]) => void; onSketch: (s: SketchPreview | null) => void; onDone: () => void; onCancel: () => void; onBusy: (b: boolean) => void;
 }) {
   const e = editing;
   const pre = preset ?? {};
-  const [name, setName] = useState(e?.name ?? (op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
+  const patKind0 = (e?.kind ?? (pre.kind as "linear" | "circular" | undefined) ?? "linear");
+  const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
+    : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
+  // feature pattern
+  const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
+  const candidates = manual.slice(0, idx < 0 ? manual.length : idx).filter(m => PATTERNABLE.has(m.op) && !m.suppressed);
+  const [sources, setSources] = useState<string[]>(e?.source ?? (candidates.length ? [candidates[candidates.length - 1]!.id] : []));
+  const [patKind, setPatKind] = useState<"linear" | "circular">(patKind0);
+  const ax0 = e?.axis && "dir" in e.axis ? e.axis : null;
+  const [axisKey, setAxisKey] = useState<AxisKey>(() => {
+    const d = e?.kind === "circular" ? ax0?.dir : e?.step;
+    if (!d) return patKind0 === "circular" ? "Z" : "X";
+    const l = Math.hypot(...d) || 1;
+    return (Object.entries(AXES).find(([, v]) => v.every((c, i) => Math.abs(c - d[i]! / l) < 1e-9))?.[0] as AxisKey | undefined) ?? "pick";
+  });
+  const [spacing, setSpacing] = useState(String(e?.step ? +Math.hypot(...e.step).toFixed(4) : 20));
+  const [flip, setFlip] = useState(false);
+  const [patCount, setPatCount] = useState(String(e?.count ?? (patKind0 === "circular" ? 6 : 3)));
+  const [patAngle, setPatAngle] = useState(String(e?.angle ?? 360));
+  const [axOrigin, setAxOrigin] = useState<[string, string, string]>(ax0 ? ax0.origin.map(String) as [string, string, string] : ["0", "0", "0"]);
+  const picked = op === "pattern" ? pickedAxis(selection, topo) : null;
+  const keptPick = axisKey === "pick" && !picked && e ? (e.kind === "circular" ? ax0 : e.step ? { origin: [0, 0, 0] as V3, dir: e.step } : null) : null;
   const [size, setSize] = useState(String(e?.r ?? e?.d ?? e?.t ?? (op === "hole" ? 6.6 : op === "fillet" ? 2 : op === "shell" ? 2 : 1)));
   const [depth, setDepth] = useState(e?.depth ? String(e.depth) : "");
   const [pattern, setPattern] = useState<"none" | "linear" | "circular">(e?.pattern === "circular" ? "circular" : (e?.count ?? 1) > 1 ? "linear" : (pre.pattern as "linear" | "circular") ?? "none");
@@ -77,15 +122,27 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   }, [op, plane, kind, w, h, r, cx_, cy_, size]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onSketch(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => { if (op === "pattern" && picked) { setAxisKey("pick"); if (patKind === "circular") setAxOrigin(picked.origin.map(fmt) as [string, string, string]); } }, [picked?.label, patKind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const patDir = (): V3 | null => {
+    const d = axisKey === "pick" ? (picked ?? keptPick)?.dir ?? null : AXES[axisKey];
+    if (!d) return null; const l = Math.hypot(...d) || 1; const s = flip ? -1 : 1;
+    return [s * d[0] / l, s * d[1] / l, s * d[2] / l];
+  };
   const needsEdges = op === "fillet" || op === "chamfer";
-  const ready = needsEdges ? (edges.length > 0 || !!e?.edges?.length)
+  const ready = op === "pattern" ? sources.length > 0 && !!patDir() && num(patCount) >= 2
+    : needsEdges ? (edges.length > 0 || !!e?.edges?.length)
     : op === "shell" ? (planarFaces.length > 0 || !!e?.faces?.length)
     : op === "mirror" ? (mirrorPlane !== "face" || !!plane)
     : !!plane;
 
   const submit = async () => {
     let f: Record<string, unknown> = { op, name, suppressed: e?.suppressed ?? false };
-    if (needsEdges) {
+    if (op === "pattern") {
+      const d = patDir()!;
+      f = { ...f, source: sources, count: num(patCount), ...(patKind === "circular"
+        ? { kind: "circular", axis: { origin: axOrigin.map(num), dir: d }, angle: num(patAngle) }
+        : { kind: "linear", step: d.map(c => c * num(spacing)) }) };
+    } else if (needsEdges) {
       const pts = edges.length && topo ? edges.map(p => edgeMid(topo, p.id)) : e?.edges;
       f = { ...f, edges: pts, [op === "fillet" ? "r" : "d"]: num(size) };
     } else if (op === "hole") {
@@ -126,11 +183,31 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-primary-soft to-transparent px-3 py-2.5">
-        <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : TITLE[op]}</span>
+        <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : op === "pattern" ? (patKind === "circular" ? "Circular Pattern" : "Linear Pattern") : TITLE[op]}</span>
         <button onClick={submit} disabled={!ready || busy} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button>
         <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
+        {op === "pattern" ? <>
+          <div className="rounded-lg border border-border bg-panel2 p-2.5">
+            <div className="label mb-1">Features to pattern</div>
+            {candidates.length === 0 ? <p className="text-[12px] text-muted">Add a boss, cut, revolve or hole first. Fillets and shells are not patterned.</p>
+              : <ul className="space-y-0.5">{candidates.map(m => (
+                <li key={m.id}><label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-text/5">
+                  <input type="checkbox" checked={sources.includes(m.id)} onChange={ev => setSources(s => ev.target.checked ? [...s, m.id] : s.filter(x => x !== m.id))} />
+                  <span className="flex-1 truncate text-[12.5px]">{m.name}</span><span className="text-[10.5px] text-muted">{FEATURE_LABEL[m.op]}</span></label></li>))}</ul>}
+          </div>
+          <div>{seg<"linear" | "circular">([["linear", "Linear"], ["circular", "Circular"]], patKind, k => { setPatKind(k); if (!e) setName(nextName(k === "circular" ? "CirPattern" : "LPattern", manual)); })}</div>
+          <div className="rounded-lg border border-border bg-panel2 p-2.5">
+            <div className="label mb-1">{patKind === "linear" ? "Direction" : "Axis"}</div>
+            <div className="flex items-center gap-2">{seg<AxisKey>([["X", "X"], ["Y", "Y"], ["Z", "Z"], ["pick", "Picked"]], axisKey, setAxisKey)}
+              <Tip content="Reverse direction" side="top"><button onClick={() => setFlip(!flip)} className={cx("rounded border p-1", flip ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse direction"><ArrowLeftRight className="h-3.5 w-3.5" /></button></Tip></div>
+            <p className="mt-1 text-[11.5px] text-muted">{axisKey === "pick" ? (picked?.label ?? (keptPick ? "Using the original direction." : "Click a straight edge, a circular edge, a hole or a face.")) : `Along the model ${axisKey} axis.`}</p>
+          </div>
+          {numField("Instances (incl. original)", patCount, setPatCount, "")}
+          {patKind === "linear" ? numField("Spacing", spacing, setSpacing)
+            : <>{numField("Total angle", patAngle, setPatAngle, "°", "360° spaces the instances equally around the axis")}{vec("Axis through point (X, Y, Z mm)", axOrigin, setAxOrigin)}</>}
+        </> : <>
         <div className="rounded-lg border border-border bg-panel2 p-2.5">
           <div className="label mb-1">{needsEdges ? "Edges" : op === "shell" ? "Faces to remove" : op === "mirror" ? "Mirror plane" : "Placement face"}</div>
           {op === "mirror" && <div className="mb-2">{seg<"face" | "YZ" | "XZ" | "XY">([["face", "Picked face"], ["YZ", "YZ"], ["XZ", "XZ"], ["XY", "XY"]], mirrorPlane, setMirrorPlane)}</div>}
@@ -167,6 +244,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
             <p className="mt-1 flex gap-1 text-[11px] text-muted"><Info className="mt-0.5 h-3 w-3 shrink-0" />Offsets are measured on the face from the picked point. The green outline previews the sketch. For free-form profiles use Sketch.</p>
           </div>
           {numField(mode === "add" ? "Extrude distance" : "Cut depth", dist, setDist)}
+        </>}
         </>}
       </div>
       <div className="flex gap-2 border-t border-border p-3">

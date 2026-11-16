@@ -190,6 +190,25 @@ export class CadViewer {
     this.applyDisplay(); this.applyExplode(); this.applyParts(); this.applySection();
     this.clearHover();
     if (!keepView) this.setView("Iso");
+    else this.refitIfClipped();
+  }
+
+  /** Keep the user's view, but zoom out (same direction) when the rebuilt part would extend past the window. */
+  private refitIfClipped() {
+    const cam = this.camera as THREE.PerspectiveCamera | THREE.OrthographicCamera;
+    cam.updateMatrixWorld();
+    let clipped = false;
+    for (const x of [this.box.min.x, this.box.max.x]) for (const y of [this.box.min.y, this.box.max.y]) for (const z of [this.box.min.z, this.box.max.z]) {
+      const p = new THREE.Vector3(x, y, z).project(cam);
+      if (Math.abs(p.x) > 0.98 || Math.abs(p.y) > 0.98) clipped = true;
+    }
+    if (!clipped) return;
+    const c = this.box.getCenter(new THREE.Vector3());
+    const shift = c.clone().sub(this.controls.target);
+    for (const k of [this.persp, this.ortho]) k.position.add(shift);
+    this.controls.target.copy(c); this.controls.update();
+    this.updateOrthoFrustum();
+    this.fitProjected();
   }
 
   // ---------------------------------------------------------------- camera

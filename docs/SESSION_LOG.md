@@ -4,6 +4,41 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (j): Design Studio: model from scratch, revolve, feature patterns; agents launched
+
+Founder (going away): "keep building, finish Design Studio, then every remaining module one by one; park decisions";
+then "start more agents for the other modules; this session stays the master for talking and orchestrating."
+
+### Done (DS-024; DS-010 acceptance now met)
+- Second workstation set up: uv installed, `uv sync`, `npm ci` → 82 passed, ruff, tsc, vite green (INF-001 done).
+- **Model from scratch**: the first manual feature on an empty project creates a blank hand-modelled part
+  (`result = None`). Front/Top/Right reference planes (plus offset) are in the sketch picker and as tree entries;
+  the first boss or revolve creates the body; cuts/fillets etc. on an empty part are refused with a plain message.
+- **Revolve / Revolved Cut** about a sketch centerline (new Centerline tool, construction toggle).
+- **Extrude end conditions**: blind, mid plane, through all (cuts), reverse direction.
+- **Feature patterns**: linear/circular pattern of any earlier boss, cut, revolve or hole; direction/axis from X/Y/Z
+  or a picked edge, hole or face. Pattern fails cleanly if its source is suppressed.
+- Ribbon: Extruded Boss/Base, Revolved Boss/Base, Extruded Cut, Revolved Cut open the sketcher; only body-dependent
+  commands are disabled on an empty part. SOLIDWORKS names (Boss-Extrude1, Cut-Revolve1, LPattern1, CirPattern1).
+- Viewer re-fits (same direction) when a rebuilt part would leave the window.
+- Agent prompt knows about hand-modelled parts.
+
+### Evidence
+- `fw.apply_manual` smoke: revolve, mid-plane disc, through-all cut, circular and linear patterns all match hand
+  formulas to about 1e-16.
+- New tests `test_part_modelled_from_scratch_with_pattern`, `test_revolved_part_from_scratch` (analytic volumes,
+  422 paths).
+- Browser (isolated data dir, port 8766, puppeteer-core 25.17.0): empty project → Top plane → rectangle → boss
+  40×20×10 = 8000 mm³ → Linear Pattern ×3 @ 20 mm = 80×20×10, 16000 mm³; Revolved Boss on Front plane → bushing
+  28274.33 mm³ (= π·300·30) → Extruded Cut from Top +15 mm, through all → Circular Pattern ×6 → 26012.39 mm³
+  (= hand calc). 0 console/page errors.
+- Found by walkthrough and fixed: tree plane clicks ignored a pending Revolve/Cut command; viewer cropped a part that
+  grew; a misleading "checks informational" note on hand-made parts.
+
+### Next
+Background agents in git worktrees: Design Studio continuation (DS-026), Drawing Studio, Manufacturing Advisor,
+3D Print Prep, Engineering Advisor. This session merges and verifies their work.
+
 ## 2026-11-16 (i): Project skills for Claude Code
 
 Founder request: "understand the project and add the relevant skills needed to get this app where it needs to be."

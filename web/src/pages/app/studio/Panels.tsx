@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, Pencil, ScanSearch, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
 import { ago, cx, num } from "@/lib/format";
 import { Badge, Button, Input, Toggle, Tip } from "@/components/ui";
 import type { Topo } from "@/viewer/types";
+import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 
 /* ------------------------------------------------------------------ checks */
 export function ChecksPanel({ status }: { status?: BuildStatus }) {
@@ -168,11 +169,11 @@ export interface Recognition {
 const fmtParams = (p: Record<string, unknown>) => Object.entries(p).filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
   .slice(0, 4).map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? +v.toFixed(3) : String(v)}`).join(" · ");
 
-export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing }: {
+export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
   onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
-  recognition: Recognition | null; onRecognize: () => void; recognizing: boolean;
+  recognition: Recognition | null; onRecognize: () => void; recognizing: boolean; onSketchPlane: (p: RefPlane) => void;
 }) {
   const modelFeats = (status?.features ?? []).filter(f => f.kind !== "manual" && f.kind !== "edit");
   const facesOf = (name: string) => topo ? topo.faces.filter(f => f.feature === name).map(f => f.id) : [];
@@ -190,7 +191,13 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
           <Button size="sm" variant="secondary" loading={recognizing} disabled={busy || !status?.fingerprint} icon={<Sparkles className="h-3.5 w-3.5 text-accent" />} onClick={onRecognize}>Recognize features</Button>
         </Tip>
       </div>
-      {modelFeats.length === 0 ? <p className="text-[12px] text-muted">No named features recorded for this model yet — use <b>Recognize features</b>.</p> :
+      <ul className="mb-2 space-y-0.5 border-b border-border pb-2">
+        <li className="flex items-center gap-2 px-2 py-0.5 text-muted"><Crosshair className="h-3.5 w-3.5 shrink-0" /><span className="flex-1">Origin</span></li>
+        {(["Front", "Top", "Right"] as RefPlane[]).map(n => (
+          <li key={n}><Tip content={`Sketch on the ${n} Plane`} side="right"><button disabled={busy} onClick={() => onSketchPlane(n)} className="flex w-full items-center gap-2 rounded px-2 py-0.5 text-left hover:bg-primary-soft disabled:opacity-50">
+            <Square className="h-3.5 w-3.5 shrink-0 -skew-x-12 text-primary/70" /><span className="flex-1">{n} Plane</span></button></Tip></li>))}
+      </ul>
+      {modelFeats.length === 0 ? (manual.length || !status?.fingerprint ? null : <p className="text-[12px] text-muted">No named features recorded for this model yet — use <b>Recognize features</b>.</p>) :
         <ul className="space-y-0.5">{modelFeats.map((f, i) => {
           const blank = f.kind === "blank";
           const n = facesOf(f.name).length;
@@ -230,17 +237,17 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
         </div>)}
 
       <div className="label mb-1 mt-4 flex items-center gap-1"><Pencil className="h-3.5 w-3.5" />Manual features</div>
-      {manual.length === 0 ? <p className="text-[12px] text-muted">Use the command bar (Features / Sketch) to add features by hand — they stay editable here.</p> :
+      {manual.length === 0 ? <p className="text-[12px] text-muted">{status?.fingerprint ? "Use the command bar (Features / Sketch) to add features by hand. They stay editable here." : "Start a part by hand: click a plane above (or Extruded / Revolved Boss in the command bar), sketch a closed profile and extrude or revolve it."}</p> :
         <ul className="space-y-0.5">{manual.map((f, i) => (
           <li key={f.id} onMouseEnter={() => onHover(f.suppressed ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])}
             className={cx("group flex items-center gap-1 rounded px-2 py-1 hover:bg-primary-soft", f.suppressed && "opacity-50")}>
-            <button className="flex-1 truncate text-left" onClick={() => onEdit(f)} disabled={busy}>{f.name} <Badge className="ml-1">{f.op}</Badge></button>
+            <button className="flex-1 truncate text-left" onClick={() => onEdit(f)} disabled={busy}>{f.name} <Badge className="ml-1">{f.op === "sketch" && f.mode === "cut" ? "Cut" : FEATURE_LABEL[f.op] ?? f.op}</Badge></button>
             <Tip content={f.suppressed ? "Unsuppress" : "Suppress"} side="left"><button disabled={busy} onClick={() => onToggle(f)} className="rounded p-0.5 text-muted hover:text-text">{f.suppressed ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>
             <button disabled={busy || i === 0} onClick={() => onMove(f, -1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move up"><ArrowUp className="h-3.5 w-3.5" /></button>
             <button disabled={busy || i === manual.length - 1} onClick={() => onMove(f, 1)} className="rounded p-0.5 text-muted hover:text-text disabled:opacity-30" aria-label="Move down"><ArrowDown className="h-3.5 w-3.5" /></button>
             <button disabled={busy} onClick={() => onDelete(f)} className="rounded p-0.5 text-muted hover:text-danger" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
           </li>))}</ul>}
-      {(status?.manual_features ?? 0) > 0 && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With manual features, the size and volume checks are informational: they compare against the original expectation, which doesn't include your manual edits.</p>}
+      {(status?.manual_features ?? 0) > 0 && status?.checks?.some(c => c.id === "CHK-05" && (c.detail as Record<string, unknown>)?.expected_mm3 !== undefined) && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With manual features, the size and volume checks are informational: they compare against the original expectation, which doesn't include your manual edits.</p>}
     </div>
   );
 }
