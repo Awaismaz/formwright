@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Coins, ImagePlus, Loader2, Lock, MousePointer2, RotateCcw, Send, Sparkles, Square, Undo2, X } from "lucide-react";
+import { Check, Coins, ImagePlus, ListTree, Loader2, Lock, MousePointer2, RotateCcw, Send, Sparkles, Square, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -17,8 +17,13 @@ import type { TbMatch } from "./Toolbox";
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
   | { kind: "user"; text: string } | { kind: "agent"; text: string } | { kind: "error"; text: string }
-  | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string }
+  | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string; ids?: string[]; done?: number }
   | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] };
+
+/** "5 edits" or "×3" for a collapsed run of identical steps. */
+function stepCount(brief: string, n: number): string {
+  return /^(Updating|Drafting)/.test(brief) ? `${n} edits` : `×${n}`;
+}
 
 function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
   switch (ev.type) {
@@ -26,8 +31,18 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
     case "user": return [...items, { kind: "user", text: ev.text }];
     case "text": return [...items, { kind: "agent", text: ev.text }];
     case "error": return [...items, { kind: "error", text: ev.text }];
-    case "tool": return [...items, { kind: "tool", id: ev.id, name: ev.name, brief: ev.brief, state: "run" }];
-    case "tool_result": return items.map(i => i.kind === "tool" && i.id === ev.id ? { ...i, state: ev.is_error ? "bad" : "ok", result: ev.brief } : i);
+    case "tool": {
+      // Consecutive identical steps without a result ("Updating the design" ×5) collapse into one line with a count.
+      const last = items[items.length - 1];
+      if (last?.kind === "tool" && last.brief === ev.brief && !last.result && last.state !== "bad")
+        return [...items.slice(0, -1), { ...last, ids: [...(last.ids ?? [last.id]), ev.id], done: last.done ?? (last.state === "ok" ? 1 : 0), state: "run" }];
+      return [...items, { kind: "tool", id: ev.id, name: ev.name, brief: ev.brief, state: "run" }];
+    }
+    case "tool_result": return items.map(i => {
+      if (i.kind !== "tool" || !(i.ids ?? [i.id]).includes(ev.id)) return i;
+      const done = (i.done ?? 0) + 1; const all = done >= (i.ids?.length ?? 1);
+      return { ...i, done, state: ev.is_error ? "bad" : all ? "ok" : "run", result: ev.brief || i.result };
+    });
     case "result": return [...items, { kind: "result", ev: ev as ResultEv }];
     case "questions": return [...items, { kind: "questions", questions: ev.questions }];
     default: return items;
@@ -79,9 +94,13 @@ function Questions({ qs, active, onSubmit }: { qs: AgentQuestion[]; active: bool
   );
 }
 
-export default function Chat({ project, topo, selection, onSelectionChange, onActivity, onToolbox }: {
+export default function Chat({ project, topo, selection, onSelectionChange, onActivity, onToolbox, features = [], onFeaturesChange, request }: {
   project: Project; topo: Topo | null; selection: Pick[]; onSelectionChange: (p: Pick[]) => void; onActivity: () => void;
   onToolbox?: (m?: TbMatch) => void;
+  /** Design features picked in the feature tree, sent to the agent as references. */
+  features?: string[]; onFeaturesChange?: (f: string[]) => void;
+  /** A prompt the Studio asks the chat to send (e.g. "delete this feature"); a new id triggers it once. */
+  request?: { id: number; text: string } | null;
 }) {
   const [offer, setOffer] = useState<{ prompt: string; matches: TbMatch[] } | null>(null);
   const { me } = useSession();
@@ -104,12 +123,18 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
       const ev = JSON.parse(m.data) as AgentEvent;
       if (ev.type === "hello") setBusy(ev.busy);
       if (ev.type === "busy") setBusy(ev.value);
-      if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
+      if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
     };
     return () => es.close();
   }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight; }, [items]);
+  const lastReq = useRef<number | null>(null);
+  useEffect(() => {
+    if (!request || request.id === lastReq.current) return;
+    lastReq.current = request.id;
+    void send(request.text, true);
+  }, [request?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addFiles = async (files: FileList | File[]) => {
     for (const f of Array.from(files)) {
@@ -122,16 +147,17 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     let t = (override ?? text).trim(); if ((!t && !atts.length) || busy) return;
     if (!t) t = "Model the part shown in the attached reference image(s).";
     // A standard component? Offer the Toolbox (repeatable generator) — the user decides; the agent stays available.
-    if (!override && !skipToolbox && !selection.length && !atts.length && onToolbox) {
+    if (!override && !skipToolbox && !selection.length && !features.length && !atts.length && onToolbox) {
       try {
         const m = await api.post<{ matches: TbMatch[] }>("/api/toolbox/match", { prompt: t });
         if (m.matches.length) { setOffer({ prompt: t, matches: m.matches }); return; }
       } catch { /* matching is optional */ }
     }
     if (selection.length && topo) t += "\n\n[Selected in viewer: " + selection.map((p, i) => `(${i + 1}) ${agentDescriptor(p, topo)}`).join("; ") + "]";
+    if (features.length && !override) t += "\n\n[Selected feature(s) in the feature tree: " + features.map(f => `“${f}”`).join(", ") + "]";
     try {
       await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
-      if (!override || skipToolbox) { setText(""); setAtts([]); onSelectionChange([]); }
+      if (!override || skipToolbox) { if (!override) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
@@ -163,8 +189,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             Include material, overall size, holes, fillets and anything that must not change. Attach a sketch or photo, or select faces and edges in the viewer and say what to do with them.
           </div>)}
         {items.map((i, n) => {
-          if (i.kind === "user") return <div key={n} className="ml-8 whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-white">{i.text.replace(/\n\n\[Selected in viewer:[\s\S]*$/, "").replace(/\n\n\[Reference image[\s\S]*$/, "").replace(/\n\n\[Recognition data[\s\S]*$/, "")}
+          if (i.kind === "user") return <div key={n} className="ml-8 whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-white">{i.text.replace(/\n\n\[Selected feature\(s\) in the feature tree:[\s\S]*$/, "").replace(/\n\n\[Selected in viewer:[\s\S]*$/, "").replace(/\n\n\[Reference image[\s\S]*$/, "").replace(/\n\n\[Recognition data[\s\S]*$/, "")}
             {/\[Selected in viewer:/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><MousePointer2 className="mr-1 inline h-3 w-3" />with viewer selection</div>}
+            {/\[Selected feature\(s\) in the feature tree:/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ListTree className="mr-1 inline h-3 w-3" />about {/\[Selected feature\(s\) in the feature tree: ([^\]]*)\]/.exec(i.text)?.[1]}</div>}
             {/\[Reference image/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ImagePlus className="mr-1 inline h-3 w-3" />with reference image</div>}</div>;
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;
           if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={n === items.length - 1 && !busy} onSubmit={a => send(a)} />;
@@ -172,7 +199,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           if (i.kind === "tool") return (
             <div key={n} className="flex items-start gap-2 px-1 text-[12px] text-muted">
               <span className="mt-0.5">{i.state === "run" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : i.state === "ok" ? <Check className="h-3.5 w-3.5 text-success" /> : <X className="h-3.5 w-3.5 text-danger" />}</span>
-              <span><span className="text-text">{i.brief}</span>
+              <span><span className="text-text">{i.brief}</span>{(i.ids?.length ?? 1) > 1 && <span className="ml-1.5 rounded-full bg-text/5 px-1.5 py-px text-[10.5px] tabular-nums">{stepCount(i.brief, i.ids!.length)}</span>}
                 {i.result && <span className={cx("ml-1", /passed/.test(i.result) ? "text-success" : "text-warning")}>— {i.result}</span>}</span>
             </div>);
           return (
@@ -194,8 +221,13 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             {agent?.cta && <Button size="sm" className="mt-2.5" onClick={() => nav(agent.cta!)}>Upgrade or top up</Button>}
           </div>
         ) : <>
-          {(selection.length > 0 || atts.length > 0) && (
+          {(selection.length > 0 || atts.length > 0 || features.length > 0) && (
             <div className="mb-2 flex flex-wrap gap-1.5">
+              {features.map(f => (
+                <span key={`f-${f}`} className="inline-flex items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[11.5px] text-accent">
+                  <ListTree className="h-3 w-3" />{f}
+                  <button onClick={() => onFeaturesChange?.(features.filter(x => x !== f))} aria-label={`Remove ${f}`}><X className="h-3 w-3" /></button>
+                </span>))}
               {selection.map(p => (
                 <span key={pickKey(p)} className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary-soft px-2 py-0.5 text-[11.5px] text-primary">
                   <MousePointer2 className="h-3 w-3" />{topo ? describe(p, topo) : p.kind}
@@ -210,7 +242,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           <textarea value={text} onChange={e => setText(e.target.value)} rows={4} disabled={busy}
             onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
             onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } }}
-            placeholder={selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
+            placeholder={features.length ? "Say what to change, e.g. “make these Ø12” or “move it 10 mm towards the edge”" : selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
             className="input h-auto min-h-[84px] resize-y py-2 leading-relaxed" />
           <div className="mt-2 flex items-center gap-2">
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />

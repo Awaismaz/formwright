@@ -69,6 +69,25 @@ def _manual_block(source: str) -> tuple[str, list[dict[str, Any]]]:
     return source[:i], feats
 
 
+def managed_list(source: str, var: str) -> list[str]:
+    """Names in an app-managed top-level list such as `SUPPRESSED_FEATURES = [...]`, if present."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == var:
+            try:
+                return [str(x) for x in ast.literal_eval(node.value)]
+            except ValueError:
+                return []
+    return []
+
+
+def suppressed_features(source: str) -> list[str]:
+    return managed_list(source, "SUPPRESSED_FEATURES")
+
+
 def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
     """Run a model script. Its folder is importable (helper modules), and anything imported from that
     folder is purged afterwards so a warm worker never serves stale helpers to the next build.
@@ -85,12 +104,14 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
 
     fw.reset()
     fw.set_base(script.parent)
+    fw.set_suppressed(suppressed_features(base_src))
     key = hashlib.sha256((folder + "\0" + base_src + "".join(f.read_text(encoding="utf-8") for f in helpers))
                          .encode()).hexdigest()
     cached = _BASE_CACHE.get(key) if use_cache else None
     if cached is not None:
         ns = dict(cached["ns"])
         fw._STATE["log"] = list(cached["log"])
+        fw._STATE["last"] = cached.get("last")
     else:
         sys.path.insert(0, folder)
         try:
@@ -105,7 +126,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
                     del sys.modules[name]
         if "result" not in ns:
             raise ScriptRejected("script must assign the final build123d shape to a variable named `result`")
-        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log()}
+        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last")}
         while len(_BASE_CACHE) > _CACHE_MAX:
             _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
     ns["__fw_base__"] = ns["result"]
@@ -298,12 +319,16 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
                                               detail={"got_mm3": shape.volume}))
         if ns.get("REFERENCE_STEP") and not ns.get("IMPORTED"):
             results.append(check_reference(ns.get("__fw_base__", shape), str(ns["REFERENCE_STEP"])))
-        if manual:
+        n_sup = sum(1 for e in ns.get("__fw_log__", []) if e.get("suppressed")) + len(ns.get("DELETED_FEATURES") or [])
+        if manual or n_sup:
+            why = "manual features" if manual and not n_sup else "suppressed or deleted features" if not manual \
+                else "manual and suppressed features"
             for r in results:
                 if r.id in ("CHK-04", "CHK-05") and r.gating:
                     r.gating = False
-                    r.name += " (informational: manual features not in EXPECTED)"
+                    r.name += f" (informational: {why} not in EXPECTED)"
                     r.detail["manual_features"] = manual
+                    r.detail["suppressed_features"] = n_sup
 
         declared = ns.get("PARAMS") if isinstance(ns.get("PARAMS"), dict) else {}
         params = {str(k): v for k, v in declared.items() if isinstance(v, (int, float, str, bool))}
@@ -313,7 +338,8 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
             part=ns.get("NAME", script.stem), material=ns.get("MATERIAL", "unspecified"),
             params=params, editable_params=editable_params(source, params), expected=exp,
             param_meta=param_meta(ns.get("PARAM_META"), params), mass=mass, manual_features=manual,
-            features=[{"name": e["name"], "kind": e["kind"], "params": e["params"]} for e in ns.get("__fw_log__", [])],
+            features=[{"name": e["name"], "kind": e["kind"], "params": e["params"], "chain": bool(e.get("chain")),
+                       "suppressed": bool(e.get("suppressed"))} for e in ns.get("__fw_log__", [])],
             fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
             env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp")},
         )

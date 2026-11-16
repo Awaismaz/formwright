@@ -53,7 +53,7 @@ export interface BuildStatus {
   timings_s?: Record<string, number>; traceback?: string;
   param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
-  features?: { name: string; kind: string; params: Record<string, unknown> }[];
+  features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean }[];
   manual_features?: number;
 }
 

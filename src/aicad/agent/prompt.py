@@ -64,6 +64,13 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 - The file may end with a block between `# --- Formwright manual features` and
   `# --- end manual features ---`. The user authored those features in the app. Keep that block
   last and unchanged unless the user asks you to change, fold in or remove them.
+- Build designs as a chain, `part = fw.feature("Name", <part after this step>)`, one recorded step per feature.
+  The user can suppress any step except the first from the feature tree. The app then writes a block
+  `# --- Formwright suppressed features ...` with `SUPPRESSED_FEATURES = [...]` (keep it, just before the manual
+  block), and `fw.feature` returns the previous state for those names. Keep feature names stable across edits.
+  If asked to delete a feature, remove its code and its fw.feature call, and drop its name from SUPPRESSED_FEATURES.
+- Prompts may reference features chosen in the tree as `[Selected feature(s) in the feature tree: ...]`, using the
+  names you gave them in fw.feature. Act on exactly those features.
 - A part modelled by hand starts with `result = None`; its first manual boss or revolve creates the body
   (manual ops: sketch extrude with blind / mid-plane / through-all ends, revolve about a centerline, hole,
   fillet, chamfer, shell, mirror, and linear/circular patterns of earlier features). To add your own geometry

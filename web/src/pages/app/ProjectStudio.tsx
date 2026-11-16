@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
 import { cx, num } from "@/lib/format";
-import { Input, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
+import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import Viewer3D, { type Tool, type ViewerApi } from "@/components/Viewer3D";
 import { ProjectStatus } from "@/components/ProjectCard";
@@ -50,6 +50,9 @@ export default function ProjectStudio() {
   const setLeftOpen = (v: boolean) => { setLeftOpenS(v); try { localStorage.setItem("fw_studio_left", v ? "1" : "0"); } catch { /* */ } };
   const setChatOpen = (v: boolean) => { setChatOpenS(v); try { localStorage.setItem("fw_studio_chat", v ? "1" : "0"); } catch { /* */ } };
   const [recognizing, setRecognizing] = useState(false);
+  const [featureChips, setFeatureChips] = useState<string[]>([]);
+  const [chatRequest, setChatRequest] = useState<{ id: number; text: string } | null>(null);
+  const [delTarget, setDelTarget] = useState<string | null>(null);
 
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
@@ -170,7 +173,11 @@ export default function ProjectStudio() {
               </TabList>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
-                  recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)} onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
+                  recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)}
+                  selectedFeatures={featureChips} agentBusy={!!p.agent?.busy} onDeleteDesign={setDelTarget}
+                  onPickFeature={n => { setFeatureChips(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n])); if (!chatOpen) setChatOpen(true); }}
+                  onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`)}
+                  onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? "Feature unsuppressed" : "Feature suppressed", l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)))}
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id))} /></TabPanel>
@@ -246,9 +253,24 @@ export default function ProjectStudio() {
                 <div key={k} className="flex justify-between font-mono text-[11px]"><span>{k}</span><span>{String(v.from)} → {String(v.to)}</span></div>)}</div>}
             </div>)}
         </div>
-        {chatOpen && <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }} />}
+        {chatOpen && <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
+          features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} />}
       </div>
 
+      <Modal open={!!delTarget} onOpenChange={o => !o && setDelTarget(null)} title={`Delete “${delTarget ?? ""}”?`}
+        description="Removes this feature's step from the design, without AI and without tokens."
+        footer={<><Button variant="ghost" className="mr-auto" disabled={!!p.agent?.busy} onClick={() => {
+            const n = delTarget!; setDelTarget(null); setFeatureChips(c => c.filter(x => x !== n)); if (!chatOpen) setChatOpen(true);
+            setChatRequest({ id: Date.now(), text: `Delete the feature “${n}” from the design: remove its geometry and its step, keep everything else unchanged, then rebuild and check.` });
+          }}>Ask the design agent instead</Button>
+          <Button variant="secondary" onClick={() => setDelTarget(null)}>Cancel</Button>
+          <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} disabled={!!p.agent?.busy || manualBusy} onClick={() => {
+            const n = delTarget!; setDelTarget(null); setFeatureChips(c => c.filter(x => x !== n));
+            void manualCall(() => api.post(`/api/projects/${id}/design-features/delete`, { name: n }), `${n} deleted`);
+          }}>Delete</Button></>}>
+        <p className="text-[13px] text-muted">The result is checked to be identical to suppressing it. If anything else would change, nothing is deleted and
+          the feature stays suppressed. Then you can ask the design agent to remove it. Undo with <b>Revisions</b>.</p>
+      </Modal>
       {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
       {dialog === "toolbox" && <Toolbox project={p} initial={tbInit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
 

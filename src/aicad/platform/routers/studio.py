@@ -311,7 +311,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> dict[str, Any]:
+async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, transform: Any = None) -> dict[str, Any]:
     p = _project(ctx, project_id)
     if ctx.role == "viewer":
         raise HTTPException(403)
@@ -327,12 +327,15 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     src = f.read_text(encoding="utf-8")
     feats = read_manual(src)
     new_feats = mutate([dict(x) for x in feats])
+    if transform is not None and fresh:
+        f.unlink()
+        raise HTTPException(404, "There is no design to change yet")
     await wait_finalized(p.id)  # never snapshot while background exports are writing
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
     if (ws / "out").is_dir():
         shutil.copytree(ws / "out", backup)
-    f.write_text(write_manual(src, new_feats), encoding="utf-8")
+    f.write_text(transform(src) if transform is not None else write_manual(src, new_feats), encoding="utf-8")
     st = await _rebuild(p, ws, determinism=False, fast=True)
     if st.get("error") or not st.get("fingerprint"):
         f.unlink() if fresh else f.write_text(src, encoding="utf-8")
@@ -357,8 +360,126 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str) -> 
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
     if s:
-        s.publish({"type": "text", "text": f"Manual feature {action} without AI (revision {rev})."})
+        s.publish({"type": "text", "text": f"{'Feature' if transform is not None else 'Manual feature'} {action} without AI (revision {rev})."})
     return {"ok": True, "features": new_feats, "revision": rev, "build_s": (st.get("timings_s") or {}).get("total_s")}
+
+
+SUP_START = "# --- Formwright suppressed features (managed by the app; toggle them in the feature tree) ---"
+SUP_END = "# --- end suppressed features ---"
+
+
+def write_managed(src: str, suppressed: list[str], deleted: list[str] | None = None) -> str:
+    """Set the app-managed SUPPRESSED_FEATURES / DELETED_FEATURES lists. The block sits just before the
+    manual-features block (or at the end). DELETED_FEATURES records steps removed without AI, so the size and
+    volume checks stay informational until the design's expected values are updated."""
+    nl = "\n"
+    if SUP_START in src:
+        end = src.index(SUP_END) + len(SUP_END) if SUP_END in src else len(src)
+        src = src[:src.index(SUP_START)].rstrip(nl) + nl + src[end:].lstrip(nl)
+    lines = []
+    if suppressed:
+        lines.append(f"SUPPRESSED_FEATURES = {sorted(set(suppressed))!r}")
+    if deleted:
+        lines.append(f"DELETED_FEATURES = {sorted(set(deleted))!r}")
+    if not lines:
+        return src if src.endswith(nl) else src + nl
+    block = SUP_START + nl + nl.join(lines) + nl + SUP_END + nl
+    if BLOCK_START in src:
+        i = src.index(BLOCK_START)
+        return src[:i].rstrip(nl) + nl + nl + block + nl + src[i:]
+    return src.rstrip(nl) + nl + nl + block
+
+
+def write_suppressed(src: str, names: list[str]) -> str:
+    from aicad.agent.runner import managed_list
+
+    return write_managed(src, names, managed_list(src, "DELETED_FEATURES"))
+
+
+class SuppressIn(BaseModel):
+    name: str
+    suppressed: bool
+
+
+@router.post("/projects/{project_id}/design-features/suppress")
+async def suppress_design_feature(project_id: str, body: SuppressIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Suppress or restore a feature the design agent built (no AI): the model is rebuilt without that step."""
+    from aicad.agent.runner import suppressed_features
+
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    mf = ws / "model.py"
+    if not mf.is_file():
+        raise HTTPException(404, "There is no design to change yet")
+    current = suppressed_features(mf.read_text(encoding="utf-8"))
+    if body.suppressed:
+        st = _read_status(ws) or {}
+        feats = [f for f in st.get("features") or [] if f.get("kind") == "feature"]
+        target = next((f for f in feats if f.get("name") == body.name), None)
+        if target is None:
+            raise HTTPException(404, "Feature not found in the current design")
+        if not target.get("chain"):
+            raise HTTPException(422, f"“{body.name}” can't be suppressed: it is the base feature or a separate body. "
+                                     "Ask the design agent to change it instead.")
+        names = [*current, body.name]
+    else:
+        names = [n for n in current if n != body.name]
+    res = await _apply_manual(ctx, project_id, lambda fs: fs, "suppressed" if body.suppressed else "restored",
+                              transform=lambda src: write_suppressed(src, names))
+    return {**res, "suppressed": sorted(set(names))}
+
+
+class NameIn(BaseModel):
+    name: str
+
+
+def _same_geometry(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
+    if not a or not b:
+        return False
+    va, vb = float(a.get("volume", 0)), float(b.get("volume", 0))
+    return (abs(va - vb) <= 1e-9 * max(abs(vb), 1.0)
+            and all(abs(float(x) - float(y)) <= 1e-6 for x, y in zip(a.get("bbox", []), b.get("bbox", []), strict=False))
+            and all(a.get(k) == b.get(k) for k in ("faces", "edges", "solids")))
+
+
+@router.post("/projects/{project_id}/design-features/delete")
+async def delete_design_feature(project_id: str, body: NameIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Delete a design step without AI: remove its code, then verify the result is identical to the model with that
+    step suppressed. If it isn't, nothing is deleted and the feature stays suppressed."""
+    from aicad.agent.runner import managed_list, suppressed_features
+    from aicad.design_edit import DesignEditError, delete_step
+
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    mf = ws / "model.py"
+    if not mf.is_file():
+        raise HTTPException(404, "There is no design to change yet")
+    src = mf.read_text(encoding="utf-8")
+    try:
+        delete_step(src, body.name)  # dry run: can this step be removed on its own?
+    except DesignEditError as e:
+        raise HTTPException(422, f"Can't delete without AI: {e}. Suppress it, or ask the design agent to remove it.") from None
+    sup = suppressed_features(src)
+    if body.name not in sup:  # reference: the same design with the step suppressed
+        await _apply_manual(ctx, project_id, lambda fs: fs, "suppressed",
+                            transform=lambda s: write_suppressed(s, [*sup, body.name]))
+    reference = (_read_status(ws) or {}).get("fingerprint")
+    src_sup = mf.read_text(encoding="utf-8")
+    remaining = [n for n in suppressed_features(src_sup) if n != body.name]
+    deleted = [*managed_list(src_sup, "DELETED_FEATURES"), body.name]
+    new_src = write_managed(delete_step(src_sup, body.name), remaining, deleted)
+    try:
+        res = await _apply_manual(ctx, project_id, lambda fs: fs, "deleted", transform=lambda s: new_src)
+    except HTTPException:
+        raise HTTPException(409, f"“{body.name}” couldn't be removed cleanly, so it stays suppressed. "
+                                 "Ask the design agent to remove it.") from None
+    if not _same_geometry((_read_status(ws) or {}).get("fingerprint"), reference):
+        await _apply_manual(ctx, project_id, lambda fs: fs, "kept suppressed", transform=lambda s: src_sup)
+        raise HTTPException(409, f"Removing “{body.name}” changed other geometry, so it stays suppressed. "
+                                 "Ask the design agent to remove it.")
+    return {**res, "deleted": body.name}
+
+
 
 
 class FeatureIn(BaseModel):

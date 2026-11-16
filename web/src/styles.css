@@ -83,3 +83,14 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 .fw-md code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: rgb(var(--text) / .06); padding: 0 .3em; border-radius: 4px; }
 .fw-md pre { background: rgb(var(--text) / .05); padding: .6em .8em; border-radius: 6px; overflow-x: auto; margin: .5em 0; }
 .fw-md pre code { background: none; padding: 0; }
+.fw-md h3, .fw-md h4, .fw-md h5, .fw-md h6 { font-weight: 600; margin: .7em 0 .3em; }
+.fw-md h3 { font-size: 1.05em; } .fw-md h4, .fw-md h5, .fw-md h6 { font-size: 1em; }
+.fw-md > :first-child { margin-top: 0; }
+.fw-md hr { border: 0; border-top: 1px solid rgb(var(--border)); margin: .7em 0; }
+.fw-md-table { overflow-x: auto; margin: .4em 0 .7em; border: 1px solid rgb(var(--border)); border-radius: 6px; }
+.fw-md table { width: 100%; border-collapse: collapse; font-size: 12.5px; line-height: 1.35; }
+.fw-md th { background: rgb(var(--text) / .05); font-weight: 600; white-space: nowrap; }
+.fw-md th, .fw-md td { padding: .35em .6em; border-bottom: 1px solid rgb(var(--border)); vertical-align: top; }
+.fw-md tbody tr:last-child td { border-bottom: 0; }
+.fw-md tbody tr:nth-child(even) td { background: rgb(var(--text) / .02); }
+.fw-md td:first-child { font-weight: 500; }

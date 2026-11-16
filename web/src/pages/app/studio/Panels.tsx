@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
 import { ago, cx, num } from "@/lib/format";
-import { Badge, Button, Input, Toggle, Tip } from "@/components/ui";
+import { Badge, Button, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Toggle, Tip } from "@/components/ui";
 import type { Topo } from "@/viewer/types";
 import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 
@@ -169,11 +169,15 @@ export interface Recognition {
 const fmtParams = (p: Record<string, unknown>) => Object.entries(p).filter(([, v]) => v !== null && v !== undefined && typeof v !== "object")
   .slice(0, 4).map(([k, v]) => `${k.replace(/_/g, " ")} ${typeof v === "number" ? +v.toFixed(3) : String(v)}`).join(" · ");
 
-export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane }: {
+export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane,
+  selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
   onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
   recognition: Recognition | null; onRecognize: () => void; recognizing: boolean; onSketchPlane: (p: RefPlane) => void;
+  /** Design (agent-built) feature actions: pick as a chat reference, suppress/restore without AI, delete via the agent. */
+  selectedFeatures?: string[]; onPickFeature?: (name: string) => void;
+  onSuppressDesign?: (name: string, suppressed: boolean) => void; onDeleteDesign?: (name: string) => void; agentBusy?: boolean;
 }) {
   const modelFeats = (status?.features ?? []).filter(f => f.kind !== "manual" && f.kind !== "edit");
   const facesOf = (name: string) => topo ? topo.faces.filter(f => f.feature === name).map(f => f.id) : [];
@@ -201,13 +205,35 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
         <ul className="space-y-0.5">{modelFeats.map((f, i) => {
           const blank = f.kind === "blank";
           const n = facesOf(f.name).length;
+          const sup = !!f.suppressed;
+          const canSup = f.kind === "feature" && (!!f.chain || sup);
+          const picked = selectedFeatures.includes(f.name);
+          const label = aiName(f.name)?.name ?? f.name;
           return (
-            <li key={i} onMouseEnter={() => onHover(facesOf(f.name))} onMouseLeave={() => onHover([])}
-              className="flex items-center gap-2 rounded px-2 py-1 hover:bg-primary-soft">
+            <li key={i} onMouseEnter={() => onHover(sup ? [] : facesOf(f.name))} onMouseLeave={() => onHover([])}
+              className={cx("group flex items-center gap-1.5 rounded px-2 py-1 hover:bg-primary-soft", picked && "bg-accent/10 ring-1 ring-accent/40", sup && "opacity-55")}>
               {blank ? <Box className="h-3.5 w-3.5 shrink-0 text-muted" /> : imported ? <ScanSearch className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Bot className="h-3.5 w-3.5 shrink-0 text-muted" />}
-              <span className={cx("flex-1 truncate", blank && "italic")} title={blank ? "Exact imported solid. Geometry not resolved into features stays here; it can still be edited by the design agent or with manual features." : fmtParams(f.params)}>
-                {aiName(f.name)?.name ?? f.name}</span>
-              <span className="text-[10.5px] text-muted">{n} faces</span>
+              <button onClick={() => onPickFeature?.(f.name)} disabled={!onPickFeature}
+                className={cx("flex-1 truncate text-left", (blank || sup) && "italic", sup && "line-through decoration-muted/60")}
+                title={blank ? "Exact imported solid. Geometry not resolved into features stays here; it can still be edited by the design agent or with manual features."
+                  : `${fmtParams(f.params) ? fmtParams(f.params) + " · " : ""}Click to reference it in the design agent chat`}>
+                {label}</button>
+              <span className="text-[10.5px] text-muted group-hover:hidden">{sup ? "suppressed" : `${n} faces`}</span>
+              {canSup && <Tip content={sup ? "Unsuppress (no AI)" : "Suppress (no AI)"} side="left">
+                <button disabled={busy || agentBusy} onClick={() => onSuppressDesign?.(f.name, !sup)} className={cx("rounded p-0.5 text-muted hover:text-text disabled:opacity-30", !sup && "hidden group-hover:block")} aria-label={sup ? `Unsuppress ${f.name}` : `Suppress ${f.name}`}>
+                  {sup ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}</button></Tip>}
+              <Menu>
+                <MenuTrigger asChild><button className="hidden rounded p-0.5 text-muted hover:text-text group-hover:block data-[state=open]:block" aria-label={`Actions for ${f.name}`}><MoreHorizontal className="h-3.5 w-3.5" /></button></MenuTrigger>
+                <MenuContent>
+                  <MenuLabel>{label}</MenuLabel>
+                  <MenuItem icon={<MessageSquarePlus className="h-4 w-4" />} onSelect={() => onPickFeature?.(f.name)}>{picked ? "Remove from chat" : "Ask the design agent about it"}</MenuItem>
+                  {f.kind === "feature" && (canSup
+                    ? <MenuItem icon={sup ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />} onSelect={() => onSuppressDesign?.(f.name, !sup)}>{sup ? "Unsuppress" : "Suppress"} <span className="ml-1 text-[11px] text-muted">no AI</span></MenuItem>
+                    : <div className="px-2 py-1.5 text-[11.5px] text-muted">Base feature: can't be suppressed</div>)}
+                  {canSup && <MenuSeparator />}
+                  {canSup && <MenuItem danger icon={<Trash2 className="h-4 w-4" />} onSelect={() => onDeleteDesign?.(f.name)}>Delete… <span className="ml-1 text-[11px] text-muted">no AI</span></MenuItem>}
+                </MenuContent>
+              </Menu>
             </li>);
         })}</ul>}
 

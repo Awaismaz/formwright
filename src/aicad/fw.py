@@ -41,6 +41,8 @@ _STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
 def reset() -> None:
     _STATE["log"] = []
     _STATE["manual"] = 0
+    _STATE["last"] = None
+    _STATE["suppressed"] = set()
 
 
 def set_base(folder: Any) -> None:
@@ -169,14 +171,36 @@ def face_key(f: Any) -> tuple[Any, ...]:
     return (str(f.geom_type), r(c.X), r(c.Y), r(c.Z), r(f.area))
 
 
-def feature(name: str, part: Any, kind: str = "feature", **params: Any) -> Any:
-    """Record that `part` is the state after feature `name`. Returns `part` unchanged."""
+def set_suppressed(names: Any) -> None:
+    """Design features the user suppressed in the feature tree (set by the runner before the script runs)."""
+    _STATE["suppressed"] = {str(n) for n in (names or [])}
+
+
+def _keys(part: Any) -> set[tuple[Any, ...]]:
     try:
-        keys = {face_key(f) for f in part.faces()}
+        return {face_key(f) for f in part.faces()}
     except Exception:  # noqa: BLE001 - never break a model because of bookkeeping
-        keys = set()
+        return set()
+
+
+def feature(name: str, part: Any, kind: str = "feature", **params: Any) -> Any:
+    """Record that `part` is the state after feature `name` and return it.
+
+    `chain` marks a step built on the previous recorded state (they share surfaces), the usual
+    `part = fw.feature("Pocket", part - pocket)` pattern. Such a step can be suppressed from the feature tree:
+    `feature` then returns the previous state instead, so the step has no effect on the result."""
+    keys = _keys(part)
+    prev = _STATE.get("last")
+    chain = prev is not None and bool(keys & prev[1])
     clean = {k: v for k, v in params.items() if isinstance(v, (int, float, str, bool))}
-    _STATE["log"].append({"name": str(name), "kind": kind, "keys": keys, "params": clean})
+    if kind == "feature" and str(name) in _STATE.get("suppressed", set()):
+        if not chain:
+            raise ValueError(f"'{name}' can't be suppressed: it is the first feature or isn't built on the previous one")
+        _STATE["log"].append({"name": str(name), "kind": kind, "keys": set(), "params": clean, "chain": True,
+                              "suppressed": True})
+        return prev[0]
+    _STATE["log"].append({"name": str(name), "kind": kind, "keys": keys, "params": clean, "chain": chain})
+    _STATE["last"] = (part, keys)
     return part
 
 
