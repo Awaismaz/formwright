@@ -325,11 +325,15 @@ def main():
         if o.get("blend"):
             sc.render.filepath = "//frames/f_"
             bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
-        for i in range(1, n + 1):
-            sc.frame_set(i)
-            sc.render.filepath = out_path(os.path.join(o["frames_dir"], "f_%04d.png" % i))
-            bpy.ops.render.render(write_still=True)
-            say("FW_FRAME %d/%d" % (i, n))
+        # one animation render keeps the device, kernels and scene loaded between frames (much faster than
+        # rendering each frame as a separate still)
+        def _frame_done(scene, *args):
+            say("FW_FRAME %d/%d" % (scene.frame_current, n))
+
+        bpy.app.handlers.render_write.append(_frame_done)
+        sc.render.filepath = out_path(os.path.join(o["frames_dir"], "f_"))
+        sc.render.use_file_extension = True
+        bpy.ops.render.render(animation=True)
     else:
         if o.get("blend"):
             sc.render.filepath = "//render.png"

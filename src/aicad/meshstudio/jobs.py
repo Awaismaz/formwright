@@ -32,7 +32,7 @@ class QueueFull(RuntimeError):
 
 
 def now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(UTC).replace(tzinfo=None).isoformat(timespec="seconds")  # naive UTC, like the platform
 
 
 def read_job(d: Path) -> dict[str, Any] | None:
