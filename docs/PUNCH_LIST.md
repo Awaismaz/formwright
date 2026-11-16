@@ -108,7 +108,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | IO-003 | IO | GLB export for web viewer | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Loads in Three.js; scale correct | `model.glb` loads in Three.js viewer (screenshot, session log) | Unit scale inferred in viewer; explicit check pending |
 | IO-004 | IO | 3MF export | P1 | Done | M2 | LT | Eng | IO-002 | Opens in a slicer; units preserved | 3MF with unit=millimeter, byte-identical rewrite, read-back volume match rel 1e-5 (`tests/test_print.py`) | Via 3D Print Prep exports; Studio also writes part.3mf |
 | IO-005 | IO | STEP import + validation (size limits, isolated parse) | P1 | Backlog | M2 | LT | Eng | SEC-005 | Malformed files rejected safely | — | |
-| IO-006 | IO | Assembly STEP export (hierarchy, placements) | P1 | Backlog | M3 | LT | Eng | ASM-001 | Reimport preserves tree & transforms | — | |
+| IO-006 | IO | Assembly STEP export (hierarchy, placements) | P1 | Done | M3 | LT | Eng | ASM-001 | Reimport preserves tree & transforms | Assembly STEP with sub-assemblies per fastener stack; reimport 18/18 instances, 4 groups, placement deviation 0 |  |
 | IO-007 | IO | DXF export of drawings/flat patterns | P2 | Done | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | DXF 1:1 via build123d ExportDXF (ezdxf, MIT) with layers | DXF dims are lines+text, not associative; DXF bytes not deterministic |
 | IO-008 | IO | Coordinate system + unit preservation tests across all formats | P0 | Backlog | M1 | MVP | Eng | IO-001 | Round-trip test matrix green | — | |
 
@@ -137,7 +137,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DRW-011 | Drawing | Detail views | P2 | Backlog | M2 | LT | Eng | DRW-001 | | — | |
 | DRW-012 | Drawing | General tolerances block + per-dim tolerances from spec | P1 | In Progress | M2 | LT | Eng | DRW-002 | Only approved tolerances shown as such | General tolerance block: 'Not specified' default, ISO 2768 class by name or custom text | Per-dimension tolerances not built |
 | DRW-013 | Drawing | GD&T frames where specified (never invented) | P2 | Backlog | M4 | LT | Eng | DRW-012 | Frames only from explicit input | — | |
-| DRW-014 | Drawing | BOM table on assembly drawings | P1 | Backlog | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | — | |
+| DRW-014 | Drawing | BOM table on assembly drawings | P1 | In Progress | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | BOM data exposed at /api/m/assembly/assemblies/{id}/bom | No drawing table yet |
 | DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Done | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | Out-of-date drawings regenerate; revision rows ('Regenerated: L 120→150'); byte-identical SVG for same model+options |  |
 | DRW-016 | Drawing | STEP-in → auto drawing (wedge W4 candidate) | P1 | Backlog | M2 | LT | Eng | IO-005, DRW-002 | Pilot-rated usefulness ≥ agreed bar | — | Inferred dims only, clearly labelled |
 
@@ -145,18 +145,19 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| ASM-001 | Assembly | Multi-part project model (parts, subassemblies, instances) | P1 | Backlog | M3 | LT | Eng | CAD-012 | Tree persisted and reloaded | — | |
-| ASM-002 | Assembly | Relative placement / joints (build123d joints) | P1 | Backlog | M3 | LT | Eng | ASM-001 | FX-05 placed correctly | — | |
-| ASM-003 | Assembly | Mate/constraint solver (coincident, concentric, distance, angle) | P1 | Backlog | M3 | LT | Eng | ASM-002 | Solver tests; over/under-constraint reported | — | |
-| ASM-004 | Assembly | Interference/collision check | P1 | Backlog | M3 | LT | Eng | ASM-002 | Seeded interferences detected with volumes | — | |
-| ASM-005 | Assembly | Clearance/fit checks | P1 | Backlog | M3 | LT | Eng | ASM-004 | Min clearance reported per mate | — | |
-| ASM-006 | Assembly | DOF analysis where feasible | P2 | Backlog | M3 | LT | Eng | ASM-003 | FX-06 DOF count correct | — | |
-| ASM-007 | Assembly | Exploded views | P2 | Backlog | M3 | LT | Eng | ASM-002 | Render + drawing view | — | |
-| ASM-008 | Assembly | BOM generation (qty, material, standard parts) | P1 | Backlog | M3 | LT | Eng | ASM-001 | BOM matches tree | — | |
-| ASM-009 | Assembly | Standard fastener library (original/licensed data) | P1 | Backlog | M3 | LT | Eng | CAD-027 | Dims match cited standard tables | — | Provenance required |
+| ASM-001 | Assembly | Multi-part project model (parts, subassemblies, instances) | P1 | Done | M3 | LT | Eng | CAD-012 | Tree persisted and reloaded | Assembly documents per org with part snapshots pinned to builds; Refresh re-maps mates (0 references lost in API test); `tests/test_assembly.py` (19); docs/reports/assembly.md | Assembly Studio Live 2026-11-17 |
+| ASM-002 | Assembly | Relative placement / joints (build123d joints) | P1 | Done | M3 | LT | Eng | ASM-001 | FX-05 placed correctly | Rigid transforms; ±X/Y/Z steps, ±90° rotations, exact transform via API | No drag-to-move |
+| ASM-003 | Assembly | Mate/constraint solver (coincident, concentric, distance, angle) | P1 | Done | M3 | LT | Eng | ASM-002 | Solver tests; over/under-constraint reported | Coincident/flush/distance/angle/concentric + Smart; block lands at (30,20,10) to 1e-9; conflicts isolated and reported Over-defined | No tangent mates |
+| ASM-004 | Assembly | Interference/collision check | P1 | Done | M3 | LT | Eng | ASM-002 | Seeded interferences detected with volumes | Exact boolean volumes: 4590 mm³ = 15·17·18; Ø10 pin in Ø8 hole × 12 = 108π; thread engagement not reported as clash |  |
+| ASM-005 | Assembly | Clearance/fit checks | P1 | Done | M3 | LT | Eng | ASM-004 | Min clearance reported per mate | Exact min distances: √32; bolt-hole 0.3 mm; washer bore 0.2 mm |  |
+| ASM-006 | Assembly | DOF analysis where feasible | P2 | Done | M3 | LT | Eng | ASM-003 | FX-06 DOF count correct | DOF from Jacobian rank; free spins reported ('Fully positioned · 16 free spins') |  |
+| ASM-007 | Assembly | Exploded views | P2 | Done | M3 | LT | Eng | ASM-002 | Render + drawing view | Explode along the mate tree (walkthrough at 70 %) |  |
+| ASM-008 | Assembly | BOM generation (qty, material, standard parts) | P1 | Done | M3 | LT | Eng | ASM-001 | BOM matches tree | BOM qty/material/mass/standard (plate 1, block 1, M6×25 ×4, washer ×8, nut ×4; 355.92 g); CSV | Masses at nominal density, verify |
+| ASM-009 | Assembly | Standard fastener library (original/licensed data) | P1 | In Progress | M3 | LT | Eng | CAD-027 | Dims match cited standard tables | Toolbox ISO fasteners used in assemblies (M3–M24 coarse) | Fine threads, other heads not yet |
 | ASM-010 | Assembly | AI assembly planning from description | P2 | Backlog | M3 | LT | Eng | ASM-003, AGT-003 | FX-05 from text | — | |
 | ASM-011 | Assembly | Motion range check / simple kinematics | P2 | Backlog | M5 | LT | Eng | ASM-006 | Range-of-motion collision sweep | — | |
 | ASM-012 | Assembly | Golden fixtures FX-04/05/06 (original designs) | P1 | Backlog | M3 | LT | Eng | ASM-001 | Fixtures with provenance + checks | — | |
+| ASM-013 | Assembly | **Fastener auto-fit**: pick a hole pattern; grip measured by ray probes through mated parts; ISO 273 size, ISO 888 length after grip + washers + nut + 2·pitch (or engagement for tapped joints); to-scale joint section; inserts one stack per hole, mated | P1 | Done | M3 | LT | Eng | ASM-003 | Length rule on hand cases | `tests/test_assembly.py` (5 through + 2 tapped cases); walkthrough: 4 × M6×25, grip 10, min 20.4 → 25 | Rule shown with VERIFY |
 
 ## Agent orchestration & evaluation
 
@@ -264,18 +265,18 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| MSH-001 | Mesh | Headless Blender worker (separate process, sandboxed) | P2 | Backlog | M5 | LT | Eng | SEC-004, LEG-004 | Script runs headless with limits | — | Blender 5.1 installed locally |
+| MSH-001 | Mesh | Headless Blender worker (separate process, sandboxed) | P2 | Done | M5 | LT | Eng | SEC-004, LEG-004 | Script runs headless with limits | Headless Blender 5.3 as a separate process: offline, factory settings, no auto-run, timeout kill, outputs confined to job folder (tests); docs/reports/mesh.md | Mesh Studio Live 2026-11-17 (product render studio); PD-25 sandbox |
 | MSH-002 | Mesh | Text → procedural scene script | P2 | Backlog | M5 | LT | Eng | MSH-001 | Benchmark prompts produce scenes | — | |
 | MSH-003 | Mesh | Image → scene/object via vision + script | P2 | Backlog | M5 | LT | Eng | MSH-002 | | — | |
-| MSH-004 | Mesh | Objects, modifiers, materials, lighting, camera control | P2 | Backlog | M5 | LT | Eng | MSH-002 | | — | |
+| MSH-004 | Mesh | Objects, modifiers, materials, lighting, camera control | P2 | Done | M5 | LT | Eng | MSH-002 |  | 14 PBR finishes auto-mapped from material (36 strings tested), 3 lighting setups, 5 cameras with tested framing, auto pose, transparent PNG |  |
 | MSH-005 | Mesh | Render → critique → revise loop using shared orchestrator | P2 | Backlog | M5 | LT | Eng | AGT-005 | Mesh validators via plug-in interface | — | |
 | MSH-006 | Mesh | Multiview reference support | P2 | Backlog | M5 | LT | Eng | MSH-005 | | — | |
-| MSH-007 | Mesh | Editable .blend output + GLB/GLTF/OBJ/STL (FBX where practical) | P2 | Backlog | M5 | LT | Eng | MSH-001 | Exports open in viewers | — | |
-| MSH-008 | Mesh | Topology/watertight/manifold/UV checks | P2 | Backlog | M5 | LT | Eng | PRN-001 | | — | |
-| MSH-009 | Mesh | Mesh vs B-rep labelling; defensible conversion only | P2 | Backlog | M5 | LT | Eng | — | UI label + conversion limits doc | — | |
+| MSH-007 | Mesh | Editable .blend output + GLB/GLTF/OBJ/STL (FBX where practical) | P2 | Done | M5 | LT | Eng | MSH-001 | Exports open in viewers | PNG, .blend, GIF, MP4, GLB/OBJ/STL; STL reload 40×20×10 mm, 8000 mm³ (test) | No FBX |
+| MSH-008 | Mesh | Topology/watertight/manifold/UV checks | P2 | Done | M5 | LT | Eng | PRN-001 |  | MS-01..08 via printprep checks (flange: 5,300 tris, 0.0133 mm deviation, volume within 0.022 %) |  |
+| MSH-009 | Mesh | Mesh vs B-rep labelling; defensible conversion only | P2 | Done | M5 | LT | Eng | — | UI label + conversion limits doc | 'Visualisation, not the exact model' in UI, PNG metadata, STL/OBJ/GLB, README |  |
 | MSH-010 | Mesh | Benchmark: scripted vs generative 3D models vs hybrid | P2 | Backlog | M5 | LT | Eng | MSH-002 | Report per VALIDATION §5 | — | |
 | MSH-011 | Mesh | Hybrid pipeline if benchmark favours it | P2 | Backlog | M5 | LT | Eng | MSH-010 | ADR | — | |
-| MSH-012 | Mesh | GPU render path on local RTX 8000 vs cloud cost comparison | P2 | Backlog | M5 | LT | Eng | MSH-001 | Measured cost/latency | — | |
+| MSH-012 | Mesh | GPU render path on local RTX 8000 vs cloud cost comparison | P2 | Done | M5 | LT | Eng | MSH-001 | Measured cost/latency | OptiX RTX 3070 vs Xeon CPU: final 1920×1440 38.5 s (256 spp) vs 334.6 s (96 spp); ~23× per sample | Cloud GPU not compared |
 
 ## E. Shared platform, security, UX, infra, docs
 

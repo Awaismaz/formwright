@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, ScanLine, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -31,6 +31,8 @@ const MAKE: Record<string, Omit<MakeModule, "code">> = {
   manufacturing: { name: "DFM Review", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
   print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
   engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
+  assembly: { name: "Assemble", icon: <Boxes className="h-5 w-5" />, tip: "Mate with other parts, check clashes, fit ISO fasteners" },
+  mesh: { name: "Product Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
 };
 
 /** Live input modules offered on the Library tab: they bring outside geometry into this part. */
