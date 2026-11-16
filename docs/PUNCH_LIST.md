@@ -186,6 +186,26 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | EVAL-008 | Eval | Repeatability: same prompt ×5 variance report | P1 | Backlog | M1 | MVP | Eng | EVAL-003 | Variance report | — | |
 | EVAL-009 | Eval | Custom-model decision gate (only if EVAL-003 shows inadequacy) | P2 | Backlog | M5 | LT | Founder | EVAL-003 | ADR with data rights + ROI | — | Do not train by default |
 
+
+### Design Studio roadmap (founder-prioritised 2026-11-16)
+
+| ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| DS-001 | Studio | Section view: solid capped cut with highlighted hatch, axis X/Y/Z, flip, numeric offset | P0 | Done | M1 | MVP | Eng | UX-004 | Cut face renders filled and highlighted on any axis; no hollow shell | Stencil capping in `web/src/components/Viewer3D.tsx`; screenshots of founder gear cut on X (−6.30 mm) and Z (10.00 mm = mid-plane of 20 mm), bore/keyway voids correct | Founder-reported defect, fixed 2026-11-16 |
+| DS-002 | Studio | Snap measurement: hover highlights vertices, edges, circle centres, faces; snaps to them; B-rep-accurate distance, radius/diameter, angle | P0 | Backlog | M1 | MVP | Eng | UX-004 | Hole Ø and edge lengths measure exactly (±0.001 mm) vs kernel | — | Needs B-rep topology export (edges/vertices/faces with ids) from runner |
+| DS-003 | Studio | Point and tell: select face/edge/hole in viewer → selection chip in chat → agent receives stable reference | P0 | Backlog | M1 | MVP | Eng | DS-002 | "Fillet this edge R2" changes only the selected edge | — | Shares topology export with DS-002 |
+| DS-004 | Studio | Mass properties + material library (density with cited source): mass, CoG, inertia | P1 | Backlog | M1 | MVP | Eng | ENG-003 | Values match hand calc on fixtures | — | Deterministic, no AI |
+| DS-005 | Studio | Reference image/sketch attachment in chat; agent asks for scale/missing dims | P1 | Backlog | M1 | MVP | Eng | AGT-014 | Sketch + one dimension → model with stated assumptions | — | Lite version of Image-to-CAD module |
+| DS-006 | Studio | Smart parameters: agent-declared limits/units/groups, sliders, live preview | P1 | Backlog | M2 | LT | Eng | UX-005 | Out-of-range values blocked before rebuild | — | |
+| DS-007 | Studio | Revision compare: 3D overlay (added/removed material) + parameter diff | P2 | Backlog | M2 | LT | Eng | UX-006 | | — | |
+| DS-008 | Studio | Feature tree: agent-labelled features, highlight in 3D, per-feature parameters | P1 | Backlog | M2 | LT | Eng | DS-003 | Selecting a tree node highlights its faces | — | Foundation for DS-010 |
+| DS-009 | Studio | Multi-part view: part list, show/hide, transparency, explode slider | P2 | Backlog | M2 | LT | Eng | UX-004 | | — | Bridge to Assembly Studio |
+| DS-010 | Studio | **Manual feature authoring & editing (major epic)** like standard CAD: sketch on face/plane (lines, arcs, circles, dimensions, constraints), extrude / cut / revolve, hole wizard, fillet / chamfer on selected edges, linear/circular pattern, mirror, shell; edit, suppress, delete and reorder features in the tree; no AI, no tokens; manual and agent edits interoperate | P0 | Backlog | M2 | LT | Eng | DS-003, DS-008, CAD-060 | A user can model the FX-01 plate entirely by hand, then ask the agent to modify it, and vice versa | — | Writes deterministic feature code into the model; needs sketch solver (CAD-060) and stable references (CAD-007) |
+| DS-010a | Studio | DS-010 step 1: edge/face operations on selection (fillet, chamfer, hole, delete face) | P0 | Backlog | M2 | LT | Eng | DS-003 | | — | |
+| DS-010b | Studio | DS-010 step 2: sketch mode on a face with dimensions + extrude/cut | P0 | Backlog | M2 | LT | Eng | DS-010a, CAD-060 | | — | |
+| DS-010c | Studio | DS-010 step 3: feature tree edit/suppress/reorder with regeneration | P1 | Backlog | M2 | LT | Eng | DS-010b, DS-008 | | — | |
+| DS-011 | Studio | Quick wins: persist chat history, undo last agent change, 3MF + named-part STEP export, pre-run token estimate | P1 | Backlog | M1 | MVP | Eng | — | | — | |
+
 ## B. AI Manufacturing Advisor
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
