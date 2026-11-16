@@ -143,3 +143,7 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-12 | GitHub repo | **Resolved 2026-11-16:** founder created private repo `github.com/Awaismaz/formwright`; `main` pushed and tracking `origin/main` | Done |
 | PD-13 | Toolbox catalogue scope and standards to license/verify (ISO table values typed from public references; verify before production) | 11 components, envelope-accurate, threads cosmetic | Before pilots |
 | PD-14 | Feature recognition depth: in-house heuristics vs a commercial FR library | In-house heuristics + agent rebuild with CHK-09 | When customers import complex parts |
+| PD-15 | 3D Print process limits (walls, holes, pins, clearances, bridges, overhang) | From 3D Hubs / Protolabs design-rule tables; build volumes, time constants, FDM 1.2 mm wall warning and resin density 1.15 g/cm³ are assumptions, editable and labelled in the UI | Before pilots |
+| PD-16 | 3D Print permissions | Viewers analyse/download; engineers upload, repair, export, delete | When roles are reviewed |
+| PD-17 | Uploaded-mesh retention/quota | Stored per workspace on disk, no retention or quota limit | Before external users |
+| PD-18 | Module check numbering | 3D Print uses PP-01..17 internally; map to CHK-15+ later if a single catalogue is wanted | Optional |

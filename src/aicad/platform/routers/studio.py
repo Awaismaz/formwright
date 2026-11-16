@@ -304,7 +304,8 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, transform: Any = None) -> dict[str, Any]:
+async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, transform: Any = None,
+                        cause: str | None = None) -> dict[str, Any]:
     p = _project(ctx, project_id)
     if ctx.role == "viewer":
         raise HTTPException(403)
@@ -348,7 +349,11 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
     p.last_status = _status_summary(st)
     p.builds += 1
     p.updated_at = utcnow()
-    rev = _snapshot(p, ws)
+    if cause is None:
+        names = ([f.get("name", f.get("op")) for f in new_feats if f not in feats]
+                 or [f.get("name", f.get("op")) for f in feats if f not in new_feats])
+        cause = f"Manual feature {action}" + (f": {', '.join(names)}" if names else "")
+    rev = _snapshot(p, ws, cause=cause, kind="manual", by=ctx.user.name)
     schedule_finalize(p, ws, rev)
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
@@ -418,7 +423,8 @@ async def suppress_design_feature(project_id: str, body: SuppressIn, ctx: Ctx = 
     else:
         names = [n for n in current if n != body.name]
     res = await _apply_manual(ctx, project_id, lambda fs: fs, "suppressed" if body.suppressed else "restored",
-                              transform=lambda src: write_suppressed(src, names))
+                              transform=lambda src: write_suppressed(src, names),
+                              cause=f"{'Suppressed' if body.suppressed else 'Restored'} “{body.name}” (no AI)")
     return {**res, "suppressed": sorted(set(names))}
 
 
@@ -455,14 +461,16 @@ async def delete_design_feature(project_id: str, body: NameIn, ctx: Ctx = Depend
     sup = suppressed_features(src)
     if body.name not in sup:  # reference: the same design with the step suppressed
         await _apply_manual(ctx, project_id, lambda fs: fs, "suppressed",
-                            transform=lambda s: write_suppressed(s, [*sup, body.name]))
+                            transform=lambda s: write_suppressed(s, [*sup, body.name]),
+                            cause=f"Suppressed “{body.name}” (no AI), before deleting it")
     reference = (_read_status(ws) or {}).get("fingerprint")
     src_sup = mf.read_text(encoding="utf-8")
     remaining = [n for n in suppressed_features(src_sup) if n != body.name]
     deleted = [*managed_list(src_sup, "DELETED_FEATURES"), body.name]
     new_src = write_managed(delete_step(src_sup, body.name), remaining, deleted)
     try:
-        res = await _apply_manual(ctx, project_id, lambda fs: fs, "deleted", transform=lambda s: new_src)
+        res = await _apply_manual(ctx, project_id, lambda fs: fs, "deleted", transform=lambda s: new_src,
+                                  cause=f"Deleted “{body.name}” (no AI; verified identical to suppressing it)")
     except HTTPException:
         raise HTTPException(409, f"“{body.name}” couldn't be removed cleanly, so it stays suppressed. "
                                  "Ask the design agent to remove it.") from None

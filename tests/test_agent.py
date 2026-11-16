@@ -163,3 +163,30 @@ def test_warm_worker_builds_renders_and_recovers(tmp_path: Path) -> None:
     assert r1["rc"] == 0 and r2["rc"] == 0 and rr["ok"] and (tmp_path / "v.png").stat().st_size > 1000
     assert r2["elapsed_s"] < r1["elapsed_s"]  # warm + no determinism rebuild
     assert r3["ok"] and json.loads((tmp_path / "o3" / "status.json").read_text())["fingerprint"]["volume"] == 6.0
+
+
+def test_stl_export_deviation_is_absolute(tmp_path: Path) -> None:
+    """part.stl must stay within 0.01 mm of the exact surface on large parts too (build123d's tolerance is relative)."""
+    import struct
+
+    from build123d import Cylinder
+
+    from aicad.agent.runner import export_stl_abs
+
+    r = 100.0
+    p = tmp_path / "c.stl"
+    assert export_stl_abs(Cylinder(r, 20), p)
+    data = p.read_bytes()
+    n = struct.unpack("<I", data[80:84])[0]
+    worst = 0.0
+    for i in range(n):
+        if abs(struct.unpack("<3f", data[84 + 50 * i:84 + 50 * i + 12])[2]) > 0.1:
+            continue  # end caps: their chords cross the disc; only the side wall approximates the cylinder
+        v = struct.unpack("<9f", data[84 + 50 * i + 12:84 + 50 * i + 48])
+        pts = [v[0:3], v[3:6], v[6:9]]
+        for a, b in ((0, 1), (1, 2), (2, 0)):  # edge midpoints on the side wall sag inward by the chordal deviation
+            mx, my = (pts[a][0] + pts[b][0]) / 2, (pts[a][1] + pts[b][1]) / 2
+            rho = (mx * mx + my * my) ** 0.5
+            if rho > r * 0.5:
+                worst = max(worst, r - rho)
+    assert 0 < worst <= 0.0101, worst  # float32 STL coordinates

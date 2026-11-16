@@ -202,6 +202,7 @@ class AgentSession:
         self.worker_key = worker_key
         self.client: ClaudeSDKClient | None = None
         self.history: list[dict[str, Any]] = []
+        self.last_prompt: str | None = None  # the request behind the next revision (change notices)
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.busy = False
         self.session_id: str | None = None
@@ -287,6 +288,7 @@ class AgentSession:
             raise RuntimeError("agent is busy")
         self.busy = True
         self.publish({"type": "user", "text": prompt})
+        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)", prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         try:
             try:

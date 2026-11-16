@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
@@ -9,6 +9,7 @@ import { ago, cx, num } from "@/lib/format";
 import { Badge, Button, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Toggle, Tip } from "@/components/ui";
 import type { Topo } from "@/viewer/types";
 import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
+import ChangeNotice from "./ChangeNotice";
 
 /* ------------------------------------------------------------------ checks */
 export function ChecksPanel({ status }: { status?: BuildStatus }) {
@@ -280,8 +281,9 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
 
 /* ------------------------------------------------------------------ revisions + compare */
 export function RevisionsPanel({ project, onChanged, version, onCompare, comparing }: { project: Project; onChanged: () => void; version?: number; onCompare: (n: number) => void; comparing: number | null }) {
-  const q = useQuery({ queryKey: ["revisions", project.id, version], queryFn: () => api.get<{ items: { n: number; ok: boolean; error?: string; fingerprint?: { bbox: number[]; volume: number }; created_at: string }[] }>(`/api/projects/${project.id}/revisions`) });
+  const q = useQuery({ queryKey: ["revisions", project.id, version], queryFn: () => api.get<{ items: { n: number; ok: boolean; error?: string; fingerprint?: { bbox: number[]; volume: number }; created_at: string; why?: string | null; by?: string | null }[] }>(`/api/projects/${project.id}/revisions`) });
   const [busy, setBusy] = useState<number | null>(null);
+  const [notice, setNotice] = useState<number | null>(null);
   const items = q.data?.items ?? [];
   if (!items.length) return <p className="p-4 text-sm text-muted">Every build becomes a revision you can restore or compare.</p>;
   return (
@@ -291,8 +293,10 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-panel2 text-[11px] font-semibold">{r.n}</span>
           <div className="min-w-0 flex-1 text-[12px]">
             <div className="flex items-center gap-1.5">{r.ok ? <Badge tone="success">Verified</Badge> : <Badge tone="danger">Failed</Badge>}{i === 0 && <Badge tone="primary">Latest</Badge>}</div>
-            <div className="mt-0.5 truncate text-muted">{r.fingerprint ? `${r.fingerprint.bbox.map(n => Math.round(n)).join("×")} mm · ${num(r.fingerprint.volume, 0)} mm³` : r.error?.slice(0, 40)} · {ago(r.created_at)}</div>
+            {r.why && <div className="mt-0.5 truncate text-text/85" title={r.why}>{r.why}</div>}
+            <div className="mt-0.5 truncate text-muted">{r.fingerprint ? `${r.fingerprint.bbox.map(n => Math.round(n)).join("×")} mm · ${num(r.fingerprint.volume, 0)} mm³` : r.error?.slice(0, 40)} · {ago(r.created_at)}{r.by ? ` · ${r.by}` : ""}</div>
           </div>
+          <Tip content="Change notice: what changed and why" side="left"><button onClick={() => setNotice(r.n)} className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-primary" aria-label={`Change notice for revision ${r.n}`}><FileText className="h-4 w-4" /></button></Tip>
           {i > 0 && <>
             <Tip content="Compare with current model" side="left"><button onClick={() => onCompare(r.n)} className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-primary" aria-label="Compare"><GitCompare className="h-4 w-4" /></button></Tip>
             <Button size="sm" variant="secondary" loading={busy === r.n} disabled={busy !== null} onClick={async () => {
@@ -301,6 +305,7 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
               catch (e) { toast.error(e instanceof ApiError ? e.message : "Restore failed"); } finally { setBusy(null); }
             }}>Restore</Button></>}
         </li>))}
+      <ChangeNotice projectId={project.id} n={notice} onClose={() => setNotice(null)} />
     </ul>
   );
 }

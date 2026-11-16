@@ -130,8 +130,9 @@ def workspace_for(p: Project) -> Path:
     return ws
 
 
-def _snapshot(p: Project, ws: Path) -> int | None:
-    """Copy model.py + status into revisions/<n> after a build; returns revision number."""
+def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None = None, by: str | None = None) -> int | None:
+    """Copy model.py + status into revisions/<n> after a build; returns revision number. `cause` records why the
+    revision exists (the request or action), for change notices."""
     status_p, model_p = ws / "out" / "status.json", ws / "model.py"
     if not status_p.is_file() or not model_p.is_file():
         return None
@@ -152,6 +153,8 @@ def _snapshot(p: Project, ws: Path) -> int | None:
             shutil.copy2(ws / "out" / extra, d / extra)
     if (ws / "out" / "views.png").is_file():
         shutil.copy2(ws / "out" / "views.png", d / "views.png")
+    if cause:
+        (d / "cause.json").write_text(json.dumps({"cause": cause[:600], "kind": kind or "edit", "by": by}), encoding="utf-8")
     return n
 
 
@@ -173,7 +176,10 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                                                             "build_id", "params")}
                     p.builds += 1
                     p.updated_at = utcnow()
-                    rev = _snapshot(p, ws)
+                    s = _sessions.get(project_id)
+                    who = db.get(User, user_id)
+                    rev = _snapshot(p, ws, cause=getattr(s, "last_prompt", None) or "Design agent build", kind="agent",
+                                    by=who.name if who else None)
                     if rev:
                         ev["revision"] = rev
                     if p.builds == 1:
@@ -362,10 +368,28 @@ def revisions(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
     if root.is_dir():
         for d in sorted((d for d in root.iterdir() if d.name.isdigit()), key=lambda d: -int(d.name)):
             st = json.loads((d / "status.json").read_text(encoding="utf-8")) if (d / "status.json").is_file() else {}
-            items.append({"n": int(d.name), "ok": st.get("ok"), "error": st.get("error"),
+            cause = json.loads((d / "cause.json").read_text(encoding="utf-8")) if (d / "cause.json").is_file() else {}
+            items.append({"n": int(d.name), "ok": st.get("ok"), "error": st.get("error"), "why": cause.get("cause"),
+                          "kind": cause.get("kind"), "by": cause.get("by"),
                           "fingerprint": st.get("fingerprint"), "params": st.get("params"),
                           "created_at": datetime.fromtimestamp(d.stat().st_mtime, UTC).replace(tzinfo=None).isoformat()})
     return {"items": items}
+
+
+@router.get("/projects/{project_id}/revisions/{n}/notice")
+def change_notice(project_id: str, n: int, base: int | None = None, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """What changed in revision n (vs. the previous one, or `base`) and why: deterministic, for the shop floor."""
+    from aicad import change_notice as cn
+
+    p = _project(ctx, project_id)
+    root = workspace_for(p) / "revisions"
+    try:
+        out = cn.notice(root, n, base)
+    except FileNotFoundError:
+        raise HTTPException(404, "Revision not found") from None
+    newer = sorted(int(d.name) for d in root.iterdir() if d.name.isdigit() and int(d.name) > n) if root.is_dir() else []
+    return {**out, "project": {"id": p.id, "name": p.name}, "superseded_by": newer[0] if newer else None,
+            "latest": not newer}
 
 
 def _read_status(ws: Path) -> dict[str, Any]:
@@ -384,6 +408,26 @@ async def _render_later(p: Project, ws: Path) -> None:
     stl = ws / "out" / "part.stl"
     if stl.is_file():
         await worker.render(p.org_id, stl, ws / "out" / "views.png", p.name)
+        _attach_view_to_revision(ws)
+
+
+def _attach_view_to_revision(ws: Path) -> None:
+    """The 4-view render finishes after the revision snapshot; give that revision its picture (change notices,
+    revision compare). Matches by build id, so a newer build can never lend its image to an older revision."""
+    view, status = ws / "out" / "views.png", ws / "out" / "status.json"
+    root = ws / "revisions"
+    if not view.is_file() or not status.is_file() or not root.is_dir():
+        return
+    try:
+        build = json.loads(status.read_text(encoding="utf-8")).get("build_id")
+        for d in sorted((d for d in root.iterdir() if d.name.isdigit()), key=lambda d: -int(d.name))[:3]:
+            st = d / "status.json"
+            if st.is_file() and json.loads(st.read_text(encoding="utf-8")).get("build_id") == build:
+                if not (d / "views.png").is_file():
+                    shutil.copy2(view, d / "views.png")
+                return
+    except (OSError, ValueError):
+        return
 
 
 async def _finalize_later(p: Project, ws: Path, rev: int | None = None) -> None:
@@ -542,7 +586,8 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     p.last_status = _status_summary(st)
     p.builds += 1
     p.updated_at = utcnow()
-    rev = _snapshot(p, ws)
+    rev = _snapshot(p, ws, cause="Parameters changed: " + ", ".join(f"{k} {v['from']:g} → {v['to']:g}" for k, v in changes.items()),
+                    kind="params", by=ctx.user.name)
     schedule_finalize(p, ws, rev)
     audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
     ctx.db.commit()

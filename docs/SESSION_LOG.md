@@ -4,6 +4,45 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (k): Tree actions without AI, Find similar parts, 3D Print Prep merged, Make tab
+
+Founder (between away periods): fix chat tables; make the feature tree useful (suppress, delete, ask agent);
+"why does deleting a clean feature need AI?"; collapse the repeated "Updating the design" lines. Then: keep
+building autonomously, research gaps, quality over quantity, no decisions until back.
+
+### Done
+- **Chat**: markdown tables, headings and italics render properly (escape-first); repeated steps collapse
+  ("Updating the design · 5 edits").
+- **Feature tree (DS-027)**: agent-built steps can be suppressed or deleted without AI. A delete is verified
+  identical to the suppressed model, or else nothing is deleted. Click a feature to reference it in chat.
+  Size/volume checks become informational while steps are suppressed or deleted.
+- **Research → docs/OPPORTUNITIES.md** (sources cited): finding existing parts, change notices for the shop,
+  variants, handoff packs, drawing checks.
+- **Find similar parts (PLT-012 / O-1)**: shape signatures, similar-part ranking with reasons, search by size.
+- **3D Print Prep merged and Live** (agent; PRN-001..006, IO-004). Its PP-17 check found that the Studio STL
+  tolerance was relative (pipe flange deviated 0.023 mm). Fixed: absolute 0.01 mm deflection (IO-002).
+- **Make tab (DS-028)** in the command bar opens Live downstream modules on the current part.
+- Ops: the studio-e2e skill made agents share `fw-e2e` and `rm -rf` each other's data. Fixed with per-port
+  folders and Windows-style FW_DATA_DIR; all agents told.
+
+### Evidence
+- Tests: tree suppress/delete (volumes exact), design_edit rules, search (unit + API), STL deviation
+  (R100 cylinder sag 0.031 → 0.005 mm). The print agent's suite on its branch: 98 passed.
+- Browser (isolated, port 8766, 0 errors each):
+  - suppress Mounting holes → 91032.24 mm³ (= v0 + 4π·3.3²·10), restore → 89663.76;
+  - delete via dialog → same volume, tree updated, base feature offers no delete;
+  - chat shows "5 edits";
+  - size search "120 x 80" → Mounting plate 100 % (exact);
+  - Similar Parts on Flange DN100 → copy 100 %, Pipe Flange 79 %, DN150 "Same shape, scaled ×1.50" 48 %;
+  - Make → 3D Print opens the flange directly.
+
+### Parked
+PD-15..18 (print process limits, permissions, upload retention, check numbering).
+
+### Next
+Merge Drawing, Manufacturing, Engineering and Studio agents as they report. Then wave 2 (Assembly,
+Image & Drawing to CAD, Mesh Studio; Blender 5.3 is now installed). Then O-2 change notice and O-3 variants.
+
 ## 2026-11-16 (j): Design Studio: model from scratch, revolve, feature patterns; agents launched
 
 Founder (going away): "keep building, finish Design Studio, then every remaining module one by one; park decisions";

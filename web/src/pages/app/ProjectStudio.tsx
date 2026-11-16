@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, CircleHelp, Download, FileCode2, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
+import type { BuildStatus, Catalog, ManualFeature, Project } from "@/lib/types";
 import { cx, num } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -15,7 +15,7 @@ import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 import Chat from "./studio/Chat";
 import FeatureManager, { selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
-import CommandManager, { type Command } from "./studio/CommandManager";
+import CommandManager, { type Command, type MakeModule } from "./studio/CommandManager";
 import SketchEditor, { type SketchPreset } from "./studio/SketchEditor";
 import { offsetPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import StepImport from "./studio/StepImport";
@@ -25,8 +25,17 @@ import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, Source
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
 
+/** Downstream modules offered on the Make tab when they are Live: each opens the module on this part. */
+const MAKE: Record<string, Omit<MakeModule, "code">> = {
+  drawings: { name: "Drawing", icon: <FileText className="h-5 w-5" />, tip: "Generate the manufacturing drawing of this part" },
+  manufacturing: { name: "DFM Review", icon: <Factory className="h-5 w-5" />, tip: "Check manufacturability and get a relative cost estimate" },
+  print: { name: "3D Print", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
+  engineering: { name: "Calculations", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
+};
+
 export default function ProjectStudio() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const { me } = useSession();
   const [editing, setEditing] = useState(false);
@@ -55,6 +64,9 @@ export default function ProjectStudio() {
   const [chatRequest, setChatRequest] = useState<{ id: number; text: string } | null>(null);
   const [delTarget, setDelTarget] = useState<string | null>(null);
 
+  const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
+    .map(m => ({ code: m.code, ...MAKE[m.code]! })), [catalog.data]);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
@@ -195,7 +207,7 @@ export default function ProjectStudio() {
 
   return (
     <div className="flex h-full flex-col">
-      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool}
+      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} onMake={code => navigate(`/app/modules/${code}?project=${id}`)}
         left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
           <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className="rounded p-1 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
           {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"

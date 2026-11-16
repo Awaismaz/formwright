@@ -217,15 +217,31 @@ def _export_atomic(fn: Any, shape: Any, out: Path, name: str, **kw: Any) -> Path
     return p
 
 
+STL_DEFLECTION_MM = 0.01
+
+
+def export_stl_abs(shape: Any, path: Any, tolerance: float = STL_DEFLECTION_MM, angular_tolerance: float = 0.1) -> bool:
+    """Binary STL whose chordal deviation is at most `tolerance` mm. build123d's export_stl treats the tolerance as
+    *relative* to the part size, so large parts deviated more than 0.01 mm (found by 3D Print Prep, PP-17)."""
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.StlAPI import StlAPI_Writer
+
+    mesh = BRepMesh_IncrementalMesh(shape.wrapped, tolerance, False, angular_tolerance, True)
+    mesh.Perform()
+    writer = StlAPI_Writer()
+    writer.ASCIIMode = False
+    return bool(writer.Write(shape.wrapped, str(path)))
+
+
 def _exports(shape: Any, out: Path) -> tuple[Any, Path]:
     """STEP (+ re-import for round-trip check), STL, GLB, 3MF. Returns (reimported shape, step path)."""
     import os
 
-    from build123d import export_gltf, export_step, export_stl, import_step
+    from build123d import export_gltf, export_step, import_step
 
     step = _export_atomic(export_step, shape, out, "part.step", timestamp=STEP_TIMESTAMP)
     reimported = import_step(str(step))
-    _export_atomic(export_stl, reimported, out, "part.stl", tolerance=0.01)
+    _export_atomic(export_stl_abs, reimported, out, "part.stl")
     _export_atomic(export_gltf, reimported, out, "model.glb", binary=True, linear_deflection=0.01,
                    angular_deflection=0.1)
     try:

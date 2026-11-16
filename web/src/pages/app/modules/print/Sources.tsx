@@ -5,6 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import type { Project } from "@/lib/types";
 import { Badge, Button, Card, Modal, Spinner } from "@/components/ui";
+import { IsoThumb } from "@/components/ProjectCard";
 import type { UploadMeta } from "./types";
 import type { Src } from "./index";
 
@@ -43,8 +44,8 @@ export function SourcePicker({ projects, uploads, loading, onPick, onUpload, onD
           {built.map(p => (
             <button key={p.id} onClick={() => onPick({ kind: "projects", id: p.id })} data-project={p.id}
               className="card group overflow-hidden text-left transition hover:-translate-y-0.5 hover:shadow-pop">
-              <div className="viewport-bg flex aspect-[4/3] items-center justify-center">
-                {p.thumbnail ? <img src={p.thumbnail} alt="" className="h-full w-full object-contain" /> : <BoxIcon className="h-10 w-10 text-muted" />}
+              <div className="viewport-bg relative flex aspect-[4/3] items-center justify-center overflow-hidden">
+                {p.thumbnail ? <IsoThumb src={`${p.thumbnail}?v=${p.last_status?.build_id ?? 0}`} /> : <BoxIcon className="h-10 w-10 text-muted" />}
               </div>
               <div className="border-t border-border p-3">
                 <div className="truncate text-[13px] font-semibold">{p.name}</div>

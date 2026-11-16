@@ -94,3 +94,16 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 .fw-md tbody tr:last-child td { border-bottom: 0; }
 .fw-md tbody tr:nth-child(even) td { background: rgb(var(--text) / .02); }
 .fw-md td:first-child { font-weight: 500; }
+
+/* Print only the change notice (or any .fw-print block) when one is open */
+@media print {
+  body:has(.fw-print) { background: #fff !important; }
+  body:has(.fw-print) * { visibility: hidden; }
+  body:has(.fw-print) .fw-print, body:has(.fw-print) .fw-print * { visibility: visible; }
+  /* release the dialog's scroll box and centring so the whole notice lays out on the page */
+  body:has(.fw-print) [role="dialog"], body:has(.fw-print) [role="dialog"] * { overflow: visible !important; max-height: none !important; }
+  body:has(.fw-print) [role="dialog"] { position: static !important; transform: none !important; box-shadow: none !important; border: 0 !important; }
+  body:has(.fw-print) .fw-print { position: absolute; left: 0; top: 0; width: 100%; padding: 14mm 16mm; background: #fff; }
+  body:has(.fw-print) [role="dialog"] .fw-crop { overflow: hidden !important; }
+  @page { size: A4; margin: 0; }
+}
