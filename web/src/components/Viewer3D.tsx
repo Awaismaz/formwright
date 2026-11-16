@@ -65,7 +65,9 @@ export default function Viewer3D({ url, version, bboxMm, className, empty }: Pro
       const c = box.getCenter(new THREE.Vector3());
       const rad = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
       const dir = (VIEWS[name] ?? VIEWS.Iso!).clone().normalize();
-      const dist = rad / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.1;
+      const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
+      const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
+      const dist = rad / Math.sin(Math.min(vHalf, hHalf)) * 1.12; // fit in the narrower direction
       camera.position.copy(c).addScaledVector(dir, dist);
       camera.near = dist / 100; camera.far = dist * 100; camera.updateProjectionMatrix();
       controls.target.copy(c); controls.update();

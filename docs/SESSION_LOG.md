@@ -30,8 +30,10 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 ### Parked decisions
 PD-01…PD-11 in `docs/DECISIONS.md`: name clearance, pricing, token economics, preview add-on billing, data/AI policy wording, Stripe account, email provider, hosting, agent API key, sandbox, contact addresses.
 
+- **Live AI run through the platform UI** (founder's dev login, God bypasses off): L-bracket template prompt → agent finished in 3 turns / 34.5 s → part 80 × 40 × 60 mm, all 6 gating checks pass (volume rel err 1.2e-16) → **16 tokens metered** (300 → 284, ledger row written) → the agent listed assumptions to confirm (hole spacing, Ø9 clearance for M8). Fixed from the screenshot: the viewer framing cropped parts in narrow viewports, so the fit now uses the narrower FOV.
+
 ### Not done / honest gaps
-- No live AI run was executed through the new platform UI in this session. The agent pipeline itself was proven end to end in session (c); the platform wiring is covered by tests up to the agent boundary.
+- The studio tour's "seen" state is per browser (localStorage); the product tour is stored server-side.
 - No Alembic migrations (INF-008). Rate limiting is in-process. The mobile layout of the studio is desktop-first.
 - The Stripe path is implemented but unexercised without keys (COM-007).
 
