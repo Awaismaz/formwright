@@ -82,6 +82,9 @@ def test_toolbox_validation_and_matching() -> None:
     assert toolbox.match("spur gear module 1.5 with 40 teeth")[0]["params"]["Z"] == 40
     assert toolbox.match("6205 bearing")[0]["params"] == {"SERIES": 6205}
     assert toolbox.match("electronics enclosure with a pocket and four bolt bosses") == []
+    # STU-15: edits and plain blocks are not standard components
+    assert toolbox.match("Add a 1 mm x 45 degree chamfer to the outer top edge of the flange") == []
+    assert toolbox.match("rectangular spacer block 60 x 30 x 12 with two 6.6 mm through holes") == []
 
 
 def test_agent_questions_block_is_parsed_and_stripped() -> None:

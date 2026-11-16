@@ -88,8 +88,10 @@ async def install_model(p: Project, ctx: Ctx, source: str, strict: bool, note: s
         shutil.rmtree(ws / "out", ignore_errors=True)
         if backup.is_dir():
             backup.rename(ws / "out")
-        reason = st.get("error") or ", ".join(c["id"] for c in st.get("checks", []) if c["gating"] and not c["passed"])
-        raise HTTPException(422, f"The model could not be built ({reason}). Nothing was changed.")
+        from aicad.platform.plain import build_error
+
+        raise HTTPException(422, f"The model could not be built: {build_error(st.get('error'), st.get('checks'))}. "
+                                 "Nothing was changed.")
     shutil.rmtree(backup, ignore_errors=True)
     p.last_status = _status_summary(st)
     p.builds += 1

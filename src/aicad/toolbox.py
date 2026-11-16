@@ -460,7 +460,9 @@ def match(prompt: str) -> list[dict[str, Any]]:
     t = prompt.lower()
     out: list[dict[str, Any]] = []
     custom = sum(w in t for w in ("pocket", "slot", "custom", "rib", "boss", "with a", "cutout", "enclosure", "housing",
-                                  "assembly", "mount for", "adapter", "modify", "change", "make it", "the part"))
+                                  "assembly", "mount for", "adapter", "modify", "change", "make it", "the part",
+                                  # edits and plain prismatic parts are not standard components (STU-15)
+                                  "chamfer", "fillet", "block", "plate", "through hole", "holes", "add a", "add an"))
     for c in COMPONENTS.values():
         score = 0
         for k in c.keywords:

@@ -9,6 +9,7 @@ State is per build: the runner calls reset() before executing a script.
 
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Any
 
@@ -16,6 +17,7 @@ from build123d import (
     Align,
     Axis,
     Circle,
+    Cone,
     Cylinder,
     Edge,
     Face,
@@ -41,7 +43,7 @@ from build123d import (
 
 from aicad import refplane as _refplane
 
-_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None}
+_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None, "manual_errors": []}
 
 
 def reset() -> None:
@@ -49,6 +51,7 @@ def reset() -> None:
     _STATE["manual"] = 0
     _STATE["last"] = None
     _STATE["suppressed"] = set()
+    _STATE["manual_errors"] = []
 
 
 def set_base(folder: Any) -> None:
@@ -223,13 +226,126 @@ def _v(p: Any) -> Vector:
 
 
 def edges_near(part: Any, points: list[Any], tol: float = 0.05) -> list[Any]:
-    """Edges passing within `tol` mm of any of the given points (e.g. picked in the viewer)."""
+    """For each point (e.g. picked in the viewer), the edge passing nearest to it within `tol` mm. A point that is
+    equally near several edges (a corner vertex) selects all of them, as before; a point on an edge's middle selects
+    that edge only."""
     pts = [_v(p) for p in points]
-    out = []
-    for e in part.edges():
-        if any(e.distance_to(p) <= tol for p in pts):
-            out.append(e)
+    out: list[Any] = []
+    for p in pts:
+        near = [(e.distance_to(p), e) for e in part.edges()]
+        near = [(d, e) for d, e in near if d <= tol]
+        if not near:
+            continue
+        best = min(d for d, _ in near)
+        for d, e in near:
+            if d <= best + 1e-7 and not any(e.is_same(x) for x in out):
+                out.append(e)
     return out
+
+
+def _edge_sig(e: Any) -> tuple[str, Vector | None]:
+    """("line", direction) / ("circle", axis) / ("other", None): what kind of edge was picked, for re-finding it."""
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Line
+
+    c = BRepAdaptor_Curve(e.wrapped)
+    t = c.GetType()
+    if t == GeomAbs_Line:
+        d = c.Line().Direction()
+        return "line", Vector(d.X(), d.Y(), d.Z())
+    if t == GeomAbs_Circle:
+        d = c.Circle().Axis().Direction()
+        return "circle", Vector(d.X(), d.Y(), d.Z())
+    return "other", None
+
+
+def _sig_matches(e: Any, ref: dict[str, Any] | None) -> bool:
+    if not ref or not ref.get("kind"):
+        return True
+    kind, d = _edge_sig(e)
+    if kind != ref["kind"]:
+        return False
+    if d is None or not ref.get("dir"):
+        return True
+    return abs(d.normalized().dot(_v(ref["dir"]).normalized())) > 0.999
+
+
+def _bbox6(part: Any) -> list[float]:
+    bb = part.bounding_box()
+    return [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z]
+
+
+def _remaps(p: Vector, ref: list[float], now: list[float]) -> list[Vector]:
+    """Where a point picked on the body when it had bounding box `ref` most likely is now (box `now`): per axis, a
+    point on the box boundary keeps its offset from that side; any other point is tried at the same offset from the
+    centre, at the same fraction of the size, then at the same offset from either side."""
+    axes = []
+    for i in range(3):
+        a0, a1, b0, b1, x = ref[i], ref[i + 3], now[i], now[i + 3], (p.X, p.Y, p.Z)[i]
+        eps = 1e-6 * max(1.0, a1 - a0)
+        if abs(x - a0) <= eps:
+            c = [b0 + (x - a0)]
+        elif abs(x - a1) <= eps:
+            c = [b1 + (x - a1)]
+        else:
+            c = [(b0 + b1) / 2 + x - (a0 + a1) / 2]
+            if a1 - a0 > 1e-9:
+                c.append(b0 + (x - a0) / (a1 - a0) * (b1 - b0))
+            c += [b0 + (x - a0), b1 + (x - a1)]
+        uniq: list[float] = []
+        for v in c:
+            if all(abs(v - u) > 1e-9 for u in uniq):
+                uniq.append(v)
+        axes.append(uniq)
+    return [Vector(*xyz) for xyz in itertools.product(*axes)]
+
+
+def _near_box(shape: Any, p: Vector, tol: float) -> bool:
+    bb = shape.bounding_box()
+    return (bb.min.X - tol <= p.X <= bb.max.X + tol and bb.min.Y - tol <= p.Y <= bb.max.Y + tol
+            and bb.min.Z - tol <= p.Z <= bb.max.Z + tol)
+
+
+def _resolve_edges(part: Any, f: dict[str, Any], tol: float = 0.05) -> list[Any]:
+    """The edges a fillet/chamfer was picked on. Each stored point selects the nearest edge of the picked kind and
+    direction (`edge_refs`). If the body changed size so the point no longer lies on such an edge, the point is
+    carried along with the body's bounding box (`ref_bbox`, the box when it was picked) and the edge found there."""
+    pts = [_v(p) for p in f["edges"]]
+    refs = list(f.get("edge_refs") or [])
+    refs += [None] * (len(pts) - len(refs))
+    edges = list(part.edges())
+    now = _bbox6(part) if f.get("ref_bbox") else None
+    out: list[Any] = []
+    for i, (p, ref) in enumerate(zip(pts, refs, strict=True)):
+        found: list[Any] = []
+        for q in [p, *(_remaps(p, f["ref_bbox"], now) if now else [])]:
+            near = [(e.distance_to(q), e) for e in edges if _near_box(e, q, tol) and _sig_matches(e, ref)]
+            near = [(d, e) for d, e in near if d <= tol]
+            if near:
+                best = min(d for d, _ in near)
+                found = [e for d, e in near if d <= best + 1e-7]
+                if ref:  # a picked edge is one edge, even where several meet at the stored point
+                    found = found[:1]
+                break
+        if not found:
+            what = "edge" if len(pts) == 1 else f"edge {i + 1} of {len(pts)}"
+            raise ValueError(f"the picked {what} was not found (the geometry changed)")
+        out += [e for e in found if not any(e.is_same(x) for x in out)]
+    return out
+
+
+def _resolve_face(part: Any, fc: dict[str, Any], ref_bbox: list[float] | None, what: str) -> list[Any]:
+    """Faces at a picked point (and outward normal), carried along with the body's size like `_resolve_edges`."""
+    p = _v(fc["point"])
+    found = faces_near(part, p, normal=fc.get("normal"))
+    if not found and ref_bbox:
+        for q in _remaps(p, ref_bbox, _bbox6(part)):
+            found = faces_near(part, q, normal=fc.get("normal"))
+            if found:
+                break
+    if not found:
+        raise ValueError(f"{what} was not found (the geometry changed)")
+    return found
 
 
 def faces_near(part: Any, point: Any, normal: Any | None = None, tol: float = 0.05) -> list[Any]:
@@ -373,8 +489,17 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
     if op == "hole":
         n = _v(f["normal"]).normalized()
         depth = float(f["depth"]) if f.get("depth") else diag * 2
-        plane = Plane(origin=_v(f["point"]), z_dir=n)
-        tool = plane * Cylinder(float(f["d"]) / 2, depth, align=(Align.CENTER, Align.CENTER, Align.MAX))
+        if f.get("place"):
+            return [_hole_tool(c, n, f, depth) for c in hole_centres(f["_part"], f)]
+        point = _v(f["point"])
+        if f.get("ref_bbox") and f.get("_part") is not None and not faces_near(f["_part"], point, normal=n):
+            # the body changed size: carry the hole with it (if no face is found, keep the stored point)
+            for q in _remaps(point, f["ref_bbox"], _bbox6(f["_part"])):
+                if faces_near(f["_part"], q, normal=n):
+                    f = {**f, "center": list(_v(f["center"]) + (q - point)) if f.get("center") else None}
+                    point = q
+                    break
+        tool = _hole_tool(point, n, f, depth)
         count = int(f.get("count", 1))
         if count > 1 and f.get("pattern") == "circular":
             ax = Axis(_v(f["center"]), n)
@@ -384,6 +509,54 @@ def _tool(f: dict[str, Any], diag: float) -> Any:
             return [Location(step * i) * tool for i in range(count)]
         return tool
     raise ValueError(f"operation {op!r} has no tool body")
+
+
+def _hole_tool(centre: Vector, n: Vector, f: dict[str, Any], depth: float) -> Any:
+    """Drill body of one hole whose top centre is on the face: plain, counterbored or countersunk."""
+    plane = Plane(origin=centre, z_dir=n)
+    top = (Align.CENTER, Align.CENTER, Align.MAX)
+    d = float(f["d"])
+    tool = plane * Cylinder(d / 2, depth, align=top)
+    if f.get("cbore"):
+        tool = tool + plane * Cylinder(float(f["cbore"]["d"]) / 2, float(f["cbore"]["depth"]), align=top)
+    elif f.get("csk"):
+        dk, ang = float(f["csk"]["d"]), math.radians(float(f["csk"].get("angle", 90)))
+        h = (dk - d) / 2 / math.tan(ang / 2)
+        tool = tool + plane * Cone(d / 2, dk / 2, h, align=top)
+    return tool
+
+
+def _xdir_for(n: Vector) -> Vector:
+    """Sketch x direction for a face normal (same convention as the app's sketcher)."""
+    if abs(n.Z) > 0.9:
+        return Vector(1, 0, 0)
+    return Vector(n.Y, -n.X, 0).normalized()
+
+
+def hole_centres(part: Any, f: dict[str, Any]) -> list[Vector]:
+    """Hole Wizard placement on a face, measured from the face's boundary (its extent along the sketch x/y
+    directions): `corners` = four holes `dx` from the left/right and `dy` from the bottom/top edges; `points` =
+    holes at (x, y) from the face's lower-left corner. Re-evaluated on every rebuild, so the holes follow the face."""
+    if part is None:
+        raise ValueError("holes need an existing solid")
+    pl = f["place"]
+    n = _v(f["normal"]).normalized()
+    face = _resolve_face(part, pl["face"], f.get("ref_bbox"), "the face the holes are placed on")[0]
+    frame = Plane(origin=_v(pl["face"]["point"]), x_dir=_v(pl["x_dir"]) if pl.get("x_dir") else _xdir_for(n), z_dir=n)
+    local = frame.to_local_coords(face).bounding_box()
+    x0, y0, x1, y1 = local.min.X, local.min.Y, local.max.X, local.max.Y
+    if pl["mode"] == "corners":
+        dx, dy = float(pl["dx"]), float(pl["dy"])
+        if 2 * dx >= x1 - x0 or 2 * dy >= y1 - y0:
+            raise ValueError(f"the holes don't fit: the face is {x1 - x0:.1f} × {y1 - y0:.1f} mm, so the edge distances "
+                             f"must be under {(x1 - x0) / 2:.1f} and {(y1 - y0) / 2:.1f} mm")
+        uv = [(x0 + dx, y0 + dy), (x1 - dx, y0 + dy), (x1 - dx, y1 - dy), (x0 + dx, y1 - dy)]
+    else:
+        uv = [(x0 + float(u), y0 + float(v)) for u, v in pl["pts"]]
+    # the face plane may sit at a different height than the stored pick (the body changed): project onto it
+    origin = _v(face.center())
+    z_shift = (origin - frame.origin).dot(n)
+    return [Vector(frame.from_local_coords(p)) + n * z_shift for p in uv]
 
 
 def _sketch_face(sk: dict[str, Any], what: str, single: bool = False) -> Any:
@@ -479,9 +652,7 @@ def _draft(part: Any, f: dict[str, Any]) -> Any:
     neutral = Plane(origin=_v(f["neutral"]["point"]), z_dir=n)
     faces = []
     for fc in f["faces"]:
-        found = faces_near(solid, fc["point"], normal=fc.get("normal"))
-        if not found:
-            raise ValueError("a face to draft was not found (geometry changed?)")
+        found = _resolve_face(solid, fc, f.get("ref_bbox"), "a face to draft")
         faces += [x for x in found if x not in faces]
     try:
         return solid.draft(faces, neutral, float(f["angle"]))
@@ -581,30 +752,34 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
     if part is None and op not in BASE_OPS:
         raise ValueError("this feature needs an existing solid; start the part with a boss or revolve")
     if op in TOOL_OPS:
-        return _apply_tool(part, _tool(f, diag), _is_cut(f))
+        return _apply_tool(part, _tool({**f, "_part": part} if op == "hole" else f, diag), _is_cut(f))
     if op == "pattern":
         for src in _sources(f, done, "patterned"):
-            for inst in pattern_instances(_tool(src, diag), f):
+            for inst in pattern_instances(_tool({**src, "_part": part} if src["op"] == "hole" else src, diag), f):
                 part = _apply_tool(part, inst, _is_cut(src))
         return part
     if op == "fillet":
-        edges = edges_near(part, f["edges"])
-        if not edges:
-            raise ValueError("no edges found at the picked locations (geometry changed?)")
-        return fillet(edges, float(f["r"]))
+        edges = _resolve_edges(part, f)
+        r = float(f["r"])
+        try:
+            return fillet(edges, r)
+        except Exception as e:  # OCCT: "Failed creating a fillet ..." — say what fits instead
+            raise ValueError(_too_large(part, edges, r)) from e
     if op == "chamfer":
-        edges = edges_near(part, f["edges"])
-        if not edges:
-            raise ValueError("no edges found at the picked locations (geometry changed?)")
-        return chamfer(edges, float(f["d"]))
+        edges = _resolve_edges(part, f)
+        try:
+            return chamfer(edges, float(f["d"]))
+        except Exception as e:
+            raise ValueError(f"a {float(f['d']):g} mm chamfer doesn't fit on the selected edge(s); try a smaller "
+                             "distance or fewer edges") from e
     if op == "shell":
         openings = []
         for fc in f["faces"]:
-            found = faces_near(part, fc["point"], normal=fc.get("normal"))
-            if not found:
-                raise ValueError("a face to remove was not found (geometry changed?)")
-            openings += found
-        return offset(part, amount=-float(f["t"]), openings=openings)
+            openings += _resolve_face(part, fc, f.get("ref_bbox"), "a face to remove")
+        try:
+            return offset(part, amount=-float(f["t"]), openings=openings)
+        except Exception as e:
+            raise ValueError(f"a {float(f['t']):g} mm wall can't be made here; try a thinner wall") from e
     if op == "draft":
         return _draft(part, f)
     if op == "rib":
@@ -617,6 +792,27 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
             return part
         return part + mirror(part, about=pl)
     raise ValueError(f"unknown manual operation {op!r}")
+
+
+def _too_large(part: Any, edges: list[Any], r: float) -> str:
+    """Plain message for a fillet that doesn't fit, with the largest radius that does (when it can be found)."""
+    msg = f"R{r:g} mm is too large for the selected edge(s)"
+    try:
+        sols = list(part.solids())
+        if len(sols) == 1:
+            m = sols[0].max_fillet(edges, tolerance=0.05, max_iterations=12)
+            if m > 0.01:
+                return f"{msg}; the largest radius that fits is about {math.floor(m * 10) / 10:g} mm"
+    except Exception:  # noqa: BLE001,S110 - the hint is optional
+        pass
+    return f"{msg}; try a smaller radius"
+
+
+def plain(e: BaseException) -> str:
+    """A kernel or validation failure in plain engineering words (never exception or function names)."""
+    if isinstance(e, ValueError) and str(e):
+        return str(e)
+    return "the geometry kernel could not compute this feature with these values; try a smaller size or another selection"
 
 
 def _diag(part: Any, features: list[dict[str, Any]]) -> float:
@@ -660,13 +856,26 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
             continue
         if f.get("plane_ref") in planes:
             f = {**f, "plane": planes[str(f["plane_ref"])]}
+        name = str(f.get("name") or f["op"])
         try:
             if f["op"] in SKETCH_USERS:
                 f = _with_sketches(f, sketches)
             part = _op(part, f, diag, done)
-        except Exception as e:
-            raise ValueError(f"manual feature '{f.get('name', f.get('op'))}' failed: {e}") from e
+        except Exception as e:  # noqa: BLE001 - a rebuild error flags the feature; the rest of the tree still builds
+            msg = plain(e)
+            _STATE["manual_errors"].append({"id": str(f.get("id", "")), "name": name, "op": f["op"], "error": msg})
+            _STATE["log"].append({"name": name, "kind": "manual", "keys": set(), "error": msg,
+                                  "params": {"op": f["op"], "id": str(f.get("id", ""))}})
+            continue
         done[str(f.get("id", ""))] = f
-        feature(str(f.get("name") or f["op"]), part, kind="manual", op=f["op"], id=str(f.get("id", "")))
+        feature(name, part, kind="manual", op=f["op"], id=str(f.get("id", "")))
         _STATE["manual"] += 1
+    if part is None and _STATE["manual_errors"]:  # nothing could be built: report why
+        first = _STATE["manual_errors"][0]
+        raise ValueError(f"manual feature '{first['name']}' failed: {first['error']}")
     return part
+
+
+def manual_errors() -> list[dict[str, Any]]:
+    """Manual features that failed to rebuild in the last build (rebuild errors shown in the feature tree)."""
+    return list(_STATE.get("manual_errors") or [])

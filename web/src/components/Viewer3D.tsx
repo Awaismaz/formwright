@@ -12,6 +12,10 @@ export type Tool = "orbit" | "measure" | "select";
 
 export interface ViewerApi {
   setView: (v: ViewName) => void;
+  /** Fit the model in the window, keeping the current orientation. */
+  zoomToFit: () => void;
+  /** Look straight at a planar face (its outward normal). */
+  normalTo: (n: V3) => void;
   setDisplay: (m: DisplayMode) => void;
   toggleSection: () => void;
   setOrtho: (ortho: boolean) => void;
@@ -120,10 +124,17 @@ export default function Viewer3D(props: Props) {
   useEffect(() => { eng.current?.setExplode(explode); }, [explode, topo]);
 
   if (apiRef) apiRef.current = {
-    setView: (v) => eng.current?.setView(v), setDisplay, toggleSection: () => setSection(!section),
+    setView: (v) => eng.current?.setView(v), zoomToFit: () => eng.current?.zoomToFit(), normalTo: (n) => eng.current?.normalTo(n),
+    setDisplay, toggleSection: () => setSection(!section),
     setOrtho: (o) => setProj({ ...proj, ortho: o }), display, section, ortho: proj.ortho,
   };
 
+  useEffect(() => { // Esc clears the measurement (STU-28)
+    if (tool !== "measure") return;
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape" && mpicks.length) { setMpicks([]); e.stopPropagation(); } };
+    addEventListener("keydown", h, true);
+    return () => removeEventListener("keydown", h, true);
+  }, [tool, mpicks.length]);
   const result: MeasureResult | null = useMemo(() => (topo && tool === "measure" ? measure(mpicks, topo) : null), [mpicks, topo, tool]);
   useEffect(() => { eng.current?.setMeasureLine(result?.line?.[0] ?? null, result?.line?.[1] ?? null); }, [result]);
   const multi = (topo?.solids.length ?? 0) > 1;
@@ -205,7 +216,7 @@ export default function Viewer3D(props: Props) {
         </div>)}
 
       {section && (
-        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-panel/95 px-3 py-1.5 text-xs shadow-card">
+        <div className="absolute bottom-3 left-24 flex max-w-[calc(100%-26rem)] flex-wrap items-center gap-2 rounded-lg border border-border bg-panel/95 px-3 py-1.5 text-xs shadow-card max-md:max-w-[calc(100%-7rem)]">
           <Scissors className="h-3.5 w-3.5 text-muted" />
           <span className="inline-flex overflow-hidden rounded border border-border">
             {(["X", "Y", "Z"] as Axis[]).map(a => <button key={a} onClick={() => setAxis(a)} className={cx("px-2 py-0.5 font-semibold", axis === a ? "bg-primary text-white" : "text-muted hover:bg-text/5")}>{a}</button>)}
@@ -227,6 +238,7 @@ export default function Viewer3D(props: Props) {
               {result.rows.map(r => <div key={r.label} className="flex justify-between py-0.5"><span className="text-muted">{r.label}</span>
                 <span className={cx("tabular-nums", r.primary && "text-[14px] font-semibold text-primary")}>{r.value}</span></div>)}
               {mpicks.length === 1 && <div className="mt-1.5 text-[11px] text-muted">Pick a second entity to measure between them.</div>}
+              <div className="mt-1 text-[10.5px] text-muted">Esc clears</div>
             </div>
           ) : <div className="px-3 py-3 text-[12px] text-muted">Hover to snap to a vertex, edge, circle centre or face, then click. Pick two to measure between them.</div>}
         </div>)}

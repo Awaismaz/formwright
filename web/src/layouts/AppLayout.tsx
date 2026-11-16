@@ -18,9 +18,15 @@ import GodPanel from "@/components/GodPanel";
 import CommandPalette from "@/components/CommandPalette";
 import { APP_TOUR, runTour } from "@/lib/tour";
 
-function useCollapsed(): [boolean, (v: boolean) => void] {
-  const [c, setC] = useState(() => { try { return localStorage.getItem("fw_sidebar") === "1"; } catch { return false; } });
-  return [c, (v) => { setC(v); try { localStorage.setItem("fw_sidebar", v ? "1" : "0"); } catch { /* ignore */ } }];
+/** Sidebar collapsed state, remembered separately in the Design Studio, where it starts collapsed so the
+ *  CommandManager and the 3D view get the width (STU-09). */
+function useCollapsed(studio: boolean): [boolean, (v: boolean) => void] {
+  const read = (k: string, d: boolean) => { try { const v = localStorage.getItem(k); return v === null ? d : v === "1"; } catch { return d; } };
+  const [c, setC] = useState(() => ({ app: read("fw_sidebar", false), studio: read("fw_sidebar_studio", true) }));
+  return [studio ? c.studio : c.app, (v) => {
+    setC(s => (studio ? { ...s, studio: v } : { ...s, app: v }));
+    try { localStorage.setItem(studio ? "fw_sidebar_studio" : "fw_sidebar", v ? "1" : "0"); } catch { /* ignore */ }
+  }];
 }
 
 function NavItem({ to, icon, label, collapsed, end, tour, right }: {
@@ -110,7 +116,7 @@ export default function AppLayout() {
   const loc = useLocation();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [collapsed, setCollapsed] = useCollapsed();
+  const [collapsed, setCollapsed] = useCollapsed(/^\/app\/projects\/[^/]+\/?$/.test(loc.pathname));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
   const org = me?.org;

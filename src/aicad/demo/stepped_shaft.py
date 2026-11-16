@@ -2,6 +2,8 @@ import math
 
 from build123d import *
 
+from aicad import fw
+
 NAME = "Stepped shaft"
 MATERIAL = "Steel 1045"
 D1 = 20.0
@@ -12,12 +14,22 @@ KW = 6.0  # keyway width, depth (from Ø25 surface), length
 KD = 3.5
 KL = 30.0
 PARAMS = dict(D1=D1, L1=L1, D2=D2, L2=L2, KW=KW, KD=KD, KL=KL)
+PARAM_META = {
+    "D1": {"min": 5, "max": 100, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Journal Ø"},
+    "L1": {"min": 5, "max": 200, "step": 1, "unit": "mm", "group": "Shaft", "label": "Journal length"},
+    "D2": {"min": 6, "max": 120, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Centre Ø"},
+    "L2": {"min": 10, "max": 400, "step": 1, "unit": "mm", "group": "Shaft", "label": "Centre length"},
+    "KW": {"min": 2, "max": 30, "step": 0.5, "unit": "mm", "group": "Keyway", "label": "Keyway width"},
+    "KD": {"min": 1, "max": 15, "step": 0.1, "unit": "mm", "group": "Keyway", "label": "Keyway depth"},
+    "KL": {"min": 5, "max": 200, "step": 1, "unit": "mm", "group": "Keyway", "label": "Keyway length"},
+}
 
 shaft = Cylinder(D1 / 2, L1, align=(Align.CENTER, Align.CENTER, Align.MIN))
 shaft += Pos(0, 0, L1) * Cylinder(D2 / 2, L2, align=(Align.CENTER, Align.CENTER, Align.MIN))
 shaft += Pos(0, 0, L1 + L2) * Cylinder(D1 / 2, L1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+shaft = fw.feature("Stepped shaft", shaft)
 key = Pos(D2 / 2 - KD, 0, L1 + L2 / 2 - KL / 2) * Box(KD + 1, KW, KL, align=(Align.MIN, Align.CENTER, Align.MIN))
-shaft -= key
+shaft = fw.feature("Keyway", shaft - key)
 result = shaft
 
 

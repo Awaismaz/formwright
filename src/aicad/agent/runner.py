@@ -135,6 +135,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
         ns["MANUAL_FEATURES"] = manual
     ns["__fw_log__"] = fw.log()
     ns["__fw_manual__"] = fw.manual_count()
+    ns["__fw_manual_errors__"] = fw.manual_errors()
     ns["__cache_hit__"] = cached is not None
     return ns
 
@@ -355,7 +356,10 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
             params=params, editable_params=editable_params(source, params), expected=exp,
             param_meta=param_meta(ns.get("PARAM_META"), params), mass=mass, manual_features=manual,
             features=[{"name": e["name"], "kind": e["kind"], "params": e["params"], "chain": bool(e.get("chain")),
-                       "suppressed": bool(e.get("suppressed"))} for e in ns.get("__fw_log__", [])],
+                       "suppressed": bool(e.get("suppressed")), **({"error": e["error"]} if e.get("error") else {})}
+                      for e in ns.get("__fw_log__", [])],
+            manual_errors=ns.get("__fw_manual_errors__") or [],
+            bbox_minmax=_bbox_minmax(shape),
             fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
             env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp")},
         )
@@ -393,6 +397,10 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
     except Exception as e:  # noqa: BLE001 - report any script/kernel failure to the agent
         tb = traceback.format_exc(limit=6)
         status.update(error=f"{type(e).__name__}: {e}", traceback=tb[-3000:])
+    if status.get("error"):
+        from aicad.platform.plain import build_error
+
+        status["error_plain"] = build_error(status["error"])  # what the app shows; `error` is for the agent
     _write(out, status)
     return 0 if status.get("ok") else 1
 
@@ -425,6 +433,11 @@ def finalize(out: Path) -> int:
     st2["build_id"] = build_id
     status_p.write_text(json.dumps(st2, indent=2, default=str), encoding="utf-8")
     return 0
+
+
+def _bbox_minmax(shape: Any) -> list[float]:
+    bb = shape.bounding_box()
+    return [round(v, 6) for v in (bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z)]
 
 
 def _ver(*names: str) -> str:

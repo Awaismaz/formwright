@@ -17,11 +17,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from aicad import materials, refplane
+from aicad import holes, materials, refplane
 from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import TokenLedger
+from aicad.platform.plain import build_error
 from aicad.platform.routers.projects import (
     _project,
     _read_status,
@@ -29,6 +30,7 @@ from aicad.platform.routers.projects import (
     _sessions,
     _snapshot,
     _status_summary,
+    current_revision,
     schedule_finalize,
     wait_finalized,
     workspace_for,
@@ -116,7 +118,7 @@ OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "rev
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
-MATERIAL = "Aluminium 6061-T6"
+MATERIAL = "unspecified"
 PARAMS = {{}}
 
 result = None  # the first boss or revolve in the feature tree creates the body
@@ -230,6 +232,37 @@ def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
     out["reverse"] = bool(f.get("reverse"))
 
 
+REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft"}  # picks stored with the body's box, to follow size changes
+
+
+def _edge_ref(r: Any) -> dict[str, Any]:
+    if not isinstance(r, dict) or r.get("kind") not in ("line", "circle", "other"):
+        raise HTTPException(422, "edge reference: unknown edge kind")
+    out: dict[str, Any] = {"kind": r["kind"]}
+    if r.get("dir") is not None:
+        out["dir"] = _pt(r["dir"], "edge direction")
+    return out
+
+
+def _place(pl: Any, normal: list[float]) -> dict[str, Any]:
+    """Hole Wizard placement: on a picked face, by distance from its edges."""
+    if not isinstance(pl, dict) or pl.get("mode") not in ("corners", "points"):
+        raise HTTPException(422, "Hole position: choose corners or positions")
+    face = pl.get("face") or {}
+    out: dict[str, Any] = {"mode": pl["mode"], "face": {"point": _pt(face.get("point"), "face point"), "normal": list(normal)}}
+    if pl.get("x_dir") is not None:
+        out["x_dir"] = _pt(pl["x_dir"], "face x direction")
+    if pl["mode"] == "corners":
+        out["dx"] = _num(pl.get("dx"), "edge distance X", 0.01, 1e5)
+        out["dy"] = _num(pl.get("dy"), "edge distance Y", 0.01, 1e5)
+    else:
+        pts = pl.get("pts") or []
+        if not isinstance(pts, list) or not 1 <= len(pts) <= 100:
+            raise HTTPException(422, "Place 1–100 holes")
+        out["pts"] = [_pt2(q, "hole position") for q in pts]
+    return out
+
+
 def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     op = f.get("op")
     if op not in OPS:
@@ -243,26 +276,40 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         if not edges or len(edges) > 200:
             raise HTTPException(422, "Select 1–200 edges")
         out["edges"] = [_pt(e, "edge") for e in edges]
+        refs = f.get("edge_refs")
+        if isinstance(refs, list) and len(refs) == len(edges):
+            out["edge_refs"] = [_edge_ref(r) for r in refs]
         key = "r" if op == "fillet" else "d"
-        out[key] = _num(f.get(key), key, 0.001, 1e4)
+        out[key] = _num(f.get(key), "radius" if op == "fillet" else "distance", 0.001, 1e4)
     elif op == "hole":
         out.update(point=_pt(f.get("point"), "point"), normal=_pt(f.get("normal"), "normal"),
                    d=_num(f.get("d"), "diameter", 0.01, 1e4))
         out["depth"] = _num(f["depth"], "depth", 0.01, 1e5) if f.get("depth") else None
-        if f.get("count") and int(f["count"]) > 1:
+        if f.get("spec"):  # Hole Wizard: sizes come from the standard tables, never from the client
+            try:
+                out.update(holes.resolve(f["spec"]))
+            except holes.HoleError as e:
+                raise HTTPException(422, str(e)) from None
+        if f.get("place"):
+            out["place"] = _place(f["place"], out["normal"])
+        elif f.get("count") and int(f["count"]) > 1:
             out["count"] = min(int(f["count"]), 100)
             if f.get("pattern") == "circular":
                 out["pattern"] = "circular"
                 out["center"] = _pt(f.get("center"), "pattern centre")
             else:
                 out["step"] = _pt(f.get("step"), "step")
-    elif op == "shell":
+    if op in REF_OPS and isinstance(f.get("ref_bbox"), list) and len(f["ref_bbox"]) == 6:
+        out["ref_bbox"] = [_num(v, "reference box") for v in f["ref_bbox"]]
+    if op == "shell":
         faces = f.get("faces") or []
         if not 1 <= len(faces) <= 50:
             raise HTTPException(422, "Select 1–50 faces to remove")
         out["faces"] = [{"point": _pt(x.get("point"), "face point"), "normal": _pt(x.get("normal"), "face normal")}
                         for x in faces]
         out["t"] = _num(f.get("t"), "thickness", 0.01, 1e4)
+    elif op in ("fillet", "chamfer", "hole"):
+        pass
     elif op in ("sketch", "revolve"):
         out["plane"] = _sketch_plane(f.get("plane") or {})
         out["profiles"] = _profiles(f.get("profiles") or [])
@@ -388,8 +435,47 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _current_bbox(ws: Path) -> list[float] | None:
+    st = _read_status(ws)
+    if st.get("bbox_minmax"):
+        return list(st["bbox_minmax"])
+    try:  # builds from before bbox_minmax was recorded
+        return list(json.loads((ws / "out" / "topo.json").read_text(encoding="utf-8"))["bbox"])
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def stamp_refs(feats: list[dict[str, Any]], bbox: list[float] | None, ids: set[str] | None = None) -> list[dict[str, Any]]:
+    """Record the body's box with hand-picked edges/faces (all features lacking one, or the given ids), so the
+    picks can follow the body when a dimension changes (STU-03)."""
+    if bbox is None:
+        return feats
+    for x in feats:
+        if x["op"] in REF_OPS and (x["id"] in ids if ids is not None else "ref_bbox" not in x):
+            x["ref_bbox"] = [round(float(v), 6) for v in bbox]
+    return feats
+
+
+def stamp_manual_refs(src: str, ws: Path) -> str:
+    """Before a parameter change: give older manual features (made before refs were stored) the current box."""
+    feats = read_manual(src)
+    if not feats or not any(x["op"] in REF_OPS and "ref_bbox" not in x for x in feats):
+        return src
+    return write_manual(src, stamp_refs(feats, _current_bbox(ws)))
+
+
+def _restore(f: Path, src: str, fresh: bool, ws: Path, backup: Path) -> None:
+    f.unlink() if fresh else f.write_text(src, encoding="utf-8")
+    if backup.is_dir():
+        shutil.rmtree(ws / "out", ignore_errors=True)
+        backup.rename(ws / "out")
+
+
 async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, transform: Any = None,
-                        cause: str | None = None) -> dict[str, Any]:
+                        cause: str | None = None, strict: set[str] | str | None = None) -> dict[str, Any]:
+    """Apply a feature-tree change and rebuild (no AI). A failure of a feature in `strict` (the one just added or
+    edited; "new" = any feature that built before) rejects the change. Otherwise a feature that no longer rebuilds
+    is kept, flagged in the tree with its reason (a rebuild error to repair), and the rest of the model still builds."""
     p = _project(ctx, project_id)
     if ctx.role == "viewer":
         raise HTTPException(403)
@@ -421,21 +507,27 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
     if (ws / "out").is_dir():
         shutil.copytree(ws / "out", backup)
     f.write_text(transform(src) if transform is not None else write_manual(src, new_feats), encoding="utf-8")
-    st = await _rebuild(p, ws, determinism=False, fast=True)
+    before = current_revision(ws)
+    prev_errors = {m["id"] for m in _read_status(ws).get("manual_errors") or []}
+    try:
+        st = await _rebuild(p, ws, determinism=False, fast=True)
+    except HTTPException:
+        _restore(f, src, fresh, ws, backup)
+        raise
     if st.get("error") or not st.get("fingerprint"):
-        f.unlink() if fresh else f.write_text(src, encoding="utf-8")
-        if backup.is_dir():
-            shutil.rmtree(ws / "out", ignore_errors=True)
-            backup.rename(ws / "out")
-        raise HTTPException(422, f"{st.get('error') or 'Build failed'} — the previous model was restored.")
+        _restore(f, src, fresh, ws, backup)
+        raise HTTPException(422, f"{build_error(st.get('error'))}. The previous model was restored.")
+    bad = next((m for m in st.get("manual_errors") or [] if (strict == "new" and m["id"] not in prev_errors)
+                or (isinstance(strict, set) and m["id"] in strict)), None)
+    if bad:
+        _restore(f, src, fresh, ws, backup)
+        raise HTTPException(422, f"“{bad['name']}” couldn't be built: {bad['error']}. The previous model was restored.")
     # Manual edits are gated on geometric validity only; size/volume vs the agent's estimate stay informational.
-    gating_fail = [c["id"] for c in st.get("checks", []) if c["id"] in ("CHK-02", "CHK-03") and not c["passed"]]
+    gating_fail = [c for c in st.get("checks", []) if c["id"] in ("CHK-02", "CHK-03") and not c["passed"]]
     if gating_fail:
-        f.unlink() if fresh else f.write_text(src, encoding="utf-8")
-        if backup.is_dir():
-            shutil.rmtree(ws / "out", ignore_errors=True)
-            backup.rename(ws / "out")
-        raise HTTPException(422, f"The result failed checks ({', '.join(gating_fail)}) — the previous model was restored.")
+        _restore(f, src, fresh, ws, backup)
+        raise HTTPException(422, f"{build_error(None, [{**c, 'gating': True} for c in gating_fail])}. "
+                                 "The previous model was restored.")
     shutil.rmtree(backup, ignore_errors=True)
     p.last_status = _status_summary(st)
     p.builds += 1
@@ -452,7 +544,8 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
         what = (f"Feature tree {action[5:].replace('_', ' ')}" if action.startswith("tree_")
                 else f"{'Feature' if transform is not None else 'Manual feature'} {action}")
         s.publish({"type": "text", "text": f"{what} without AI (revision {rev})."})
-    return {"ok": True, "features": new_feats, "revision": rev, "build_s": (st.get("timings_s") or {}).get("total_s")}
+    return {"ok": True, "features": new_feats, "revision": rev, "rev_before": before, "repairs": st.get("manual_errors") or [],
+            "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
 SUP_START = "# --- Formwright suppressed features (managed by the app; toggle them in the feature tree) ---"
@@ -623,11 +716,12 @@ def list_manual(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, 
 @router.post("/projects/{project_id}/manual")
 async def add_manual(project_id: str, body: FeatureIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     feat = validate_feature({**body.feature, "rolled_back": False})
+    bbox = _current_bbox(workspace_for(_project(ctx, project_id)))
 
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         bar = next((i for i, x in enumerate(fs) if x.get("rolled_back")), len(fs))
-        return [*fs[:bar], feat, *fs[bar:]]  # a new feature goes in at the rollback bar
-    return await _apply_manual(ctx, project_id, mutate, "added")
+        return [*fs[:bar], *stamp_refs([feat], bbox, {feat["id"]}), *fs[bar:]]  # new features go in at the bar
+    return await _apply_manual(ctx, project_id, mutate, "added", strict={feat["id"]})
 
 
 class RollbackIn(BaseModel):
@@ -661,16 +755,25 @@ async def rollback_manual(project_id: str, body: RollbackIn, ctx: Ctx = Depends(
 
 @router.patch("/projects/{project_id}/manual/{fid}")
 async def edit_manual(project_id: str, fid: str, body: FeatureIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    repicked = bool({"edges", "point", "faces", "place", "neutral"} & set(body.feature))
+    bbox = _current_bbox(workspace_for(_project(ctx, project_id))) if repicked else None
+    only_tree = set(body.feature) <= {"name", "suppressed"}  # rename / suppress: never reject for the feature itself
+
     def mutate(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for i, f in enumerate(fs):
             if f["id"] == fid:
-                new = validate_feature({**f, **body.feature, "id": fid})
+                merged = {**f, **body.feature, "id": fid}
+                if repicked and "edges" in body.feature and "edge_refs" not in body.feature:
+                    merged.pop("edge_refs", None)  # new picks without kinds: don't keep the old ones
+                new = validate_feature(merged)
                 if new["name"] != f["name"] and any(x["name"] == new["name"] for x in fs if x["id"] != fid):
                     raise HTTPException(422, f"A feature named “{new['name']}” already exists")
-                fs[i] = new
+                fs[i] = stamp_refs([new], bbox, {fid})[0] if repicked else new
                 return fs
         raise HTTPException(404, "Feature not found")
-    return await _apply_manual(ctx, project_id, mutate, "edited")
+    unsuppress = body.feature.get("suppressed") is False
+    return await _apply_manual(ctx, project_id, mutate, "edited",  # suppressing must not break features that use it
+                               strict="new" if only_tree and not unsuppress else {fid})
 
 
 @router.delete("/projects/{project_id}/manual/{fid}")
@@ -683,7 +786,7 @@ async def delete_manual(project_id: str, fid: str, ctx: Ctx = Depends(verified_c
             name = next(f["name"] for f in fs if f["id"] == fid)
             raise HTTPException(422, f"“{name}” is used by {', '.join(users)}. Delete or edit {users[0]} first.")
         return [f for f in fs if f["id"] != fid]
-    return await _apply_manual(ctx, project_id, mutate, "deleted")
+    return await _apply_manual(ctx, project_id, mutate, "deleted", strict="new")
 
 
 @router.post("/projects/{project_id}/manual/reorder")
@@ -694,6 +797,27 @@ async def reorder_manual(project_id: str, body: ReorderIn, ctx: Ctx = Depends(ve
             raise HTTPException(422, "Reorder must list every feature exactly once")
         return [by[i] for i in body.ids]
     return await _apply_manual(ctx, project_id, mutate, "reordered")
+
+
+@router.post("/projects/{project_id}/warm")
+async def warm(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Start the project's geometry engine ahead of the first build (called when the Studio opens)."""
+    import asyncio
+
+    p = _project(ctx, project_id)
+    t = asyncio.create_task(worker.warm(p.org_id))
+    _WARMING.add(t)
+    t.add_done_callback(_WARMING.discard)
+    return {"ok": True}
+
+
+_WARMING: set[Any] = set()
+
+
+@router.get("/holes/standards")
+def hole_standards() -> dict[str, Any]:
+    """Hole Wizard tables (ISO 273 clearance, tap drills, counterbores, countersinks, washers), with sources."""
+    return holes.tables()
 
 
 # ----------------------------------------------------------------------------- revisions: files & compare
