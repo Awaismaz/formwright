@@ -2,10 +2,14 @@
 
 Paths are never taken from the request: projects resolve through the platform's workspace resolver, uploads live
 under `<data>/print_uploads/<org_id>/<upload_id>/` with server-generated ids.
+
+Exports carry the build stamp of the model they were made from (`print/exports.json`, MAKE-16): an export of an
+older build is listed as outdated, and file names include the model revision (`…_r2_fdm-o1.3mf`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -18,6 +22,7 @@ from typing import Any
 
 import numpy as np
 
+from aicad import deliverables, materials
 from aicad.printprep import DISCLOSURE, analysis, presets
 from aicad.printprep.bvh import BVH
 from aicad.printprep.mesh import (
@@ -256,7 +261,31 @@ def run_analysis(src: Source, opts: dict[str, Any]) -> dict[str, Any]:
     rep["notes"] = presets.NOTES[process]
     rep["presets_source"] = presets.SOURCE
     rep["disclosure"] = DISCLOSURE
+    rep["design_material"] = design_material(src)
     return rep
+
+
+NON_PRINT_GROUPS = {"Aluminium", "Steel", "Stainless", "Cast iron", "Copper alloys", "Titanium"}
+
+
+def design_material(src: Source) -> dict[str, Any] | None:
+    """The material the part is designed in (project only). A metal part printed in a polymer is a form/fit model."""
+    if src.kind != "project":
+        return None
+    code = None
+    try:
+        code = json.loads((src.root / ".fw" / "project.json").read_text(encoding="utf-8")).get("material")
+    except (OSError, ValueError):
+        pass
+    text = src.material_hint or deliverables.read_status(src.root).get("material")
+    m = materials.get(code) if code and code != "custom" else materials.get(materials.guess(text))
+    name = (m or {}).get("name") or text
+    if not name:
+        return None
+    metal = bool(m and m.get("group") in NON_PRINT_GROUPS)
+    return {"name": name, "metal": metal,
+            "note": f"Design material: {name}. A polymer print of this part is a form and fit model, not a "
+                    "functional replacement." if metal else None}
 
 
 def studio_stl_check(src: Source, entry: _Entry) -> dict[str, Any] | None:
@@ -375,6 +404,34 @@ def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:48] or "part"
 
 
+def source_stamp(src: Source) -> dict[str, Any]:
+    """What an export records about its source: the project's build stamp plus the SHA-256 of the STEP it was
+    meshed from, or the upload's revision."""
+    if src.kind == "project":
+        st = deliverables.build_stamp(src.root)
+        step = src.root / "out" / "part.step"
+        st["step_file_sha256"] = hashlib.sha256(step.read_bytes()).hexdigest() if step.is_file() else None
+        return st
+    return {"upload_revision": int(read_meta(src.root).get("revision", 0))}
+
+
+def _current(stamp: dict[str, Any] | None, cur: dict[str, Any]) -> bool:
+    if not stamp:
+        return False
+    if "upload_revision" in cur:
+        return stamp.get("upload_revision") == cur["upload_revision"]
+    if cur.get("build_id") and deliverables.same_build(stamp, cur):
+        return True
+    return bool(stamp.get("step_file_sha256")) and stamp.get("step_file_sha256") == cur.get("step_file_sha256")
+
+
+def _exports_meta(src: Source) -> dict[str, Any]:
+    try:
+        return json.loads((src.root / "print" / "exports.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def export(src: Source, fmt: str, rot: np.ndarray, tol: float, printer_mm: list[float], label: str,
            tag: str) -> dict[str, Any]:
     entry = entry_for(src, tol)
@@ -382,7 +439,9 @@ def export(src: Source, fmt: str, rot: np.ndarray, tol: float, printer_mm: list[
     lo, hi = m.v.min(axis=0), m.v.max(axis=0)
     shift = np.array([printer_mm[0] / 2 - (lo[0] + hi[0]) / 2, printer_mm[1] / 2 - (lo[1] + hi[1]) / 2, -lo[2]])
     m.v = m.v + shift
-    name = f"{slug(src.name)}_{slug(tag)}.{fmt}"
+    stamp = source_stamp(src)
+    rev = stamp.get("model_rev") if src.kind == "project" else (stamp.get("upload_revision") or None)
+    name = f"{slug(src.name)}{f'_r{rev}' if rev else ''}_{slug(tag)}.{fmt}"
     path = src.out_dir / name
     if fmt == "stl":
         write_stl(m, path, header=f"Formwright print prep, mm, {label}"[:80])
@@ -390,21 +449,57 @@ def export(src: Source, fmt: str, rot: np.ndarray, tol: float, printer_mm: list[
         write_3mf(m, path, title=f"{src.name} ({label})")
     back = parse_mesh(path.read_bytes(), name, "mm")  # reload: units and volume survive the round trip
     v0, v1 = signed_volume(m.v, m.f), signed_volume(back.v, back.f)
-    return {"name": name, "format": fmt, "bytes": path.stat().st_size, "triangles": m.n_tri,
+    meta = _exports_meta(src)
+    meta[name] = {"stamp": stamp, "label": label,
+                  "at": datetime.now(UTC).isoformat(timespec="seconds")}
+    tmp = src.out_dir / "exports.json.tmp"
+    tmp.write_text(json.dumps(meta, indent=1, sort_keys=True), encoding="utf-8")
+    tmp.replace(src.out_dir / "exports.json")
+    return {"name": name, "format": fmt, "state": "current", "made_from_rev": rev, "bytes": path.stat().st_size, "triangles": m.n_tri,
             "volume_mm3": v0, "reloaded_volume_mm3": v1, "units": back.meta["units"],
             "volume_match": abs(v1 - v0) <= 1e-4 * max(abs(v0), 1.0), "label": label,
             "bbox_mm": [float(x) for x in (m.v.max(axis=0) - m.v.min(axis=0))]}
 
 
 def list_exports(src: Source) -> list[dict[str, Any]]:
+    """Exports, newest first, each with ``state`` current / outdated (made from another build, or before builds
+    were recorded) and the model revision it came from."""
     d = src.root / "print"
     if not d.is_dir():
         return []
-    out = [{"name": p.name, "bytes": p.stat().st_size, "format": p.suffix[1:],
-            "modified": datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat(timespec="seconds")}
-           for p in d.iterdir() if p.is_file() and EXPORT_NAME.fullmatch(p.name)]
+    meta = _exports_meta(src)
+    cur = source_stamp(src) if (src.kind != "project" or (src.root / "out" / "part.step").is_file()) else {}
+    out = []
+    for p in d.iterdir():
+        if not (p.is_file() and EXPORT_NAME.fullmatch(p.name)):
+            continue
+        rec = meta.get(p.name) or {}
+        stamp = rec.get("stamp")
+        rev = (stamp or {}).get("model_rev") if src.kind == "project" else (stamp or {}).get("upload_revision")
+        out.append({"name": p.name, "bytes": p.stat().st_size, "format": p.suffix[1:], "label": rec.get("label"),
+                    "modified": datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat(timespec="seconds"),
+                    "state": "current" if _current(stamp, cur) else "outdated", "made_from_rev": rev,
+                    "current_rev": cur.get("model_rev") if src.kind == "project" else cur.get("upload_revision")})
     out.sort(key=lambda r: r["modified"], reverse=True)
     return out
+
+
+def export_summary(ws: Path, name: str = "part") -> dict[str, Any]:
+    """Print exports of a project workspace for the Studio's Make tab and the release gate.
+
+    ``state``: ``missing`` (no exports), ``stale`` (none made from the current build), else ``current``.
+    ``current_files``: names of exports made from the current build (what a release may include)."""
+    rows = list_exports(Source("project", "", name, ws))
+    cur = [r for r in rows if r["state"] == "current"]
+    n_out = len(rows) - len(cur)
+    if not rows:
+        return {"state": "missing", "exports": 0, "outdated": 0, "label": "No print exports", "current_files": []}
+    if cur:
+        label = f"{len(cur)} export{'s' if len(cur) > 1 else ''} · current" + (f" · {n_out} outdated" if n_out else "")
+    else:
+        label = f"Exports from model rev {rows[0]['made_from_rev'] or '—'} · outdated"
+    return {"state": "current" if cur else "stale", "exports": len(rows), "outdated": n_out, "label": label,
+            "current_files": [r["name"] for r in cur]}
 
 
 def export_path(src: Source, name: str) -> Path | None:

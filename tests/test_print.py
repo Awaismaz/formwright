@@ -339,3 +339,65 @@ def test_catalog_marks_print_live() -> None:
     from aicad.platform.catalog import MODULES
 
     assert MODULES["print"]["status"] == "live"
+
+
+# ------------------------------------------------------------------ audit fixes (MAKE-03/16/17/29)
+def test_slender_upright_shaft_is_penalised_and_laid_down() -> None:
+    """MAKE-17: the stepped-shaft demo stands 150 mm tall on its Ø20 end face. Hand number: height / sqrt(base area)
+    = 150 / sqrt(pi * 10^2) = 150 / 17.725 = 8.46 > 3, so the upright orientation is penalised and an
+    axis-horizontal one is suggested."""
+    import math
+    import runpy
+
+    assert analysis.slenderness(150, math.pi * 100, 25 * 25) == pytest.approx(8.4628, abs=1e-4)
+    assert analysis.slenderness(25, 0.0, 150 * 25) == pytest.approx(25 / math.sqrt(3750))  # no flat base: footprint
+    shape = runpy.run_path(str(Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo" / "stepped_shaft.py"))["result"]
+    rep = _report(tessellate_shape(shape, 0.05))
+    upright = next(o for o in rep["orientations"] if o["kind"] == "as_modelled")
+    assert upright["slenderness"] == pytest.approx(8.46, rel=5e-3)        # tessellated end face, within 0.5 %
+    assert upright["cost_terms"]["stability"] == pytest.approx(1.0)        # 0.25 x (8.46 - 3), capped at 1
+    assert any("Tall and slender" in r for r in upright["rationale"])
+    assert "weakest direction in bending" in upright["strength_note"]
+    best = rep["orientations"][0]
+    assert best["axis_horizontal"] and best["rank"] < upright["rank"] and "Axis horizontal" in best["strength_note"]
+    # MAKE-03: deterministic measurements are "Measured from the model", never "Verified calculation"
+    levels = {c["level"] for c in rep["checks"]} | {c["level"] for o in rep["orientations"] for c in o["checks"]}
+    assert "Measured from the model" in levels and "Verified calculation" not in levels
+
+
+def test_exports_record_the_build_and_go_stale_when_the_part_changes(tmp_path: Path) -> None:
+    """MAKE-16 / MAKE-29: an export names the model revision, is current for that build, and is listed as outdated
+    once the part is rebuilt; a metal design material is called out."""
+    import json
+
+    ws = tmp_path / "ws"
+    (ws / "out").mkdir(parents=True)
+    (ws / "revisions" / "1").mkdir(parents=True)
+
+    def build(shape, bid: int) -> None:
+        export_step(shape, str(ws / "out" / "part.step"))
+        st = {"ok": True, "build_id": bid, "step_sha256": f"{bid:064d}", "material": "Aluminium 6061-T6"}
+        (ws / "out" / "status.json").write_text(json.dumps(st), encoding="utf-8")
+        (ws / "revisions" / str(bid)).mkdir(parents=True, exist_ok=True)
+        (ws / "revisions" / str(bid) / "status.json").write_text(json.dumps(st), encoding="utf-8")
+        service.clear_cache()
+
+    src = service.Source("project", "p1", "Demo plate", ws, "Aluminium 6061-T6")
+    assert service.export_summary(ws)["state"] == "missing"
+    build(Box(120, 80, 10, align=MIN), 1)
+    res = service.export(src, "3mf", np.eye(3), 0.05, [220, 220, 250], "#1 As modelled", "fdm-o1")
+    assert res["name"] == "demo-plate_r1_fdm-o1.3mf" and res["volume_match"]
+    rows = service.list_exports(src)
+    assert [(r["name"], r["state"], r["made_from_rev"]) for r in rows] == [("demo-plate_r1_fdm-o1.3mf", "current", "1")]
+    assert service.export_summary(ws)["state"] == "current"
+    rep = service.run_analysis(src, {"process": "fdm"})
+    assert rep["design_material"]["metal"] and rep["design_material"]["name"] == "Aluminium 6061-T6"
+    build(Box(140, 80, 10, align=MIN), 2)           # the part changes (L 120 -> 140)
+    rows = service.list_exports(src)
+    assert rows[0]["state"] == "outdated" and rows[0]["made_from_rev"] == "1" and rows[0]["current_rev"] == "2"
+    summ = service.export_summary(ws)
+    assert summ["state"] == "stale" and summ["outdated"] == 1 and summ["label"] == "Exports from model rev 1 · outdated"
+    res2 = service.export(src, "3mf", np.eye(3), 0.05, [220, 220, 250], "#1 As modelled", "fdm-o1")
+    assert res2["name"] == "demo-plate_r2_fdm-o1.3mf" and res2["bbox_mm"][0] == pytest.approx(140)
+    assert service.export_summary(ws)["current_files"] == ["demo-plate_r2_fdm-o1.3mf"]
+    service.clear_cache()
