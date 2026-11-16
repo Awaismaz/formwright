@@ -305,3 +305,81 @@ def test_revolved_part_from_scratch(app_client: TestClient) -> None:  # noqa: F8
     assert v == pytest.approx(math.pi * 300 * 30 - math.pi * (400 - 324) * 4, rel=1e-9)
     r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**rev, "axis": {"a": [0, 0], "b": [0, 0]}}})
     assert r.status_code == 422 and "centerline" in r.json()["detail"]
+
+
+def test_suppress_design_agent_features(app_client: TestClient) -> None:  # noqa: F811
+    """Features the agent recorded with fw.feature can be suppressed and restored from the tree, without AI."""
+    c = app_client
+    signup(c, "suppress@x.com")
+    pid, ws = _project_with_model(c, (DEMO / "mounting_plate.py").read_text(encoding="utf-8"))
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    v0 = st["fingerprint"]["volume"]
+    chain = {f["name"]: f["chain"] for f in st["features"]}
+    assert chain == {"Base plate": False, "Top chamfer": True, "Mounting holes (4x)": True, "Centre pocket": True}
+    url = f"/api/projects/{pid}/design-features/suppress"
+    # the base feature can't be suppressed
+    r = c.post(url, json={"name": "Base plate", "suppressed": True})
+    assert r.status_code == 422 and "base feature" in r.json()["detail"]
+    # suppress the holes: their volume comes back, the rest of the design rebuilds on the earlier state
+    r = c.post(url, json={"name": "Mounting holes (4x)", "suppressed": True})
+    assert r.status_code == 200, r.text
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    holes = 4 * math.pi * 3.3 ** 2 * 10
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(v0 + holes, rel=1e-9)
+    assert next(f for f in st["features"] if f["name"] == "Mounting holes (4x)")["suppressed"] is True
+    assert "SUPPRESSED_FEATURES = ['Mounting holes (4x)']" in (ws / "model.py").read_text(encoding="utf-8")
+    chk5 = next(x for x in st["checks"] if x["id"] == "CHK-05")
+    assert chk5["gating"] is False and "suppressed" in chk5["name"]
+    # suppress the chamfer too, then restore both
+    assert c.post(url, json={"name": "Top chamfer", "suppressed": True}).status_code == 200
+    v2 = c.get(f"/api/projects/{pid}/files/status.json").json()["fingerprint"]["volume"]
+    assert v2 == pytest.approx(v0 + holes + (120 + 80) * 1.0 - 4 / 3, rel=1e-9)
+    for n in ("Top chamfer", "Mounting holes (4x)"):
+        assert c.post(url, json={"name": n, "suppressed": False}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["fingerprint"]["volume"] == pytest.approx(v0, rel=1e-12)
+    assert "SUPPRESSED_FEATURES" not in (ws / "model.py").read_text(encoding="utf-8")
+    assert c.post(url, json={"name": "Nope", "suppressed": True}).status_code == 404
+
+
+def test_delete_step_source_edit_rules() -> None:
+    from aicad.design_edit import DesignEditError, delete_step
+
+    src = (DEMO / "mounting_plate.py").read_text(encoding="utf-8")
+    out = delete_step(src, "Mounting holes (4x)")
+    assert 'fw.feature("Mounting holes (4x)"' not in out and "for sx in" not in out
+    assert 'fw.feature("Top chamfer"' in out and 'fw.feature("Centre pocket"' in out
+    compile(out, "model.py", "exec")
+    with pytest.raises(DesignEditError, match="base feature"):
+        delete_step(src, "Base plate")
+    with pytest.raises(DesignEditError, match="isn't a separate step"):
+        delete_step(src, "Nope")
+    entangled = (
+        "from build123d import *\nfrom aicad import fw\n"
+        "part = fw.feature('Block', Box(10, 10, 10))\n"
+        "r = 2\npart = fw.feature('Hole', part - Cylinder(r, 20))\n"
+        "part = fw.feature('Boss', part + Pos(0, 0, 5) * Cylinder(r + 1, 4))\nresult = part\n")
+    with pytest.raises(DesignEditError, match=r"later features use values defined in “Hole” \(r\)"):
+        delete_step(entangled, "Hole")
+    no_boss = delete_step(entangled, "Boss")  # the last step only reads earlier values, so it can go
+    assert "'Boss'" not in no_boss and "'Hole'" in no_boss and "result = part" in no_boss
+
+
+def test_delete_design_feature_without_ai(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "delete@x.com")
+    pid, ws = _project_with_model(c, (DEMO / "mounting_plate.py").read_text(encoding="utf-8"))
+    v0 = c.get(f"/api/projects/{pid}/files/status.json").json()["fingerprint"]["volume"]
+    url = f"/api/projects/{pid}/design-features/delete"
+    r = c.post(url, json={"name": "Base plate"})
+    assert r.status_code == 422 and "base feature" in r.json()["detail"]
+    r = c.post(url, json={"name": "Mounting holes (4x)"})
+    assert r.status_code == 200, r.text
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"] and st["fingerprint"]["volume"] == pytest.approx(v0 + 4 * math.pi * 3.3 ** 2 * 10, rel=1e-9)
+    assert [f["name"] for f in st["features"]] == ["Base plate", "Top chamfer", "Centre pocket"]
+    src = (ws / "model.py").read_text(encoding="utf-8")
+    assert "Mounting holes (4x)" not in src.split("SUPPRESSED")[0].split("# --- Formwright suppressed")[0]
+    assert "DELETED_FEATURES = ['Mounting holes (4x)']" in src and "SUPPRESSED_FEATURES" not in src
+    chk5 = next(x for x in st["checks"] if x["id"] == "CHK-05")
+    assert chk5["gating"] is False and "deleted" in chk5["name"]
