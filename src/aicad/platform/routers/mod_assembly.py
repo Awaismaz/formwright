@@ -50,6 +50,7 @@ from aicad.platform.services import audit, org_modules, track
 
 router = APIRouter(prefix="/api/m/assembly", tags=["assembly"])
 CODE = "assembly"
+PNG_MAGIC = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 _locks: dict[str, asyncio.Lock] = {}
 
 
@@ -209,10 +210,26 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
         "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
         "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
         "can_edit": ctx.role != "viewer",
+        "thumb_rev": (store.read_json(ddir / "thumb.json") or {}).get("rev"),
     }
 
 
+def _thumb_url(ctx: Ctx, doc: dict[str, Any]) -> str | None:
+    meta = store.read_json(store.doc_dir(_root(ctx), doc["id"]) / "thumb.json")
+    if not meta or not (store.doc_dir(_root(ctx), doc["id"]) / "thumb.png").is_file():
+        return None
+    return f"/api/m/assembly/assemblies/{doc['id']}/thumbnail?v={meta.get('rev', 0)}"
+
+
 def _summary(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
+    own = _thumb_url(ctx, doc)
+    if own:
+        s = doc.get("solve") or {}
+        return {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"),
+                "updated_at": doc["updated_at"], "instances": len(doc["instances"]), "mates": len(doc["mates"]),
+                "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
+                "status": s.get("status"), "dof": s.get("dof"), "free_spins": s.get("free_spins"),
+                "thumbnail": own, "own_thumbnail": True}
     thumb = None
     pid = doc.get("project_id") or next((i["source"]["project_id"] for i in doc["instances"]
                                          if i["source"]["kind"] == "project"), None)
@@ -224,7 +241,8 @@ def _summary(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
     return {"id": doc["id"], "name": doc["name"], "project_id": doc.get("project_id"), "updated_at": doc["updated_at"],
             "instances": len(doc["instances"]), "mates": len(doc["mates"]),
             "fasteners": sum(1 for g in doc["groups"] if g.get("kind") == "fastener"),
-            "status": s.get("status"), "thumbnail": thumb}
+            "status": s.get("status"), "dof": s.get("dof"), "free_spins": s.get("free_spins"),
+            "thumbnail": thumb, "own_thumbnail": False}
 
 
 # ----------------------------------------------------------------------------- bodies
@@ -279,6 +297,11 @@ class MatePatch(BaseModel):
     value: float | None = None
     flip: bool | None = None
     suppressed: bool | None = None
+
+
+class ThumbIn(BaseModel):
+    png_b64: str = Field(max_length=2_000_000)
+    rev: int = Field(ge=0)
 
 
 class FitIn(BaseModel):
@@ -599,6 +622,38 @@ async def fit_accept(aid: str, body: FitIn, ctx: Ctx = Depends(asm_ctx)) -> dict
           stacks=(view.get("result") or {}).get("inserted"))
     ctx.db.commit()
     return view
+
+
+@router.post("/assemblies/{aid}/thumbnail")
+async def put_thumbnail(aid: str, body: ThumbIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """The workspace uploads an isometric snapshot of the assembly for the list (PNG, at most 1.4 MB)."""
+    _editor(ctx)
+    import base64
+    import binascii
+
+    try:
+        data = base64.b64decode(body.png_b64.split(",", 1)[-1], validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise HTTPException(400, "Not a PNG image") from e
+    if not data.startswith(PNG_MAGIC) or len(data) > 1_400_000:
+        raise HTTPException(400, "Not a PNG image")
+    async with _lock(aid):
+        _doc(ctx, aid)
+        d = store.doc_dir(_root(ctx), aid)
+        tmp = d / "thumb.tmp"
+        tmp.write_bytes(data)
+        tmp.replace(d / "thumb.png")
+        store.write_json(d / "thumb.json", {"rev": body.rev, "at": store.now()})
+    return {"ok": True}
+
+
+@router.get("/assemblies/{aid}/thumbnail")
+def get_thumbnail(aid: str, ctx: Ctx = Depends(asm_ctx)) -> FileResponse:
+    _doc(ctx, aid)
+    f = store.doc_dir(_root(ctx), aid) / "thumb.png"
+    if not f.is_file():
+        raise HTTPException(404, "No thumbnail")
+    return FileResponse(f, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/parts/{key}/topo")

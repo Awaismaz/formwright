@@ -442,6 +442,14 @@ def test_api_full_flow(app_client: Any, tmp_path: Path) -> None:
     v = c.post(f"/api/m/assembly/assemblies/{aid}/instances/{plate_iid}/refresh").json()
     assert v["result"]["refreshed"] == 1 and v["result"]["references_lost"] == 0
     assert next(i for i in v["instances"] if i["id"] == plate_iid)["stale"] is False
+    # list thumbnail: PNG only
+    import base64
+
+    png = base64.b64encode(bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + b"\0" * 32).decode()
+    assert c.post(f"/api/m/assembly/assemblies/{aid}/thumbnail", json={"png_b64": "aGVsbG8=", "rev": 1}).status_code == 400
+    assert c.post(f"/api/m/assembly/assemblies/{aid}/thumbnail", json={"png_b64": png, "rev": 7}).status_code == 200
+    item = c.get("/api/m/assembly/assemblies").json()["items"][0]
+    assert item["own_thumbnail"] and item["thumbnail"].endswith("?v=7") and c.get(item["thumbnail"]).status_code == 200
     # viewers read only
     db = session_factory()()
     me = db.scalar(select(User).where(User.email == "asm@x.com"))
