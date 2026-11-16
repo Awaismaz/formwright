@@ -12,11 +12,11 @@ STL visualisation meshes. Everything it produces is labelled as **visualisation,
 | Visualisation mesh (MSH-008, MSH-009) | `meshstudio/geometry.py` re-imports `out/part.step` and tessellates it with `aicad.printprep.mesh.tessellate_shape` (chordal tolerance = part diagonal / 8000, clamped 0.005–0.05 mm; 5° angular). The mesh stays welded and watertight. Shading uses per-corner "split" normals: area-weighted and smooth inside each exact B-rep face, breaking at face boundaries, so cylinders read round and edges stay crisp. Checks MS-01..08 (watertight, manifold, outward winding, degenerate triangles, self-intersection, shells, measured deviation from the exact surface, UV) are **measured by the 3D Print Prep functions** (`printprep.analysis.topology`, `self_intersections`, the deviation from `tessellate_shape`), not duplicated. Cached once per STEP content (sha256) in `<ws>/mesh/geom/`. |
 | Finishes (MSH-004) | 14 physically based recipes (Principled BSDF): anodised aluminium in 9 colours, bead-blasted aluminium, brushed aluminium, machined steel (turned anisotropy around the part axis), brushed stainless, black oxide (oiled clear-coat sheen), brass, copper, bead-blasted titanium, ABS (textured) and PLA (satin) in 9 colours, rubber in 3 colours, and a neutral studio clay. Details: low-amplitude roughness variation, fine bump grain where it is larger than a pixel, and a Cycles Bevel shader node that rounds edges in **shading only** (the geometry is unchanged; can be switched off). |
 | Material auto-mapping | `presets.map_material(text)` reads the project's material text: finish words first (black oxide, bead blast, anodise, brushed), then alloy families (stainless grades, titanium, brass/bronze, copper, aluminium grades, steel grades, cast iron, plastics, elastomers), then colour words. Unknown or unspecified materials start in studio clay. Every entry in our material library maps to a real finish (tested). The UI says what it suggested and why ("Material Carbon steel suggests Machined steel") and offers a one-click reset to the suggestion. |
-| Lighting | Three rigs of area lights plus a three-stop gradient world: **Studio softbox** (key, fill, top and two vertical kick strips, light-grey sweep), **Dark dramatic** (narrow key and two rim strips on charcoal) and **Technical white** (bright, even, pure white). Lights are placed relative to the camera azimuth and scaled to the part (position and size ∝ diagonal, power ∝ diagonal²), so a 10 mm pin and a 1 m frame expose the same. The floor is a Cycles shadow catcher: renders come out with alpha and a real contact shadow, and Pillow composites a soft radial studio background unless **Transparent background** is on. View transform: Khronos PBR Neutral (made for accurate product colour). |
+| Lighting | Three rigs of area lights plus a three-stop gradient world: **Studio softbox** (key, fill, top and two vertical kick strips, light-grey sweep), **Dark dramatic** (narrow key and two rim strips on charcoal) and **Technical white** (bright, even, pure white). Lights are placed relative to the camera azimuth and scaled to the part (position and size ∝ diagonal, power ∝ diagonal²), so a 10 mm pin and a 1 m frame expose the same. Lights below 30° elevation (kickers, fills) cast no shadows, so there are no long shadow wedges across the floor. The floor is a Cycles shadow catcher: renders come out with alpha and a real contact shadow, and Pillow composites a soft radial studio background unless **Transparent background** is on. View transform: Khronos PBR Neutral (made for accurate product colour). |
 | Camera and framing | Presets **Hero 3/4** (85 mm), **Isometric** (true iso, orthographic), **Front**, **Top** (orthographic), **Low hero** (70 mm); aspect 4:3, 16:9, 1:1, 3:4. `framing.py` computes the camera in Python (deterministic, unit-tested): it bisects the distance for the tightest fit of the convex hull at 80% of the frame and centres the part with lens shift (perspective) or a lateral offset (ortho). Turntables are framed over the whole turn. **Auto pose** lays long slender parts (height > 1.6 × footprint) on their side, as a photographer would. |
-| Preview → final (MSH-001) | A fast preview (720 px, 24 samples on GPU, adaptive sampling + OpenImageDenoise) re-renders automatically as settings change, one in flight at a time with the newest settings winning. **Render final** (1920 px, 256 samples, editable `.blend`) and **Turntable** (72 frames at 960 px → GIF via Pillow and H.264 MP4 via Blender's own encoder) run in the background queue with a progress bar fed by Cycles' sample count and per-frame markers. |
+| Preview → final (MSH-001) | A fast preview (720 px, 24 samples on GPU, adaptive sampling + OpenImageDenoise) re-renders automatically as settings change, one in flight at a time with the newest settings winning. **Render final** (1920 px, 256 samples, editable `.blend`) and **Turntable** (72 frames at 960 px → GIF via Pillow and H.264 MP4 via Blender's own encoder) run in the background queue with a progress bar fed by Cycles' `Sample i/n` log lines (`--log render`) and per-frame markers. Turntables render as one Blender animation, so the device, kernels and scene stay loaded between frames (4.3 s/frame instead of 11 s/frame as separate stills). The GIF is undithered with one palette (2.9 MB instead of 8.8 MB for 72 frames at 640 px, no visible banding on the studio gradients). |
 | Queue and cache | `jobs.py`: worker pool (default 1 Blender at a time, `FW_MESH_WORKERS`), previews jump ahead of exports, finals and turntables; max 6 pending per workspace and 30 overall (429 "queue full"); queued jobs can be cancelled. Results are cached by **(verified STEP content hash, preset hash, script version, CPU/GPU)**: asking again returns the finished job instantly ("Already rendered with these settings"). Previews are pruned to the newest 12. Jobs interrupted by a restart show as failed with a clear message. |
-| Runner limits (MSH-001) | `runner.py` starts `blender -b --factory-startup --disable-autoexec --offline-mode -noaudio --python-exit-code 3 --python <job>/scene.py -- <job> <mesh.npz>` with a stripped environment (proxies pointed at a dead local port, no user site-packages), `cwd` = the job folder, and a wall-clock timeout that kills the process (preview 420 s, final 1200 s, turntable 3600 s, export 300 s). Output guard: the job folder must lie inside `<ws>/mesh/`; the scene script refuses any output path outside its job folder; after the run every new file is re-checked to resolve inside the job folder. |
+| Runner limits (MSH-001) | `runner.py` starts `blender -b --factory-startup --disable-autoexec --offline-mode -noaudio --log render --log-level info --python-exit-code 3 --python <job>/scene.py -- <job> <mesh.npz>` with a stripped environment (proxies pointed at a dead local port, no user site-packages), `cwd` = the job folder, and a wall-clock timeout that kills the process (preview 420 s, final 1200 s, turntable 3600 s, export 300 s). Output guard: the job folder must lie inside `<ws>/mesh/`; the scene script refuses any output path outside its job folder; after the run every new file is re-checked to resolve inside the job folder. |
 | Scene scripts | `blender_scene.py` is a static template; `scene.build_script(spec)` inlines the job's spec (preset values, computed camera/light matrices, relative file names) as JSON. Same build + same presets → **byte-identical script** (tested), with no machine paths in it. The job folder keeps `spec.json`, `scene.py` and the Blender log for reproducibility. |
 | Outputs (MSH-007) | Final: `render.png` (labelled in PNG text chunks: "Visualisation only…", finish, mesh tolerance), `thumb.jpg`, `scene.blend` (self-contained: mesh, materials, lights, camera; the turntable `.blend` keeps its animation). Turntable: `turntable.gif`, `turntable.mp4`, the PNG frames. Exports: `part.glb` (glTF 2.0, metres, Y up, flat PBR colour of the finish), `part_obj.zip` (OBJ + MTL, mm, Z up, disclosure comment), `part.stl` (binary, mm, Z up, header "Formwright Mesh Studio visualisation mesh, mm. Not the exact model."). |
 | GPU vs CPU (MSH-012) | `runner.detect()` probes Blender once per binary: Cycles on the best GPU backend (OptiX > CUDA > HIP > Metal > oneAPI), else Cycles on the CPU with fewer samples and a capped thread count (half the cores, max 8, for a shared machine). `FW_MESH_DEVICE=CPU` forces CPU. EEVEE is not used: it needs a GPU context and has no shadow catcher, and Cycles CPU is the honest fallback. Here: **OptiX on an NVIDIA GeForce RTX 3070**. Measured times are below. |
@@ -48,7 +48,7 @@ or desktop builds would then have to pass on Blender's source and licence).
 
 ## Tests
 
-`tests/test_mesh.py`: **76 tests, all pass in about 53 s** (real Blender on this machine).
+`tests/test_mesh.py`: **76 tests, all pass in about 45–53 s** (real Blender on this machine).
 
 - Material mapping: 36 material strings → (finish, colour), plus every library material maps to a real finish.
 - sRGB → linear against the IEC 61966-2-1 transfer function (#808080 → 0.21586; knee segment).
@@ -69,9 +69,63 @@ or desktop builds would then have to pass on Blender's source and licence).
 - API: 401 / 402 / 409 / 422 / 404 across workspaces, render → poll → PNG download, file allow-list and traversal.
 - Catalog is live with honest copy.
 
+Gate before the final commit: full suite **258 passed** (6 min 51 s), `ruff check src tests` clean,
+`npx tsc --noEmit` clean, `npx vite build` OK.
+
 ## Walkthrough (port 8778, scratch data dir, God-mode demo seed)
 
-WALKTHROUGH
+Flow walked in headless Chrome (puppeteer-core 25.17.0) against `aicad app --port 8778` on a throwaway data dir,
+with the four God-mode demo projects seeded. **0 console or page errors** over all three scripted runs.
+
+1. `/app/modules/mesh` shows the picker (four verified demos with ISO thumbnails and materials).
+2. Opening **Demo · Pipe Flange** (material "Carbon steel"): the panel says "Material Carbon steel suggests Machined
+   steel" and the first preview arrives automatically (18.8 s from a cold server, including tessellation; later
+   previews 6–8 s: Cycles GPU (RTX 3070), 24 samples, 720 × 540).
+3. **Anodised aluminium, clear** → preview in 7.9 s. **Render final · 1920 × 1440** → queued, progress, done
+   (56 s render on a GPU shared with other agents; 38.5 s on a quiet GPU, see below). Requesting it again answers
+   instantly from the cache ("Already rendered with these settings").
+4. **Isometric** final (101 s under load), then a **Turntable** (72 frames, 960 × 720, 48 samples; 446 s with the
+   first per-frame implementation, 313 s after switching to one animation render).
+5. Gallery: thumbnails with finish / lighting / view, a progress card while running, menu downloads (PNG, Blender
+   scene, GIF, MP4) and a lightbox playing the GIF with the disclosure and download buttons.
+6. **Exports** (machined steel): GLB 160 kB, OBJ (zip) 51 kB, STL 265 kB for 5,300 triangles.
+7. **Mesh** tab: MS-01..07 pass, MS-08 info; 5,300 triangles at 0.0266 mm chordal tolerance; measured deviation
+   0.0133 mm over 5,276 samples, volume within 0.022% of the exact model.
+8. Black anodised under **Dark dramatic**: preview in 7.0 s.
+9. **Demo · Stepped Shaft** opened by `?project=` (suggested Machined steel from "Steel 1045"; auto pose lays it
+   down): final in 43 s end to end.
+
+Fixes made from the screenshots: the finish list pushed lighting and camera below the fold (now a two-column
+grid with lighting tiles); gallery dates showed "Invalid Date" (job times are now naive UTC like the rest of the
+platform); gallery cards showed only a date (now finish + lighting + view); the turntable badge overlapped the
+progress card; settings reset on reload (now remembered per project in the browser); low kick and fill lights threw
+hard shadow wedges across the floor (they no longer cast shadows); turntables were 2.6× slower than needed (one
+animation render); GIFs were 8.8 MB (undithered, 2.9 MB).
+
+Images reviewed critically (in `docs/reports/mesh/`): `flange_anodised_hero.jpg`, `flange_anodised_iso.jpg`,
+`shaft_machined_steel_hero.jpg`, `finish_lighting_sheet.jpg` (red / black anodised and stainless on Dark dramatic,
+brass and bead-blast on Studio), and the UI shots `ui_studio.jpg`, `ui_lightbox_turntable.jpg`,
+`ui_mesh_checks.jpg`. What I looked for and tuned over ~10 contact-sheet iterations: blown-out tops (a rim light sat
+in the mirror direction of flat faces; moved to side kickers), metal sides reflecting a black void (world given a
+three-stop gradient and the floor made visible to reflections at 30% albedo), plastics washing out to pastel (light
+powers lowered 4× relative to the world; Khronos PBR Neutral view transform instead of AgX, which desaturated red to
+salmon), black finishes crushing to pure black (black anodise and black oxide lifted to a believable satin), and
+sub-pixel bump noise on bead-blast (removed in favour of roughness). Edges are crisp with a thin edge-break
+highlight from the shading bevel; framing is centred at 80% fill.
+
+### MSH-012: measured render times (same flange scene, Studio softbox, Hero 3/4)
+
+| Job | GPU: Cycles OptiX, RTX 3070 | CPU: Cycles, Xeon W-2135, 6 threads |
+|---|---|---|
+| Preview 720 × 540 | 24 samples: 6.7 s render, 11.6 s job | 12 samples: 11.4 s render, 11.9 s job |
+| Final 1920 × 1440 | 256 samples: **38.5 s** | 96 samples: **334.6 s** |
+| Turntable 72 × 960 × 720 | 48 samples: 313 s (4.3 s/frame) | not run; estimated ≈ 40 min at 16 samples |
+
+Per sample and pixel, the GPU final is about 23× faster than the CPU (256 vs 96 samples in 1/8.7 of the time). Job
+time includes Blender start-up (≈3–4 s) and, for the first job on a build, tessellation. The first-ever GPU render
+after installing Blender compiled OptiX kernels for 203 s (once per machine and Blender version). Times were measured
+on a workstation shared with other agents, so they vary ±50% (the same final took 38.5–56 s). Cloud cost comparison
+is not done (no cloud account; see PD-MSH-4).
 
 ## Known limits
 
@@ -103,4 +157,16 @@ WALKTHROUGH
 
 ## Parked decisions
 
-PARKED
+| ID | Decision | Default used |
+|---|---|---|
+| PD-MSH-1 | Licence of the two scripts that run inside Blender (`blender_scene.py`, `blender_encode.py`, both `import bpy`). LEG-004 counsel review is still pending. | Not relicensed. They stay isolated, contain no proprietary logic, run only on our servers and are not distributed. If counsel says they must be GPL, relicense those two files only. Blender itself is never bundled; any on-prem or desktop build that ships Blender needs counsel first. |
+| PD-MSH-2 | Should renders cost tokens? GPU time is real cost in production. | No token charge yet. Access is gated by the `addon_mesh` add-on ($19/mo hypothesis, unchanged) and limited by the queue caps (6 pending per workspace, 1 render at a time). |
+| PD-MSH-3 | Production hosting of Blender: OS-level sandbox (container with no network, read-only filesystem except the job folder) and GPU vs CPU servers. | Process-level limits only (offline mode, factory settings, no autoexec, dead proxies, timeout, output guard). Our generated script is the only code Blender runs. A container sandbox is required before untrusted inputs (uploaded meshes, user scripts) are allowed; none are today. |
+| PD-MSH-4 | Cloud GPU vs local GPU cost (MSH-012 second half). | Not decided; local numbers above. |
+| PD-MSH-5 | Default finish when a project has no material. | Studio clay (neutral) rather than guessing a metal. |
+| PD-MSH-6 | Studio entry point. | Ask the master to add **Make → Product render** in the Studio, opening `/app/modules/mesh?project=<id>`. |
+
+## Studio entry point wanted (for the master)
+
+Module code `mesh`. In the Studio's **Make** tab: "Product render (Mesh Studio)" → `/app/modules/mesh?project=<id>`.
+The page opens that project directly, starts a preview in the suggested finish, and offers "Back to project".

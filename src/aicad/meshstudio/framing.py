@@ -135,5 +135,7 @@ def place_lights(rig: list[dict[str, Any]], target: np.ndarray, diag: float, cam
         right, up, back = basis(cam_az + light["az"], light["el"])
         out.append({"name": light["name"], "matrix": matrix(right, up, back, loc),
                     "size": [round(light["w"] * diag, 6), round(light["h"] * diag, 6)],
-                    "power": round(light["power"] * (diag / ref) ** 2, 5)})
+                    "power": round(light["power"] * (diag / ref) ** 2, 5),
+                    # low lights (kickers, fills) would throw long hard-edged shadow wedges across the floor
+                    "shadow": bool(light.get("shadow", light["el"] >= 30))})
     return out

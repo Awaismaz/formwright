@@ -60,7 +60,8 @@ def thumbnail(src: Path, dst: Path, width: int = 480) -> None:
 
 
 def gif(frames: list[Path], dst: Path, fps: int, width: int = 640) -> None:
-    """Animated GIF (looping). One adaptive palette from the middle frame keeps colours stable across the turn."""
+    """Animated GIF (looping). One adaptive palette from the middle frame keeps colours stable across the turn; no
+    dithering (smooth studio gradients survive 255 colours, and the file is about 3x smaller than dithered)."""
     ims = []
     for p in frames:
         im = Image.open(p).convert("RGB")
@@ -68,8 +69,8 @@ def gif(frames: list[Path], dst: Path, fps: int, width: int = 640) -> None:
             im = im.resize((width, round(im.height * width / im.width)), Image.Resampling.LANCZOS)
         ims.append(im)
     pal = ims[len(ims) // 2].quantize(colors=255, method=Image.Quantize.MEDIANCUT)
-    q = [im.quantize(palette=pal, dither=Image.Dither.FLOYDSTEINBERG) for im in ims]
-    q[0].save(dst, save_all=True, append_images=q[1:], duration=round(1000 / fps), loop=0, optimize=False,
+    q = [im.quantize(palette=pal, dither=Image.Dither.NONE) for im in ims]
+    q[0].save(dst, save_all=True, append_images=q[1:], duration=round(1000 / fps), loop=0, optimize=True,
               disposal=1, comment=DISCLOSURE.encode())
 
 

@@ -33,17 +33,6 @@ def say(msg):
     print(msg, flush=True)
 
 
-def _stats(*args):
-    # Cycles reports "... | Sample 12/64" through render stats; forward it so the runner can show progress
-    for a in args:
-        if isinstance(a, str) and "Sample" in a:
-            say("FW_STATS " + a.split("|")[-1].strip())
-            return
-
-
-bpy.app.handlers.render_stats.append(_stats)
-
-
 # ------------------------------------------------------------------ scene
 bpy.ops.wm.read_factory_settings(use_empty=True)
 sc = bpy.context.scene
@@ -198,6 +187,10 @@ def build_lights(lights):
         ld.size, ld.size_y = li["size"]
         ld.energy = li["power"]
         ld.color = (1.0, 0.985, 0.97)
+        if hasattr(ld, "use_shadow"):
+            ld.use_shadow = li["shadow"]
+        elif hasattr(ld, "cycles"):
+            ld.cycles.cast_shadow = li["shadow"]
         ob = bpy.data.objects.new(li["name"], ld)
         sc.collection.objects.link(ob)
         set_matrix(ob, li["matrix"])

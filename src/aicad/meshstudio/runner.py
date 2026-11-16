@@ -77,6 +77,7 @@ def _env() -> dict[str, str]:
 
 def command(blender: Path, script: Path, args: list[str]) -> list[str]:
     return [str(blender), "-b", "--factory-startup", "--disable-autoexec", "--offline-mode", "-noaudio",
+            "--log", "render", "--log-level", "info",  # Cycles "Sample i/n" progress lines on stdout
             "--python-exit-code", "3", "--python", str(script), "--", *args]
 
 

@@ -196,8 +196,8 @@ LIGHTING: dict[str, dict[str, Any]] = {
     },
     "technical": {
         "label": "Technical white", "hint": "Bright, flat lighting on pure white for catalogues and datasheets",
-        "world": {"top": "#ffffff", "horizon": "#d5d8dc", "bottom": "#7d8187", "strength": 0.9},
-        "background": {"centre": "#ffffff", "edge": "#ffffff"}, "shadow": 0.45, "exposure": 0.15,
+        "world": {"top": "#ffffff", "horizon": "#d5d8dc", "bottom": "#7d8187", "strength": 0.6},
+        "background": {"centre": "#ffffff", "edge": "#ffffff"}, "shadow": 0.45, "exposure": 0.0,
         "lights": [
             {"name": "Key", "az": -35, "el": 50, "dist": 2.8, "w": 1.8, "h": 1.4, "power": 26.0},
             {"name": "Fill", "az": 50, "el": 25, "dist": 3.0, "w": 1.8, "h": 1.4, "power": 16.0},
