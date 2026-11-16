@@ -5,13 +5,22 @@ description = "AI-native engineering design platform (M0 spike)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "build123d==0.13.0",
+    "claude-agent-sdk==0.2.182",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "vtk>=9.3",
 ]
 
 [project.scripts]
 aicad = "aicad.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "httpx>=0.28.1",
+]
 
 [build-system]
 requires = ["hatchling"]

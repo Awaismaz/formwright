@@ -1,6 +1,6 @@
 # Punch List
 
-Last updated: 2026-11-16 (Session 1b, after approval). Synchronized with `ROADMAP.md`.
+Last updated: 2026-11-16 (Session 1c, design agent). Synchronized with `ROADMAP.md`.
 
 ## Legend
 
@@ -21,9 +21,9 @@ Last updated: 2026-11-16 (Session 1b, after approval). Synchronized with `ROADMA
 | MFG / ENG | 24 | 0 | 0 | 0 |
 | MSH | 12 | 0 | 0 | 0 |
 | PLT / SEC / UX / INF / DOC | 39 | 1 | 4 | 1 |
-| **Total** | **196** | **17** | **15** | **11** |
+| **Total** | **199** | **19** | **26** | **10** |
 
-Implemented so far is a **spike**: one hand-coded part family (FX-01), deterministic checks CHK-02..08, and a local live viewer. There is no LLM, no Part Spec DSL compiler and no drawings yet.
+Implemented so far is a **prototype**: the FX-01 spike, deterministic checks CHK-02..08, a live viewer, and the chat-driven design agent (`aicad studio`, Claude Agent SDK). There are no drawings, no DFM checks and no sandbox yet. Per-module rows above are not re-split; the Total row is authoritative.
 
 ---
 
@@ -45,7 +45,7 @@ Implemented so far is a **spike**: one hand-coded part family (FX-01), determini
 | ARC-007 | Architecture | Deployment comparison | P1 | Done | M0 | MVP | Eng | — | Staged plan | ARCHITECTURE §3.5 | |
 | ARC-008 | Architecture | Drawings/sketch/mates/history approach survey | P1 | Done | M0 | MVP | Eng | — | Table per area | ARCHITECTURE §3.6 | |
 | ARC-010 | Architecture | Geometry spike: uv venv Py3.12 + build123d; build FX-01 from hand-written code; STEP export/reimport; volume/bbox checks | P0 | Done | M0 | MVP | Eng | ARC-002 | FX-01 passes CHK-02..08; timings recorded | `tests/test_plate.py` (20 tests pass); `out/fx01_plate/status.json`: CHK-02..08 pass, vol rel err 5e-16, build+checks 0.5 s | Hand-written build123d, no DSL yet |
-| ARC-011 | Architecture | Part Spec DSL v0 schema design (features, params, IDs, selectors, assumptions, open questions) | P0 | Backlog | M0 | MVP | Eng | ARC-010 | JSON schema + 3 example specs validate; reviewed by founder | — | Core IP |
+| ARC-011 | Architecture | Part Spec DSL v0 schema design (features, params, IDs, selectors, assumptions, open questions) | P0 | Backlog | M0 | MVP | Eng | ARC-010 | JSON schema + 3 example specs validate; reviewed by founder | — | Deprioritised by ADR-013: DSL now optional (structured param editing / LLM-free regeneration) |
 | ARC-012 | Architecture | Python 3.12 vs 3.13 wheel compatibility check | P2 | Done | M0 | MVP | Eng | ARC-010 | Decision recorded in ADR-005 | ADR-005: Py 3.12.13 chosen; 3.13 not tested | Revisit if a dependency requires 3.13 |
 | LEG-001 | Legal | Record licenses of direct deps (metadata) | P0 | Done | M0 | MVP | Eng | — | List with versions | SESSION_LOG §A; ARCHITECTURE §5 | Metadata only, not legal review |
 | LEG-002 | Legal | Transitive dependency license audit (pip-licenses or similar) + SBOM | P0 | Backlog | M0 | MVP | Eng | ARC-010 | Report of every package/license; copyleft flagged | — | |
@@ -163,16 +163,18 @@ Implemented so far is a **spike**: one hand-coded part family (FX-01), determini
 | AGT-001 | Agent | LLMProvider interface (structured output, vision, metering) | P0 | Backlog | M1 | MVP | Eng | ARC-011 | Typed interface + tests | — | ADR-009 |
 | AGT-002 | Agent | Recorded/replay provider for CI (zero paid calls) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | CI passes offline | — | |
 | AGT-003 | Agent | Requirement interpretation → Part Spec + assumptions + open questions | P0 | Backlog | M1 | MVP | Eng | AGT-001 | Schema-valid output on benchmark prompts | — | |
-| AGT-004 | Agent | Generate–check–render–critique–revise loop (shared orchestrator) | P0 | Backlog | M1 | MVP | Eng | AGT-003, EVAL-001 | Bounded; stops on criteria/limits; all artifacts saved | — | Master prompt §4 |
-| AGT-005 | Agent | Domain validator plug-in interface (CAD now, mesh later) | P0 | Backlog | M1 | MVP | Eng | AGT-004 | CAD validators registered via interface | — | |
-| AGT-006 | Agent | Vision critique: observed vs uncertain findings, structured | P1 | Backlog | M1 | MVP | Eng | UX-003 | Structured output; never overrides gates | — | R-TEC-05 |
-| AGT-007 | Agent | Revision on spec (not exported file) | P0 | Backlog | M1 | MVP | Eng | AGT-004 | Revisions are spec diffs | — | |
-| AGT-008 | Agent | Iteration/time/cost caps + human-approval stop | P0 | Backlog | M1 | MVP | Eng | AGT-004 | CHK-14 enforced | — | R-OPS-01 |
+| AGT-004 | Agent | Generate–check–render–critique–revise loop (shared orchestrator) | P0 | In Progress | M1 | MVP | Eng | AGT-003, EVAL-001 | Bounded; stops on criteria/limits; all artifacts saved | `aicad studio`: agent writes model.py → build_model → checks + render → revise; SESSION_LOG 2026-11-16 (c) e2e L-bracket | Loop owned by Agent SDK (ADR-013); stop = agent judgement + max_turns 80 |
+| AGT-005 | Agent | Domain validator plug-in interface (CAD now, mesh later) | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CAD validators registered via interface | `src/aicad/agent/tools.py` build_model MCP tool; checks provider-neutral | Mesh validators later |
+| AGT-006 | Agent | Vision critique: observed vs uncertain findings, structured | P1 | In Progress | M1 | MVP | Eng | UX-003 | Structured output; never overrides gates | build_model returns 4-view PNG to agent (`agent/render.py`) | Critique is the agent's own; no structured findings schema yet |
+| AGT-007 | Agent | Revision on spec (not exported file) | P0 | In Progress | M1 | MVP | Eng | AGT-004 | Revisions are spec diffs | Agent revises model.py source, never the STEP |  |
+| AGT-008 | Agent | Iteration/time/cost caps + human-approval stop | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CHK-14 enforced | max_turns=80, 180 s build timeout, Stop button (interrupt) | No per-session cost cap under subscription auth |
 | AGT-009 | Agent | Run record: prompts (policy-permitting), model IDs, versions, costs, timings | P0 | Backlog | M1 | MVP | Eng | AGT-001 | `run.json` complete | — | |
-| AGT-010 | Agent | Live Claude provider | P0 | Blocked | M1 | MVP | Eng | AGT-001, LEG-005 | Live benchmark run completes | — | No API key; paid usage needs approval |
+| AGT-010 | Agent | Live Claude provider | P0 | In Progress | M1 | MVP | Eng | AGT-001, LEG-005 | Live benchmark run completes | Agent SDK 0.2.182 on claude-opus-5-5 via subscription login (dev); `--api-key` flag for API billing | Dev auth only (R-LIC-05) |
 | AGT-011 | Agent | Gated free-form build123d code fallback | P2 | Backlog | M2 | LT | Eng | SEC-004 | Runs only in sandbox; extra checks | — | ADR-002 |
-| AGT-012 | Agent | Prompt-injection defences (file text as data, tool allowlist) | P0 | Backlog | M1 | MVP | Eng | AGT-003 | Injection test prompts don't change tool behaviour | — | R-SEC-03 |
+| AGT-012 | Agent | Prompt-injection defences (file text as data, tool allowlist) | P0 | In Progress | M1 | MVP | Eng | AGT-003 | Injection test prompts don't change tool behaviour | Tool allow-list, no Bash, workspace path guard, WebFetch host allow-list; `tests/test_agent.py` | No injection test prompts yet |
 | AGT-013 | Agent | Second provider stub (portability check) | P2 | Backlog | M2 | LT | Eng | AGT-001 | Same tests pass with alt provider | — | Vendor lock-in |
+| AGT-014 | Agent | Claude Agent SDK session per project workspace (tool allow-list, hooks, settings isolation, SSE events) | P0 | Done | M1 | MVP | Eng | ADR-013 | Prompt in UI → agent builds part → checks pass → viewer updates; no file access outside workspace | SESSION_LOG 2026-11-16 (c) e2e L-bracket; `tests/test_agent.py` guard + endpoint tests | Prototype; dev auth = subscription |
+| AGT-015 | Agent | Switch to API-key (or Anthropic-approved) auth before any non-founder user | P0 | Backlog | M2 | LT | Founder | LEG-005 | Pilot build refuses subscription auth | — | R-LIC-05 |
 | EVAL-001 | Eval | Deterministic check suite CHK-01..10, 12, 14 | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Each check unit-tested with pass and fail fixtures | `src/aicad/checks.py`: CHK-02..08 implemented + negative tests | CHK-01 (schema), 10, 12, 14 pending |
 | EVAL-002 | Eval | Metamorphic/property tests (hypothesis) | P0 | Done | M1 | MVP | Eng | CAD-008 | ≥50 random param sets, no crashes | `test_random_specs_build_valid_or_fail_cleanly` (80 seeded random specs, ≥50 built, volume/bbox/manifold asserted); `test_metamorphic_length_increase` | Seeded `random`, not hypothesis yet |
 | EVAL-003 | Eval | LLM benchmark: 20 original prompts, plate/bracket family | P0 | Backlog | M1 | MVP | Eng | AGT-004 | Report: first-pass & ≤3-iter rates, cost, latency | — | Opt-in (paid) |
@@ -249,7 +251,7 @@ Implemented so far is a **spike**: one hand-coded part family (FX-01), determini
 | PLT-009 | Platform | Usage controls per tenant | P2 | Backlog | M4 | LT | Eng | PLT-004 | Caps enforced | — | |
 | PLT-010 | Platform | Collaboration foundations (sharing, comments) | P2 | Backlog | M4 | LT | Eng | PLT-004 | | — | |
 | PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | Backlog | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | — | |
-| SEC-001 | Security | M1 isolation: compiler-only execution in subprocess w/ timeout + memory guard | P0 | Backlog | M1 | MVP | Eng | CAD-001 | Timeout test kills runaway job | — | ADR-007 |
+| SEC-001 | Security | M1 isolation: compiler-only execution in subprocess w/ timeout + memory guard | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Timeout test kills runaway job | runner subprocess, timeout, secret-free env, import tripwire (`tests/test_agent.py`) | Tripwire is not a sandbox (R-SEC-05) |
 | SEC-002 | Security | Path traversal + filename sanitization in artifact store | P0 | In Progress | M1 | MVP | Eng | PLT-002 | Fuzz tests | Viewer serves allow-listed names only; `tests/test_viewer.py` traversal cases → 404 | Artifact store not built yet |
 | SEC-003 | Security | Secrets management (env/keyring; never in workers or logs) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | Log scrubbing test | — | |
 | SEC-004 | Security | Container sandbox: no network, ro mounts, limits, no secrets, per-tenant scratch | P1 | Blocked | M2 | LT | Eng | approval | Escape test suite passes | — | No Docker / WSL distro; install needs approval |
@@ -259,17 +261,18 @@ Implemented so far is a **spike**: one hand-coded part family (FX-01), determini
 | SEC-008 | Security | Threat model document | P1 | Backlog | M2 | LT | Eng | ARC-002 | STRIDE-style doc reviewed | — | |
 | SEC-009 | Security | Dependency vulnerability scanning in CI | P1 | Backlog | M1 | MVP | Eng | INF-003 | CI job runs pip-audit/npm audit | — | |
 | UX-001 | UX | CLI: `make`, `edit-param`, `revise`, `export` | P0 | Backlog | M1 | MVP | Eng | AGT-004 | End-to-end demo via CLI | — | M1a |
-| UX-002 | UX | Minimal web UI: prompt, assumptions approval, params panel, downloads | P0 | Backlog | M1 | MVP | Eng | INF-004 | VS-1 demo in browser | — | M1b |
-| UX-003 | UX | Offscreen renderer (fixed cameras) | P0 | Backlog | M1 | MVP | Eng | CAD-001 | CHK-10 passes | — | ADR-006 |
+| UX-002 | UX | Minimal web UI: prompt, assumptions approval, params panel, downloads | P0 | In Progress | M1 | MVP | Eng | INF-004 | VS-1 demo in browser | Chat panel + live viewer + checks panel in `aicad studio` (screenshot, SESSION_LOG c) | Assumption approval is conversational, not a form |
+| UX-003 | UX | Offscreen renderer (fixed cameras) | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-10 passes | `agent/render.py` VTK offscreen 2×2 views | CHK-10 automatic render check pending |
 | UX-004 | UX | Three.js viewer: orbit, part tree, selection, measure | P1 | In Progress | M1 | MVP | Eng | IO-003 | Measured dims match spec | `src/aicad/viewer/static/index.html`: orbit, 4 views, edges, wireframe, section, measure | Part tree and selection pending |
 | UX-005 | UX | Feature tree + parameter editing UI | P1 | Backlog | M2 | LT | Eng | UX-004 | Edit → regenerate | — | |
 | UX-006 | UX | Revision history / compare UI | P2 | Backlog | M2 | LT | Eng | CAD-012 | | — | |
 | UX-007 | UX | Clear capability labels (implemented/prototype/inferred/not approved) | P0 | Backlog | M1 | MVP | Eng | — | Labels on every output | — | Honesty requirement |
 | UX-008 | UX | Live local viewer: auto-reload on spec save, mesh from re-imported STEP, checks panel | P0 | Done | M0 | MVP | Eng | ARC-010 | Save spec → viewer shows new geometry + checks within ~1 s; only allow-listed files served | `aicad live`; headless-Chrome screenshots 120→150 mm rebuild (SESSION_LOG 2026-11-16 b); `tests/test_viewer.py` | Founder request; ADR-012. Three.js from CDN: vendor before offline use |
+| UX-009 | UX | Studio chat panel: streaming agent text, tool steps with status, Stop/New, cost-estimate line | P0 | Done | M1 | MVP | Eng | AGT-014 | Prompt typed in browser drives the agent; tool progress visible; result line shows turns/time/est. cost | Screenshot, SESSION_LOG c | Escape-first minimal markdown |
 | INF-001 | Infra | uv venv (Py3.12), lockfile, pinned deps | P0 | In Progress | M1 | MVP | Eng | ARC-010 | Fresh clone → `uv sync` → tests pass | `pyproject.toml`, `uv.lock`, `.venv` Py 3.12.13 | Fresh-clone test not yet run |
 | INF-002 | Infra | SQLite persistence + local artifact store | P0 | Backlog | M1 | MVP | Eng | INF-001 | Migration + tests | — | ADR-008 |
 | INF-003 | Infra | CI (lint, type, tests, no paid calls) incl. Linux runner | P0 | Backlog | M1 | MVP | Eng | GOV-004 | CI green on Win + Linux | — | R-TEC-07 |
-| INF-004 | Infra | FastAPI app + SSE progress | P0 | Backlog | M1 | MVP | Eng | PLT-003 | API contract tests | — | |
+| INF-004 | Infra | FastAPI app + SSE progress | P0 | In Progress | M1 | MVP | Eng | PLT-003 | API contract tests | `src/aicad/studio/app.py` FastAPI + SSE; endpoint tests |  |
 | INF-005 | Infra | Observability: per-stage timings, model calls, tokens, failures | P0 | Backlog | M1 | MVP | Eng | AGT-009 | Structured logs + run summary | — | |
 | INF-006 | Infra | Pilot deployment: single VM, Postgres, S3-compatible store, containerized worker | P1 | Backlog | M2 | LT | Eng | SEC-004 | Deploy script; restore test | — | Cloud spend needs approval |
 | INF-007 | Infra | Cost-per-design model (CPU-s, tokens, storage) | P1 | Backlog | M2 | LT | Eng | INF-005 | Measured, not estimated from dev box | — | AS-08 |

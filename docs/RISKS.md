@@ -25,4 +25,8 @@ Likelihood/Impact: L/M/H. Status: Open, Mitigating, Closed, Accepted.
 | R-ENG-01 | Users treat AI engineering advice as validated | M | H | Advice levels (recommended/preliminary/verified/validated), sign-off gate, disclaimers | Eng | Open |
 | R-OPS-01 | Unbounded agent loops → runaway cost | M | M | Iteration/time/cost caps per job; metering | Eng | Open |
 | R-OPS-02 | No Docker/WSL distro on dev box blocks isolation work | H | M | Approval to install Docker Desktop or WSL2 distro | Founder | Open |
-| R-OPS-03 | Directory not under version control → evidence links impossible | H | L | `git init` after approval | Founder | Open |
+| R-OPS-03 | Directory not under version control → evidence links impossible | H | L | `git init` after approval | Founder | Closed 2026-11-16 (repo initialised) |
+| R-LIC-05 | Dev agent uses the founder's Claude Code subscription login; the Agent SDK docs disallow offering claude.ai login in third-party products without approval | M | H | Founder-only use on this PC; `aicad studio --api-key` path exists; switch before any other user (pilot or customer); counsel to confirm personal-dev use (LEG-005) | Founder/Counsel | Open |
+| R-SEC-05 | Agent-written model scripts execute as unsandboxed Python on the dev PC (import tripwire is bypassable) | M | H | Subprocess + 180 s timeout + secret-free env + tripwire + no Bash tool + workspace path guard; container sandbox (SEC-004) mandatory before customer use | Eng | Mitigating |
+| R-TEC-08 | Lock-in to Claude Code harness (Agent SDK) and Anthropic models | M | M | Keep tools/checks/viewer provider-neutral; revisit if a comparable harness exists elsewhere | Eng | Accepted |
+| R-OPS-04 | Subscription usage limits throttle development sessions | M | L | Monitor; use `--model` for a lighter model on routine edits; API key as fallback | Founder | Open |

@@ -4,6 +4,48 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (c) — Chat-driven design agent (Claude Agent SDK)
+
+**Founder input:** "Just a view — where do I give a prompt?" The founder rejected a plain chat-API approach, which lacks Claude Code's agentic power, and asked for the UI to be driven by a Claude Code session. For development it should use the founder's subscription, not paid API calls.
+
+**Research (docs fetched 2026-11-16):** the Claude Agent SDK is "Claude Code as a library": the same tools, agent loop and context management. Use is governed by the Commercial Terms. The overview page says: *"Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK."* So subscription auth is used **only for the founder's own development on this PC** (R-LIC-05, AGT-015).
+
+### Done (evidence)
+- **Dependencies:** claude-agent-sdk 0.2.182 (MIT on PyPI; it bundles the CLI, 2.1.325), fastapi, uvicorn 0.54, vtk 9.7.2, httpx (dev).
+- **Smoke test:** `apiKeySource: none` (subscription login), model claude-opus-5-5. With `setting_sources=[]`, the founder's personal plugins and hooks are not loaded into the product agent.
+- **New code:**
+  - `agent/runner.py`: subprocess build of the AI-written script, checks, artifacts, import tripwire.
+  - `agent/render.py`: VTK offscreen 2×2 views, about 2 s.
+  - `agent/tools.py`: the `build_model` MCP tool returns the report plus an image.
+  - `agent/prompt.py`: the CAD workflow, script contract and honesty rules.
+  - `agent/session.py`: `ClaudeSDKClient`, tool allow-list, workspace path guard, SSE events.
+  - `studio/app.py`: the FastAPI server.
+  - Chat panel added to the viewer page.
+  - `aicad studio --project NAME [--api-key]`.
+- **Tests:** 43 pass, with no model calls: runner, tripwire, path/web guard and endpoint tests. `ruff` clean.
+- **E2E (live, subscription):** prompt for a 6061 L-bracket (60/40 legs, 50 wide, 5 thick, 4× M5 clearance holes, R3 inside fillet).
+  - The agent stated requirements and assumptions, wrote `model.py` with an analytic `EXPECTED` (section area + r²(1−π/4) fillet material − holes), built once, and all gating checks passed.
+  - Volume: 23 371.4049 mm³, rel err 0.
+  - 3 turns, 38.4 s. API-equivalent estimate $0.55, **not billed** (subscription).
+  - It also flagged a real ambiguity: the vertical leg's holes end up only 10 mm apart, and it asked about it.
+  - Screenshot of the studio UI checked.
+
+### Findings
+- Headless-Chrome screenshots hang with `--virtual-time-budget` while the SSE stream is open; use `--timeout`.
+- VTK: `AddActor2D` is not available; use `AddViewProp`.
+- An earlier `uv pip list` showed packages from base conda (VIRTUAL_ENV leak), not the project venv. Always `unset VIRTUAL_ENV`.
+
+### Blocked / risks
+SEC-004 sandbox is still blocked (no Docker/WSL distro). It is now the gate for any customer use, because the agent writes and runs Python.
+
+### Next highest-leverage item
+Add DRW-001..004 (3-view drawing) as a second agent tool, so the loop produces a manufacturing drawing as well as STEP. In parallel, run 5–10 real prompts from the founder's own work as a qualitative benchmark (EVAL-003).
+
+### Decision required
+None now. Before any pilot user: an API key or approved auth (AGT-015), and Docker/WSL for the sandbox (SEC-004).
+
+---
+
 ## 2026-11-16 (b) — Approval, geometry spike, live viewer
 
 **Founder decision:** approved the M1 wedge and direction ("Go ahead"). ADR-001, 002, 003 and 005 are Accepted. New request: a live viewer instead of checking STEP files in SOLIDWORKS → ADR-012.

@@ -58,14 +58,72 @@
   td:last-child { text-align: right; }
   a { color: var(--accent); }
   .err { color: var(--fail); white-space: pre-wrap; font-weight: 600; }
+  #app.with-chat { grid-template-columns: 400px 1fr 320px; }
+  #chat { display: none; flex-direction: column; min-height: 0; background: var(--panel);
+    border-right: 1px solid var(--line); }
+  #app.with-chat #chat { display: flex; }
+  #chat header { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex;
+    align-items: center; gap: 8px; }
+  #chat header .title { font-weight: 700; flex: 1; }
+  #chat header .meta { color: var(--muted); font-size: 11.5px; }
+  #log { flex: 1; overflow-y: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { border-radius: 8px; padding: 8px 10px; word-wrap: break-word; }
+  .msg.user { background: var(--accent); color: #fff; align-self: flex-end; max-width: 88%;
+    white-space: pre-wrap; }
+  .msg.agent { background: var(--bg); border: 1px solid var(--line); }
+  .msg.agent p { margin: 0 0 6px; } .msg.agent p:last-child { margin-bottom: 0; }
+  .msg.agent pre { background: var(--viewport); padding: 6px 8px; border-radius: 6px; overflow-x: auto;
+    font-size: 12px; margin: 6px 0; }
+  .msg.agent code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .msg.agent ul, .msg.agent ol { margin: 4px 0 6px; padding-left: 20px; }
+  .tool { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: baseline;
+    padding: 0 4px; }
+  .tool b { color: var(--text); font-weight: 600; }
+  .tool .st { min-width: 12px; } .tool .st.ok { color: var(--pass); } .tool .st.bad { color: var(--fail); }
+  .tool .st.run { color: var(--accent); }
+  .result { font-size: 11.5px; color: var(--muted); text-align: center; padding: 2px 0 6px;
+    border-bottom: 1px dashed var(--line); }
+  .msg.error { background: transparent; color: var(--fail); border: 1px solid var(--fail); }
+  #composer { border-top: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+  #prompt { width: 100%; min-height: 70px; max-height: 220px; resize: vertical; font: inherit;
+    color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  #prompt:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #composer .row { display: flex; gap: 8px; align-items: center; }
+  #composer button { font: inherit; border-radius: 6px; padding: 6px 12px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+  #composer button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #composer button:disabled { opacity: .5; cursor: default; }
+  #working { color: var(--accent); font-size: 12px; flex: 1; }
+  @media (max-width: 1100px) {
+    #app.with-chat { grid-template-columns: 340px 1fr; }
+    #app.with-chat aside { display: none; }
+  }
   @media (max-width: 760px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 60vh auto; }
+    #app, #app.with-chat { grid-template-columns: 1fr; grid-template-rows: auto 55vh auto; height: auto; }
+    #chat { max-height: 70vh; border-right: 0; border-bottom: 1px solid var(--line); }
+    #view { min-height: 55vh; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
   }
 </style>
 </head>
 <body>
 <div id="app">
+  <section id="chat">
+    <header>
+      <span class="title">Design agent</span>
+      <span class="meta" id="agent-meta"></span>
+      <button id="btn-new" title="Start a new conversation">New</button>
+    </header>
+    <div id="log"></div>
+    <div id="composer">
+      <textarea id="prompt" placeholder="Describe the part or change, e.g. &quot;Aluminium L-bracket, 60×40×5 mm legs, two M5 clearance holes per leg, 3 mm inside fillet&quot;  (Ctrl+Enter to send)"></textarea>
+      <div class="row">
+        <span id="working"></span>
+        <button id="btn-stop" disabled>Stop</button>
+        <button id="btn-send" class="primary">Send</button>
+      </div>
+    </div>
+  </section>
   <div id="view">
     <div id="toolbar">
       <button data-view="iso">Iso</button>
@@ -146,7 +204,7 @@ function resize() {
   renderer.setSize(r.width, r.height, false);
   camera.aspect = r.width / Math.max(r.height, 1); camera.updateProjectionMatrix();
 }
-addEventListener("resize", resize); resize();
+new ResizeObserver(resize).observe(view); resize();
 
 // glTF is Y-up. CAD (build123d) is Z-up; exporter maps CAD +Z -> glTF +Y, CAD +Y -> glTF -Z.
 const VIEWS = {
@@ -293,6 +351,80 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 poll();
+
+// --- agent chat (only when served by `aicad studio`)
+const appEl = document.getElementById("app"), logEl = document.getElementById("log");
+const promptEl = document.getElementById("prompt"), sendBtn = document.getElementById("btn-send");
+const stopBtn = document.getElementById("btn-stop"), workingEl = document.getElementById("working");
+const metaEl = document.getElementById("agent-meta");
+const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function md(src) {  // minimal, escape-first markdown: code fences, inline code, bold, bullets, paragraphs
+  const parts = src.split(/```[^\n]*\n?/);
+  return parts.map((p, i) => {
+    if (i % 2) return `<pre><code>${esc(p.replace(/\n$/, ""))}</code></pre>`;
+    const inl = t => t.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    let html = "", list = null, para = [];
+    const flushP = () => { if (para.length) html += `<p>${para.map(inl).join("<br>")}</p>`; para = []; };
+    const flushL = () => { if (list) html += `<${list.tag}>${list.items.map(i => `<li>${inl(i)}</li>`).join("")}</${list.tag}>`; list = null; };
+    for (const line of esc(p).split("\n")) {
+      const ul = line.match(/^\s*[-*] (.*)$/), ol = line.match(/^\s*\d+[.)] (.*)$/);
+      const m = ul || ol;
+      if (m) { flushP(); const tag = ul ? "ul" : "ol";
+        if (!list || list.tag !== tag) { flushL(); list = { tag, items: [] }; } list.items.push(m[1]); }
+      else if (!line.trim()) { flushP(); flushL(); }
+      else { flushL(); para.push(line.replace(/^#{1,6}\s+/, "")); }
+    }
+    flushP(); flushL();
+    return html;
+  }).join("");
+}
+const toolRows = new Map();
+function add(el) { const near = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
+  logEl.appendChild(el); if (near) logEl.scrollTop = logEl.scrollHeight; }
+function div(cls, html) { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; return d; }
+function setBusy(b) { sendBtn.disabled = b; stopBtn.disabled = !b; workingEl.textContent = b ? "Agent working…" : ""; }
+function onEvent(ev) {
+  switch (ev.type) {
+    case "hello": setBusy(ev.busy); break;
+    case "reset": logEl.innerHTML = ""; toolRows.clear(); break;
+    case "user": add(div("msg user", esc(ev.text))); break;
+    case "text": add(div("msg agent", md(ev.text))); break;
+    case "system": metaEl.textContent = `${ev.model} · ${ev.auth}`; break;
+    case "tool": {
+      const r = div("tool", `<span class="st run">●</span><span><b>${esc(ev.name)}</b> ${esc(ev.brief || "")}</span>`);
+      toolRows.set(ev.id, r); add(r); break; }
+    case "tool_result": {
+      const r = toolRows.get(ev.id); if (!r) break;
+      const st = r.querySelector(".st"); st.className = "st " + (ev.is_error ? "bad" : "ok");
+      st.textContent = ev.is_error ? "✕" : "✓";
+      if (ev.brief && (ev.is_error || /build/.test(r.textContent))) r.title = ev.brief;
+      if (/build_model/.test(r.textContent) && ev.brief)
+        r.querySelector("span:last-child").insertAdjacentHTML("beforeend", ` — ${esc(ev.brief)}`);
+      break; }
+    case "result": {
+      const cost = ev.cost_est_usd != null ? ` · API-equiv. est. $${ev.cost_est_usd.toFixed(2)}` +
+        (ev.auth === "none" ? " (subscription — not billed)" : "") : "";
+      add(div("result", `${esc(ev.subtype)} · ${ev.turns} turns · ${ev.duration_s} s${cost}`)); break; }
+    case "error": add(div("msg error", esc(ev.text))); break;
+    case "busy": setBusy(ev.value); break;
+  }
+}
+async function send() {
+  const text = promptEl.value.trim(); if (!text || sendBtn.disabled) return;
+  const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt: text }) });
+  if (r.ok) promptEl.value = ""; else onEvent({ type: "error", text: `Send failed: ${r.status} ${await r.text()}` });
+}
+sendBtn.onclick = send;
+promptEl.addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+stopBtn.onclick = () => fetch("/api/interrupt", { method: "POST" });
+document.getElementById("btn-new").onclick = () => {
+  if (confirm("Start a new conversation? The current model files stay in the workspace.")) fetch("/api/reset", { method: "POST" }); };
+fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => {
+  if (!s?.agent) return;
+  appEl.classList.add("with-chat"); resize();
+  new EventSource("/api/events").onmessage = m => onEvent(JSON.parse(m.data));
+}).catch(() => {});
 
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 </script>
