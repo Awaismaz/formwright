@@ -258,7 +258,8 @@ def test_process_ranking_sanity() -> None:
     assert im["fit"] in ("Poor fit", "Possible") and low["process"]["ranking"][0]["process"] != "injection_moulding"
     assert all(r["confidence"] in ("low", "medium") for r in high["process"]["ranking"])  # never "high"
     br = run(demo("l_bracket"))
-    assert br["signals"]["sheet"]["sheet_like"] and br["process"]["ranking"][0]["process"] == "sheet_metal"
+    sm = next(r for r in br["process"]["ranking"] if r["process"] == "sheet_metal")
+    assert br["signals"]["sheet"]["sheet_like"] and sm["fit"] == "Possible" and sm["score"] <= 60  # MAKE-11
     steel_im = next(r for r in run(Box(20, 20, 20), material="steel_1045")["process"]["ranking"]
                     if r["process"] == "injection_moulding")
     assert not steel_im["feasible"] and steel_im["score"] == 0
@@ -323,7 +324,8 @@ def test_report_html_and_pdf() -> None:
     with tempfile.TemporaryDirectory() as td:
         topo = export_topology(shape, Path(td) / "t.json")
     h = report.build_html(a, "Plate", topo)
-    assert "NOT APPROVED FOR MANUFACTURE" in h and "not a quote" in h and "CHK-13" in h
+    assert "NOT APPROVED FOR MANUFACTURE" in h and "not a quote" in h and "Rules run" in h
+    assert "Where:" in h and "Faces:" not in h  # findings point at features, never at face ids (MAKE-13)
     assert "ISO 273 medium clearance for M6" in h and h.count("data:image/png") >= 2
     pdf = report.build_pdf(a, "Plate", topo)
     assert pdf.startswith(b"%PDF") and len(pdf) > 20_000
@@ -404,3 +406,145 @@ def test_api_god_mode_unlock(app_client: TestClient) -> None:  # noqa: F811
     assert c.get("/api/m/manufacturing/meta").status_code == 402  # superadmin without the bypass: still locked
     assert c.patch("/api/god", json={"bypass_paywall": True}).status_code == 200
     assert c.get("/api/m/manufacturing/meta").status_code == 200
+
+
+# ----------------------------------------------------------------------------- audit fixes (MAKE-10/11/12/13, IDEA-02)
+def _plate(**over: float) -> dict[str, Any]:
+    src = (DEMO / "mounting_plate.py").read_text(encoding="utf-8")
+    for k, v in over.items():
+        src = src.replace(f"\n{k} = ", f"\n{k} = {v!r}  # was ", 1)
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:  # our own demo script with one value changed
+        f = Path(td) / "plate.py"
+        f.write_text(src, encoding="utf-8")
+        return runpy.run_path(str(f))
+
+
+def test_iso273_clearance_table_matches_the_standard() -> None:
+    # ISO 273:1979 table (fine / medium / coarse), typed against the standard
+    for thread, row in {"M3": (3.2, 3.4, 3.6), "M5": (5.3, 5.5, 5.8), "M6": (6.4, 6.6, 7.0), "M8": (8.4, 9.0, 10.0),
+                        "M10": (10.5, 11.0, 12.0), "M12": (13.0, 13.5, 14.5), "M16": (17.0, 17.5, 18.5),
+                        "M20": (21.0, 22.0, 24.0), "M24": (25.0, 26.0, 28.0)}.items():
+        assert S.ISO_273[thread] == row, thread
+    assert S.clearance_matches(6.6) == [("M6", "medium")] and S.clearance_thread(14.0) == "M12"
+    assert S.clearance_neighbours(14.0) == (("M12", "medium", 13.5), ("M12", "coarse", 14.5))
+    assert S.tap_drill_matches(14.0) == ["M16"] and S.min_bend_radius("al_6061", 5.0) == (20.0, 4.0)
+    assert S.min_bend_radius("al_5052", 2.0) == (3.0, 1.5) and S.min_bend_radius("pla", 2.0) is None
+    assert S.nice_up(1.65) == 2.0 and S.nice_up(3.3) == 3.5 and S.nice_up(3.0) == 3.0
+
+
+def test_through_holes_are_clearance_holes_blind_holes_tap_drills() -> None:
+    fl = rule(run(demo("pipe_flange"), material="steel_1018"), "DFM-HOLE-02")
+    assert len(fl) == 1 and fl[0]["severity"] == "warning"  # MAKE-12: no longer "tap drill for M16, no action"
+    assert "between M12 medium Ø13.5 and M12 coarse Ø14.5" in fl[0]["measured"] and "No action" not in fl[0]["fix"]
+    assert fl[0]["target"]["to"] == 13.5 and fl[0]["where"] == "6× Ø14 through holes"
+    pl = rule(run(demo("mounting_plate")), "DFM-HOLE-02")
+    assert pl[0]["severity"] == "info" and "ISO 273 medium clearance for M6" in pl[0]["limit"]
+    tap = rule(run(blind_hole(5.0, 10.0)), "DFM-HOLE-02")
+    assert tap and "tap drill for M6 coarse" in tap[0]["limit"] and "thread" in tap[0]["fix"]
+
+
+def test_keyway_finding_attaches_to_turning_and_counts_are_never_filtered() -> None:
+    a = run(demo("stepped_shaft"), material="steel_1045")
+    kw = rule(a, "DFM-CNC-02", "critical")[0]
+    assert kw["also"] == ["cnc_turning"]  # MAKE-10: shown under the primary (turning) view
+    assert kw["where"] == "keyway 6 × 30 mm on the Ø25 section"  # hand: KW 6, KL 30, D2 25
+    assert "R = width / 2 = R3" in kw["fix"]
+    assert a["summary"]["critical"] == 1 and a["chk13"]["counts"] == a["summary"]
+    assert not a["screens"]["moulding_casting"]["shown"]  # steel at qty 10: casting/moulding not shortlisted
+    assert a["screens"]["cnc_turning"]["shown"] and a["process"]["ranking"][0]["process"] == "cnc_turning"
+
+
+def _formed_l(r_in: float, t: float, w: float = 30.0, leg: float = 40.0) -> Any:
+    """An L bent from sheet: quarter-annulus bend (inside r_in, outside r_in + t) plus two flat legs."""
+    ro = r_in + t
+    ring = Cylinder(ro, w) - Cylinder(r_in, w)
+    bend = ring & Box(ro + 1, ro + 1, w, align=(Align.MIN, Align.MIN, Align.CENTER))
+    leg1 = Pos(r_in, -leg, -w / 2) * Box(t, leg, w, align=(Align.MIN, Align.MIN, Align.MIN))
+    leg2 = Pos(-leg, r_in, -w / 2) * Box(leg, t, w, align=(Align.MIN, Align.MIN, Align.MIN))
+    return bend + leg1 + leg2
+
+
+def test_sheet_metal_rules_and_score_cap() -> None:
+    br = run(demo("l_bracket"))  # 6061-T6, t = 5, inside R3, outside sharp
+    r1, r2 = rule(br, "SHM-01", "critical"), rule(br, "SHM-02", "critical")
+    assert r1 and r1[0]["value"] == pytest.approx(3.0) and "≥ R20" in r1[0]["limit"]  # 4 t = 20 (band 4.8 < t ≤ 6.4)
+    assert r1[0]["target"]["to"] == 20.0
+    assert r2 and "R8" in r2[0]["limit"]  # outside = 3 + 5
+    sm = next(r for r in br["process"]["ranking"] if r["process"] == "sheet_metal")
+    assert sm["fit"] != "Good fit" and sm["critical"] == 2 and br["screens"]["sheet_metal"]["shown"]
+    ok = run(_formed_l(3.0, 2.0), material="al_5052")  # 5052-H32 at 2 mm: 1.5 t = R3 minimum, outside R5
+    assert ok["signals"]["sheet"]["sheet_like"] and rule(ok, "SHM-00")
+    assert not rule(ok, "SHM-01") and not rule(ok, "SHM-02")
+    hard = run(_formed_l(3.0, 2.0), material="al_6061")  # 6061-T6 at 2 mm: 2 t = R4
+    f = rule(hard, "SHM-01", "critical")
+    assert f and "≥ R4" in f[0]["limit"] and not rule(hard, "SHM-02")
+
+
+def test_unanalysed_processes_are_capped() -> None:
+    shell = Box(100, 70, 40, align=BOT) - Pos(0, 0, 2.5) * Box(95, 65, 40, align=BOT)
+    a = run(shell, material="abs", quantity=2)
+    for r in a["process"]["ranking"]:
+        if r["process"] in ("fdm", "sla", "sls"):
+            assert not r["analysed"] and r["score"] <= 60 and r["fit"] != "Good fit"
+    assert "Verified calculation" not in json.dumps(a)  # only a signed calculation set carries that level
+
+
+def test_parameter_fix_maps_one_compatible_parameter() -> None:
+    from aicad.manufacturing import fixes
+
+    ns = _plate(PR=1.0)
+    a = run(ns["result"], smallest_tool_d_mm=6.0)
+    f = rule(a, "DFM-CNC-01", "critical")[0]
+    assert f["target"] == {"kind": "radius", "to": 3.5, "why": "≥ R3.3"}  # hand: 6 / 2 × 1.1 = 3.3, up to 0.5 step
+    params, meta = dict(ns["PARAMS"]), ns["PARAM_META"]
+    act = fixes.param_fix(f, params, meta)
+    assert act and act["param"] == "PR" and act["from"] == 1.0 and act["to"] == 3.5
+    assert act["label"] == "Set Corner radius 1 → 3.5 mm"  # CH = 1.0 too, but a chamfer is not a radius
+    assert fixes.param_fix(f, {**params, "R_EDGE": 1.0}, meta) is None  # two radius parameters equal 1: ambiguous
+    assert fixes.param_fix(f, params, {**meta, "PR": {**meta["PR"], "max": 3}}) is None  # outside its limits
+    assert fixes.param_fix(f, {"N_HOLES": 1}, {}) is None
+    assert fixes.param_kinds("FILLET_IN") == {"radius"} and fixes.param_kinds("BOLT_D") == {"diameter"}
+    out = fixes.attach(a, params, meta)
+    acts = {g["rule"]: g["action"] for g in out["findings"]}
+    assert acts["DFM-CNC-01"]["kind"] == "param" and acts["DFM-EDGE-02"]["kind"] == "note"
+    shaft = fixes.attach(run(demo("stepped_shaft"), material="steel_1045"), {"KW": 6.0, "KL": 30.0}, {})
+    kw = next(g for g in shaft["findings"] if g["rule"] == "DFM-CNC-02")["action"]
+    assert kw["kind"] == "studio" and "keyway 6 × 30 mm on the Ø25 section" in kw["prompt"]
+    assert "F-0" not in kw["prompt"] and "face" not in kw["prompt"].lower()
+
+
+def test_fix_delta_hand_case() -> None:
+    from aicad.manufacturing import fixes
+
+    def an(c: int, w: int, unit: float) -> dict[str, Any]:
+        return {"summary": {"critical": c, "warning": w, "info": 3},
+                "cost": {"primary": "cnc_milling", "processes": {"cnc_milling": {"unit_cost": unit}}}}
+
+    d = fixes.delta(an(1, 2, 50.0), an(0, 2, 46.0))
+    assert d["critical"] == {"before": 1, "after": 0} and d["cost"]["pct"] == -8.0  # (46 - 50) / 50
+    assert d["text"] == "critical 1 → 0; unit cost -8.0 %"
+    assert fixes.delta(an(0, 0, 10.0), an(0, 0, 10.0))["text"] == "no change in findings or cost"
+
+
+def test_api_fix_rebuilds_and_reports_the_delta(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "fix@x.com")
+    _buy_addon(c)
+    src = (DEMO / "mounting_plate.py").read_text(encoding="utf-8").replace("\nPR = 3.0", "\nPR = 1.0", 1)
+    pid, _ws = _project_with_model(c, src)
+    a = c.post(f"/api/m/manufacturing/projects/{pid}/analyse", json={}).json()
+    f = next(x for x in a["findings"] if x["rule"] == "DFM-CNC-01" and x["severity"] == "critical")
+    assert a["build"]["build_id"] and a["freshness"]["state"] == "current" and a["summary"]["critical"] >= 1
+    act = f["action"]
+    assert act["kind"] == "param" and act["param"] == "PR" and act["to"] == 2.0  # 3 / 2 × 1.1 = 1.65 -> 2
+    bad = c.post(f"/api/m/manufacturing/projects/{pid}/fix", json={"finding": f["id"], "param": "L", "value": 200})
+    assert bad.status_code == 409
+    r = c.post(f"/api/m/manufacturing/projects/{pid}/fix", json={"finding": f["id"], "param": "PR", "value": 2.0})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["delta"]["critical"]["after"] == d["delta"]["critical"]["before"] - 1
+    assert not any(x["rule"] == "DFM-CNC-01" and x["severity"] == "critical" for x in d["analysis"]["findings"])
+    assert c.get(f"/api/projects/{pid}/params").json()["editable"]["PR"] == 2.0
+    assert c.get(f"/api/m/manufacturing/projects/{pid}/analysis").json()["stale"] is False

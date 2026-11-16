@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box as BoxIcon, CheckCircle2, ChevronRight, CircleSlash, Download, Factory, FileText, Info,
-  Loader2, Play, RefreshCw, Settings2, X, XCircle,
+  AlertTriangle, ArrowLeft, Box as BoxIcon, CheckCircle2, ChevronRight, CircleSlash, Copy, Download, Factory, FileText, Info,
+  Loader2, MessageSquareText, PencilRuler, Play, RefreshCw, Settings2, SlidersHorizontal, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -12,11 +12,12 @@ import { Badge, Button, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, Pa
 import Viewer3D, { type Tool } from "@/components/Viewer3D";
 import type { Pick } from "@/viewer/types";
 import type { ModuleAppProps } from "../registry";
+import { studioAskUrl } from "../fixit";
 import CostChart, { money, seriesColor } from "./CostChart";
 import ShopProfileDialog from "./ShopProfileDialog";
 import {
-  COST_NAMES, PROCESS_LABEL, type Analysis, type Finding, type MatInfo, type MfgProject, type ProcessKey, type Severity,
-  type ShopResp, type Tolerance,
+  COST_NAMES, PROCESS_LABEL, type Analysis, type Finding, type FixResult, type MatInfo, type MfgProject, type ProcessKey,
+  type Severity, type ShopResp, type Tolerance,
 } from "./types";
 
 const BASE = "/api/m/manufacturing";
@@ -25,8 +26,21 @@ const SEV: Record<Severity, { label: string; icon: ReactNode; text: string; ring
   warning: { label: "Warnings", icon: <AlertTriangle className="h-4 w-4" />, text: "text-warning", ring: "border-warning/40", bg: "bg-warning/10" },
   info: { label: "Notes", icon: <Info className="h-4 w-4" />, text: "text-primary", ring: "border-primary/30", bg: "bg-primary-soft" },
 };
-const LEVELS = "Advice levels: Recommended check → Preliminary estimate → Verified calculation → Validated simulation. "
-  + "Measurements here are deterministic; the limits are published guidance and your shop profile.";
+const LEVELS = "Advice levels: Measured from the model → Recommended check → Preliminary estimate → Verified calculation (a signed "
+  + "calculation set) → Validated simulation. Measurements here are deterministic; the limits are published guidance and your shop profile.";
+
+/** A finding is in a shown process group (or attached to one, like a milled keyway on a turned part); critical ones always are. */
+function inShown(a: Analysis, f: Finding): boolean {
+  const sc = a.screens;
+  if (!sc || f.severity === "critical") return true;
+  return (sc[f.process]?.shown ?? true) || (f.also ?? []).some(p => sc[p]?.shown);
+}
+function totals(a: Analysis): Record<Severity, number> {
+  if (a.summary) return a.summary;
+  const out = { critical: 0, warning: 0, info: 0 };
+  for (const f of a.findings) if (inShown(a, f)) out[f.severity] += 1;
+  return out;
+}
 
 function Level({ children }: { children: ReactNode }) {
   return <Tip content={LEVELS} side="bottom"><span className="inline-flex cursor-help items-center rounded-full border border-primary/25 bg-primary-soft px-2 py-0.5 text-[10.5px] font-semibold text-primary">{children}</span></Tip>;
@@ -91,6 +105,7 @@ function Picker({ onPick }: { onPick: (id: string) => void }) {
                   <div className="truncate text-[13.5px] font-semibold">{p.name}</div>
                   <div className="mt-0.5 truncate text-[11.5px] text-muted">{p.material ?? "No material set"} · updated {ago(p.updated_at)}</div>
                   <div className="mt-2 flex items-center gap-1.5">
+                    {p.stale && <Badge tone="warning">Model changed</Badge>}
                     {!p.built ? <Badge>Not built yet</Badge> : p.counts ? <>
                       {p.counts.critical > 0 && <Badge tone="danger">{p.counts.critical} critical</Badge>}
                       {p.counts.warning > 0 && <Badge tone="warning">{p.counts.warning} warning{p.counts.warning > 1 ? "s" : ""}</Badge>}
@@ -126,7 +141,9 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
   const [tol, setTol] = useState<Tolerance>("general");
   const [sel, setSel] = useState<string | null>(null);
   const [hlOverride, setHlOverride] = useState<{ label: string; faces: number[] } | null>(null);
-  const [proc, setProc] = useState<"all" | ProcessKey | null>(null);
+  const [proc, setProc] = useState<"all" | "other" | ProcessKey>("all");
+  const [fixed, setFixed] = useState<FixResult | null>(null);
+  const [fixing, setFixing] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const [picks, setPicks] = useState<Pick[]>([]);
   const [shopOpen, setShopOpen] = useState(false);
@@ -153,14 +170,28 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
     if (!s && !auto.current && shop.data.can_edit && !saved.isError) { auto.current = true; void run(); }
   }, [saved.isLoading, saved.data, shop.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const top = a?.process.ranking.find(r => r.feasible)?.process;
-  const procF: "all" | ProcessKey = proc ?? (top === "cnc_turning" ? "cnc_turning" : top === "casting" || top === "injection_moulding" ? "moulding_casting" : "cnc_milling");
+  const procF = proc;
   const facePick = picks.find(p => p.kind === "face") as Extract<Pick, { kind: "face" }> | undefined;
-  const findings = useMemo(() => (a?.findings ?? []).filter(f => (procF === "all" || f.process === procF) && (!facePick || f.faces.includes(facePick.id))), [a, procF, facePick]);
+  const findings = useMemo(() => (a?.findings ?? []).filter(f => !f.note
+    && (procF === "all" ? inShown(a!, f) : procF === "other" ? !inShown(a!, f) : f.process === procF || (f.also ?? []).includes(procF))
+    && (!facePick || f.faces.includes(facePick.id))), [a, procF, facePick]);
+  const notes = (a?.findings ?? []).filter(f => f.note);
+  const others = (a?.findings ?? []).filter(f => !inShown(a!, f)).length;
   const selected = a?.findings.find(f => f.id === sel) ?? null;
   const hl = hlOverride?.faces ?? selected?.faces ?? [];
   const cur = a?.cost.currency ?? shop.data?.profile.currency ?? "USD";
-  const procCount = (p: ProcessKey) => (a?.findings ?? []).filter(f => f.process === p && f.severity !== "info").length;
+  const procCount = (p: ProcessKey) => (a?.findings ?? []).filter(f => (f.process === p || (f.also ?? []).includes(p)) && f.severity !== "info").length;
+
+  const applyFix = async (f: Finding) => {
+    if (f.action?.kind !== "param") return;
+    setFixing(f.id);
+    try {
+      const r = await api.post<FixResult>(`${BASE}/projects/${pid}/fix`, {
+        finding: f.id, param: f.action.param, value: f.action.to, quantity: qty, material: mat || null, tolerance: tol });
+      setA(r.analysis); setFixed(r); setSel(null); qc.setQueryData(["mfg-analysis", pid], r.analysis); qc.invalidateQueries({ queryKey: ["mfg-projects"] });
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "The change could not be applied"); }
+    finally { setFixing(null); }
+  };
 
   const back = <Link to={`/app/projects/${pid}`} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12.5px] text-muted hover:bg-text/5 hover:text-text" title="Back to the Design Studio"><ArrowLeft className="h-4 w-4" />Studio</Link>;
 
@@ -201,6 +232,11 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
       {a?.stale && <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-1.5 text-[12.5px]">
         <AlertTriangle className="h-4 w-4 text-warning" />The model has been rebuilt since this analysis.
         {canEdit && <button className="font-medium text-primary hover:underline" onClick={() => run()}>Re-analyse</button>}</div>}
+      {fixed && <div className="flex items-center gap-2 border-b border-success/30 bg-success/10 px-4 py-1.5 text-[12.5px]" data-delta>
+        <CheckCircle2 className="h-4 w-4 text-success" />
+        <span><b className="font-medium">{fixed.applied.label}</b>{fixed.applied.revision != null && <> (model revision {fixed.applied.revision}, rebuilt without AI)</>}. Re-analysed: {fixed.delta.text}.</span>
+        <Link to={`/app/projects/${pid}`} className="font-medium text-primary hover:underline">Review in Studio</Link>
+        <button aria-label="Dismiss" className="ml-auto text-muted hover:text-text" onClick={() => setFixed(null)}><X className="h-3.5 w-3.5" /></button></div>}
       {shop.data?.is_default && a && <div className="flex items-center gap-2 border-b border-border bg-panel2 px-4 py-1.5 text-[12px] text-muted">
         <Info className="h-3.5 w-3.5" />Checked against an <b className="font-medium text-text">assumed default shop</b> (Ø{shop.data.profile.smallest_tool_d_mm} mm smallest tool, typical rates).
         {canEdit && <button className="font-medium text-primary hover:underline" onClick={() => setShopOpen(true)}>Enter your shop</button>}</div>}
@@ -210,23 +246,28 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
         <aside className="flex w-[340px] shrink-0 flex-col border-r border-border bg-panel">
           <div className="border-b border-border px-3 pb-2 pt-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2"><span className="text-[13px] font-semibold">DFM findings</span><span className="text-[11px] text-muted">CHK-13 · advisory</span></div>
+              <span className="text-[13px] font-semibold">Manufacturability findings</span>
               <Level>Recommended check</Level>
             </div>
-            {a && <div className="mt-2 grid grid-cols-3 gap-1.5">
+            {a && <Tip content="Counted across every process, whatever filter is selected" side="bottom"><div className="mt-2 grid grid-cols-3 gap-1.5" data-counters>
               {(["critical", "warning", "info"] as Severity[]).map(s => <div key={s} className={cx("rounded border px-2 py-1", SEV[s].ring, SEV[s].bg)}>
                 <div className={cx("flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide", SEV[s].text)}>{SEV[s].icon}{SEV[s].label}</div>
-                <div className="text-[17px] font-semibold tabular-nums leading-tight">{a.findings.filter(f => f.severity === s && (procF === "all" || f.process === procF)).length}</div></div>)}
-            </div>}
+                <div className="text-[17px] font-semibold tabular-nums leading-tight">{totals(a)[s]}</div></div>)}
+            </div></Tip>}
             <div className="mt-2 flex flex-wrap gap-1">
-              {(["all", "cnc_milling", "cnc_turning", "moulding_casting"] as const).map(p => {
+              {(["all", "cnc_milling", "cnc_turning", "sheet_metal", "moulding_casting"] as const).filter(p => p === "all" || !a?.screens || a.screens[p]?.shown).map(p => {
                 const n = p === "all" ? null : procCount(p);
                 const na = p === "cnc_turning" && a && !a.signals.turning.turnable;
                 return <button key={p} data-filter={p} onClick={() => setProc(p)} disabled={!!na} title={na ? "Not a rotational part" : undefined}
                   className={cx("rounded-full border px-2.5 py-0.5 text-[11.5px] transition disabled:opacity-40", procF === p ? "border-primary bg-primary-soft font-medium text-primary" : "border-border text-muted hover:text-text")}>
                   {p === "all" ? "All" : PROCESS_LABEL[p]}{n ? <span className="ml-1 tabular-nums">{n}</span> : null}</button>;
               })}
+              {a && others > 0 && <Tip content={Object.entries(a.screens ?? {}).filter(([, v]) => !v.shown).map(([k, v]) => `${PROCESS_LABEL[k as ProcessKey]}: ${v.reason}`).join(" · ")} side="bottom">
+                <button data-filter="other" onClick={() => setProc("other")}
+                  className={cx("rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] transition", procF === "other" ? "border-primary bg-primary-soft font-medium text-primary" : "border-border text-muted hover:text-text")}>
+                  Other screens <span className="tabular-nums">{others}</span></button></Tip>}
             </div>
+            {notes.map(n => <NoteChip key={n.id} f={n} onShow={() => { setHlOverride(null); setSel(sel === n.id ? null : n.id); }} />)}
             {facePick && <div className="mt-2 flex items-center gap-2 rounded border border-primary/30 bg-primary-soft px-2 py-1 text-[11.5px]">
               Showing findings on face #{facePick.id}<button aria-label="Clear face filter" className="ml-auto text-muted hover:text-text" onClick={() => setPicks([])}><X className="h-3.5 w-3.5" /></button></div>}
           </div>
@@ -240,7 +281,8 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
                 if (!fs.length) return null;
                 return <div key={s} className="mb-2">
                   <div className={cx("sticky top-0 z-[1] flex items-center gap-1.5 bg-panel px-1 py-1 text-[11px] font-semibold uppercase tracking-wide", SEV[s].text)}>{SEV[s].icon}{SEV[s].label} · {fs.length}</div>
-                  {fs.map(f => <FindingRow key={f.id} f={f} open={sel === f.id} onClick={() => { setHlOverride(null); setSel(sel === f.id ? null : f.id); }} />)}
+                  {fs.map(f => <FindingRow key={f.id} f={f} open={sel === f.id} pid={pid} canEdit={canEdit && !a.stale} fixing={fixing === f.id}
+                    onFix={() => applyFix(f)} onClick={() => { setHlOverride(null); setSel(sel === f.id ? null : f.id); }} />)}
                 </div>;
               })}
           </div>
@@ -288,28 +330,61 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
 }
 
 /* ============================================================================ findings */
-function FindingRow({ f, open, onClick }: { f: Finding; open: boolean; onClick: () => void }) {
+function FindingRow({ f, open, onClick, pid, canEdit, fixing, onFix }: {
+  f: Finding; open: boolean; onClick: () => void; pid: string; canEdit: boolean; fixing: boolean; onFix: () => void;
+}) {
   const s = SEV[f.severity];
+  const [confirm, setConfirm] = useState(false);
+  const where = f.features.length ? f.features.join(", ") : f.where;
+  const act = f.action;
   return (
     <div className={cx("mb-1 rounded-md border transition", open ? cx(s.ring, "bg-panel2 shadow-card") : "border-transparent hover:border-border hover:bg-panel2/60")} data-finding={f.rule}>
       <button className="flex w-full items-start gap-2 px-2 py-1.5 text-left" onClick={onClick} aria-expanded={open}>
         <span className={cx("mt-0.5 shrink-0", s.text)}>{s.icon}</span>
         <span className="min-w-0 flex-1">
           <span className="block text-[12.5px] font-medium leading-snug">{f.title}</span>
-          <span className="block truncate text-[11px] text-muted">{f.measured}</span>
+          <span className="block truncate text-[11px] text-muted">{where ?? f.measured}</span>
         </span>
-        <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted">{f.rule}</span>
       </button>
       {open && <div className="space-y-1.5 px-2 pb-2 pl-8 text-[11.5px] leading-snug">
         <div className="grid grid-cols-[62px_1fr] gap-x-2 gap-y-0.5">
+          {where && <><span className="text-muted">Where</span><span>{where}</span></>}
           <span className="text-muted">Measured</span><span className="font-medium">{f.measured}</span>
           <span className="text-muted">Limit</span><span>{f.limit}</span>
-          {f.features.length > 0 && <><span className="text-muted">Feature</span><span>{f.features.join(", ")}</span></>}
-          <span className="text-muted">Faces</span><span className="text-muted">{f.faces.length ? `${f.faces.length} highlighted in the view` : "whole part"}</span>
         </div>
         <p className="text-text/90">{f.rationale}</p>
         <p><span className="font-medium">Suggested fix: </span>{f.fix}</p>
-        <p className="text-[10.5px] text-muted">Source: {f.source} · {f.advice_level}</p>
+        {act?.kind === "param" && canEdit && (!confirm
+          ? <Button size="sm" variant="secondary" icon={<SlidersHorizontal className="h-3.5 w-3.5" />} onClick={() => setConfirm(true)} data-action="fix-param">{act.label}</Button>
+          : <div className="rounded border border-primary/30 bg-primary-soft/50 p-2" data-confirm>
+            <p>Change <b className="font-medium">{act.param_label ?? act.param}</b> from {act.from} to {act.to} {act.unit} ({act.why}). The model is rebuilt without AI and this analysis re-runs; undo from Revisions in the Studio.</p>
+            <div className="mt-1.5 flex gap-2"><Button size="sm" loading={fixing} onClick={onFix} data-action="fix-apply">Apply change</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirm(false)}>Cancel</Button></div>
+          </div>)}
+        {act?.kind === "studio" && canEdit && <Link to={studioAskUrl(pid, act.prompt)} data-action="fix-studio"
+          className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11.5px] font-medium text-primary hover:border-primary/50 hover:bg-primary-soft/40">
+          <MessageSquareText className="h-3.5 w-3.5" />Fix in Studio</Link>}
+        <p className="text-[10.5px] text-muted">Source: {f.source} · {f.advice_level} · rule {f.rule}</p>
+      </div>}
+    </div>
+  );
+}
+
+/** Note-type advice (break sharp edges) collapsed to one chip: it belongs on the drawing, not in the model. */
+function NoteChip({ f, onShow }: { f: Finding; onShow: () => void }) {
+  const [open, setOpen] = useState(false);
+  const text = f.action?.kind === "note" ? f.action.text : (f.note ?? "");
+  return (
+    <div className="mt-2 rounded border border-border bg-panel2/60 px-2 py-1 text-[11.5px]" data-note={f.rule}>
+      <button className="flex w-full items-center gap-1.5 text-left" onClick={() => { setOpen(!open); onShow(); }} aria-expanded={open}>
+        <PencilRuler className="h-3.5 w-3.5 text-primary" /><span className="font-medium">Drawing note suggested</span>
+        <span className="truncate text-muted">· {f.measured}</span></button>
+      {open && <div className="mt-1 space-y-1 pl-5">
+        <div className="font-mono text-[11px]">{text}</div>
+        <p className="text-muted">{f.rationale}</p>
+        <button className="inline-flex items-center gap-1 text-primary hover:underline" onClick={() => {
+          void navigator.clipboard?.writeText(text).then(() => toast.success("Note copied: paste it into the drawing notes"), () => toast.error("Copy failed"));
+        }}><Copy className="h-3 w-3" />Copy note for the drawing</button>
       </div>}
     </div>
   );
@@ -441,8 +516,8 @@ function ReportPanel({ a, pid, name }: { a: Analysis; pid: string; name: string 
         <Button size="sm" variant="secondary" loading={busy === "html"} icon={<FileText className="h-3.5 w-3.5" />} onClick={() => go("html")}>Printable (HTML)</Button>
         <Button size="sm" loading={busy === "pdf"} icon={<Download className="h-3.5 w-3.5" />} onClick={() => go("pdf")}>Download PDF</Button>
       </div>
-      <div className="mt-4 mb-1 flex items-center justify-between text-[12.5px] font-semibold">CHK-13 rules <span className="text-[11px] font-normal text-muted">advisory, not a gate</span></div>
-      {groups.map(([p, rows]) => <div key={p} className="mb-2">
+      <div className="mt-4 mb-1 flex items-center justify-between text-[12.5px] font-semibold">Rules run <span className="text-[11px] font-normal text-muted">advisory, not a gate</span></div>
+      {groups.filter(([, rows]) => rows.length).map(([p, rows]) => <div key={p} className="mb-2">
         <div className="label mb-1 mt-2">{PROCESS_LABEL[p]}</div>
         <table className="w-full text-[11.5px]"><tbody>
           {rows.map(r => <tr key={r.rule} className="border-t border-border">
