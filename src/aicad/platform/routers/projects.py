@@ -376,6 +376,28 @@ def revisions(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
     return {"items": items}
 
 
+@router.get("/revisions/recent")
+def recent_revisions(limit: int = 6, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Latest revisions across the workspace with why/who: the team's change feed."""
+    org = ctx.require_org()
+    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+                          .order_by(Project.updated_at.desc()).limit(40)).all()
+    out = []
+    for p in rows:
+        root = workspace_for(p) / "revisions"
+        if not root.is_dir():
+            continue
+        for d in sorted((d for d in root.iterdir() if d.name.isdigit()), key=lambda d: -int(d.name))[:3]:
+            cause = json.loads((d / "cause.json").read_text(encoding="utf-8")) if (d / "cause.json").is_file() else {}
+            out.append({"project": {"id": p.id, "name": p.name}, "n": int(d.name), "why": cause.get("cause"),
+                        "kind": cause.get("kind"), "by": cause.get("by"), "mtime": d.stat().st_mtime})
+    out.sort(key=lambda r: -r["mtime"])
+    items = out[:max(1, min(limit, 20))]
+    for r in items:
+        r["created_at"] = datetime.fromtimestamp(r.pop("mtime"), UTC).replace(tzinfo=None).isoformat()
+    return {"items": items}
+
+
 @router.get("/projects/{project_id}/revisions/{n}/notice")
 def change_notice(project_id: str, n: int, base: int | None = None, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """What changed in revision n (vs. the previous one, or `base`) and why: deterministic, for the shop floor."""

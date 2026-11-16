@@ -40,6 +40,8 @@ def test_change_notice_api_records_what_and_why(app_client: TestClient) -> None:
     revs = c.get(f"/api/projects/{pid}/revisions").json()["items"]
     n = revs[0]["n"]
     assert revs[0]["why"] == "Parameters changed: L 150 → 160" and revs[0]["kind"] == "params" and revs[0]["by"]
+    feed = c.get("/api/revisions/recent").json()["items"]  # the workspace change feed, newest first
+    assert feed[0]["project"]["id"] == pid and feed[0]["why"] == "Parameters changed: L 150 → 160"
     r = c.get(f"/api/projects/{pid}/revisions/{n}/notice")
     assert r.status_code == 200, r.text
     nt = r.json()

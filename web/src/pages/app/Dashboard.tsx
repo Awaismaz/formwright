@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import type { Catalog, Project } from "@/lib/types";
-import { money, num } from "@/lib/format";
+import { ago, money, num } from "@/lib/format";
 import { Button, Card, EmptyState, Progress, StatusBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import ProjectCard from "@/components/ProjectCard";
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const projects = useQuery({ queryKey: ["projects", false], queryFn: () => api.get<{ items: Project[] }>("/api/projects") });
   const checklist = useQuery({ queryKey: ["checklist"], queryFn: () => api.get<{ items: { key: string; title: string; done: boolean; link: string }[]; done: number; total: number }>("/api/checklist") });
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const feed = useQuery({ queryKey: ["revisions-recent"], queryFn: () => api.get<{ items: { project: { id: string; name: string }; n: number; why: string | null; by: string | null; created_at: string }[] }>("/api/revisions/recent"), staleTime: 30_000 });
   const tpl = useTemplates();
   const org = me?.org;
   const goals = ((me?.user?.onboarding?.goals as string[]) ?? []).map(g => GOAL_MODULE[g]).filter(Boolean) as string[];
@@ -111,6 +112,23 @@ export default function Dashboard() {
                     </button>
                   </li>
                 ))}
+              </ul>
+            </Card>
+          )}
+
+          {(feed.data?.items.length ?? 0) > 0 && (
+            <Card className="p-5">
+              <h2 className="font-semibold">Latest changes</h2>
+              <ul className="mt-3 space-y-2.5">
+                {feed.data!.items.map(r => (
+                  <li key={`${r.project.id}-${r.n}`}>
+                    <Link to={`/app/projects/${r.project.id}`} className="group block">
+                      <div className="flex items-baseline gap-1.5 text-[13px]"><span className="truncate font-medium group-hover:text-primary">{r.project.name}</span>
+                        <span className="shrink-0 text-[11px] text-muted">rev {r.n}</span></div>
+                      <div className="truncate text-[12px] text-muted" title={r.why ?? undefined}>{r.why ?? (r.n === 1 ? "First version" : "Rebuilt")}</div>
+                      <div className="text-[11px] text-muted/80">{ago(r.created_at)}{r.by ? ` · ${r.by}` : ""}</div>
+                    </Link>
+                  </li>))}
               </ul>
             </Card>
           )}
