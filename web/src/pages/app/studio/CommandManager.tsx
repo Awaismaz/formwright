@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import {
   ArrowDownToLine, ArrowUpFromLine, Box, ChevronDown, ChevronUp, Circle, CircleDot, Diamond, Eye, FlipHorizontal2, GitCompare, Grid3x3,
-  Layers2, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
-  Squircle, Upload, Wrench,
+  Fence, Layers2, Maximize, MousePointer2, Package, PenLine, RectangleHorizontal, RefreshCcwDot, RotateCw, Ruler, Scale, Scissors, ShieldCheck,
+  Squircle, Triangle, Upload, Wrench,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Tip } from "@/components/ui";
@@ -10,8 +10,8 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane"; preset?: Record<string, unknown> }
-  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve"; mode?: "add" | "cut" } }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft"; preset?: Record<string, unknown> }
+  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
   | { kind: "import" } | { kind: "toolbox" };
@@ -45,6 +45,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "fillet", label: "Fillet", icon: <Squircle className="h-5 w-5" />, tip: "Round selected edges", cmd: { kind: "feature", op: "fillet" }, needsBody: true },
       { id: "chamfer", label: "Chamfer", icon: <Diamond className="h-5 w-5" />, tip: "Bevel selected edges", cmd: { kind: "feature", op: "chamfer" }, needsBody: true },
       { id: "shell", label: "Shell", icon: <Package className="h-5 w-5" />, tip: "Hollow the part, removing the selected faces", cmd: { kind: "feature", op: "shell" }, needsBody: true },
+      { id: "draft", label: "Draft", icon: <Triangle className="h-5 w-5" />, tip: "Taper faces by an angle about a neutral plane (moulding/casting release)", cmd: { kind: "feature", op: "draft" }, needsBody: true },
+      { id: "rib", label: "Rib", icon: <Fence className="h-5 w-5" />, tip: "Sketch an open line between walls, then thicken it into a rib", cmd: { kind: "sketch", preset: { feature: "rib" } }, needsBody: true },
     ], [
       { id: "linpat", label: "Linear Pattern", icon: <Grid3x3 className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes along a direction", cmd: { kind: "feature", op: "pattern", preset: { kind: "linear" } }, needsBody: true },
       { id: "cirpat", label: "Circular Pattern", icon: <RotateCw className="h-5 w-5" />, tip: "Repeat bosses, cuts, revolves or holes around an axis", cmd: { kind: "feature", op: "pattern", preset: { kind: "circular" } }, needsBody: true },

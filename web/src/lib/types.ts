@@ -58,11 +58,13 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib"; name: string; suppressed: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
   axis?: { a: [number, number]; b: [number, number] } | { origin: [number, number, number]; dir: [number, number, number] }; angle?: number;
   source?: string[]; kind?: "linear" | "circular";
-  faces?: { point: [number, number, number]; normal: [number, number, number] }[]; t?: number;
+  faces?: { point: [number, number, number]; normal?: [number, number, number] }[]; t?: number;
+  /** draft: neutral plane face; rib: open profile chains and material side */
+  neutral?: { point: [number, number, number]; normal: [number, number, number] }; chains?: unknown[]; flip?: boolean;
   pattern?: "circular"; center?: [number, number, number];
   edges?: [number, number, number][]; r?: number; d?: number;
   point?: [number, number, number]; normal?: [number, number, number]; depth?: number | null; count?: number; step?: [number, number, number];

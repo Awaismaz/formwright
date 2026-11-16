@@ -410,6 +410,105 @@ def pattern_instances(tool: Any, f: dict[str, Any]) -> list[Any]:
     return out
 
 
+def _single_solid(part: Any, what: str) -> Any:
+    sols = list(part.solids())
+    if len(sols) != 1:
+        raise ValueError(f"{what} works on a single solid body")
+    return sols[0]
+
+
+def _draft(part: Any, f: dict[str, Any]) -> Any:
+    """Draft the picked faces by `angle` degrees about the neutral plane. The pull direction points into the part
+    from the neutral face (so a positive angle narrows the part away from it); `reverse` flips it."""
+    solid = _single_solid(part, "Draft")
+    n = _v(f["neutral"]["normal"]).normalized() * (1.0 if f.get("reverse") else -1.0)
+    neutral = Plane(origin=_v(f["neutral"]["point"]), z_dir=n)
+    faces = []
+    for fc in f["faces"]:
+        found = faces_near(solid, fc["point"], normal=fc.get("normal"))
+        if not found:
+            raise ValueError("a face to draft was not found (geometry changed?)")
+        faces += [x for x in found if x not in faces]
+    try:
+        return solid.draft(faces, neutral, float(f["angle"]))
+    except Exception as e:  # OCCT reports a failed draft with a bare exception
+        raise ValueError("the draft could not be applied to these faces (try a smaller angle, or planar/cylindrical "
+                         "faces that meet the neutral plane)") from e
+
+
+def _xy(v: Vector) -> tuple[float, float]:
+    return (v.X, v.Y)
+
+
+def _seg_edges(segs: list[dict[str, Any]]) -> tuple[list[Any], Vector, Vector, Vector, Vector]:
+    """2D edges of an ordered open chain plus its start point/tangent (pointing backwards) and end point/tangent."""
+    def tangent(s: dict[str, Any], at_end: bool) -> Vector:
+        a, b = Vector(*s["a"], 0), Vector(*s["b"], 0)
+        if s["type"] != "arc":
+            return (b - a).normalized()
+        m = Vector(*s["m"], 0)
+        ax, ay, mx, my, bx, by = a.X, a.Y, m.X, m.Y, b.X, b.Y
+        d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my))
+        ux = ((ax * ax + ay * ay) * (my - by) + (mx * mx + my * my) * (by - ay) + (bx * bx + by * by) * (ay - my)) / d
+        uy = ((ax * ax + ay * ay) * (bx - mx) + (mx * mx + my * my) * (ax - bx) + (bx * bx + by * by) * (mx - ax)) / d
+        c = Vector(ux, uy, 0)
+        ccw = (m - a).cross(b - m).Z > 0
+        p = b if at_end else a
+        r = p - c
+        t = Vector(-r.Y, r.X, 0) if ccw else Vector(r.Y, -r.X, 0)
+        return t.normalized()
+    edges = []
+    for s in segs:
+        a, b = (float(s["a"][0]), float(s["a"][1])), (float(s["b"][0]), float(s["b"][1]))
+        edges.append(ThreePointArc(a, (float(s["m"][0]), float(s["m"][1])), b) if s["type"] == "arc" else Line(a, b))
+    return (edges, Vector(*segs[0]["a"], 0), tangent(segs[0], False), Vector(*segs[-1]["b"], 0), tangent(segs[-1], True))
+
+
+def _rib(part: Any, f: dict[str, Any], diag: float) -> Any:
+    """Rib from an open sketch profile: the region between the profile (extended along its end tangents) and the body,
+    `t` thick symmetric about the sketch plane, in the sketch plane. The side that is closed off by the body is used
+    (`flip` tries the other side first)."""
+    plane = _plane(f["plane"])
+    t = float(f["t"])
+    bb = part.bounding_box()
+    big = diag * 4
+    for chain in f["chains"]:
+        edges, p0, t0, p1, t1 = _seg_edges(chain)
+        e0, e1 = p0 - t0 * big, p1 + t1 * big
+        chord = (e1 - e0).normalized()
+        left = Vector(-chord.Y, chord.X, 0)
+        mid_seg = chain[len(chain) // 2]
+        mid = Vector(*mid_seg["m"], 0) if mid_seg["type"] == "arc" else (Vector(*mid_seg["a"], 0) + Vector(*mid_seg["b"], 0)) * 0.5
+        added = None
+        for side in ((-1.0, 1.0) if f.get("flip") else (1.0, -1.0)):
+            n = left * side
+            loop = [Line(_xy(e0), _xy(p0)), *edges, Line(_xy(p1), _xy(e1)),
+                    Line(_xy(e1), _xy(e1 + n * big)),
+                    Line(_xy(e1 + n * big), _xy(e0 + n * big)),
+                    Line(_xy(e0 + n * big), _xy(e0))]
+            try:
+                region = Face(Wire(loop))
+            except Exception:  # noqa: BLE001,S112 - a self-crossing closure on this side; try the other one
+                continue
+            slab = extrude(plane * region, amount=t / 2, both=True)
+            probe = plane.from_local_coords(_xy(mid + n * min(t, 0.05)))
+            pieces = sorted((slab - part).solids(), key=lambda s: s.distance_to(Vector(probe)))
+            if not pieces or pieces[0].distance_to(Vector(probe)) > 1e-6:
+                continue
+            pb = pieces[0].bounding_box()
+            tol = t + 1e-6
+            inside = (pb.min.X >= bb.min.X - tol and pb.min.Y >= bb.min.Y - tol and pb.min.Z >= bb.min.Z - tol
+                      and pb.max.X <= bb.max.X + tol and pb.max.Y <= bb.max.Y + tol and pb.max.Z <= bb.max.Z + tol)
+            if inside:
+                added = pieces[0]
+                break
+        if added is None:
+            raise ValueError("the rib profile isn't closed off by the body on either side (the profile, extended along "
+                             "its ends, must run between walls of the part)")
+        part = part + added
+    return part
+
+
 def _sources(f: dict[str, Any], done: dict[str, dict[str, Any]] | None, verb: str) -> list[dict[str, Any]]:
     """Earlier, unsuppressed tool features a pattern or mirror refers to (by id)."""
     sources = [(done or {}).get(str(i)) for i in f.get("source", [])]
@@ -452,6 +551,10 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
                 raise ValueError("a face to remove was not found (geometry changed?)")
             openings += found
         return offset(part, amount=-float(f["t"]), openings=openings)
+    if op == "draft":
+        return _draft(part, f)
+    if op == "rib":
+        return _rib(part, f, diag)
     if op == "mirror":
         pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
         if f.get("source"):  # mirror features: each source's tool body, reflected, added or cut like the original

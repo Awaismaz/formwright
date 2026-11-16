@@ -98,7 +98,7 @@ export default function ProjectStudio() {
   };
   const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
     if (op === "revolve" && !ed) { openPm("sketch", null, { feature: "revolve", ...(preset ?? {}) }); return; }
-    if (op === "sketch" || op === "revolve") {
+    if (op === "sketch" || op === "revolve" || op === "rib") {
       if (ed?.plane) {
         const pl = ed.plane; const n = pl.normal as V3;
         const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6

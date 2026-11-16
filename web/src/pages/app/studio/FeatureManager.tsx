@@ -9,8 +9,8 @@ import { describe, edgeMid } from "@/viewer/measure";
 import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
-export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane" };
+export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib">;
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft" };
 const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
@@ -70,7 +70,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const pre = preset ?? {};
   const patKind0 = (e?.kind ?? (pre.kind as "linear" | "circular" | undefined) ?? "linear");
   const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
-    : op === "mirror" ? nextName("Mirror", manual) : op === "plane" ? nextName("Plane", manual)
+    : op === "mirror" ? nextName("Mirror", manual) : op === "plane" ? nextName("Plane", manual) : op === "draft" ? nextName("Draft", manual)
     : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
   // feature pattern
   const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
@@ -105,6 +105,19 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [cy_, setCy] = useState(String(e?.sketch?.cy ?? 0));
   const [dist, setDist] = useState(String(e?.distance ?? 5));
   const [mode, setMode] = useState<"add" | "cut">(e?.mode ?? (pre.mode as "add" | "cut") ?? "add");
+  // draft: a neutral face, then the faces to draft (the next picked face fills the active box)
+  const [neutral, setNeutral] = useState<{ point: V3; normal: V3; label: string } | null>(e?.neutral ? { ...e.neutral, label: "Original neutral face" } : null);
+  const [draftBox, setDraftBox] = useState<"neutral" | "faces">(e?.neutral ? "faces" : "neutral");
+  const [draftAngle, setDraftAngle] = useState(String(op === "draft" && e?.angle ? e.angle : 3));
+  const [draftRev, setDraftRev] = useState(!!e?.reverse);
+  useEffect(() => {
+    if (op !== "draft" || draftBox !== "neutral" || !topo) return;
+    const pick = selection.find(p => p.kind === "face" && topo.faces[p.id]?.type === "plane") as Extract<Pick, { kind: "face" }> | undefined;
+    if (!pick) return;
+    setNeutral({ point: pick.point, normal: topo.faces[pick.id]!.normal!, label: describe(pick, topo) });
+    onSelection(selection.filter(p => p !== pick)); setDraftBox("faces");
+  }, [selection]); // eslint-disable-line react-hooks/exhaustive-deps
+  const draftFaces = op === "draft" ? selection.filter(p => p.kind === "face") as Extract<Pick, { kind: "face" }>[] : [];
   // reference plane
   const otherPlanes = manual.filter(m => m.op === "plane" && m.id !== e?.id && m.plane);
   const [refBase, setRefBase] = useState<string>(() => {
@@ -173,6 +186,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "shell" ? (planarFaces.length > 0 || !!e?.faces?.length)
     : op === "mirror" ? !!mirrorPl && (mirrorWhat === "body" || sources.length > 0)
     : op === "plane" ? !!planeBase && Number.isFinite(num(planeOff)) && Number.isFinite(num(planeAng))
+    : op === "draft" ? !!neutral && (draftFaces.length > 0 || !!e?.faces?.length) && num(draftAngle) > 0
     : !!plane;
 
   // features are replayed in tree order, whatever order they were ticked in
@@ -193,6 +207,9 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     } else if (op === "shell") {
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
+    } else if (op === "draft") {
+      const faces = draftFaces.length && topo ? draftFaces.map(p => { const fc = topo.faces[p.id]!; return fc.type === "plane" && fc.normal ? { point: p.point, normal: fc.normal } : { point: p.point }; }) : e?.faces;
+      f = { ...f, neutral: { point: neutral!.point, normal: neutral!.normal }, faces, angle: num(draftAngle), reverse: draftRev };
     } else if (op === "plane") {
       f = { ...f, base: planeBase!.def, base_name: planeBase!.name, offset: num(planeOff), angle: num(planeAng), rot_axis: rotAxis };
     } else if (op === "mirror") {
@@ -240,7 +257,21 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
-        {op === "plane" ? <>
+        {op === "draft" ? <>
+          {(["neutral", "faces"] as const).map(b => (
+            <button key={b} onClick={() => setDraftBox(b)} className={cx("block w-full rounded-lg border p-2.5 text-left", draftBox === b ? "border-primary bg-primary-soft/40" : "border-border bg-panel2")}>
+              <div className="label mb-1">{b === "neutral" ? "Neutral plane (a planar face)" : "Faces to draft"}</div>
+              {b === "neutral" ? <p className="text-[12px]">{neutral ? neutral.label : <span className="text-muted">Click the face the draft pivots about (e.g. the parting face or base).</span>}</p>
+                : draftFaces.length ? <ul className="space-y-0.5">{draftFaces.map(p => <li key={p.id} className="text-[12px]">{topo ? describe(p, topo) : `Face ${p.id}`}</li>)}</ul>
+                : <p className="text-[12px] text-muted">{e?.faces?.length ? `${e.faces.length} face(s) from the original selection. Click faces to replace.` : "Click the side faces to taper (Ctrl+click for several)."}</p>}
+            </button>))}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">{numField("Draft angle", draftAngle, setDraftAngle, "°", "0–45°")}</div>
+            <Tip content="Reverse the pull direction" side="top"><button onClick={() => setDraftRev(!draftRev)} className={cx("mb-1 rounded border p-1.5", draftRev ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse pull direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
+          </div>
+          <p className="flex gap-1 text-[11px] text-muted"><Info className="mt-0.5 h-3 w-3 shrink-0" />{draftRev ? "The faces lean outwards going away from the neutral face." : "The faces lean inwards going away from the neutral face (the part narrows away from it)."}</p>
+          <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+        </> : op === "plane" ? <>
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
             <div className="label mb-1">First reference</div>
             <div className="flex flex-wrap gap-1">{seg<string>([["Top", "Top"], ["Front", "Front"], ["Right", "Right"], ["face", "Face"], ...otherPlanes.map(m => [`pl:${m.id}`, m.name] as [string, string])], refBase, setRefBase)}</div>

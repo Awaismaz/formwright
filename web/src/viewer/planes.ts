@@ -40,7 +40,7 @@ export function nextName(base: string, existing: { name: string }[]): string {
 
 export const FEATURE_LABEL: Record<string, string> = {
   fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror",
-  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane",
+  sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane", draft: "Draft", rib: "Rib",
 };
 
 /**

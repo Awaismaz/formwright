@@ -111,7 +111,7 @@ def estimate(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any
 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
-OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane"}
+OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -175,6 +175,32 @@ def _sketch_plane(pl: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _segs(segs: Any) -> list[dict[str, Any]]:
+    """Line/arc segments of a sketch chain (arcs through a mid point)."""
+    if not isinstance(segs, list) or not 1 <= len(segs) <= 2000:
+        raise HTTPException(422, "Profile has too many segments")
+    cs = []
+    for sg in segs:
+        t = "arc" if sg.get("type") == "arc" else "line"
+        item = {"type": t, "a": _pt2(sg.get("a"), "point"), "b": _pt2(sg.get("b"), "point")}
+        if t == "arc":
+            item["m"] = _pt2(sg.get("m"), "arc mid")
+        cs.append(item)
+    return cs
+
+
+def _face_refs(faces: Any, what: str) -> list[dict[str, Any]]:
+    if not isinstance(faces, list) or not 1 <= len(faces) <= 50:
+        raise HTTPException(422, f"Select 1–50 {what}")
+    out = []
+    for x in faces:
+        item = {"point": _pt(x.get("point"), "face point")}
+        if x.get("normal") is not None:
+            item["normal"] = _pt(x["normal"], "face normal")
+        out.append(item)
+    return out
+
+
 def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
     if not 1 <= len(profs) <= 100:
         raise HTTPException(422, "The sketch needs 1–100 closed profiles")
@@ -184,17 +210,7 @@ def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
             clean.append({"kind": "circle", "cx": _num(pr.get("cx"), "cx"), "cy": _num(pr.get("cy"), "cy"),
                           "r": _num(pr.get("r"), "radius", 0.001, 1e5)})
         elif pr.get("kind") == "loop":
-            segs = pr.get("segs") or []
-            if not 1 <= len(segs) <= 2000:
-                raise HTTPException(422, "Profile has too many segments")
-            cs = []
-            for sg in segs:
-                t = "arc" if sg.get("type") == "arc" else "line"
-                item = {"type": t, "a": _pt2(sg.get("a"), "point"), "b": _pt2(sg.get("b"), "point")}
-                if t == "arc":
-                    item["m"] = _pt2(sg.get("m"), "arc mid")
-                cs.append(item)
-            clean.append({"kind": "loop", "segs": cs})
+            clean.append({"kind": "loop", "segs": _segs(pr.get("segs") or [])})
         else:
             raise HTTPException(422, "Unknown profile")
     return clean
@@ -277,6 +293,27 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
             out.update(kind="linear", step=_pt(f.get("step"), "spacing"))
             if math.hypot(*out["step"]) < 1e-6:
                 raise HTTPException(422, "spacing: must not be zero")
+    elif op == "draft":
+        nf = f.get("neutral") or {}
+        out["neutral"] = {"point": _pt(nf.get("point"), "neutral plane point"), "normal": _pt(nf.get("normal"), "neutral plane normal")}
+        if math.hypot(*out["neutral"]["normal"]) < 1e-9:
+            raise HTTPException(422, "Pick a planar face as the neutral plane")
+        out["faces"] = _face_refs(f.get("faces"), "faces to draft")
+        out["angle"] = _num(f.get("angle"), "draft angle", 0.01, 45)
+        out["reverse"] = bool(f.get("reverse"))
+    elif op == "rib":
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        if f.get("plane_ref"):
+            out["plane_ref"] = str(f["plane_ref"])[:40]
+        chains = f.get("chains") or []
+        if not isinstance(chains, list) or not 1 <= len(chains) <= 20:
+            raise HTTPException(422, "A rib needs an open sketch profile (lines or arcs that don't close)")
+        out["chains"] = [_segs(c) for c in chains]
+        out["t"] = _num(f.get("t"), "rib thickness", 0.01, 1e4)
+        out["flip"] = bool(f.get("flip"))
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))
     elif op == "plane":
         out["base"] = _sketch_plane(f.get("base") or {})
         out["base_name"] = str(f.get("base_name") or "")[:60]

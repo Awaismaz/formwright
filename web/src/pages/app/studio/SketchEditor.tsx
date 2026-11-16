@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowRightToLine, ArrowUpFromLine, Check, Circle as CircleIcon, CircleDashed, CopyPlus, Equal, FlipHorizontal2,
   Grid2x2, Hexagon, Lock, MousePointer2, Pencil, Pill, Radius, RectangleHorizontal, Redo2, RotateCw, Ruler, Scissors, SeparatorVertical, Spline,
-  SquareDashed, Trash2, TriangleRight, Undo2, X,
+  Fence, SquareDashed, Trash2, TriangleRight, Undo2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -17,7 +17,9 @@ import type { Topo, V3 } from "@/viewer/types";
 type ToolT = "select" | "line" | "centerline" | "rect" | "circle" | "arc" | "slot" | "polygon" | "dim" | "angle" | "trim" | "extend" | "fillet";
 type Sel = { kind: "pt" | "ent"; id: string };
 type NoId<T> = T extends unknown ? Omit<T, "id"> : never;
-export interface SketchPreset { feature?: "extrude" | "revolve"; mode?: "add" | "cut" }
+export type SketchKind = "extrude" | "revolve" | "rib";
+export interface SketchPreset { feature?: SketchKind; mode?: "add" | "cut" }
+const OP_OF: Record<SketchKind, ManualFeature["op"]> = { extrude: "sketch", revolve: "revolve", rib: "rib" };
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const crossV = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -43,6 +45,12 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
     if (!topo) return [] as [number, number][][];
     return refEdges.map(eid => { const p = topo.edges[eid]!.pts; const out: [number, number][] = []; for (let i = 0; i < p.length; i += 3) out.push(to2([p[i]!, p[i + 1]!, p[i + 2]!])); return out; });
   }, [topo, refEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  // On a plane that cuts through the part (no model edge lies in it), show every model edge projected onto the
+  // sketch plane, faintly and without snapping, so the user can see where the walls are.
+  const projected = useMemo(() => {
+    if (!topo || faceId !== null || refEdges.length) return [] as [number, number][][];
+    return topo.edges.map(e => { const p = e.pts; const out: [number, number][] = []; for (let i = 0; i < p.length; i += 3) out.push(to2([p[i]!, p[i + 1]!, p[i + 2]!])); return out; });
+  }, [topo, faceId, refEdges]); // eslint-disable-line react-hooks/exhaustive-deps
   const refVerts = useMemo(() => {
     if (!topo) return [] as [number, number][];
     const ids = new Set<number>(); refEdges.forEach(e => topo.edges[e]!.verts.forEach(v => ids.add(v)));
@@ -67,7 +75,9 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   // Focus and select the value once the click that placed the dimension has finished (its mousedown would blur it).
   useEffect(() => { if (!dimEdit) return; const t = setTimeout(() => { dimInput.current?.focus(); dimInput.current?.select(); }, 0); return () => clearTimeout(t); }, [dimEdit?.cid]); // eslint-disable-line react-hooks/exhaustive-deps
   const [mode, setMode] = useState<"add" | "cut">(editing?.mode ?? preset?.mode ?? "add");
-  const [kind, setKind] = useState<"extrude" | "revolve">(editing ? (editing.op === "revolve" ? "revolve" : "extrude") : preset?.feature ?? "extrude");
+  const [kind, setKind] = useState<SketchKind>(editing ? (editing.op === "revolve" ? "revolve" : editing.op === "rib" ? "rib" : "extrude") : preset?.feature ?? "extrude");
+  const [ribT, setRibT] = useState(String(editing?.op === "rib" ? editing.t ?? 5 : 5));
+  const [ribFlip, setRibFlip] = useState(!!editing?.flip);
   const [end, setEnd] = useState<"blind" | "mid" | "through">(editing?.end ?? "blind");
   const [reverse, setReverse] = useState(!!editing?.reverse);
   const [angle, setAngle] = useState(String(editing?.angle ?? 360));
@@ -83,13 +93,14 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   // fit reference into view
   useEffect(() => {
     const r = svg.current!.getBoundingClientRect();
-    const pts = ref.flat(); if (!pts.length) { setView({ s: 4, ox: r.width / 2, oy: r.height / 2 }); return; }
+    const pts = ref.length ? ref.flat() : [...projected.flat(), ...(projected.length ? [[0, 0] as [number, number]] : [])];
+    if (!pts.length) { setView({ s: 4, ox: r.width / 2, oy: r.height / 2 }); return; }
     const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
     const w = Math.max(...xs) - Math.min(...xs) || 50, h = Math.max(...ys) - Math.min(...ys) || 50;
     const s = Math.min(r.width / w, r.height / h) * 0.75;
     const cxm = (Math.max(...xs) + Math.min(...xs)) / 2, cym = (Math.max(...ys) + Math.min(...ys)) / 2;
     setView({ s, ox: r.width / 2 - cxm * s, oy: r.height / 2 + cym * s });
-  }, [ref]);
+  }, [ref, projected]);
 
   const scr = (p: [number, number]) => [view.ox + p[0] * view.s, view.oy - p[1] * view.s] as [number, number];
   const mm = (e: { clientX: number; clientY: number }) => { const r = svg.current!.getBoundingClientRect(); return [(e.clientX - r.left - view.ox) / view.s, -(e.clientY - r.top - view.oy) / view.s] as [number, number]; };
@@ -337,19 +348,25 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   const prof = useMemo(() => profiles(sk), [sk]);
   const centerline = sk.entities.find(e => e.type === "line" && e.construction) as Extract<SEntity, { type: "line" }> | undefined;
   const finish = async () => {
-    if (!prof.loops.length) { toast.error("Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return; }
-    const base = kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
-    const common = { name: editing && editing.op === (kind === "revolve" ? "revolve" : "sketch") ? editing.name : nextName(base, existing),
-      suppressed: editing?.suppressed ?? false, plane, plane_ref: planeRef?.id ?? null, profiles: prof.loops, mode, editor: sk };
+    if (kind === "rib" ? !prof.chains.length : !prof.loops.length) {
+      toast.error(kind === "rib" ? "A rib needs an open profile: a line or chain of lines/arcs that runs between walls of the part."
+        : "Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return;
+    }
+    const base = kind === "rib" ? "Rib" : kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
+    const common = { name: editing && editing.op === OP_OF[kind] ? editing.name : nextName(base, existing),
+      suppressed: editing?.suppressed ?? false, plane, plane_ref: planeRef?.id ?? null, editor: sk };
     let feature: Record<string, unknown>;
-    if (kind === "revolve") {
+    if (kind === "rib") {
+      const t = Number(ribT); if (!(t > 0)) { toast.error("Enter a positive rib thickness"); return; }
+      feature = { op: "rib", ...common, chains: prof.chains, t, flip: ribFlip };
+    } else if (kind === "revolve") {
       if (!centerline) { toast.error("Draw a centerline to revolve about (Centerline tool)."); return; }
       const a = Number(angle); if (!(a > 0 && a <= 360)) { toast.error("Revolve angle must be between 0 and 360°"); return; }
       const p1 = P(centerline.p1), p2 = P(centerline.p2);
-      feature = { op: "revolve", ...common, axis: { a: [p1.x, p1.y], b: [p2.x, p2.y] }, angle: a };
+      feature = { op: "revolve", ...common, profiles: prof.loops, mode, axis: { a: [p1.x, p1.y], b: [p2.x, p2.y] }, angle: a };
     } else {
       const d = Number(dist); if (end !== "through" && !(d > 0)) { toast.error("Enter a positive distance"); return; }
-      feature = { op: "sketch", ...common, distance: end === "through" ? 1 : d, end, reverse };
+      feature = { op: "sketch", ...common, profiles: prof.loops, mode, distance: end === "through" ? 1 : d, end, reverse };
     }
     setBusy(true);
     try {
@@ -398,6 +415,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
           <defs><pattern id="g" width={10 * view.s} height={10 * view.s} patternUnits="userSpaceOnUse" x={view.ox} y={view.oy}><path d={`M ${10 * view.s} 0 L 0 0 0 ${10 * view.s}`} className="fill-none stroke-border" strokeWidth={0.6} /></pattern></defs>
           <rect width="100%" height="100%" fill="url(#g)" />
           <line x1={view.ox} y1={0} x2={view.ox} y2="100%" className="stroke-success/50" strokeWidth={1} /><line x1={0} y1={view.oy} x2="100%" y2={view.oy} className="stroke-danger/50" strokeWidth={1} />
+          {projected.map((pl, i) => <polyline key={`j${i}`} points={pl.map(p => scr(p).join(",")).join(" ")} className="fill-none stroke-muted/70" strokeWidth={1} strokeDasharray="3 3" />)}
           {ref.map((pl, i) => <polyline key={i} points={pl.map(p => scr(p).join(",")).join(" ")} className="fill-none stroke-muted" strokeWidth={1.2} strokeDasharray="5 3" />)}
           {prof.loops.map((l, i) => l.kind === "circle"
             ? <circle key={`f${i}`} cx={scr([l.cx, l.cy])[0]} cy={scr([l.cx, l.cy])[1]} r={l.r * view.s} className="fill-primary/10" />
@@ -433,7 +451,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
           {preview}
         </svg>
         {(tool === "polygon" || tool === "fillet" || tool === "slot" || tool === "trim" || tool === "extend" || tool === "angle" || offset) && (
-          <div className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-3 rounded-md border border-border bg-panel/95 px-3 py-1.5 text-[12px] shadow-card">
+          <div className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-13rem)] flex-wrap items-center gap-3 rounded-md border border-border bg-panel/95 px-3 py-1.5 text-[12px] shadow-card">
             {offset ? <>
               <span className="font-medium">Offset entities</span>
               <label className="flex items-center gap-1.5">Distance<Input value={offset.dist} onChange={e => setOffset({ ...offset, dist: e.target.value })} className="h-7 w-20 text-right" inputMode="decimal" aria-label="Offset distance" />mm</label>
@@ -462,24 +480,30 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
             <button type="submit" className="rounded bg-success p-1 text-white" aria-label="Apply dimension"><Check className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={() => setDimEdit(null)} className="rounded bg-text/10 p-1" aria-label="Cancel"><X className="h-3.5 w-3.5" /></button>
           </form>); })()}
-        <span data-sketch-status className={cx("pointer-events-none absolute bottom-2 right-2 rounded-full px-2 py-0.5 text-[11.5px] font-medium shadow-card", !status.ok ? "bg-danger/10 text-danger" : status.dof === 0 ? "bg-text/10 text-text" : "bg-primary-soft text-primary")}>{defined}</span>
+        <span data-sketch-status className={cx("pointer-events-none absolute right-2 top-2 rounded-full px-2 py-0.5 text-[11.5px] font-medium shadow-card", !status.ok ? "bg-danger/10 text-danger" : status.dof === 0 ? "bg-text/10 text-text" : "bg-primary-soft text-primary")}>{defined}</span>
         <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-panel/90 px-2 py-1 text-[11px] text-muted shadow-card">
           {cursor && `${cursor[0].toFixed(2)}, ${cursor[1].toFixed(2)} mm · `}Wheel zoom · Alt/middle-drag pan · Right-click/Esc ends a tool{prof.open > 0 && <span className="ml-1 text-warning">· {prof.open} open contour(s)</span>}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3 border-t border-border bg-panel px-3 py-2">
-        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{prof.loops.length} closed profile(s){kind === "revolve" && (centerline ? " · axis: centerline" : <span className="text-warning"> · draw a centerline</span>)}</span>
+        <Grid2x2 className="h-4 w-4 text-muted" /><span className="text-[12.5px] text-muted">{kind === "rib" ? `${prof.chains.length} open profile(s)` : `${prof.loops.length} closed profile(s)`}{kind === "revolve" && (centerline ? " · axis: centerline" : <span className="text-warning"> · draw a centerline</span>)}</span>
         <div className="ml-auto inline-flex overflow-hidden rounded border border-border text-[12.5px]">
           <button onClick={() => setKind("extrude")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "extrude" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Extrude</button>
           <button onClick={() => setKind("revolve")} className={cx("flex items-center gap-1 px-2.5 py-1", kind === "revolve" ? "bg-primary text-white" : "text-muted")}><RotateCw className="h-3.5 w-3.5" />Revolve</button>
+          <Tip content={hasBody ? "Thicken an open profile into a rib that runs to the walls of the part" : "A rib needs an existing solid"} side="top">
+            <button disabled={!hasBody} onClick={() => setKind("rib")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", kind === "rib" ? "bg-primary text-white" : "text-muted")}><Fence className="h-3.5 w-3.5" />Rib</button>
+          </Tip>
         </div>
-        <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
+        {kind !== "rib" && <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
           <button onClick={() => setMode("add")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "add" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Boss</button>
           <Tip content={hasBody ? "Remove material" : "A cut needs an existing solid. Start with a boss."} side="top">
             <button disabled={!hasBody} onClick={() => setMode("cut")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", mode === "cut" ? "bg-primary text-white" : "text-muted")}><ArrowDownToLine className="h-3.5 w-3.5" />Cut</button>
           </Tip>
-        </div>
-        {kind === "extrude" ? <>
+        </div>}
+        {kind === "rib" ? <>
+          <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={ribT} onChange={e => setRibT(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" aria-label="Rib thickness" />mm</label>
+          <Tip content="Try the other side of the profile first (the side closed off by the part is used)" side="top"><button onClick={() => setRibFlip(!ribFlip)} className={cx("rounded border p-1.5", ribFlip ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Flip material side"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
+        </> : kind === "extrude" ? <>
           <select value={end} onChange={e => setEnd(e.target.value as typeof end)} className="h-8 rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="End condition">
             <option value="blind">Blind</option><option value="mid">Mid Plane</option>{mode === "cut" && <option value="through">Through All</option>}
           </select>

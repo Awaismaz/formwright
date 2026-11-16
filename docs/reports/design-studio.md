@@ -11,7 +11,7 @@ Status legend: **Done** = implemented, tested (analytic), walked in the browser,
 | 1 | Sketcher tools: trim, extend, offset, slot, polygon, sketch fillet, mirror entities, angle dimension | Done | see git log "DS-026 (1)" |
 | 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | Done | see git log "DS-026 (2)" |
 | 3 | Reference plane features | Done | see git log "DS-026 (3)" |
-| 4 | Draft and Rib | Not started | |
+| 4 | Draft and Rib | Done | see git log "DS-026 (4)" |
 | 5 | Sweep and Loft (sketch-only tree nodes) | Not started | |
 | 6 | Feature tree polish (rollback, rename, context menu) | Not started | |
 
@@ -150,6 +150,51 @@ None), then a 20×10×10 boss on it: volume 2000, bbox z 5..15.
 - Hover Plane1 in the tree: its outline is drawn at the block's bottom face. Screenshots reviewed: plane PM, tree before the first
   build, sketch on a plane, angled plane PM, cut, plane edit, hover outline.
 
+## 4. Draft and Rib (Done)
+
+**What was built**
+- **Draft** (`op: "draft"`, ribbon Features → Draft): a neutral plane (picked planar face, stored as point plus outward
+  normal) and faces to draft (planar, cylindrical or conical; stored by picked point, plus normal for planar faces, selected by
+  location on every rebuild), with an angle of 0.01–45°. By default the pull direction points into the part from the neutral face, so a positive angle
+  narrows the part away from it; **Reverse** flips it. Uses OCCT BRepOffsetAPI_DraftAngle (`Solid.draft`); an
+  impossible draft gives a plain message and the model is restored. The PropertyManager has two selection boxes (Neutral
+  plane → Faces to draft): the first face clicked fills the neutral box, and later clicks (Ctrl for several) are the draft faces.
+- **Rib** (`op: "rib"`, ribbon Features → Rib, or **Rib** as the third choice when exiting a sketch, next to
+  Extrude/Revolve): an open sketch profile (lines and arcs; several chains give several ribs), thickness `t` symmetric about the sketch
+  plane. The profile is extended along its end tangents and closed off on one side. The slab is thickened, the body is
+  subtracted, and the piece next to the profile is kept only if it is bounded by the body (stays inside the body's bounding box). The
+  side is chosen automatically; **Flip** tries the other side first. A profile with nothing to close it off gives
+  "the rib profile isn't closed off by the body on either side…".
+- Sketcher: when the sketch plane cuts through the part (no model edge lies in it, e.g. a mid-plane for a rib), all
+  model edges are drawn projected onto the plane as faint dotted reference (no snapping), and the view fits to them, so the
+  walls are visible. The sketch status pill moved to the canvas top-right so it no longer collides with the cursor readout.
+- Agent prompt lists draft and rib.
+
+**Tests** (analytic):
+- `test_draft_feature`, on a 60×40×10 block, 3°:
+  - all four sides about the bottom face: V = abh − (a+b)h²·tanα + 4/3·h³·tan²α;
+  - one face with the pull reversed: abh + b·h²·tanα/2;
+  - suppress restores the block;
+  - 422 for an angle of 0 or 60, no faces, or a zero normal; a face that isn't found gives 422 "not found" with the model restored.
+- `test_rib_feature_on_l_bracket`, a gusset on the mid-width plane, 4 mm:
+  - (½·30·25 − 9(1 − π/4))·4 (the inside R3 fillet already fills 9(1 − π/4) of the triangle);
+  - a short profile extended to the walls (to (5, 29.167) and (34, 5)), 3 mm: (½·29·145/6 − 9(1 − π/4))·3;
+  - an unbounded profile gives a clean 422; empty chains or zero thickness give 422.
+
+**Browser walkthrough** (`draft-rib.mjs`, 0 console/page errors):
+- Draft: on a 60×40×20 block, ribbon Draft; neutral = bottom face (picked in the Bottom view); faces = front/right/back/left
+  (picked in each standard view, Ctrl-click); 3°. **45932.985632 mm³** = 48000 − 100·400·tan3° + 4/3·8000·tan²3°
+  (45932.985632).
+- Rib: on the seeded L-bracket demo, ribbon Rib; sketch plane Front −25 mm (mid-width), with the projected bracket outline
+  visible; line (5,30)→(35,5); thickness 4. First run: added **1492.274333 mm³** (hand calculation 1492.274334). After the
+  projection change (the view is fitted, so clicks are within 0.01 mm): drawn (5.010, 29.996)→(34.998, 5.006), added
+  1492.794219 (hand calculation from the drawn points: 1492.794220).
+- Screenshots reviewed: Draft PM with both boxes filled, drafted block, rib sketch with projected walls, rib on the bracket.
+
 ## Parked decisions
 - PD (mirror plane default): new body mirrors now default to the Right plane **through the origin** (as in SOLIDWORKS),
   not "YZ through the model centre" as before. Existing features keep their stored plane.
+- PD (draft pull default): the default pull direction points into the part from the neutral face (a positive angle narrows
+  the part away from it), with Reverse available. SOLIDWORKS shows a pull arrow instead; we use a fixed default plus Reverse.
+- PD (rib options): symmetric thickness only, extruded within the sketch plane ("parallel to sketch"). There is no one-sided
+  thickness, "normal to sketch" direction or rib draft yet.

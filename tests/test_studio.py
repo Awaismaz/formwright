@@ -497,3 +497,53 @@ def test_reference_plane_before_any_solid(app_client: TestClient) -> None:  # no
     assert _vol(c, pid) == pytest.approx(20 * 10 * 10, rel=1e-12)
     topo = c.get(f"/api/projects/{pid}/files/topo.json").json()
     assert topo["bbox"] == pytest.approx([-10, -5, 5, 10, 5, 15], abs=1e-9)
+
+
+def test_draft_feature(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    pid = _block(c, "draft@x.com", "Draft")
+    a, b, h, t = 60.0, 40.0, 10.0, math.tan(math.radians(3))
+    sides = [{"point": [30, 0, 5], "normal": [1, 0, 0]}, {"point": [-30, 0, 5], "normal": [-1, 0, 0]},
+             {"point": [0, 20, 5], "normal": [0, 1, 0]}, {"point": [0, -20, 5], "normal": [0, -1, 0]}]
+    dr = {"op": "draft", "name": "Draft1", "neutral": {"point": [0, 0, 0], "normal": [0, 0, -1]}, "faces": sides, "angle": 3}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": dr})
+    assert r.status_code == 200, r.text
+    # all four sides narrow away from the bottom: V = abh - (a+b)h^2 tan + 4/3 h^3 tan^2
+    assert _vol(c, pid) == pytest.approx(a * b * h - (a + b) * h * h * t + 4 / 3 * h ** 3 * t * t, rel=1e-9)
+    did = r.json()["features"][-1]["id"]
+    # one face, pull reversed: that side leans outwards (+ b h^2 tan / 2)
+    r = c.patch(f"/api/projects/{pid}/manual/{did}", json={"feature": {"faces": sides[:1], "reverse": True}})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) == pytest.approx(a * b * h + b * h * h * t / 2, rel=1e-9)
+    assert c.patch(f"/api/projects/{pid}/manual/{did}", json={"feature": {"suppressed": True}}).status_code == 200
+    assert _vol(c, pid) == pytest.approx(a * b * h, rel=1e-12)
+    for bad in ({**dr, "angle": 0}, {**dr, "angle": 60}, {**dr, "faces": []}, {**dr, "neutral": {"point": [0, 0, 0], "normal": [0, 0, 0]}}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**dr, "faces": [{"point": [99, 0, 5], "normal": [1, 0, 0]}]}})
+    assert r.status_code == 422 and "not found" in r.json()["detail"]
+    assert _vol(c, pid) == pytest.approx(a * b * h, rel=1e-12)
+
+
+def test_rib_feature_on_l_bracket(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "rib@x.com")
+    pid, _ = _project_with_model(c, (DEMO / "l_bracket.py").read_text(encoding="utf-8"))
+    v0 = _vol(c, pid)
+    mid = {"origin": [0, 25, 0], "normal": [0, -1, 0], "x_dir": [1, 0, 0]}  # Front-facing plane through the middle (u = x, v = z)
+    fillet = 9 * (1 - math.pi / 4)  # the R3 inside fillet already fills that much of the corner
+    # gusset from the vertical leg (x = T = 5, z = 30) to the horizontal leg (z = 5, x = 35), 4 mm thick
+    rib = {"op": "rib", "name": "Rib1", "plane": mid, "t": 4, "chains": [[{"type": "line", "a": [5, 30], "b": [35, 5]}]]}
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": rib})
+    assert r.status_code == 200, r.text
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 30 * 25 - fillet) * 4, rel=1e-9)
+    # a profile that stops short of the walls is extended along its ends to meet them
+    rid = r.json()["features"][-1]["id"]
+    short = [{"type": "line", "a": [10, 25], "b": [30, 25 - 20 * 5 / 6]}]  # extends to (5, 29.1667) and (34, 5)
+    assert c.patch(f"/api/projects/{pid}/manual/{rid}", json={"feature": {"chains": [short], "t": 3}}).status_code == 200
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 29 * 145 / 6 - fillet) * 3, rel=1e-9)
+    # a profile with nothing to close it off fails cleanly and keeps the model
+    r = c.post(f"/api/projects/{pid}/manual", json={"feature": {**rib, "chains": [[{"type": "line", "a": [20, 50], "b": [40, 50]}]]}})
+    assert r.status_code == 422 and "closed off by the body" in r.json()["detail"]
+    assert _vol(c, pid) - v0 == pytest.approx((0.5 * 29 * 145 / 6 - fillet) * 3, rel=1e-9)
+    for bad in ({**rib, "chains": []}, {**rib, "t": 0}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
