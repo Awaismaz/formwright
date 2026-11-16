@@ -1,0 +1,87 @@
+# Design Studio: DS-026 report (branch `module/studio`)
+
+Owner: Design Studio continuation agent. Scope: punch-list row **DS-026** (sweep, loft, draft, rib, sketch tools, reference
+planes, feature mirror, feature-tree polish), done one item at a time in the order the founder asked for. Each item is
+committed separately on `module/studio` with tests and a browser walkthrough on a throwaway data dir (port 8771).
+
+Status legend: **Done** = implemented, tested (analytic), walked in the browser, screenshots reviewed.
+
+| # | Item | Status | Commit |
+|---|------|--------|--------|
+| 1 | Sketcher tools: trim, extend, offset, slot, polygon, sketch fillet, mirror entities, angle dimension | Done | see git log "DS-026 (1)" |
+| 2 | Mirror features (selected bosses/cuts/revolves/holes about a principal plane or picked face) | In progress | |
+| 3 | Reference plane features | Not started | |
+| 4 | Draft and Rib | Not started | |
+| 5 | Sweep and Loft (sketch-only tree nodes) | Not started | |
+| 6 | Feature tree polish (rollback, rename, context menu) | Not started | |
+
+## 1. Sketcher tools (Done)
+
+**What was built**
+- `web/src/sketch/tools.ts` (new): pure, React-free geometry for every tool. Bounded intersections line/line, line/circle,
+  line/arc, circle/circle (arcs are circles with an angular range).
+  - **Trim** (power trim): click a portion and it is cut back to the nearest intersections on either side. An entity
+    with no intersections is deleted, and a circle needs two to become an arc. New end points reuse an existing point at the
+    same spot, or get an on-line / on-circle relation to the entity they meet, so the profile stays closed when solved.
+    A split line keeps its H/V/parallel/perpendicular relations on both pieces, and its length relation is dropped.
+  - **Extend**: the free end nearest the click runs to the next entity along the line (or round the arc). Connected
+    ends are refused with a message.
+  - **Offset entities**: selected lines/arcs/circles. Connected ones are offset as a chain and re-joined at their
+    carrier intersections. Closed chains and circles grow outward by default, open chains go to the left of their direction,
+    and "Reverse side" flips it. Lines get a parallel relation; arcs and circles share the original centre (concentric).
+    There is a live dashed preview.
+  - **Straight slot**: two centres plus a width point. Built as two lines tangent to two equal arcs on a construction
+    centerline; 5 DOF (two centres plus radius).
+  - **Polygon**: n sides (3–64), inscribed (vertex on the circle) or circumscribed (side midpoint on the circle). It is
+    held regular by equal sides plus vertices on / sides tangent to a construction circle (2 DOF with a fixed centre:
+    size and rotation).
+  - **Sketch fillet**: click a corner where exactly two lines meet. Both lines are trimmed back by r/tan(θ/2) and joined
+    by a tangent arc with a radius dimension.
+  - **Mirror entities**: about one selected centerline. Points on the axis are shared; the others get a new
+    **symmetric** relation, so the copy follows the original when it is edited.
+  - **Angle dimension**: between two lines, measured at their corner; editable 0–180°.
+- `web/src/sketch/model.ts`: new solver relations `angle` and `symmetric`. Profiles now chain end points **by position**
+  (not just by shared id), and open chains are returned as ordered segment lists, ready for rib and sweep paths.
+  Fixed a solver defect: a tangent relation between a line and an arc that share an end point had a zero gradient at the
+  solution. That hid a degree of freedom (wrong DOF count) and could stall the solver. It now uses a
+  radius-perpendicular-to-line residual at the shared point.
+- `SketchEditor.tsx`: new tool buttons (slot, polygon, sketch fillet, trim, extend, angle), action buttons (offset
+  entities, mirror entities, plus a **Symmetric** relation for two points and a line), a floating tool-options bar (polygon sides
+  and mode, fillet radius, offset distance and side, and per-tool hints), and a dashed preview for slot, polygon and offset.
+  UX fixes found in the walkthrough:
+  - The sketch canvas no longer moves when a tool is picked or the DOF status text changes length. The options bar and
+    the "Under defined · n DOF" status are overlays now, not toolbar rows. Before, clicks landed about 7 mm off after
+    the toolbar re-wrapped.
+  - A new dimension's value box now receives keyboard focus with the value selected, so you can type the value and press
+    Enter. Before, the click that placed the dimension stole the focus; this affected Smart Dimension too.
+  - Mirror requires exactly one centerline in the selection (no implicit "last line" axis).
+- vitest 4.1.12 (MIT) added as a web dev dependency with `npm test` (`vitest run`). `npm audit`: 0 vulnerabilities.
+  vitest 3.x pulled a tinypool with critical advisories, so 4.1.12 was used. npm 9 needs `--legacy-peer-deps` to add it,
+  and `npm ci` works with the committed lockfile.
+
+**Tests** (`web/src/sketch/tools.test.ts`, 19 tests, hand-computed expectations):
+- Intersections: line/line (5,0); y=3 against R10 gives (±√91, 3); line/arc gives the upper half only; circle/circle gives (4, ±3); parallel lines give none.
+- Trim: crossing lines (shared corner point, solvable); delete when isolated; a split keeps H on both pieces and drops
+  the length; a circle cut by a diameter leaves a semicircle, and trimming the line then gives a closed D of area 50π; two
+  R5 circles trimmed into their union outline (area 50π − lens; cusp sweep 2π − 2·atan(3/4)); line/arc gives sweep π/2.
+- Extend: line to the next line; arc round to x = −5 at (−5, √75); a connected end is refused.
+- Offset: rectangle ±2 → 24×14 / 16×6 with 4 parallel relations; slot r5 → r7 arcs, areas 20·10+25π and 20·14+49π;
+  open L chain to the left; circles 4 → 5; an over-large inward offset is refused.
+- Slot area 8·30+16π with DOF 5. Hexagon sides of 10 (inscribed R10) and 20·tan30° (circumscribed, apothem 10), DOF 2.
+  Corner fillet R3 on 20×10: centre (17,3), sweep π/2, area 200 − (9 − 9π/4), DOF 8. Mirror: images at the mirrored
+  coordinates, axis point shared, and dragging the original moves the copy (−3, 1). Angle 60° measured, driven to 45° (DOF 0).
+  Coincident-by-position chaining.
+
+**Browser walkthrough** (port 8771, fresh data dir, `sketch-tools.mjs`, 0 console/page errors):
+- Boss on the Top plane: 60×30 rectangle, two R5 sketch fillets, an R6 circle on the right edge trimmed into a bump
+  (two trims), a 15 mm slot of width 6, and a hexagon R5 (inscribed); extruded 10.
+  **Kernel volume 16625.923368 mm³**; hand calculation 10·(1800 − 2(25 − 25π/4) + 18π − (90 + 9π) − 37.5√3) =
+  **16625.923368**; the area computed from the saved profiles gives 16625.923366. Bbox 66 × 30 × 10.
+- Cut sketch on the top face (Top plane +10): centerline, open line chain, **extend** to the centerline,
+  **angle dimension** 22.62° typed to **30°**, **mirror** about the centerline (closed kite), **offset** 1 mm inward
+  (reverse side) with preview, then a 2 mm cut: the ring between the kite and its offset. **Kernel 16543.975574 mm³** =
+  16625.923368 − 2 × 40.973897 (ring area from the saved profiles: 16543.975573). Angle in the saved profile: 30.000°.
+- Screenshots reviewed: sketch before trim, polygon preview, finished sketch, angle dimension, mirror selection, offset preview, final cut.
+
+## Parked decisions
+- None yet for item 1.
