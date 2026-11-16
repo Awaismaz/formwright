@@ -500,7 +500,7 @@ def test_api_image_goes_through_vision_and_is_metered(app_client: Any, monkeypat
     assert up.status_code == 200
     full = _wait(c, up.json()["upload"]["id"])
     assert full["upload"]["method"] == "vision" and full["upload"]["status"] == "review"
-    assert calls == ["preview.png"]
+    assert calls in (["vision.png"], ["vision.jpg"])  # the compact copy, never the full preview
     needs = {n["id"]: n for n in full["state"]["needs"]}
     assert needs["reference"]["answered"] is False and "kind_d2" in needs and "missing_0" in needs
     assert c.get("/api/auth/me").json()["org"]["token_balance"] == before - 5  # $0.05 at $0.01 per token
