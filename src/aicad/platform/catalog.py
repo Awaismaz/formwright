@@ -50,11 +50,14 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Cost & setup reduction ideas", "Manufacturability report"],
     },
     "engineering": {
-        "name": "Engineering Advisor", "status": "preview", "icon": "gauge",
-        "summary": "Load cases, failure modes and recommended analyses with clear evidence levels. "
-                   "Engineer sign-off is always required.",
-        "bullets": ["Load case & failure-mode checklist", "Deterministic calculators",
-                    "Material library with provenance", "Sign-off workflow"],
+        "name": "Engineering Advisor", "status": "live", "icon": "gauge",
+        "summary": "Hand-calculation checks for your parts: beams, bolted joints, pins, bearings, shafts, fits, "
+                   "springs and tolerance stack-ups, with the working and sources shown, inputs pre-filled from "
+                   "the model, and named engineer sign-off. Results are estimates, never validation.",
+        "bullets": ["10 unit-safe calculators, tested against published textbook examples",
+                    "Pre-fill from the model: mass, holes, sections, material",
+                    "Load cases, failure-mode checklist and stress-raiser hints",
+                    "Advice level on every result; signed sets invalidate on edit"],
     },
     "print": {
         "name": "3D Print Prep", "status": "preview", "icon": "printer",
