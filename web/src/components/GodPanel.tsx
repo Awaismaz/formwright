@@ -52,9 +52,9 @@ export default function GodPanel() {
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
         <button aria-label="God mode"
-          className={cx("fixed bottom-10 right-4 z-40 flex h-11 items-center gap-2 rounded-full px-4 text-sm font-semibold shadow-pop transition",
-            enabled ? "bg-gradient-to-r from-accent to-[#E0563B] text-white" : "border border-border bg-panel text-text hover:border-accent")}>
-          <Zap className={cx("h-4 w-4", enabled ? "fill-white" : "text-accent")} /> God mode{enabled ? " · on" : ""}
+          className={cx("inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12.5px] font-semibold transition",
+            enabled ? "bg-gradient-to-r from-accent to-[#E0563B] text-white shadow-sm" : "border border-border bg-panel text-text hover:border-accent")}>
+          <Zap className={cx("h-3.5 w-3.5", enabled ? "fill-white" : "text-accent")} /> God{enabled ? " · on" : ""}
         </button>
       </Dialog.Trigger>
       <Dialog.Portal>

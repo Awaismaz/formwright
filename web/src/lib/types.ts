@@ -51,6 +51,19 @@ export interface BuildStatus {
   fingerprint?: { volume: number; bbox: number[]; faces: number; edges: number; solids: number };
   params?: Record<string, unknown>; checks?: CheckResult[]; expected?: Record<string, unknown>;
   timings_s?: Record<string, number>; traceback?: string;
+  param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
+  mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
+  features?: { name: string; kind: string; params: Record<string, unknown> }[];
+  manual_features?: number;
+}
+
+export interface ManualFeature {
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude"; name: string; suppressed: boolean;
+  edges?: [number, number, number][]; r?: number; d?: number;
+  point?: [number, number, number]; normal?: [number, number, number]; depth?: number | null; count?: number; step?: [number, number, number];
+  plane?: { origin: [number, number, number]; normal: [number, number, number]; x_dir?: [number, number, number] };
+  sketch?: { kind: "rect" | "circle" | "poly"; w?: number; h?: number; r?: number; cx?: number; cy?: number };
+  distance?: number; mode?: "add" | "cut";
 }
 
 export interface Project {

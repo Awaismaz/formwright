@@ -4,6 +4,52 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-16 (f) — Design Studio maturity: B-rep viewer, measurement, manual features
+
+**Founder request:** mature Design Studio before other modules, building everything on the list. Added during the session: CAD orthographic default with perspective toggle (DS-012), and a fix for wireframe showing triangles (DS-013).
+
+### Delivered
+- **Backend:**
+  - `src/aicad/topo.py`: exact B-rep topology (faces with type/normal/axis/radius and their own tessellation; edges line/circle/curve with true radius and length; vertices; part labels).
+  - Mass properties.
+  - `src/aicad/fw.py`: named features with **surface-based provenance**, location selectors, manual features (fillet, chamfer, hole + linear pattern, rectangle/circle extrude or cut).
+  - `src/aicad/materials.py`.
+  - `routers/studio.py`: materials, settings, estimate, manual-feature CRUD with rollback, revision compare via OCCT booleans.
+  - Worker `diff` op; `PARAM_META` limits enforced; 3MF; gzip; image attachments (type-sniffed); persistent chat + resumed agent session; undo metadata; lazy topology upgrade for old projects.
+- **Frontend:**
+  - New `web/src/viewer/engine.ts`: Z-up CAD camera, ortho default, persp strength, silhouette fit, 4 display styles from real edges, picking with snapping and occlusion test, selection and hover highlights, capped section on X/Y/Z, explode and part visibility, compare overlay, CoG marker, sketch preview.
+  - `measure.ts`: exact distances, Ø/R, angles, plane distances.
+  - Studio rebuilt: feature tree, PropertyManager, smart params, Mass tab, compare, attachments, selection chips, undo, estimate.
+  - God mode moved into the header.
+- **Agent contract:** `fw.feature` provenance, `PARAM_META`, act on `[Selected …]` geometry by location, keep the managed manual block, read reference images.
+
+### Evidence
+- **Tests:** 70 pass (8 new in `tests/test_studio.py`).
+- **Browser walkthroughs on the founder's gear:**
+  - Orthographic iso and front (true projection).
+  - Wireframe shows only model edges; hidden-lines mode works.
+  - Hover snapping finds Arc R10.000 (Ø20.000) and its centre (0, 0, 10.00); a hidden bottom rim is no longer offered.
+  - Measure gives a face area of 10761.571 mm²; Mass shows steel at 844.78 g.
+- **Temporary demo project** (removed afterwards):
+  - The tree highlights the pocket's 9 faces.
+  - A Hole was added via the PropertyManager with a live outline.
+  - Compare shows removed material of 502.7 mm³, equal to π·4²·10.
+- **Live founder use:** point-and-tell sent "Remove these holes" with a hole selected, and the agent identified the 6-hole bolt pattern.
+
+### Findings / fixes during the session
+- Face provenance keyed on area mis-attributed trimmed faces; it is now keyed on the underlying surface (plane equation, cylinder axis + radius).
+- Tuple-free parameters and integer preservation from the previous session still apply.
+- A failed agent build hid the model behind the empty-state overlay; now the last good geometry is kept, with a "Last build failed" banner.
+- Radix menus and tabs need real pointer events in automation (test-script note, not a product issue).
+
+### Remaining on the Design Studio list
+- DS-010b full 2D sketcher with constraints (needs a sketch solver, CAD-060).
+- Polyline sketches, mirror/shell, patterning any feature.
+- Per-part transparency.
+- A live agent run with an attached image (the endpoint and validation are tested; the agent path isn't yet).
+
+---
+
 ## 2026-11-16 (e) — Rebuild speed-ups, safe parameters, layout fix
 
 **Founder report:** parameter edits on a generated gear were slow despite "no AI"; the Params panel exposed internal variables (`N`, `tooth_int`); the chat panel was clipped.

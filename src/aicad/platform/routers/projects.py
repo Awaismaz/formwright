@@ -328,11 +328,14 @@ def delete_project(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
 
 
 @router.get("/projects/{project_id}/files/{name}")
-def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_ctx)) -> FileResponse:
+async def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_ctx)) -> FileResponse:
     p = _project(ctx, project_id)
     if name not in FILES:
         raise HTTPException(404)
-    f = workspace_for(p) / "out" / name
+    ws = workspace_for(p)
+    f = ws / "out" / name
+    if not f.is_file() and name in ("topo.json", "part.3mf") and (ws / "model.py").is_file()             and (ws / "out" / "status.json").is_file() and not (_sessions.get(p.id) and _sessions[p.id].busy):
+        await _rebuild(p, ws, determinism=False)  # one-time upgrade of projects built before these outputs existed
     if not f.is_file():
         raise HTTPException(404)
     headers = {"Cache-Control": "no-store"}

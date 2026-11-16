@@ -1,251 +1,219 @@
-import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { Box, Eye, Grid3x3, Ruler, Scissors } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as Popover from "@radix-ui/react-dialog";
+import { Box, ChevronDown, Crosshair, Eye, EyeOff, Layers, MousePointer2, Ruler, Scissors, X } from "lucide-react";
+import { CadViewer } from "@/viewer/engine";
+import { measure, describe, type MeasureResult } from "@/viewer/measure";
+import type { Axis, DisplayMode, Pick, SketchPreview, Topo, V3, ViewName } from "@/viewer/types";
+import { pickKey } from "@/viewer/types";
 import { cx } from "@/lib/format";
-import { Tip } from "./ui";
+import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "./ui";
 
-// glTF is Y-up; build123d exports CAD +Z as glTF +Y and CAD +Y as glTF -Z.
-const VIEWS: Record<string, THREE.Vector3> = {
-  Iso: new THREE.Vector3(1, 0.9, 1.2), Front: new THREE.Vector3(0, 0, 1),
-  Top: new THREE.Vector3(0, 1, 0.0001), Right: new THREE.Vector3(1, 0, 0),
-};
+export type Tool = "orbit" | "measure" | "select";
 
-type Axis = "X" | "Y" | "Z";
-// CAD axis -> glTF direction (glTF is Y-up; CAD +Z = glTF +Y, CAD +Y = glTF -Z)
-const AXIS_DIR: Record<Axis, THREE.Vector3> = {
-  X: new THREE.Vector3(1, 0, 0), Y: new THREE.Vector3(0, 0, -1), Z: new THREE.Vector3(0, 1, 0),
-};
-
-function hatchTexture(dark: boolean) {
-  const c = document.createElement("canvas"); c.width = c.height = 64;
-  const g = c.getContext("2d")!;
-  g.fillStyle = dark ? "#5a3a1f" : "#f2c49b"; g.fillRect(0, 0, 64, 64);
-  g.strokeStyle = dark ? "#e0965a" : "#c8742e"; g.lineWidth = 6;
-  for (let i = -64; i <= 128; i += 16) { g.beginPath(); g.moveTo(i, 64); g.lineTo(i + 64, 0); g.stroke(); }
-  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+interface Props {
+  topoUrl: string | null;
+  version?: number | string;
+  tool: Tool;
+  onToolChange: (t: Tool) => void;
+  selection: Pick[];
+  onSelectionChange: (p: Pick[]) => void;
+  selectKinds?: Pick["kind"][];
+  highlightFaces?: number[];
+  com?: V3 | null;
+  sketch?: SketchPreview | null;
+  compare?: { added: Topo | null; removed: Topo | null } | null;
+  onTopo?: (t: Topo | null) => void;
+  empty?: ReactNode;
+  className?: string;
 }
 
-interface Props { url: string | null; version?: number | string; bboxMm?: number[]; className?: string; empty?: React.ReactNode }
+const DISPLAY: { mode: DisplayMode; label: string }[] = [
+  { mode: "shaded-edges", label: "Shaded with edges" }, { mode: "shaded", label: "Shaded" },
+  { mode: "hidden", label: "Hidden lines visible" }, { mode: "wireframe", label: "Wireframe" },
+];
 
-export default function Viewer3D({ url, version, bboxMm, className, empty }: Props) {
+function useStored<T>(key: string, init: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) as T : init; } catch { return init; } });
+  return [v, (n: T) => { setV(n); try { localStorage.setItem(key, JSON.stringify(n)); } catch { /* ignore */ } }];
+}
+
+export default function Viewer3D(props: Props) {
+  const { topoUrl, version, tool, onToolChange, selection, onSelectionChange, selectKinds, highlightFaces, com, sketch, compare, onTopo, empty, className } = props;
   const host = useRef<HTMLDivElement>(null);
-  const api = useRef<{ setView: (v: string) => void; setEdges: (b: boolean) => void; setWire: (b: boolean) => void;
-    setSection: (on: boolean, t: number, axis: Axis, flip: boolean) => number; setMeasure: (b: boolean) => void } | null>(null);
-  const [edges, setEdges] = useState(true);
-  const [wire, setWire] = useState(false);
+  const eng = useRef<CadViewer | null>(null);
+  const [topo, setTopo] = useState<Topo | null>(null);
+  const [display, setDisplay] = useStored<DisplayMode>("fw_view_display", "shaded-edges");
+  const [proj, setProj] = useStored<{ ortho: boolean; fov: number }>("fw_view_proj", { ortho: true, fov: 30 });
   const [section, setSection] = useState(false);
-  const [sectionT, setSectionT] = useState(0.5);
-  const [sectionAxis, setSectionAxis] = useState<Axis>("X");
-  const [sectionFlip, setSectionFlip] = useState(false);
-  const [sectionMm, setSectionMm] = useState<number | null>(null);
-  const [measure, setMeasure] = useState(false);
-  const [measureText, setMeasureText] = useState("");
-  const [loaded, setLoaded] = useState(false);
-  const loadRef = useRef<(u: string) => void>(() => {});
-  const bboxRef = useRef<number[] | undefined>(bboxMm);
-  bboxRef.current = bboxMm;
+  const [axis, setAxis] = useState<Axis>("Z");
+  const [secT, setSecT] = useState(0.5);
+  const [flip, setFlip] = useState(false);
+  const [secMm, setSecMm] = useState<number | null>(null);
+  const [hover, setHover] = useState<Pick | null>(null);
+  const [mpicks, setMpicks] = useState<Pick[]>([]);
+  const [hidden, setHidden] = useState<number[]>([]);
+  const [explode, setExplode] = useState(0);
+  const loadedUrl = useRef<string | null>(null);
+  const state = useRef({ tool, selection, mpicks, topo, onSelectionChange });
+  state.current = { tool, selection, mpicks, topo, onSelectionChange };
 
   useEffect(() => {
-    const el = host.current!;
     const dark = document.documentElement.classList.contains("dark");
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true, stencil: true });
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    renderer.localClippingEnabled = true;
-    el.appendChild(renderer.domElement);
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 1e6);
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x8a93a3, 1.5));
-    const key = new THREE.DirectionalLight(0xffffff, 1.7); key.position.set(3, 5, 4); scene.add(key);
-    const fill = new THREE.DirectionalLight(0xffffff, 0.55); fill.position.set(-4, -2, -3); scene.add(fill);
-    const clip = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
-    const mat = new THREE.MeshStandardMaterial({ color: dark ? 0xaab4c3 : 0xb7c0cd, metalness: 0.3, roughness: 0.45,
-      side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
-    const edgeMat = new THREE.LineBasicMaterial({ color: dark ? 0x0b0d12 : 0x1d2330 });
-    let model: THREE.Object3D | null = null;
-    let edgeObjs: THREE.LineSegments[] = [];
-    let box = new THREE.Box3();
-    let first = true;
-    let state = { edges: true, section: false, t: 0.5, measuring: false, axis: "X" as Axis, flip: false };
-    // Section capping (stencil technique): back faces +1, front faces -1 inside the clipped region;
-    // where the stencil is non-zero the cut plane is inside material -> draw a solid hatched cap there.
-    const stencilBase = { depthWrite: false, depthTest: false, colorWrite: false, stencilWrite: true,
-      stencilFunc: THREE.AlwaysStencilFunc, clippingPlanes: [clip] };
-    const backMat = new THREE.MeshBasicMaterial({ ...stencilBase, side: THREE.BackSide,
-      stencilFail: THREE.IncrementWrapStencilOp, stencilZFail: THREE.IncrementWrapStencilOp, stencilZPass: THREE.IncrementWrapStencilOp });
-    const frontMat = new THREE.MeshBasicMaterial({ ...stencilBase, side: THREE.FrontSide,
-      stencilFail: THREE.DecrementWrapStencilOp, stencilZFail: THREE.DecrementWrapStencilOp, stencilZPass: THREE.DecrementWrapStencilOp });
-    const hatch = hatchTexture(dark);
-    const capMat = new THREE.MeshBasicMaterial({ map: hatch, side: THREE.DoubleSide, stencilWrite: true, stencilRef: 0,
-      stencilFunc: THREE.NotEqualStencilFunc, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp,
-      stencilZPass: THREE.ReplaceStencilOp });
-    const cap = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), capMat);
-    cap.renderOrder = 2; cap.visible = false;
-    cap.onAfterRender = (r) => r.clearStencil();
-    scene.add(cap);
-    let stencilObjs: THREE.Mesh[] = [];
-    const loader = new GLTFLoader();
+    const v = new CadViewer(host.current!, dark, {
+      onHover: (p) => setHover(p),
+      onClick: (p, additive) => {
+        const s = state.current;
+        if (s.tool === "measure") {
+          if (!p) { setMpicks([]); return; }
+          setMpicks(prev => (prev.length >= 2 ? [p] : [...prev, p]));
+        } else if (s.tool === "select") {
+          if (!p) { if (!additive) s.onSelectionChange([]); return; }
+          const k = pickKey(p);
+          const exists = s.selection.some(x => pickKey(x) === k);
+          s.onSelectionChange(additive ? (exists ? s.selection.filter(x => pickKey(x) !== k) : [...s.selection, p]) : [p]);
+        }
+      },
+    });
+    eng.current = v;
+    v.setProjection(proj.ortho, proj.fov);
+    return () => { v.dispose(); eng.current = null; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const resize = () => {
-      const r = el.getBoundingClientRect();
-      renderer.setSize(r.width, r.height, false);
-      camera.aspect = r.width / Math.max(r.height, 1); camera.updateProjectionMatrix();
-    };
-    const ro = new ResizeObserver(resize); ro.observe(el); resize();
-
-    const setView = (name: string) => {
-      const c = box.getCenter(new THREE.Vector3());
-      const rad = box.getBoundingSphere(new THREE.Sphere()).radius || 1;
-      const dir = (VIEWS[name] ?? VIEWS.Iso!).clone().normalize();
-      const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
-      const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
-      const dist = rad / Math.sin(Math.min(vHalf, hHalf)) * 1.12; // fit in the narrower direction
-      camera.position.copy(c).addScaledVector(dir, dist);
-      camera.near = dist / 100; camera.far = dist * 100; camera.updateProjectionMatrix();
-      controls.target.copy(c); controls.update();
-    };
-    /** Returns the cut position in CAD millimetres along the chosen axis. */
-    const applySection = (): number => {
-      const on = state.section && !!model;
-      mat.clippingPlanes = on ? [clip] : []; edgeMat.clippingPlanes = on ? [clip] : [];
-      mat.needsUpdate = edgeMat.needsUpdate = true;
-      stencilObjs.forEach(o => (o.visible = on));
-      cap.visible = on;
-      const dir = AXIS_DIR[state.axis];
-      const corners = [0, 1].flatMap(i => [0, 1].flatMap(j => [0, 1].map(k => new THREE.Vector3(
-        i ? box.max.x : box.min.x, j ? box.max.y : box.min.y, k ? box.max.z : box.min.z))));
-      const proj = corners.map(c => c.dot(dir));
-      const lo = Math.min(...proj), hi = Math.max(...proj);
-      const d = THREE.MathUtils.lerp(lo, hi, state.t);
-      // keep material on the side opposite to the arrow (flip keeps the other side)
-      clip.normal.copy(dir).multiplyScalar(state.flip ? 1 : -1);
-      clip.constant = state.flip ? -d : d;
-      const centre = box.getCenter(new THREE.Vector3());
-      const onPlane = centre.clone().addScaledVector(dir, d - centre.dot(dir));
-      const size = box.getSize(new THREE.Vector3()).length() * 1.5 || 1;
-      cap.position.copy(onPlane);
-      cap.lookAt(onPlane.clone().add(dir));
-      cap.scale.set(size, size, 1);
-      hatch.repeat.set(size / (size / 24), size / (size / 24));
-      const s = box.getSize(new THREE.Vector3());
-      const cadMax = Math.max(...(bboxRef.current ?? [Math.max(s.x, s.y, s.z)]));
-      const mmPerUnit = cadMax / Math.max(s.x, s.y, s.z, 1e-9);
-      return d * mmPerUnit;
-    };
-    const load = (u: string) => {
-      loader.load(u, gltf => {
-        if (model) { scene.remove(model); model.traverse(o => (o as THREE.Mesh).geometry?.dispose()); }
-        edgeObjs = []; stencilObjs = [];
-        model = gltf.scene;
-        const meshes: THREE.Mesh[] = [];
-        model.traverse(o => { if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh); });
-        meshes.forEach(m => {
-          {
-            m.material = mat;
-            const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 25), edgeMat);
-            e.visible = state.edges; m.add(e); edgeObjs.push(e);
-            for (const sm of [backMat, frontMat]) {
-              const st = new THREE.Mesh(m.geometry, sm); st.renderOrder = 1; st.visible = false;
-              m.add(st); stencilObjs.push(st);
-            }
-          }
-        });
-        scene.add(model);
-        box = new THREE.Box3().setFromObject(model);
-        applySection();
-        if (first) { setView("Iso"); first = false; }
-        setLoaded(true);
-      }, undefined, () => setLoaded(false));
-    };
-    loadRef.current = load;
-
-    // measuring
-    const ray = new THREE.Raycaster(); const mouse = new THREE.Vector2();
-    let pts: THREE.Vector3[] = []; let marks: THREE.Object3D[] = [];
-    const markMat = new THREE.MeshBasicMaterial({ color: 0x1f5fbf, depthTest: false });
-    const clearMarks = () => { marks.forEach(m => scene.remove(m)); marks = []; pts = []; };
-    let down: [number, number] | null = null;
-    const onDown = (e: PointerEvent) => { down = [e.clientX, e.clientY]; };
-    const onUp = (e: PointerEvent) => {
-      if (!state.measuring || !model || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
-      const r = renderer.domElement.getBoundingClientRect();
-      mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-      ray.setFromCamera(mouse, camera);
-      const hit = ray.intersectObject(model, true).find(h => (h.object as THREE.Mesh).isMesh);
-      if (!hit) return;
-      if (pts.length === 2) clearMarks();
-      pts.push(hit.point.clone());
-      const s = new THREE.Mesh(new THREE.SphereGeometry(box.getBoundingSphere(new THREE.Sphere()).radius * 0.01, 12, 8), markMat);
-      s.position.copy(hit.point); s.renderOrder = 10; scene.add(s); marks.push(s);
-      if (pts.length === 2) {
-        const size = box.getSize(new THREE.Vector3());
-        const cadMax = Math.max(...(bboxRef.current ?? [Math.max(size.x, size.y, size.z)]));
-        const scale = cadMax / Math.max(size.x, size.y, size.z);
-        const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x1f5fbf, depthTest: false }));
-        line.renderOrder = 10; scene.add(line); marks.push(line);
-        setMeasureText(`${(pts[0]!.distanceTo(pts[1]!) * scale).toFixed(2)} mm`);
-      } else setMeasureText("Pick a second point");
-    };
-    renderer.domElement.addEventListener("pointerdown", onDown);
-    renderer.domElement.addEventListener("pointerup", onUp);
-
-    api.current = {
-      setView,
-      setEdges: (b) => { state.edges = b; edgeObjs.forEach(e => (e.visible = b)); },
-      setWire: (b) => { mat.wireframe = b; },
-      setSection: (on, t, axis, flip) => { state = { ...state, section: on, t, axis, flip }; return applySection(); },
-      setMeasure: (b) => { state.measuring = b; if (!b) clearMarks(); },
-    };
-    renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
-    return () => {
-      renderer.setAnimationLoop(null); ro.disconnect(); controls.dispose(); renderer.dispose();
-      renderer.domElement.remove(); state = { ...state };
-    };
-  }, []);
-
-  useEffect(() => { if (url) loadRef.current(`${url}${url.includes("?") ? "&" : "?"}v=${version ?? 0}`); else setLoaded(false); }, [url, version]);
-  useEffect(() => { api.current?.setEdges(edges); }, [edges]);
-  useEffect(() => { api.current?.setWire(wire); }, [wire]);
   useEffect(() => {
-    const mm = api.current?.setSection(section, sectionT, sectionAxis, sectionFlip);
-    setSectionMm(section && mm !== undefined ? mm : null);
-  }, [section, sectionT, sectionAxis, sectionFlip, loaded]);
-  useEffect(() => { api.current?.setMeasure(measure); setMeasureText(measure ? "Pick two points on the part" : ""); }, [measure]);
+    if (!topoUrl) { setTopo(null); onTopo?.(null); loadedUrl.current = null; return; }
+    let cancel = false;
+    if (version === "keep" && loadedUrl.current === topoUrl) return () => {}; // failed build: keep last good geometry
+    fetch(`${topoUrl}${topoUrl.includes("?") ? "&" : "?"}v=${version ?? 0}`).then(r => (r.ok ? r.json() : null)).then((t: Topo | null) => {
+      if (cancel || !t || !eng.current) return;
+      eng.current.load(t, loadedUrl.current === topoUrl);
+      loadedUrl.current = topoUrl;
+      setTopo(t); onTopo?.(t); setMpicks([]);
+    }).catch(() => {});
+    return () => { cancel = true; };
+  }, [topoUrl, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const tool = (on: boolean, set: (v: boolean) => void, icon: React.ReactNode, label: string) => (
+  useEffect(() => { eng.current?.setDisplay(display); }, [display, topo]);
+  useEffect(() => { eng.current?.setProjection(proj.ortho, proj.fov); }, [proj.ortho, proj.fov]);
+  useEffect(() => { const v = eng.current?.setSection(section, axis, secT, flip); setSecMm(section && v !== undefined ? v : null); }, [section, axis, secT, flip, topo]);
+  useEffect(() => {
+    const kinds: Pick["kind"][] = tool === "orbit" ? [] : tool === "measure" ? ["vertex", "center", "edge", "face"] : selectKinds ?? ["vertex", "center", "edge", "face"];
+    eng.current?.setPicking(kinds);
+    if (tool !== "measure") setMpicks([]);
+  }, [tool, selectKinds, topo]);
+  useEffect(() => { eng.current?.setSelection(tool === "measure" ? mpicks : selection); }, [selection, mpicks, tool, topo]);
+  useEffect(() => { eng.current?.highlightFaces(highlightFaces ?? []); }, [highlightFaces, topo]);
+  useEffect(() => { eng.current?.setCenterOfMass(com ?? null); }, [com, topo]);
+  useEffect(() => { eng.current?.setSketchPreview(sketch ?? null); }, [sketch, topo]);
+  useEffect(() => { eng.current?.setOverlay(compare?.added ?? null, compare?.removed ?? null); eng.current?.setGhost(!!compare); }, [compare, topo]);
+  useEffect(() => { eng.current?.setHiddenParts(hidden); }, [hidden, topo]);
+  useEffect(() => { eng.current?.setExplode(explode); }, [explode, topo]);
+
+  const result: MeasureResult | null = useMemo(() => (topo && tool === "measure" ? measure(mpicks, topo) : null), [mpicks, topo, tool]);
+  useEffect(() => { eng.current?.setMeasureLine(result?.line?.[0] ?? null, result?.line?.[1] ?? null); }, [result]);
+  const multi = (topo?.solids.length ?? 0) > 1;
+
+  const btn = (active: boolean, onClick: () => void, icon: ReactNode, label: string) => (
     <Tip content={label} side="bottom">
-      <button onClick={() => set(!on)} aria-pressed={on}
-        className={cx("rounded p-1.5 transition", on ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")}>{icon}</button>
+      <button onClick={onClick} aria-pressed={active} aria-label={label}
+        className={cx("rounded p-1.5 transition", active ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")}>{icon}</button>
     </Tip>
   );
+  const view = (v: ViewName) => <button key={v} onClick={() => eng.current?.setView(v)} className="rounded px-2 py-1 text-[12px] text-muted hover:bg-text/5 hover:text-text">{v}</button>;
 
   return (
     <div className={cx("viewport-bg relative h-full w-full overflow-hidden", className)} data-tour="viewer">
       <div ref={host} className="absolute inset-0 [&>canvas]:h-full [&>canvas]:w-full" />
-      {!loaded && <div className="absolute inset-0 flex items-center justify-center">{empty}</div>}
-      <div className="absolute left-3 top-3 flex items-center gap-0.5 rounded-lg border border-border bg-panel/95 p-1 shadow-card">
-        {Object.keys(VIEWS).map(v => <button key={v} onClick={() => api.current?.setView(v)} className="rounded px-2 py-1 text-[12px] text-muted hover:bg-text/5 hover:text-text">{v}</button>)}
+      {!topo && <div className="absolute inset-0 flex items-center justify-center">{empty}</div>}
+
+      {/* toolbar */}
+      <div className="absolute left-3 top-3 flex flex-wrap items-center gap-0.5 rounded-lg border border-border bg-panel/95 p-1 shadow-card">
+        {(["Iso", "Front", "Top", "Right"] as ViewName[]).map(view)}
+        <Menu>
+          <MenuTrigger asChild><button className="rounded px-1 py-1 text-muted hover:bg-text/5" aria-label="More views"><ChevronDown className="h-3.5 w-3.5" /></button></MenuTrigger>
+          <MenuContent align="start">{(["Back", "Left", "Bottom"] as ViewName[]).map(v => <MenuItem key={v} onSelect={() => eng.current?.setView(v)}>{v}</MenuItem>)}</MenuContent>
+        </Menu>
         <span className="mx-1 h-5 w-px bg-border" />
-        {tool(edges, setEdges, <Box className="h-4 w-4" />, "Edges")}
-        {tool(wire, setWire, <Grid3x3 className="h-4 w-4" />, "Wireframe")}
-        {tool(section, setSection, <Scissors className="h-4 w-4" />, "Section view")}
-        {tool(measure, setMeasure, <Ruler className="h-4 w-4" />, "Measure (mesh pick)")}
+        <Popover.Root>
+          <Tip content={proj.ortho ? "Orthographic (CAD) — click for perspective options" : "Perspective — click for options"} side="bottom">
+            <Popover.Trigger asChild>
+              <button className={cx("rounded px-2 py-1 text-[12px] font-medium", !proj.ortho ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")}>{proj.ortho ? "Ortho" : "Persp"}</button>
+            </Popover.Trigger>
+          </Tip>
+          <Popover.Portal>
+            <Popover.Content className="fixed left-1/2 top-1/3 z-50 w-72 -translate-x-1/2 rounded-lg border border-border bg-panel p-4 shadow-pop">
+              <Popover.Title className="text-sm font-semibold">Projection</Popover.Title>
+              <div className="mt-3 inline-flex overflow-hidden rounded border border-border text-sm">
+                {[[true, "Orthographic"], [false, "Perspective"]].map(([o, l]) => (
+                  <button key={String(o)} onClick={() => setProj({ ...proj, ortho: o as boolean })}
+                    className={cx("px-3 py-1", proj.ortho === o ? "bg-primary text-white" : "text-muted")}>{l as string}</button>))}
+              </div>
+              <label className="mt-4 block text-[13px]">Perspective strength <span className="text-muted">({proj.fov}° field of view)</span></label>
+              <input type="range" min={10} max={70} step={1} value={proj.fov} onChange={e => setProj({ ortho: false, fov: +e.target.value })} className="mt-2 w-full" aria-label="Perspective strength" />
+              <p className="mt-2 text-xs text-muted">Orthographic is the CAD default: parallel lines stay parallel and Front/Top/Right are true projections.</p>
+              <Popover.Close className="mt-3 rounded border border-border px-3 py-1 text-sm hover:bg-text/5">Done</Popover.Close>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+        <Menu>
+          <MenuTrigger asChild>
+            <button className="flex items-center gap-1 rounded px-1.5 py-1 text-muted hover:bg-text/5 hover:text-text" aria-label="Display style"><Box className="h-4 w-4" /><ChevronDown className="h-3 w-3" /></button>
+          </MenuTrigger>
+          <MenuContent align="start">
+            <MenuLabel>Display style</MenuLabel>
+            {DISPLAY.map(d => <MenuItem key={d.mode} onSelect={() => setDisplay(d.mode)}>{d.label}{display === d.mode && <span className="ml-auto text-primary">●</span>}</MenuItem>)}
+          </MenuContent>
+        </Menu>
+        {btn(section, () => setSection(!section), <Scissors className="h-4 w-4" />, "Section view")}
+        <span className="mx-1 h-5 w-px bg-border" />
+        {btn(tool === "measure", () => onToolChange(tool === "measure" ? "orbit" : "measure"), <Ruler className="h-4 w-4" />, "Measure (snaps to vertices, edges, centres, faces)")}
+        {btn(tool === "select", () => onToolChange(tool === "select" ? "orbit" : "select"), <MousePointer2 className="h-4 w-4" />, "Select faces/edges (Ctrl+click to add)")}
+        {multi && <Menu>
+          <MenuTrigger asChild><button className="flex items-center gap-1 rounded px-1.5 py-1 text-muted hover:bg-text/5" aria-label="Parts"><Layers className="h-4 w-4" /><ChevronDown className="h-3 w-3" /></button></MenuTrigger>
+          <MenuContent align="start" className="w-64">
+            <MenuLabel>Parts ({topo!.solids.length})</MenuLabel>
+            {topo!.solids.map(s => (
+              <button key={s.id} onClick={() => setHidden(hidden.includes(s.id) ? hidden.filter(x => x !== s.id) : [...hidden, s.id])}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm hover:bg-primary-soft">
+                {hidden.includes(s.id) ? <EyeOff className="h-4 w-4 text-muted" /> : <Eye className="h-4 w-4 text-primary" />}
+                <span className="flex-1 truncate">{s.label}</span><span className="text-xs text-muted">{(s.volume / 1000).toFixed(1)} cm³</span>
+              </button>))}
+            <div className="px-2.5 pb-2 pt-1"><div className="text-xs text-muted">Explode</div>
+              <input type="range" min={0} max={1.5} step={0.01} value={explode} onChange={e => setExplode(+e.target.value)} className="w-full" aria-label="Explode" /></div>
+          </MenuContent>
+        </Menu>}
       </div>
-      {section && <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-panel/95 px-3 py-1.5 text-xs shadow-card">
-        <Scissors className="h-3.5 w-3.5 text-muted" />
-        <span className="inline-flex overflow-hidden rounded border border-border">
-          {(["X", "Y", "Z"] as Axis[]).map(a => <button key={a} onClick={() => setSectionAxis(a)}
-            className={cx("px-2 py-0.5 font-semibold", sectionAxis === a ? "bg-primary text-white" : "text-muted hover:bg-text/5")}>{a}</button>)}
-        </span>
-        <input type="range" min={0} max={1} step={0.002} value={sectionT} onChange={e => setSectionT(+e.target.value)} aria-label="Section position" />
-        <span className="w-24 tabular-nums text-text">{sectionAxis} = {sectionMm !== null ? sectionMm.toFixed(2) : "—"} mm</span>
-        <button onClick={() => setSectionFlip(!sectionFlip)} className="rounded border border-border px-2 py-0.5 hover:bg-text/5" title="Keep the other side">Flip</button>
-      </div>}
-      {measureText && <div className="absolute bottom-3 right-3 rounded-lg border border-border bg-panel/95 px-3 py-1.5 text-xs font-medium tabular-nums shadow-card"><Eye className="mr-1 inline h-3.5 w-3.5 text-muted" />{measureText}</div>}
+
+      {tool !== "orbit" && hover && topo && (
+        <div className="pointer-events-none absolute left-3 top-14 rounded-md bg-chrome/90 px-2.5 py-1 text-[11.5px] text-chrome-fg shadow-card">
+          <Crosshair className="mr-1 inline h-3 w-3" />{describe(hover, topo)}
+        </div>)}
+
+      {section && (
+        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-panel/95 px-3 py-1.5 text-xs shadow-card">
+          <Scissors className="h-3.5 w-3.5 text-muted" />
+          <span className="inline-flex overflow-hidden rounded border border-border">
+            {(["X", "Y", "Z"] as Axis[]).map(a => <button key={a} onClick={() => setAxis(a)} className={cx("px-2 py-0.5 font-semibold", axis === a ? "bg-primary text-white" : "text-muted hover:bg-text/5")}>{a}</button>)}
+          </span>
+          <input type="range" min={0} max={1} step={0.002} value={secT} onChange={e => setSecT(+e.target.value)} aria-label="Section position" />
+          <span className="w-24 tabular-nums text-text">{axis} = {secMm !== null ? secMm.toFixed(2) : "—"} mm</span>
+          <button onClick={() => setFlip(!flip)} className="rounded border border-border px-2 py-0.5 hover:bg-text/5" title="Keep the other side">Flip</button>
+        </div>)}
+
+      {tool === "measure" && (
+        <div className="absolute bottom-3 right-3 w-72 rounded-lg border border-border bg-panel/95 shadow-card">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold"><Ruler className="h-4 w-4 text-primary" />Measure</span>
+            <button onClick={() => setMpicks([])} className="rounded p-0.5 text-muted hover:bg-text/5" aria-label="Clear measurement"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          {result ? (
+            <div className="px-3 py-2 text-[12.5px]">
+              <div className="mb-1.5 text-[11.5px] text-muted">{result.title}</div>
+              {result.rows.map(r => <div key={r.label} className="flex justify-between py-0.5"><span className="text-muted">{r.label}</span>
+                <span className={cx("tabular-nums", r.primary && "text-[14px] font-semibold text-primary")}>{r.value}</span></div>)}
+              {mpicks.length === 1 && <div className="mt-1.5 text-[11px] text-muted">Pick a second entity to measure between them.</div>}
+            </div>
+          ) : <div className="px-3 py-3 text-[12px] text-muted">Hover to snap to a vertex, edge, circle centre or face, then click. Pick two to measure between them.</div>}
+        </div>)}
     </div>
   );
 }

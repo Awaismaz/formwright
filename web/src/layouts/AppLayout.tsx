@@ -210,6 +210,7 @@ export default function AppLayout() {
               <Search className="h-4 w-4" /> <span className="flex-1">Search projects, modules, actions…</span><span className="kbd">Ctrl K</span>
             </button>
             <div className="ml-auto flex items-center gap-1.5">
+              {me?.god?.available && <div className="mr-1"><GodPanel /></div>}
               {org && (
                 <Tip content={unlimited ? "God mode: unlimited tokens — runs are not charged" : "Token balance — metered AI usage"} side="bottom">
                   <Link to="/app/billing#tokens" data-tour="tokens"
@@ -247,7 +248,6 @@ export default function AppLayout() {
         </div>
       </div>
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} modules={catalog.data?.modules ?? []} />
-      {me?.god?.available && <GodPanel />}
     </div>
   );
 }
