@@ -31,11 +31,14 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Spec vs inferred dimensions, hole callouts", "SVG / PDF / DXF, regenerates on model change"],
     },
     "image2cad": {
-        "name": "Image & Drawing to CAD", "status": "preview", "icon": "scan",
-        "summary": "Turn a photo, sketch or legacy drawing into an editable model. Ambiguities and missing "
-                   "dimensions are flagged instead of guessed.",
-        "bullets": ["Sketch / photo / PDF input", "Missing-dimension questions", "Confidence per feature",
-                    "Editable parametric output"],
+        "name": "Image & Drawing to CAD", "status": "live", "icon": "scan",
+        "summary": "Upload a PDF drawing, a scan, a sketch or a photo. Every value read is pinned on the image for "
+                   "review, missing sizes become questions, and scale stays undefined until you confirm a real "
+                   "dimension. The design agent then models from the confirmed values only.",
+        "bullets": ["Vector PDFs read exactly from the drawing text: Ø, R, threads, tolerances, counts, scale",
+                    "Scans, sketches and photos read by AI vision, each value with a confidence",
+                    "\"What we read / What we need\" review: nothing proceeds silently",
+                    "One-click hand-off to the Design Studio with the reference attached"],
     },
     "assembly": {
         "name": "Assembly Studio", "status": "preview", "icon": "boxes",
