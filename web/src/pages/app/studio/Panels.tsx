@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, Lock, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, MessageSquarePlus, MoreHorizontal, Pencil, ScanSearch, Sparkles, Square, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, ManualFeature, Project } from "@/lib/types";
@@ -10,6 +10,7 @@ import { Badge, Button, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSepar
 import type { Topo } from "@/viewer/types";
 import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 import ChangeNotice from "./ChangeNotice";
+import HandoffCard from "./HandoffCard";
 
 /* ------------------------------------------------------------------ checks */
 export function ChecksPanel({ status }: { status?: BuildStatus }) {
@@ -316,14 +317,14 @@ export function FilesPanel({ project, status }: { project: Project; status?: Bui
   const base = `/api/projects/${project.id}/files`;
   return (
     <div className="space-y-2 p-3">
+      <HandoffCard projectId={project.id} version={status.build_id} />
       {[["part.step", "STEP (AP214)", "SOLIDWORKS, Creo, Fusion, Inventor, NX…"], ["part.stl", "STL", "Slicers and quick viewing"], ["part.3mf", "3MF", "Modern 3D-printing format with units"]].map(([f, l, h]) => (
         <a key={f} href={`${base}/${f}`} className="flex items-center gap-3 rounded-lg border border-border p-3 hover:border-primary/50">
           <Download className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">{l}</div><div className="text-xs text-muted">{h}</div></div>
         </a>))}
-      <div className="rounded-lg border border-dashed border-border p-3 text-xs text-muted">
-        <div className="mb-1 flex items-center gap-1.5 font-medium text-text"><Lock className="h-3.5 w-3.5" /> Drawing PDF / DXF</div>
-        Manufacturing drawings come with <Link to="/app/modules/drawings" className="link">Drawing Studio</Link> (Preview).
-      </div>
+      <Link to={`/app/modules/drawings?project=${project.id}`} className="flex items-center gap-3 rounded-lg border border-border p-3 hover:border-primary/50">
+        <FileText className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">Drawing PDF / DXF / SVG</div><div className="text-xs text-muted">Generate the drawing sheet in Drawing Studio</div></div>
+      </Link>
       <img src={`${base}/views.png?v=${status.build_id}`} alt="Four-view render" className="mt-2 w-full rounded-lg border border-border" />
     </div>
   );
