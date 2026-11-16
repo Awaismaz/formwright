@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Box, Calculator, ClipboardCheck, FileSignature, FolderOpen, Library as LibraryIcon, Play, Ruler, Search, ShieldAlert, Sparkles, Weight, Plus } from "lucide-react";
+import { Box, Calculator, ClipboardCheck, FileSignature, FolderOpen, Library as LibraryIcon, Play, Ruler, Search, ShieldAlert, Sparkles, Weight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { Badge, Button, Card, EmptyState, Modal, PageLoader, Spinner, StatusBadge, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
+import { Badge, Button, Card, EmptyState, Modal, PageLoader, Spinner, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { cx } from "@/lib/format";
 import type { ModuleAppProps } from "../registry";
+import { ModuleHeader } from "../ModuleHeader";
 import { CalcForm, LevelBadge, type LoadOption, ResultView } from "./CalcForm";
 import { type CalcResult, type CalcSchema, type CalcSet, type Catalog, type FormState, type LoadCase, type ModelInfo, type Suggestion, type UnitSystem, applyPrefill, exampleKeys, fmt, initialForm, toInputs } from "./types";
 import SetsPanel from "./Sets";
@@ -59,22 +60,20 @@ export default function EngineeringApp({ projectId }: ModuleAppProps) {
   const current = projects.data?.items.find(p => p.id === pid);
 
   return (
-    <div className="mx-auto max-w-[1500px] px-5 py-6">
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Link to={pid ? `/app/projects/${pid}` : "/app/modules"} className="inline-flex items-center gap-1 text-sm text-muted hover:text-text"><ArrowLeft className="h-4 w-4" />{pid ? "Back to Studio" : "All modules"}</Link>
-        <h1 className="text-[20px] font-semibold tracking-tight">Engineering Advisor</h1>
-        <StatusBadge status="live" />
-        <div className="ml-auto flex items-center gap-2">
-          <FolderOpen className="h-4 w-4 text-muted" />
-          <select aria-label="Project" className="input h-8 w-[260px] text-[13px]" value={pid ?? ""} onChange={e => choose(e.target.value || null)}>
-            <option value="">No project (standalone calculators)</option>
+    <div>
+    <ModuleHeader code="engineering" icon={<Calculator className="h-4 w-4" />} title="Engineering Advisor" projectId={pid} projectName={current?.name}
+      projects={projects.data?.items.map(p => ({ id: p.id, name: p.name }))} onSwitch={choose}
+      actions={<>
+        {!pid && <><FolderOpen className="h-4 w-4 text-muted" />
+          <select aria-label="Project" className="input h-8 w-[240px] py-0 text-[12.5px]" value="" onChange={e => choose(e.target.value || null)}>
+            <option value="">No part: standalone calculators</option>
             {projects.data?.items.map(p => <option key={p.id} value={p.id}>{p.name}{p.built ? "" : " (not built)"}</option>)}
-          </select>
-          <div className="inline-flex rounded border border-border bg-panel p-0.5 text-[12px]" role="group" aria-label="Display units">
-            {(["SI", "US"] as const).map(s => <button key={s} onClick={() => setSys(s)} className={cx("rounded px-2 py-0.5", sys === s ? "bg-primary text-white" : "text-muted")}>{s === "SI" ? "mm · N · MPa" : "in · lbf · ksi"}</button>)}
-          </div>
+          </select></>}
+        <div className="inline-flex rounded border border-border bg-panel p-0.5 text-[12px]" role="group" aria-label="Display units">
+          {(["SI", "US"] as const).map(s => <button key={s} onClick={() => setSys(s)} className={cx("rounded px-2 py-0.5", sys === s ? "bg-primary text-white" : "text-muted")}>{s === "SI" ? "mm · N · MPa" : "in · lbf · ksi"}</button>)}
         </div>
-      </div>
+      </>} />
+    <div className="mx-auto max-w-[1500px] px-5 py-5">
       <Disclaimer cat={c} />
       <Tabs value={tab} onValueChange={goTab}>
         <TabList className="mb-4">
@@ -96,6 +95,7 @@ export default function EngineeringApp({ projectId }: ModuleAppProps) {
         <TabPanel value="review">{pid ? <ReviewPanel pid={pid} cat={c} openCalc={openCalc} /> : <NeedProject />}</TabPanel>
         <TabPanel value="library"><LibraryPanel cat={c} /></TabPanel>
       </Tabs>
+    </div>
     </div>
   );
 }

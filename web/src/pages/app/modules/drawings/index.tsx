@@ -2,16 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, ExternalLink, Eye, EyeOff, FileWarning, History, Info,
+  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileWarning, History, Info,
   Lock, Plus, RefreshCw, Ruler, ShieldAlert, ShieldCheck, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { ago, cx } from "@/lib/format";
-import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
-import { IsoThumb } from "@/components/ProjectCard";
+import { cx } from "@/lib/format";
+import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
+import { ModuleHeader, PartCard } from "../ModuleHeader";
 import { DEFAULT_OPTIONS, EMPTY_EDITS, localStamp, type DrawingEdits, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
 
 const BASE = "/api/m/drawings";
@@ -28,7 +28,7 @@ export default function DrawingStudio({ projectId }: ModuleAppProps) {
   const [params, setParams] = useSearchParams();
   const pid = params.get("project") ?? projectId;
   if (!pid) return <ProjectPicker onPick={id => setParams({ project: id })} />;
-  return <Workspace key={pid} pid={pid} onBack={() => setParams({})} />;
+  return <Workspace key={pid} pid={pid} onBack={() => setParams({})} onSwitch={id => setParams({ project: id })} />;
 }
 
 /* ------------------------------------------------------------------ project picker */
@@ -38,16 +38,11 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
   if (q.error) return <div className="p-10 text-center text-sm text-muted">{(q.error as Error).message}</div>;
   const items = [...(q.data?.items ?? [])].sort((a, b) => Number(b.verified) - Number(a.verified));
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary-soft text-primary"><Ruler className="h-5 w-5" /></div>
-          <div>
-            <div className="flex items-center gap-2"><h1 className="text-[22px] font-semibold tracking-tight">Drawing Studio</h1><StatusBadge status="live" /></div>
-            <p className="mt-0.5 text-sm text-muted">Pick a project to turn its latest verified model into a drawing sheet.</p>
-          </div>
-        </div>
-      </div>
+    <div>
+    <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null} />
+    <div className="mx-auto max-w-7xl px-6 py-6">
+      <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
+      <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>Views are exact hidden-line projections of your model. Dimensions are tagged <b className="text-[#0b3d91]">spec</b> when they equal a declared model parameter and <i className="text-[#9a3412]">inferred</i> when measured from the geometry. Every sheet is consistency-checked and stamped <b>NOT APPROVED FOR MANUFACTURE</b>: an engineer must review it.</div>
@@ -57,9 +52,11 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
           action={<Link to="/app/projects"><Button>Go to projects</Button></Link>} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map(p => <PickCard key={p.id} p={p} onPick={onPick} />)}
+          {items.map(p => <PartCard key={p.id} id={p.id} name={p.name} thumbnail={p.thumbnail} sub={p.material ?? "Material not set"} updatedAt={p.updated_at}
+            status={<DrawingBadge p={p} />} disabled={!p.verified} onPick={onPick} />)}
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -70,37 +67,6 @@ function DrawingBadge({ p }: { p: DrawingProject }) {
   if (p.drawing.stale) return <Badge tone="warning"><AlertTriangle className="h-3 w-3" />Model changed</Badge>;
   const rev = p.drawing.sheet_rev && p.drawing.sheet_rev !== "DRAFT" ? `Rev ${p.drawing.sheet_rev}` : "Draft";
   return <Badge tone={p.drawing.chk12 ? "success" : "danger"}>{p.drawing.chk12 ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}{rev} · {p.drawing.sheet} {p.drawing.scale}</Badge>;
-}
-
-function PickCard({ p, onPick }: { p: DrawingProject; onPick: (id: string) => void }) {
-  const body = (
-    <>
-      <div className="viewport-bg relative flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-border">
-        {p.thumbnail ? <IsoThumb src={p.thumbnail} /> : <Box className="h-10 w-10 text-muted/50" />}
-      </div>
-      <div className="flex flex-1 flex-col gap-2 p-3.5">
-        <div className="min-w-0"><div className="truncate text-sm font-semibold">{p.name}</div>
-          <div className="truncate text-xs text-muted">{p.material ?? "—"}</div></div>
-        <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
-          <DrawingBadge p={p} /><span>{ago(p.updated_at)}</span>
-        </div>
-      </div>
-    </>
-  );
-  if (!p.verified) {
-    return (
-      <div className="card flex flex-col overflow-hidden opacity-70" title="Build and verify this model in the Design Studio first">
-        {body}
-        <Link to={`/app/projects/${p.id}`} className="border-t border-border px-3.5 py-2 text-xs text-primary hover:underline">Open in Design Studio →</Link>
-      </div>
-    );
-  }
-  return (
-    <button type="button" onClick={() => onPick(p.id)} data-project={p.id}
-      className="card group flex flex-col overflow-hidden text-left transition hover:-translate-y-0.5 hover:shadow-pop">
-      {body}
-    </button>
-  );
 }
 
 /* ------------------------------------------------------------------ workspace */
@@ -162,8 +128,9 @@ export function DrawingActions({ pid, rec, canEdit, verified, stale, busy, onReg
   );
 }
 
-function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
+function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void; onSwitch: (id: string) => void }) {
   const qc = useQueryClient();
+  const projects = useQuery({ queryKey: ["drw-projects"], queryFn: () => api.get<{ items: DrawingProject[] }>(`${BASE}/projects`) });
   const q = useQuery({ queryKey: ["drw", pid], queryFn: () => api.get<DrawingState>(`${BASE}/projects/${pid}`) });
   const st = q.data;
   const rec = st?.drawing ?? null;
@@ -250,23 +217,17 @@ function Workspace({ pid, onBack }: { pid: string; onBack: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* toolbar */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-panel px-3" data-testid="drawing-toolbar">
-        <Tip content="All projects" side="bottom"><button onClick={onBack} aria-label="All projects" className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-text"><ArrowLeft className="h-4 w-4" /></button></Tip>
-        <div className="flex min-w-0 items-center gap-2">
-          <Ruler className="h-4 w-4 shrink-0 text-primary" />
-          <span className="truncate text-[14px] font-semibold">{st.project.name}</span>
-          {rec && <Tip side="bottom" content={sheetRev === "DRAFT" ? "Not issued: the sheet carries a revision letter once you issue a release" : `Issued revision ${sheetRev}`}>
-            <span><Badge tone={sheetRev === "DRAFT" ? "neutral" : "success"}>{sheetRev === "DRAFT" ? "Draft" : `Rev ${sheetRev}`}</Badge></span></Tip>}
-          {rec && <Badge>{rec.sheet.size} · {rec.sheet.scale}</Badge>}
+      <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={pid} projectName={st.project.name}
+        projects={projects.data?.items.map(p => ({ id: p.id, name: p.name, disabled: !p.verified }))} onSwitch={id => id ? onSwitch(id) : onBack()}
+        actions={<DrawingActions pid={pid} rec={rec} canEdit={st.can_edit} verified={st.project.verified} stale={st.stale} busy={busy}
+            onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : "Drawing regenerated from the latest build")} />}>
+        {rec && <div className="flex items-center gap-1.5" data-testid="drawing-toolbar">
+          <Tip side="bottom" content={sheetRev === "DRAFT" ? "Not issued: the sheet carries a revision letter once you issue a release" : `Issued revision ${sheetRev}`}>
+            <span><Badge tone={sheetRev === "DRAFT" ? "neutral" : "success"}>Sheet {sheetRev === "DRAFT" ? "draft" : `rev ${sheetRev}`}</Badge></span></Tip>
+          <Badge>{rec.sheet.size} · {rec.sheet.scale}</Badge>
           {chk && <CheckBadge chk={chk} />}
-        </div>
-        <div className="ml-auto flex items-center gap-1.5">
-          <DrawingActions pid={pid} rec={rec} canEdit={st.can_edit} verified={st.project.verified} stale={st.stale} busy={busy}
-            onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : "Drawing regenerated from the latest build")} />
-          <Tip content="Open the model in the Design Studio" side="bottom"><Link to={`/app/projects/${pid}`} className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-text" aria-label="Open in Design Studio"><ExternalLink className="h-4 w-4" /></Link></Tip>
-        </div>
-      </div>
+        </div>}
+      </ModuleHeader>
       {st.stale && rec && !busy && (
         <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px]" data-testid="stale-banner">
           <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />

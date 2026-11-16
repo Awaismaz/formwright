@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Download, FileBox, Info, PenTool, RotateCcw, Wrench, XCircle } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
@@ -122,6 +123,7 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
   const [tab, setTab] = useState("checks");
   const [exports, setExports] = useState<ExportFile[]>(report.exports);
   const [busy, setBusy] = useState<string | null>(null);
+  const qc = useQueryClient();
   useEffect(() => setExports(report.exports), [report.exports]);
   const ocs = orient?.checks ?? [];
   const all = [...report.checks, ...ocs];
@@ -141,6 +143,7 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
         label: `#${orient.rank} ${orient.label}`, tag: orient.id, process: report.process.code,
       });
       setExports(x => [{ name: r.name, bytes: r.bytes, format: r.format, state: "current", made_from_rev: r.made_from_rev, label: r.label }, ...x.filter(y => y.name !== r.name)]);
+      if (src.kind === "projects") void qc.invalidateQueries({ queryKey: ["deliverables", src.id] });
       toast.success(`${format.toUpperCase()} ready: ${r.name}`, { description: r.volume_match ? "Reloaded and checked: same volume, millimetres." : undefined });
       window.location.assign(r.url);
     } catch (err) { toast.error(err instanceof ApiError ? err.message : "Export failed"); } finally { setBusy(null); }

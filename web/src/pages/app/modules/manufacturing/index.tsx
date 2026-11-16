@@ -2,16 +2,18 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box as BoxIcon, CheckCircle2, ChevronRight, CircleSlash, Copy, Download, Factory, FileText, Info,
-  Loader2, MessageSquareText, PencilRuler, Play, RefreshCw, Settings2, SlidersHorizontal, X, XCircle,
+  AlertTriangle, Box as BoxIcon, CheckCircle2, CircleSlash, Copy, Download, Factory, FileText, Info,
+  Loader2, MessageSquareText, PencilRuler, Play, Plus, RefreshCw, Settings2, SlidersHorizontal, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
-import { Badge, Button, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
+import { Badge, Button, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import Viewer3D, { type Tool } from "@/components/Viewer3D";
 import type { Pick } from "@/viewer/types";
 import type { ModuleAppProps } from "../registry";
+import { ModuleHeader, PartCard } from "../ModuleHeader";
+import { refreshDeliverables, type Deliverables } from "@/components/Release";
 import { studioAskUrl } from "../fixit";
 import CostChart, { money, seriesColor } from "./CostChart";
 import ShopProfileDialog from "./ShopProfileDialog";
@@ -66,26 +68,12 @@ export default function ManufacturingAdvisor({ projectId }: ModuleAppProps) {
   return pid ? <Workspace key={pid} pid={pid} onPick={open} /> : <Picker onPick={open} />;
 }
 
-function Header({ children, back }: { children?: ReactNode; back: ReactNode }) {
-  return (
-    <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-panel px-3">
-      {back}
-      <div className="flex items-center gap-2">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary-soft text-primary"><Factory className="h-4 w-4" /></div>
-        <span className="text-[14px] font-semibold tracking-tight">Manufacturing Advisor</span>
-        <StatusBadge status="live" />
-      </div>
-      {children}
-    </div>
-  );
-}
-
 /* ============================================================================ project picker */
 function Picker({ onPick }: { onPick: (id: string) => void }) {
   const q = useQuery({ queryKey: ["mfg-projects"], queryFn: () => api.get<{ items: MfgProject[] }>(`${BASE}/projects`) });
   return (
     <div className="flex h-full flex-col">
-      <Header back={<Link to="/app/modules" className="rounded p-1 text-muted hover:bg-text/5 hover:text-text" aria-label="All modules"><ArrowLeft className="h-4 w-4" /></Link>} />
+      <ModuleHeader code="manufacturing" icon={<Factory className="h-4 w-4" />} title="Manufacturing Advisor" projectId={null} />
       <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6">
         <h1 className="text-[20px] font-semibold tracking-tight">Choose a part to analyse</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted">Design-for-manufacture checks run on the exact geometry of the latest verified build: internal radii, holes, walls,
@@ -95,27 +83,14 @@ function Picker({ onPick }: { onPick: (id: string) => void }) {
             action={<Link to="/app/projects" className="link text-sm">Go to projects</Link>} /></div>
         ) : (
           <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {q.data.items.map(p => (
-              <button key={p.id} disabled={!p.built} onClick={() => onPick(p.id)} data-project={p.id}
-                className="card group overflow-hidden text-left transition enabled:hover:-translate-y-0.5 enabled:hover:shadow-pop disabled:opacity-60">
-                <div className="viewport-bg flex h-32 items-center justify-center border-b border-border">
-                  {p.thumbnail ? <img src={p.thumbnail} alt="" className="h-full w-full object-contain" /> : <BoxIcon className="h-9 w-9 text-muted/40" />}
-                </div>
-                <div className="p-3">
-                  <div className="truncate text-[13.5px] font-semibold">{p.name}</div>
-                  <div className="mt-0.5 truncate text-[11.5px] text-muted">{p.material ?? "No material set"} · updated {ago(p.updated_at)}</div>
-                  <div className="mt-2 flex items-center gap-1.5">
-                    {p.stale && <Badge tone="warning">Model changed</Badge>}
-                    {!p.built ? <Badge>Not built yet</Badge> : p.counts ? <>
-                      {p.counts.critical > 0 && <Badge tone="danger">{p.counts.critical} critical</Badge>}
-                      {p.counts.warning > 0 && <Badge tone="warning">{p.counts.warning} warning{p.counts.warning > 1 ? "s" : ""}</Badge>}
-                      {p.counts.critical + p.counts.warning === 0 && <Badge tone="success">No issues flagged</Badge>}
-                    </> : <Badge tone="primary">Ready to analyse</Badge>}
-                    <ChevronRight className="ml-auto h-4 w-4 text-muted transition group-hover:translate-x-0.5 group-hover:text-primary" />
-                  </div>
-                </div>
-              </button>
-            ))}
+            {q.data.items.map(p => <PartCard key={p.id} id={p.id} name={p.name} thumbnail={p.thumbnail} sub={p.material ?? "No material set"} updatedAt={p.updated_at}
+              disabled={!p.built} onPick={onPick} status={<>
+                {p.stale && <Badge tone="warning">Model changed</Badge>}
+                {!p.built ? <Badge>Not built yet</Badge> : p.counts ? <>
+                  {p.counts.critical > 0 && <Badge tone="danger">{p.counts.critical} critical</Badge>}
+                  {p.counts.warning > 0 && <Badge tone="warning">{p.counts.warning} warning{p.counts.warning > 1 ? "s" : ""}</Badge>}
+                  {p.counts.critical + p.counts.warning === 0 && <Badge tone="success">No issues flagged</Badge>}
+                </> : <Badge tone="primary">Ready to analyse</Badge>}</>} />)}
           </div>
         )}
       </div>
@@ -158,7 +133,7 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
     try {
       const body = { quantity: over?.quantity ?? qty, material: (over?.material ?? mat) || null, tolerance: over?.tolerance ?? tol };
       const r = await api.post<Analysis>(`${BASE}/projects/${pid}/analyse`, body);
-      setA(r); setMat(r.material.code); qc.setQueryData(["mfg-analysis", pid], r); qc.invalidateQueries({ queryKey: ["mfg-projects"] });
+      setA(r); setMat(r.material.code); qc.setQueryData(["mfg-analysis", pid], r); qc.invalidateQueries({ queryKey: ["mfg-projects"] }); qc.invalidateQueries({ queryKey: ["deliverables", pid] });
     } catch (e) { const m = e instanceof ApiError ? e.message : "Analysis failed"; setErr(m); toast.error(m); }
     finally { setRunning(false); }
   };
@@ -188,27 +163,20 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
     try {
       const r = await api.post<FixResult>(`${BASE}/projects/${pid}/fix`, {
         finding: f.id, param: f.action.param, value: f.action.to, quantity: qty, material: mat || null, tolerance: tol });
-      setA(r.analysis); setFixed(r); setSel(null); qc.setQueryData(["mfg-analysis", pid], r.analysis); qc.invalidateQueries({ queryKey: ["mfg-projects"] });
+      setA(r.analysis); setFixed(r); setSel(null); qc.setQueryData(["mfg-analysis", pid], r.analysis); qc.invalidateQueries({ queryKey: ["mfg-projects"] }); qc.invalidateQueries({ queryKey: ["deliverables", pid] });
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "The change could not be applied"); }
     finally { setFixing(null); }
   };
 
-  const back = <Link to={`/app/projects/${pid}`} className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[12.5px] text-muted hover:bg-text/5 hover:text-text" title="Back to the Design Studio"><ArrowLeft className="h-4 w-4" />Studio</Link>;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Header back={back}>
-        <div className="mx-1 h-6 w-px bg-border" />
-        <select aria-label="Project" className="input h-8 w-60 text-[13px]" value={pid} onChange={e => onPick(e.target.value)}>
-          {projects.data?.items.filter(p => p.built || p.id === pid).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-          {!project && <option value={pid}>Loading…</option>}
-        </select>
-        <button onClick={() => onPick(null)} className="whitespace-nowrap text-[12px] text-muted hover:text-primary">All parts</button>
-        <div className="ml-auto flex items-center gap-2">
+      <ModuleHeader code="manufacturing" icon={<Factory className="h-4 w-4" />} title="Manufacturing Advisor" projectId={pid} projectName={project?.name}
+        projects={projects.data?.items.map(p => ({ id: p.id, name: p.name, disabled: !p.built }))} onSwitch={onPick}
+        actions={<>
           <ReportMenu pid={pid} name={project?.name ?? "part"} disabled={!a} />
           <Button size="sm" variant="secondary" icon={<Settings2 className="h-3.5 w-3.5" />} onClick={() => setShopOpen(true)} data-action="shop-profile">Shop profile</Button>
-        </div>
-      </Header>
+        </>} />
       <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-panel2 px-3">
         <span className="label">Analysis inputs</span>
         <label className="flex items-center gap-1.5 text-[12px] text-muted">Material
@@ -267,7 +235,7 @@ function Workspace({ pid, onPick }: { pid: string; onPick: (id: string | null) =
                   className={cx("rounded-full border border-dashed px-2.5 py-0.5 text-[11.5px] transition", procF === "other" ? "border-primary bg-primary-soft font-medium text-primary" : "border-border text-muted hover:text-text")}>
                   Other screens <span className="tabular-nums">{others}</span></button></Tip>}
             </div>
-            {notes.map(n => <NoteChip key={n.id} f={n} onShow={() => { setHlOverride(null); setSel(sel === n.id ? null : n.id); }} />)}
+            {notes.map(n => <NoteChip key={n.id} f={n} pid={pid} canEdit={canEdit} onShow={() => { setHlOverride(null); setSel(sel === n.id ? null : n.id); }} />)}
             {facePick && <div className="mt-2 flex items-center gap-2 rounded border border-primary/30 bg-primary-soft px-2 py-1 text-[11.5px]">
               Showing findings on face #{facePick.id}<button aria-label="Clear face filter" className="ml-auto text-muted hover:text-text" onClick={() => setPicks([])}><X className="h-3.5 w-3.5" /></button></div>}
           </div>
@@ -371,9 +339,29 @@ function FindingRow({ f, open, onClick, pid, canEdit, fixing, onFix }: {
 }
 
 /** Note-type advice (break sharp edges) collapsed to one chip: it belongs on the drawing, not in the model. */
-function NoteChip({ f, onShow }: { f: Finding; onShow: () => void }) {
+function NoteChip({ f, onShow, pid, canEdit }: { f: Finding; onShow: () => void; pid: string; canEdit: boolean }) {
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const qc = useQueryClient();
   const text = f.action?.kind === "note" ? f.action.text : (f.note ?? "");
+  const copy = () => void navigator.clipboard?.writeText(text).then(() => toast.success("Note copied: paste it into the drawing notes"), () => toast.error("Copy failed"));
+  /** Adds the note to the drawing's own notes (Drawing Studio edits); redraws only a sheet that is up to date. */
+  const addToDrawing = async () => {
+    setBusy(true);
+    try {
+      const ed = await api.get<{ dims: Record<string, unknown>; title: Record<string, string>; notes: string[] }>(`/api/m/drawings/projects/${pid}/edits`);
+      if (ed.notes.some(n => n.trim().toUpperCase() === text.trim().toUpperCase())) { toast.info("The drawing already has this note"); return; }
+      const d = qc.getQueryData<Deliverables>(["deliverables", pid]);
+      const live = d?.modules.drawings.state === "current";
+      await api.post(`/api/m/drawings/projects/${pid}/edits`, { ...ed, notes: [...ed.notes, text], regenerate: live });
+      refreshDeliverables(qc, pid);
+      void qc.invalidateQueries({ queryKey: ["drw", pid] });
+      toast.success(live ? "Added to the drawing notes and the sheet was redrawn" : "Added to the drawing notes: it appears when the drawing is next made or updated");
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 402) { copy(); return; }
+      toast.error(e instanceof ApiError ? e.message : "Could not add the note");
+    } finally { setBusy(false); }
+  };
   return (
     <div className="mt-2 rounded border border-border bg-panel2/60 px-2 py-1 text-[11.5px]" data-note={f.rule}>
       <button className="flex w-full items-center gap-1.5 text-left" onClick={() => { setOpen(!open); onShow(); }} aria-expanded={open}>
@@ -382,9 +370,11 @@ function NoteChip({ f, onShow }: { f: Finding; onShow: () => void }) {
       {open && <div className="mt-1 space-y-1 pl-5">
         <div className="font-mono text-[11px]">{text}</div>
         <p className="text-muted">{f.rationale}</p>
-        <button className="inline-flex items-center gap-1 text-primary hover:underline" onClick={() => {
-          void navigator.clipboard?.writeText(text).then(() => toast.success("Note copied: paste it into the drawing notes"), () => toast.error("Copy failed"));
-        }}><Copy className="h-3 w-3" />Copy note for the drawing</button>
+        <div className="flex items-center gap-3">
+          {canEdit && <button className="inline-flex items-center gap-1 font-medium text-primary hover:underline disabled:opacity-50" disabled={busy} onClick={() => void addToDrawing()} data-action="add-note">
+            <Plus className="h-3 w-3" />Add to drawing</button>}
+          <button className="inline-flex items-center gap-1 text-muted hover:text-primary" onClick={copy}><Copy className="h-3 w-3" />Copy</button>
+        </div>
       </div>}
     </div>
   );

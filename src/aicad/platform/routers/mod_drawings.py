@@ -70,6 +70,7 @@ class EditsIn(BaseModel):
     notes: list[str] = []
     local_date: str | None = None
     tz: str | None = None
+    regenerate: bool = True  # False: save only (e.g. a note added from another module while the sheet is out of date)
 
 
 def _access(ctx: Ctx) -> None:
@@ -251,7 +252,7 @@ async def put_edits(project_id: str, body: EditsIn, ctx: Ctx = Depends(verified_
     if ctx.role == "viewer":
         raise HTTPException(403, "Viewers can open drawings but can't edit them.")
     try:
-        ed = normalize_edits(body.model_dump(exclude={"local_date", "tz"}))
+        ed = normalize_edits(body.model_dump(exclude={"local_date", "tz", "regenerate"}))
     except DrawingInputError as e:
         raise HTTPException(422, str(e)) from None
     ws = workspace_for(p)
@@ -261,7 +262,7 @@ async def put_edits(project_id: str, body: EditsIn, ctx: Ctx = Depends(verified_
     rec = _record(ws)
     audit(ctx.db, "drawing.edited", ctx.user, p.org_id, target=p.id, dims=len(ed["dims"]), notes=len(ed["notes"]))
     ctx.db.commit()
-    if rec is None or not _verified(ws, _status(ws)):
+    if rec is None or not body.regenerate or not _verified(ws, _status(ws)):
         return _state(p, ws, True)
     meta = _meta(p, ws, ctx.user.name or ctx.user.email, local_date(body.local_date, body.tz))
     res = await _generate(p, ws, rec.get("options") or {}, meta, ed, d)

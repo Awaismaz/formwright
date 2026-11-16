@@ -54,7 +54,7 @@ export default function SetsPanel({ pid, cat, sys, openCalc }: { pid: string; ca
   const [newOpen, setNewOpen] = useState(false);
   useEffect(() => { if (!sel && sets.data?.items.length) setSel(sets.data.items[0]!.id); }, [sets.data, sel]);
   if (!sets.data) return <Spinner />;
-  const refresh = () => { qc.invalidateQueries({ queryKey: ["eng-sets", pid] }); qc.invalidateQueries({ queryKey: ["eng-projects"] }); };
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["eng-sets", pid] }); qc.invalidateQueries({ queryKey: ["eng-projects"] }); qc.invalidateQueries({ queryKey: ["deliverables", pid] }); };
   const s = sets.data.items.find(x => x.id === sel);
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
