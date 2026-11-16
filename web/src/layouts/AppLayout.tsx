@@ -199,7 +199,7 @@ export default function AppLayout() {
           <button className="mx-3 mt-3 flex items-center gap-2.5 rounded-md border border-white/[.08] bg-white/[.04] px-2.5 py-2 text-left hover:bg-white/[.08]">
             <span className="flex h-7 w-7 items-center justify-center rounded bg-gradient-to-br from-primary to-[#174A96] text-[11px] font-bold text-white">{org.name.slice(0, 2).toUpperCase()}</span>
             <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium text-white">{org.name}</span>
-              <span className="block text-[11px] capitalize text-chrome-muted">{org.plan_name} · {org.role}</span></span>
+              <span className="block text-[11px] text-chrome-muted">{org.plan_name} · <span className="capitalize">{org.role}</span></span></span>
           </button>
         </MenuTrigger>
         <MenuContent align="start">
@@ -270,8 +270,8 @@ export default function AppLayout() {
           <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 sm:gap-3 sm:px-4">
             <button className="rounded p-2 text-muted hover:bg-text/5 md:hidden" onClick={() => setMobileOpen(true)} aria-label="Open menu"><MenuIcon className="h-5 w-5" /></button>
             <button onClick={() => setPaletteOpen(true)} aria-label="Search"
-              className="flex h-9 min-w-0 flex-1 items-center gap-2 rounded border border-border bg-panel2 px-3 text-left text-sm text-muted hover:border-primary/40 sm:max-w-md">
-              <Search className="h-4 w-4 shrink-0" /> <span className="flex-1 truncate">Search parts, sizes, modules…</span><span className="kbd max-sm:hidden">Ctrl K</span>
+              className="flex h-9 min-w-0 items-center gap-2 rounded border border-border bg-panel2 px-3 text-left text-sm text-muted hover:border-primary/40 max-sm:w-9 max-sm:justify-center max-sm:px-0 sm:flex-1 sm:max-w-md">
+              <Search className="h-4 w-4 shrink-0" /> <span className="flex-1 truncate max-sm:hidden">Search parts, sizes, modules…</span><span className="kbd max-sm:hidden">Ctrl K</span>
             </button>
             <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
               {me?.god?.available && <div className="mr-1 max-sm:hidden"><GodPanel /></div>}
@@ -307,6 +307,8 @@ export default function AppLayout() {
             </div>
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto">
+            {workspace && <div className="border-b border-border bg-panel2 px-4 py-2 text-[12.5px] text-muted md:hidden">
+              The Studio and modules are built for a larger screen. You can review parts here; model and edit on a desktop.</div>}
             <Outlet />
           </main>
         </div>

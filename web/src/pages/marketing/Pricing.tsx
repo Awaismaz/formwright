@@ -43,7 +43,7 @@ export default function Pricing() {
             <tbody className="divide-y divide-border">
               {modules.map(m => (
                 <tr key={m.code}>
-                  <td className="px-4 py-3"><span className="mr-2">{m.name}</span><StatusBadge status={m.status} /></td>
+                  <td className="px-4 py-3"><span className="mr-2">{m.name}</span>{m.status !== "live" && <StatusBadge status={m.status} />}</td>
                   {plans.map(p => <td key={p.code} className="px-4 py-3 text-center">
                     {p.modules.includes(m.code) ? <Check className="mx-auto h-4 w-4 text-success" />
                       : addons.some(a => a.modules.includes(m.code)) && !p.contact_sales ? <span className="text-xs text-muted">Add-on</span>
@@ -67,7 +67,7 @@ export default function Pricing() {
               const m = modules.find(x => x.code === a.modules[0]);
               return (
                 <div key={a.code} className="card flex items-start justify-between gap-3 p-4">
-                  <div><div className="flex items-center gap-2 font-medium">{a.name}{m && <StatusBadge status={m.status} />}</div>
+                  <div><div className="flex items-center gap-2 font-medium">{a.name}{m && m.status !== "live" && <StatusBadge status={m.status} />}</div>
                     <div className="mt-1 text-xs text-muted">{a.tagline}</div></div>
                   <div className="whitespace-nowrap text-sm font-semibold">{money(a.price_cents, a.interval)}</div>
                 </div>

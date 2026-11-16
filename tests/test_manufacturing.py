@@ -29,6 +29,7 @@ from build123d import (
 )
 from fastapi.testclient import TestClient
 from test_platform import _project_with_model, admin, app_client, signup  # noqa: F401  (fixture re-export)
+from trial_helpers import set_trial_ended
 
 from aicad.manufacturing import standards as S
 from aicad.manufacturing.analyze import Inputs, analyse_shape
@@ -338,8 +339,10 @@ def _buy_addon(c: TestClient) -> None:
 def test_api_entitlement_analysis_report_and_scoping(app_client: TestClient) -> None:  # noqa: F811
     c = app_client
     signup(c, "mfg@x.com")
+    set_trial_ended("mfg@x.com")  # a running trial may use every live module: test the paywall after it
     r = c.get("/api/m/manufacturing/shop-profile")
     assert r.status_code == 402 and r.json()["detail"]["cta"] == "/app/modules/manufacturing"
+    set_trial_ended("mfg@x.com", False)
     _buy_addon(c)
     prof = c.get("/api/m/manufacturing/shop-profile").json()
     assert prof["is_default"] and prof["can_edit"] and prof["profile"]["smallest_tool_d_mm"] == 3.0
@@ -400,6 +403,7 @@ def test_api_viewer_is_read_only_and_unbuilt_project_409(app_client: TestClient)
 def test_api_god_mode_unlock(app_client: TestClient) -> None:  # noqa: F811
     c = app_client
     admin(c)
+    set_trial_ended(c.get("/api/auth/me").json()["user"]["email"])
     assert c.patch("/api/god", json={"enabled": True, "bypass_paywall": False}).status_code == 200
     assert c.get("/api/m/manufacturing/meta").status_code == 402  # superadmin without the bypass: still locked
     assert c.patch("/api/god", json={"bypass_paywall": True}).status_code == 200

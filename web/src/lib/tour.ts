@@ -12,7 +12,7 @@ export const APP_TOUR: DriveStep[] = [
   { element: "[data-tour=nav-modules]", popover: { title: "Modules",
     description: "Drawing, manufacturability, engineering checks, 3D print prep, assemblies and renders all open straight on your part. Your trial includes every one.", side: "right" } },
   { element: "[data-tour=tokens]", popover: { title: "Tokens",
-    description: "Design-agent runs use tokens. A new part typically uses 200–450 and a change less; edits by hand are free. Every run shows a live meter and stops at your budget.", side: "bottom" } },
+    description: "Design-agent runs use tokens: up to about 400 for a new part, usually far less for a change. Edits by hand are free. Every run shows a live meter and stops at your budget.", side: "bottom" } },
   { element: "[data-tour=help]", popover: { title: "Help is always here",
     description: "Guides for every module, keyboard shortcuts (try Ctrl+K) and a direct line to the team.", side: "bottom" } },
 ];
@@ -41,9 +41,9 @@ export function runTour(steps: DriveStep[], name: string, onDone?: () => void) {
     onDestroyed: () => {
       const finished = !d.hasNextStep();
       track(finished ? "tour_step" : "tour_skipped", { name, at: d.getActiveIndex() ?? -1 });
-      if (name === "app") api.post("/api/tour/complete").catch(() => {});
       try { localStorage.setItem(`fw_tour_${name}`, "1"); } catch { /* ignore */ }
-      onDone?.();
+      // record completion first, so the checklist refreshed by onDone already shows it
+      (name === "app" ? api.post("/api/tour/complete") : Promise.resolve()).catch(() => {}).finally(() => onDone?.());
     },
   });
   d.drive();

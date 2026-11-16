@@ -123,7 +123,7 @@ def checklist(ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
     solo = (u.onboarding or {}).get("company_size") == "Just me"
     items = [
         {"key": "verify", "title": "Confirm your email", "done": u.email_verified_at is not None, "link": "/verify-email"},
-        {"key": "tour", "title": "Take the 2-minute tour", "done": u.tour_completed_at is not None, "link": "?tour=1"},
+        {"key": "tour", "title": "Take the 1-minute tour", "done": u.tour_completed_at is not None, "link": "?tour=1"},
         {"key": "build", "title": "Make your first verified part", "done": built > 0,
          "link": "/app/projects" if projects else "/app"},
         {"key": "module", "title": "Open a module on your part", "done": has("module_viewed"), "link": "/app/modules"},

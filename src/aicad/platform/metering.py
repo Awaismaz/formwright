@@ -26,15 +26,16 @@ from aicad.platform.models import AgentRun, Organization, OrgPrefs, TokenLedger,
 
 USD_PER_TOKEN: float = TOKEN_COSTS["usd_per_token"]
 
-# Measured on real first-part runs (Nov 2026, isolated test workspaces, ledger + agent cost reports):
-#   "Mounting plate" template (203-character brief): 260 tokens, 3 turns
-#   part from a vector PDF drawing (1,941 characters): 281 tokens, 4 turns
-#   part from a drawing image (3,075 characters): 275 tokens, 4 turns
-# Brief length barely moved the cost; a new part pays for loading the design context once. A change to an existing
-# part continues the same conversation and reuses that context (measured in the walkthrough, see the report).
+# Measured (Nov 2026, isolated test workspaces: ledger rows and the agent's own cost reports).
+#   New part, agent starting cold:  260 (Mounting plate template, 203-character brief), 281 (from a PDF drawing,
+#                                   1,941 characters), 275 (from a drawing image, 3,075 characters)
+#   New part, context already warm: 45 (Mounting plate template, 46 s)
+#   Change to that part:            26 (pocket depth + edge fillets, same session, 46 s)
+# Brief length barely moved the cost; whether the design context was already loaded moved it 6x. So the default is a
+# wide, honest range, replaced by the workspace's own history after MIN_SAMPLES runs of each kind.
 DEFAULT_ESTIMATE: dict[str, dict[str, int]] = {
-    "new": {"typical": 270, "low": 200, "high": 450},
-    "change": {"typical": 120, "low": 50, "high": 260},
+    "new": {"typical": 250, "low": 40, "high": 400},
+    "change": {"typical": 60, "low": 20, "high": 280},
 }
 MIN_SAMPLES = 3
 LONG_BRIEF_CHARS = 1200  # learned estimates split short and long briefs once there is enough history

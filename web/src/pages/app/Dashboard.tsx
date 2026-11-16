@@ -71,7 +71,7 @@ export default function Dashboard() {
   const intended = (() => { try { return sessionStorage.getItem("fw_intended_plan"); } catch { return null; } })();
   const intendedPlan = catalog.data?.plans.find(p => p.code === intended);
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
-  const typical = catalog.data?.typical_run?.new.typical ?? 270;
+  const typical = catalog.data?.typical_run?.new.typical ?? 250;
 
   const items = projects.data?.items ?? [];
   const latestVerified = items.find(p => p.builds > 0 && p.last_status?.ok);
