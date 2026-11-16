@@ -75,9 +75,33 @@ def _find(ws: Path, jid: str) -> Path | None:
     return None
 
 
-def view(ws: Path, d: Path, job: dict[str, Any] | None = None, base_url: str = "") -> dict[str, Any]:
-    """The client view of a job: no paths, plus download URLs and queue position."""
+def revisions(ws: Path) -> dict[int, int]:
+    """build_id -> revision number, from the project's revision snapshots (`revisions/<n>/status.json`)."""
+    out: dict[int, int] = {}
+    root = ws / "revisions"
+    for d in root.iterdir() if root.is_dir() else []:
+        if not d.name.isdigit():
+            continue
+        try:
+            bid = json.loads((d / "status.json").read_text(encoding="utf-8")).get("build_id")
+        except (OSError, ValueError):
+            continue
+        if bid is not None:
+            out[int(bid)] = int(d.name)
+    return out
+
+
+def view(ws: Path, d: Path, job: dict[str, Any] | None = None, base_url: str = "",
+         ctx: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The client view of a job: no paths, plus download URLs, queue position, and which revision of the part it
+    shows (`revision`, and `stale` when the project has been rebuilt since: AMI-22). `ctx` caches the current
+    build and the revision map across a listing."""
     job = job or jobs.read_job(d) or {}
+    if ctx is None:
+        ctx = {}
+    if "current" not in ctx:
+        ctx["current"] = build_info(ws)["build_id"]
+        ctx["revs"] = revisions(ws)
     state = job.get("state", "failed")
     if state in jobs.ACTIVE and not jobs.QUEUE.is_live(job.get("id", "")):
         state = "failed"
@@ -88,8 +112,13 @@ def view(ws: Path, d: Path, job: dict[str, Any] | None = None, base_url: str = "
             files[name] = {"url": f"{base_url}/{job.get('id')}/files/{name}", "bytes": (d / name).stat().st_size}
     out = {k: job.get(k) for k in ("id", "kind", "options", "created_at", "started_at", "finished_at", "seconds",
                                    "render_seconds", "progress", "phase", "error", "device", "label", "size",
-                                   "build_id", "cached", "triangles")}
-    out.update(state=state, files=files, disclosure=DISCLOSURE)
+                                   "build_id", "cached", "triangles", "warming", "eta_s", "highlights", "frames")}
+    bid = job.get("build_id")
+    out.update(state=state, files=files, disclosure=DISCLOSURE,
+               revision=ctx["revs"].get(int(bid)) if bid is not None else None,
+               stale=bid is not None and ctx["current"] is not None and int(bid) != int(ctx["current"]))
+    if out["warming"]:
+        out["warm_estimate_s"] = runner.WARM_UP_ESTIMATE_S
     if state == "queued":
         out["queue_position"] = jobs.QUEUE.position(job.get("id", ""))
     return out
@@ -112,7 +141,7 @@ def request_render(ws: Path, name: str, opts: scene.Options, org_id: str, user_i
         raise runner.BlenderError("Rendering isn't available on this server (Blender is not installed).")
     step = project_step(ws)
     sha = geometry.file_sha(step)[:20]
-    kind = opts.quality
+    kind = "turntable" if presets.is_turntable(opts.quality) else opts.quality
     key = scene.spec_hash({"v": VERSION, "geom": sha, "opts": opts.key(), "dev": dev["device"]})[:16]
     return _enqueue(ws, kind, key, {"options": opts.key(), "label": label_for(opts)}, org_id, user_id, base_url,
                     lambda d, j: _execute_render(ws, d, j, name, opts, dev))
@@ -171,18 +200,29 @@ def _prune(root: Path, keep: int, protect: str) -> None:
 
 
 class _Progress:
-    """Throttled job.json progress writer (Blender reports many sample lines per second)."""
+    """Throttled job.json progress writer (Blender reports many sample lines per second). Progress only goes up;
+    once rendering has run for a few seconds an ETA is estimated from the time per unit of progress (for a
+    turntable, the seconds per frame)."""
 
     def __init__(self, d: Path, job: dict[str, Any], lo: float, hi: float) -> None:
         self.d, self.job, self.lo, self.hi, self.t = d, job, lo, hi, 0.0
+        self.t0: float | None = None
+        self.best = 0.0
 
     def __call__(self, frac: float, phase: str) -> None:
         now = time.monotonic()
-        if now - self.t < 0.4 and frac < 1:
+        if self.t0 is None:
+            self.t0 = now
+        frac = self.best = max(self.best, frac)
+        if now - self.t < 0.4 and frac < 1 and not self.job.get("warming"):
             return
         self.t = now
         self.job["progress"] = round(self.lo + (self.hi - self.lo) * frac, 4)
         self.job["phase"] = "Rendering"
+        self.job["warming"] = False
+        el = now - self.t0
+        if frac >= 0.02 and el >= 3:
+            self.job["eta_s"] = round(el * (1 - frac) / frac)
         jobs.write_job(self.d, self.job)
 
 
@@ -194,7 +234,7 @@ def _update(d: Path, job: dict[str, Any], **kw: Any) -> None:
 def _fail(d: Path, job: dict[str, Any], e: Exception) -> None:
     msg = str(e) if isinstance(e, runner.BlenderError | FileNotFoundError | ValueError) else \
         "The render failed on this model."
-    _update(d, job, state="failed", error=msg, finished_at=jobs.now())
+    _update(d, job, state="failed", error=msg, finished_at=jobs.now(), warming=False, eta_s=None)
 
 
 def _meta(job: dict[str, Any], name: str, geom: dict[str, Any]) -> dict[str, Any]:
@@ -219,23 +259,29 @@ def _execute_render(ws: Path, d: Path, job: dict[str, Any], name: str, opts: sce
         spec = scene.build_spec(geom, _hull_mm(npz), opts, dev, name, outputs)
         (d / "spec.json").write_text(json.dumps(spec, indent=1, sort_keys=True), encoding="utf-8")
         (d / "scene.py").write_text(scene.build_script(spec), encoding="utf-8")
-        _update(d, job, phase="Starting the renderer", progress=0.03, triangles=geom["triangles"],
+        frames = spec["turntable"]["frames"] if spec.get("turntable") else 1
+        cold = spec["render"]["device"] == "GPU" and not runner.is_warm(dev)
+        _update(d, job, phase="Preparing the GPU (first render on this server)" if cold else "Starting the renderer",
+                progress=0.03, triangles=geom["triangles"], warming=cold, frames=frames,
                 device={"engine": "Cycles", "device": spec["render"]["device"], "backend": spec["render"]["backend"],
                         "gpu": dev.get("gpu") if spec["render"]["device"] == "GPU" else None,
                         "samples": spec["render"]["samples"]}, size=spec["render"]["res"])
         hi = 0.85 if kind == "turntable" else 0.97
         res = runner.run(d / "scene.py", d, mesh_root(ws), [str(d), str(npz)], TIMEOUTS[kind],
-                         on_progress=_Progress(d, job, 0.04, hi))
+                         on_progress=_Progress(d, job, 0.04, hi), frames=frames)
+        if spec["render"]["device"] == "GPU":
+            runner.mark_warm(dev, res.get("startup_s"))
         meta = _meta(job, name, geom)
         bg = spec["post"]["background"]
         made = ["render.png", "thumb.jpg"]
         if kind == "turntable":
-            _update(d, job, phase="Encoding the turntable", progress=0.87)
-            frames = sorted((d / "frames").glob("f_*.png"))
-            for f in frames:
+            _update(d, job, phase="Encoding the turntable", progress=0.87, warming=False, eta_s=None)
+            frames_p = sorted((d / "frames").glob("f_*.png"))
+            job["highlights"] = _highlights(res, frames_p[0])
+            for f in frames_p:
                 post.finish_frame(f, f, bg, meta)
-            post.gif(frames, d / "turntable.gif", spec["turntable"]["fps"])
-            shutil.copyfile(frames[0], d / "render.png")
+            post.gif(frames_p, d / "turntable.gif", spec["turntable"]["fps"])
+            shutil.copyfile(frames_p[0], d / "render.png")
             made += ["turntable.gif", "scene.blend"]
             try:
                 _encode_mp4(ws, d, spec["turntable"]["fps"])
@@ -243,15 +289,24 @@ def _execute_render(ws: Path, d: Path, job: dict[str, Any], name: str, opts: sce
             except runner.BlenderError:
                 pass  # the GIF and frames still stand; MP4 is a convenience
         else:
+            job["highlights"] = _highlights(res, d / "raw.png")
             post.finish_frame(d / "raw.png", d / "render.png", bg, meta)
             (d / "raw.png").unlink(missing_ok=True)
             if kind == "final":
                 made.append("scene.blend")
         post.thumbnail(d / "render.png", d / "thumb.jpg")
-        _update(d, job, state="done", progress=1.0, phase="Done", finished_at=jobs.now(),
+        _update(d, job, state="done", progress=1.0, phase="Done", finished_at=jobs.now(), warming=False, eta_s=None,
                 seconds=round(time.monotonic() - t0, 2), render_seconds=res["seconds"], outputs=made)
     except Exception as e:  # noqa: BLE001
         _fail(d, job, e)
+
+
+def _highlights(res: dict[str, Any], raw: Path) -> dict[str, Any]:
+    """What the highlight protection did (exposure change) and the measured result on the delivered pixels."""
+    exp = res.get("exposure") or {}
+    blown = post.blown_fraction(raw) if raw.is_file() else None
+    return {"ev": exp.get("ev", 0.0), "blown": round(blown, 4) if blown is not None else None,
+            "ok": blown is None or blown <= post.BLOWN_MAX}
 
 
 def _encode_mp4(ws: Path, d: Path, fps: int) -> None:
@@ -308,9 +363,37 @@ def _label_stl(p: Path) -> None:
     p.write_bytes(bytes(data))
 
 
+# ------------------------------------------------------------------ the project's look (AMI-23)
+LOOK_KEYS = ("finish", "colour", "lighting", "camera", "aspect", "transparent", "pose", "soften_edges")
+
+
+def get_look(ws: Path) -> dict[str, Any] | None:
+    """The last look saved for this project (shared by everyone in the workspace), or None. A look that no longer
+    validates (a preset was removed) is ignored."""
+    try:
+        raw = json.loads((ws / "mesh" / "look.json").read_text(encoding="utf-8"))
+        look = {k: raw[k] for k in LOOK_KEYS if k in raw}
+        scene.Options(**look).validate()
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+    return {**look, "saved_by": raw.get("saved_by"), "saved_at": raw.get("saved_at")}
+
+
+def save_look(ws: Path, opts: scene.Options, user_id: str) -> dict[str, Any]:
+    opts.validate()
+    look = {k: getattr(opts, k) for k in LOOK_KEYS}
+    data = {**look, "saved_by": user_id, "saved_at": jobs.now()}
+    p = mesh_root(ws) / "look.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp.replace(p)
+    return data
+
+
 # ------------------------------------------------------------------ listing, files, delete
 def list_jobs(ws: Path, base_url: str) -> dict[str, Any]:
     out: dict[str, list[dict[str, Any]]] = {"renders": [], "exports": [], "previews": []}
+    ctx: dict[str, Any] = {}
     for sub, items in out.items():
         root = ws / "mesh" / sub
         if not root.is_dir():
@@ -318,7 +401,7 @@ def list_jobs(ws: Path, base_url: str) -> dict[str, Any]:
         for d in root.iterdir():
             j = jobs.read_job(d)
             if j:
-                items.append(view(ws, d, j, base_url))
+                items.append(view(ws, d, j, base_url, ctx))
         items.sort(key=lambda v: v.get("created_at") or "", reverse=True)
     return out
 

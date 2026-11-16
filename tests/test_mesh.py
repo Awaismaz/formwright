@@ -7,6 +7,7 @@ Hand calculations: framing of an orthographic front view of a 100 x 50 x 20 mm b
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import time
@@ -35,6 +36,13 @@ DEMO = Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo"
 BLENDER = runner.find_blender()
 needs_blender = pytest.mark.skipif(BLENDER is None, reason="Blender is not installed on this machine "
                                    "(set FW_BLENDER to its executable to run the render tests)")
+
+
+@pytest.fixture(autouse=True)
+def _engine_state(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the GPU warm-up marker out of the real data folder."""
+    f = tmp_path_factory.getbasetemp() / "mesh_engine.json"
+    monkeypatch.setattr(runner, "_engine_file", lambda: f)
 
 
 def _demo_step(name: str, tmp: Path) -> Path:
@@ -350,6 +358,25 @@ def test_tiny_render_covers_the_parts_projected_bbox(flange: dict, tmp_path: Pat
 
 
 @needs_blender
+def test_highlight_protection_keeps_white_parts_and_dark_steel_out_of_the_white(
+        flange: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AMI-12 end to end. White ABS under the studio softbox used to come out 86 % near white (median 247 of 255);
+    machined steel on "Dark" read as a white wall. Both must now keep at most ~2 % of the part in the white shoulder,
+    measured on the delivered pixels."""
+    monkeypatch.setitem(presets.QUALITY, "preview", {"label": "Preview", "res": (240, 180), "samples_gpu": 16,
+                                                     "samples_cpu": 4, "bounces": 4})
+    ws = _ws(tmp_path, flange["step"])
+    for o, lowered in ((scene.Options(finish="abs", colour="white", lighting="studio", transparent=True), True),
+                       (scene.Options(finish="machined_steel", lighting="dark", transparent=True), False)):
+        v = _wait(lambda o=o: service.job_view(ws, service.request_render(ws, "F", o, "org1", "u1")["id"], ""))
+        assert v["state"] == "done", v
+        h = v["highlights"]
+        assert (h["ev"] < -0.5) == lowered, h  # exposure lowered only where the part would blow out
+        assert h["ok"] and h["blown"] <= 0.03, h
+        assert post.blown_fraction(service.file_path(ws, v["id"], "render.png")) == pytest.approx(h["blown"], abs=1e-4)
+
+
+@needs_blender
 def test_final_turntable_and_exports_produce_their_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _tiny(monkeypatch, frames=6)
     step = tmp_path / "box.step"
@@ -399,11 +426,186 @@ def test_queue_caps_pending_jobs_per_workspace(tmp_path: Path) -> None:
         d.mkdir()
         with pytest.raises(jobs.QueueFull):
             q.submit(d, {"id": "f" * 16, "kind": "preview", "org": "A"}, slow)
-        q.submit(d, {"id": "e" * 16, "kind": "preview", "org": "B", "state": "queued"}, slow)  # other workspace ok
-        assert q.position("e" * 16) == 1  # previews jump the queue
+        q.submit(d, {"id": "e" * 16, "kind": "final", "org": "B", "state": "queued"}, slow)  # other workspace ok
+        assert q.position("e" * 16) == 6  # long lane: five finals of A are still waiting ahead of it
         assert q.cancel("e" * 16) and not q.is_live("e" * 16)
     finally:
         gate.set()
+
+
+def _job(tmp: Path, name: str, kind: str, org: str = "A") -> tuple[Path, dict]:
+    d = tmp / name
+    d.mkdir()
+    job = {"id": name.ljust(16, "0"), "kind": kind, "org": org, "state": "queued"}
+    jobs.write_job(d, job)
+    return d, job
+
+
+def test_quick_jobs_never_wait_behind_a_turntable(tmp_path: Path) -> None:
+    """AMI-13: an export (or a preview) runs while a long turntable holds the render lane."""
+    import threading
+
+    q = jobs.RenderQueue(workers=1)
+    gate, started, exported = threading.Event(), threading.Event(), threading.Event()
+
+    def turntable(d: Path, j: dict) -> None:
+        started.set()
+        gate.wait(10)
+
+    try:
+        q.submit(*_job(tmp_path, "aa", "turntable"), turntable)
+        assert started.wait(5)
+        q.submit(*_job(tmp_path, "bb", "final"), lambda d, j: None)
+        assert q.position("bb".ljust(16, "0")) == 1  # the final waits for the turntable (same lane)
+        q.submit(*_job(tmp_path, "cc", "export"), lambda d, j: exported.set())
+        assert exported.wait(5), "the export waited behind the turntable"
+        assert not gate.is_set() and q.is_live("aa".ljust(16, "0"))  # the turntable is still running
+    finally:
+        gate.set()
+
+
+def test_previews_jump_ahead_of_exports_in_the_quick_lane(tmp_path: Path) -> None:
+    import threading
+
+    q = jobs.RenderQueue(workers=1)
+    gate, started = threading.Event(), threading.Event()
+
+    def busy(d: Path, j: dict) -> None:
+        started.set()
+        gate.wait(10)
+
+    try:
+        q.submit(*_job(tmp_path, "a1", "export"), busy)
+        assert started.wait(5)
+        q.submit(*_job(tmp_path, "a2", "export"), busy)
+        q.submit(*_job(tmp_path, "a3", "preview"), busy)
+        assert q.position("a3".ljust(16, "0")) == 1 and q.position("a2".ljust(16, "0")) == 2
+    finally:
+        gate.set()
+
+
+def test_progress_is_monotonic_with_the_frame_count_from_the_spec() -> None:
+    """AMI-14: Cycles prints frame 1's sample lines before the first FW_FRAME marker. With 72 frames known up front,
+    frame 1's samples map to 0..1/72 (they used to map to 0..1 of the whole job, then jump back to 1/72)."""
+    p = runner.ProgressParser(72)
+    seen = []
+    log = [f"Fra:1 Sample {s}/48" for s in range(1, 49)] + ["FW_FRAME 1/72"]
+    log += [f"Fra:2 Sample {s}/48" for s in range(1, 49)] + ["FW_FRAME 2/72", "some other line"]
+    for k in range(3, 73):
+        log += [f"Sample {s}/48" for s in (1, 24, 48)] + [f"FW_FRAME {k}/72"]
+    for line in log:
+        v = p.feed(line)
+        if v is not None:
+            seen.append(v)
+    assert all(b >= a for a, b in itertools.pairwise(seen))
+    assert max(seen[:48]) <= 1 / 72 + 1e-9 and seen[48] == pytest.approx(1 / 72)
+    assert seen[-1] == 1.0 and p.started
+    assert runner.ProgressParser(1).feed("Sample 12/24") == pytest.approx(0.5)  # a still
+    assert runner.ProgressParser(3).feed("Loading render kernels") is None
+
+
+def test_progress_writer_estimates_time_left(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = {"t": 100.0}
+    monkeypatch.setattr(service.time, "monotonic", lambda: clock["t"])
+    job = {"id": "x", "warming": True}
+    w = service._Progress(tmp_path, job, 0.0, 1.0)
+    w(0.0, "rendering")
+    assert job["warming"] is False and "eta_s" not in job  # warm-up ends with the first sample line
+    clock["t"] += 30.0  # 60 % done after 30 s of rendering
+    w(0.6, "rendering")
+    w(10 / 72, "rendering")  # a stale lower value never moves progress back
+    assert job["progress"] == 0.6
+    clock["t"] += 1.0
+    w(10 / 72, "rendering")
+    assert job["progress"] == 0.6 and job["eta_s"] == round(31 * 0.4 / 0.6)
+
+
+def test_draft_turntable_is_a_lighter_turntable(flange: dict) -> None:
+    dev = {"available": True, "device": "GPU", "backend": "OPTIX"}
+    full = scene.build_spec(flange["geom"], flange["hull"], scene.Options(quality="turntable"), dev, "F", {})
+    draft = scene.build_spec(flange["geom"], flange["hull"], scene.Options(quality="turntable_draft"), dev, "F", {})
+    assert draft["mode"] == full["mode"] == "turntable"
+    assert draft["turntable"]["frames"] * 2 == full["turntable"]["frames"] == 72
+    # same 3 s turn
+    assert draft["turntable"]["frames"] / draft["turntable"]["fps"] == full["turntable"]["frames"] / full["turntable"]["fps"]
+    work = (lambda s: s["turntable"]["frames"] * s["render"]["res"][0] * s["render"]["res"][1] * s["render"]["samples"])
+    assert work(draft) * 6 <= work(full) * 1.2  # about a sixth of the render work
+
+
+def test_highlight_protection_is_in_every_render_spec(flange: dict) -> None:
+    """AMI-12: every render carries the highlight rule, and the dark rig's floor is dark in reflections."""
+    dev = {"available": True, "device": "GPU", "backend": "OPTIX"}
+    for light in presets.LIGHTING:
+        s = scene.build_spec(flange["geom"], flange["hull"], scene.Options(lighting=light), dev, "F", {})
+        assert s["render"]["auto_exposure"] == {"shoulder": 0.76, "max_fraction": 0.02, "min_ev": -4.0}
+        assert s["render"]["view"] == "Khronos PBR Neutral"
+    dark = scene.build_spec(flange["geom"], flange["hull"], scene.Options(lighting="dark"), dev, "F", {})
+    studio = scene.build_spec(flange["geom"], flange["hull"], scene.Options(lighting="studio"), dev, "F", {})
+    assert dark["floor"]["albedo"][0] <= 0.05 < studio["floor"]["albedo"][0]
+
+
+def test_blown_fraction_counts_only_near_white_part_pixels(tmp_path: Path) -> None:
+    a = np.zeros((10, 10, 4), np.uint8)
+    a[:5, :, :] = (240, 240, 240, 255)      # 50 near-white part pixels
+    a[5:8, :, :] = (240, 120, 60, 255)      # 30 bright but coloured: not blown
+    a[8:, :, :] = (255, 255, 255, 0)        # background: ignored
+    Image.fromarray(a, "RGBA").save(tmp_path / "r.png")
+    assert post.blown_fraction(tmp_path / "r.png") == pytest.approx(50 / 80)
+    Image.fromarray(a[..., :3], "RGB").save(tmp_path / "rgb.png")
+    assert post.blown_fraction(tmp_path / "rgb.png") is None  # no alpha: can't tell part from background
+
+
+def test_engine_warm_state_is_per_blender_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AMI-11: a GPU job knows whether it may be the slow first render on this server."""
+    monkeypatch.setattr(runner, "_engine_file", lambda: tmp_path / "engine.json")
+    monkeypatch.setattr(runner, "find_blender", lambda: Path(__file__))
+    gpu = {"device": "GPU", "backend": "OPTIX", "gpu": "RTX"}
+    assert runner.is_warm({"device": "CPU"})  # CPU renders need no warm-up
+    assert not runner.is_warm(gpu)
+    runner.mark_warm(gpu, 162.0)
+    assert runner.is_warm(gpu) and not runner.is_warm({**gpu, "gpu": "Another GPU"})
+    data = json.loads((tmp_path / "engine.json").read_text())
+    assert next(iter(data["warm"].values()))["startup_s"] == 162.0
+
+
+def _fake_job(ws: Path, jid: str, build_id: int, kind: str = "final") -> None:
+    d = ws / "mesh" / ("exports" if kind == "export" else "renders") / jid
+    d.mkdir(parents=True)
+    jobs.write_job(d, {"id": jid, "kind": kind, "state": "done", "build_id": build_id, "options": {"finish": "clay"},
+                       "created_at": "2026-11-17T10:00:00", "outputs": []})
+
+
+def test_renders_carry_their_revision_and_flag_older_ones(tmp_path: Path) -> None:
+    """AMI-22: each render knows the part revision it shows; renders of an earlier build are flagged."""
+    ws = tmp_path / "ws"
+    for n, bid in ((1, 918700), (2, 732200)):
+        (ws / "revisions" / str(n)).mkdir(parents=True)
+        (ws / "revisions" / str(n) / "status.json").write_text(json.dumps({"build_id": bid}))
+    (ws / "out").mkdir()
+    (ws / "out" / "status.json").write_text(json.dumps({"ok": True, "build_id": 732200}))
+    _fake_job(ws, "a" * 16, 918700)
+    _fake_job(ws, "b" * 16, 732200)
+    _fake_job(ws, "c" * 16, 918700, "export")
+    got = service.list_jobs(ws, "")
+    by = {j["id"]: j for j in got["renders"] + got["exports"]}
+    assert (by["a" * 16]["revision"], by["a" * 16]["stale"]) == (1, True)
+    assert (by["b" * 16]["revision"], by["b" * 16]["stale"]) == (2, False)
+    assert (by["c" * 16]["revision"], by["c" * 16]["stale"]) == (1, True)
+
+
+def test_the_projects_look_is_saved_for_the_workspace(tmp_path: Path) -> None:
+    """AMI-23: the last look lives with the project (not in one browser); an invalid saved look is ignored."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    assert service.get_look(ws) is None
+    o = scene.Options(finish="anodised", colour="red", lighting="dark", camera="iso", aspect="16:9",
+                      transparent=True)
+    service.save_look(ws, o, "u1")
+    got = service.get_look(ws)
+    assert {k: got[k] for k in service.LOOK_KEYS} == {k: getattr(o, k) for k in service.LOOK_KEYS}
+    assert got["saved_by"] == "u1"
+    (ws / "mesh" / "look.json").write_text(json.dumps({"finish": "gone", "lighting": "studio"}))
+    assert service.get_look(ws) is None
 
 
 # ------------------------------------------------------------------ API
@@ -445,6 +647,12 @@ def test_api_auth_scoping_paywall_and_flow(app_client: TestClient, tmp_path: Pat
     info = c.get(f"/api/m/mesh/projects/{pid}").json()
     assert info["suggested"]["finish"] == "brass" and info["mesh"]["bbox_mm"] == pytest.approx([30, 20, 10])
     assert all(ch["status"] in ("pass", "info") for ch in info["mesh"]["checks"])
+    assert info["look"] is None and info["project"]["revision"] is None
+    look = {"finish": "brass", "lighting": "dark", "camera": "iso", "aspect": "1:1", "transparent": True}
+    assert c.post(f"/api/m/mesh/projects/{pid}/look", json=look).status_code == 200
+    assert c.post(f"/api/m/mesh/projects/{pid}/look", json={**look, "lighting": "disco"}).status_code == 422
+    got = c.get(f"/api/m/mesh/projects/{pid}").json()["look"]
+    assert {k: got[k] for k in look} == look and got["saved_by"]
     assert c.post(f"/api/m/mesh/projects/{pid}/renders", json={"finish": "nope"}).status_code == 422
     assert c.post(f"/api/m/mesh/projects/{pid}/renders", json={"finish": "brass", "camera": "x"}).status_code == 422
     if BLENDER is not None:

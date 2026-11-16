@@ -34,7 +34,24 @@ class RenderIn(BaseModel):
     colour: str | None = Field(default=None, max_length=20)
     lighting: str = Field(default="studio", max_length=20)
     camera: str = Field(default="hero", max_length=20)
-    quality: Literal["preview", "final", "turntable"] = "preview"
+    quality: Literal["preview", "final", "turntable", "turntable_draft"] = "preview"
+    aspect: str = Field(default="4:3", max_length=8)
+    transparent: bool = False
+    pose: str = Field(default="auto", max_length=20)
+    soften_edges: bool = True
+
+    def options(self) -> scene.Options:
+        try:
+            return scene.Options(**self.model_dump()).validate()
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+
+
+class LookIn(BaseModel):
+    finish: str = Field(max_length=40)
+    colour: str | None = Field(default=None, max_length=20)
+    lighting: str = Field(default="studio", max_length=20)
+    camera: str = Field(default="hero", max_length=20)
     aspect: str = Field(default="4:3", max_length=8)
     transparent: bool = False
     pose: str = Field(default="auto", max_length=20)
@@ -73,7 +90,9 @@ def get_presets(ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
     dev = runner.detect()
     return {**presets.catalog(), "disclosure": DISCLOSURE,
             "renderer": {"available": bool(dev.get("available")), "engine": "Cycles",
-                         "device": dev.get("device"), "gpu": dev.get("gpu"), "reason": dev.get("reason")}}
+                         "device": dev.get("device"), "gpu": dev.get("gpu"), "reason": dev.get("reason"),
+                         "warm": runner.is_warm(dev) if dev.get("available") else True,
+                         "warm_up_estimate_s": runner.WARM_UP_ESTIMATE_S}}
 
 
 @router.get("/projects/{pid}")
@@ -88,7 +107,10 @@ def project(pid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(422, "This model couldn't be tessellated for rendering") from e
     material = info.get("material")
-    return {"project": {"id": p.id, "name": p.name, "material": material, "build_id": info["build_id"]},
+    bid = info["build_id"]
+    rev = service.revisions(ws).get(int(bid)) if bid is not None else None
+    return {"project": {"id": p.id, "name": p.name, "material": material, "build_id": bid, "revision": rev},
+            "look": service.get_look(ws),
             "suggested": presets.map_material(material if isinstance(material, str) else None),
             "mesh": {k: geom[k] for k in ("triangles", "vertices", "tolerance_mm", "bbox_mm", "volume_mm3",
                                           "checks")},
@@ -117,6 +139,14 @@ def render(pid: str, body: RenderIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, 
           cached=bool(out.get("cached")))
     ctx.db.commit()
     return out
+
+
+@router.post("/projects/{pid}/look")
+def save_look(pid: str, body: LookIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    """Remember the project's look for everyone in the workspace (AMI-23)."""
+    ctx.require_role("engineer")
+    p = _project(ctx, pid)
+    return service.save_look(workspace_for(p), body.options(), ctx.user.id)
 
 
 @router.post("/projects/{pid}/exports")

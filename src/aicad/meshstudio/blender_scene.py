@@ -258,14 +258,67 @@ def configure_render(r):
     sc.render.film_transparent = True
     sc.render.resolution_x, sc.render.resolution_y = r["res"]
     sc.render.resolution_percentage = 100
-    sc.render.image_settings.file_format = "PNG"
-    sc.render.image_settings.color_mode = "RGBA"
-    sc.render.image_settings.color_depth = "8"
-    sc.render.image_settings.compression = 40
+    linear_output()
     sc.view_settings.view_transform = r["view"]
     sc.view_settings.look = r["look"]
     sc.view_settings.exposure = r["exposure"]
     sc.render.use_persistent_data = True
+
+
+def linear_output():
+    """Renders are written as linear half-float EXR first, so exposure can be chosen from the real highlight values
+    before the view transform compresses them (see expose_and_write)."""
+    im = sc.render.image_settings
+    im.file_format = "OPEN_EXR"
+    im.color_mode = "RGBA"
+    im.color_depth = "16"
+    im.exr_codec = "ZIP"
+
+
+def png_output():
+    im = sc.render.image_settings
+    im.file_format = "PNG"
+    im.color_mode = "RGBA"
+    im.color_depth = "8"
+    im.compression = 40
+
+
+def _object_mins(path):
+    """Per-pixel minimum of R, G, B (linear) over the part's opaque pixels: a pixel whose minimum channel is high is
+    near white after the view transform, i.e. a blown highlight with no colour or detail left."""
+    img = bpy.data.images.load(path)
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    px = px.reshape(-1, 4)
+    return px[px[:, 3] >= 0.98, :3].min(axis=1)
+
+
+def expose_and_write(exr_paths, png_paths):
+    """Highlight protection (AMI-12). Measure the share of the part's pixels that would land in the view transform's
+    white shoulder; when it exceeds the allowed share, lower the exposure just enough (never brighten, never more
+    than the floor). One exposure for every frame, so a turntable doesn't flicker. Then write the display-referred
+    PNGs with the scene's colour management and delete the linear files."""
+    r = SPEC["render"]
+    ae = r.get("auto_exposure") or {}
+    step = max(1, len(exr_paths) // 12)
+    mins = np.concatenate([_object_mins(p) for p in exr_paths[::step]]) * (2.0 ** r["exposure"])
+    ev, before = 0.0, 0.0
+    if mins.size and ae:
+        before = float((mins >= ae["shoulder"]).mean())
+        if before > ae["max_fraction"]:
+            q = float(np.quantile(mins, 1.0 - ae["max_fraction"]))
+            ev = max(ae["min_ev"], math.log2(ae["shoulder"] / q))
+    after = float((mins * 2.0 ** ev >= ae.get("shoulder", 1.0)).mean()) if mins.size else 0.0
+    sc.view_settings.exposure = r["exposure"] + ev
+    png_output()
+    for src, dst in zip(exr_paths, png_paths):
+        img = bpy.data.images.load(src)
+        img.save_render(dst, scene=sc)
+        bpy.data.images.remove(img)
+        os.remove(src)
+    say("FW_EXPOSURE %.4f %.5f %.5f" % (ev, before, after))
 
 
 def main():
@@ -315,9 +368,6 @@ def main():
         pivot.keyframe_insert("rotation_euler", index=2, frame=n + 1)
         frames_dir = out_path(o["frames_dir"])
         os.makedirs(frames_dir, exist_ok=True)
-        if o.get("blend"):
-            sc.render.filepath = "//frames/f_"
-            bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
         # one animation render keeps the device, kernels and scene loaded between frames (much faster than
         # rendering each frame as a separate still)
         def _frame_done(scene, *args):
@@ -327,13 +377,21 @@ def main():
         sc.render.filepath = out_path(os.path.join(o["frames_dir"], "f_"))
         sc.render.use_file_extension = True
         bpy.ops.render.render(animation=True)
-    else:
-        if o.get("blend"):
-            sc.render.filepath = "//render.png"
+        exrs = [out_path(os.path.join(o["frames_dir"], "f_%04d.exr" % k)) for k in range(1, n + 1)]
+        expose_and_write(exrs, [p[:-4] + ".png" for p in exrs])
+        if o.get("blend"):  # saved after exposure, so the scene reproduces the delivered frames
+            png_output()
+            sc.render.filepath = "//frames/f_"
             bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
-        sc.render.filepath = out_path(o["image"])
+    else:
+        sc.render.filepath = out_path("linear.exr")
         bpy.ops.render.render(write_still=True)
         say("FW_FRAME 1/1")
+        expose_and_write([out_path("linear.exr")], [out_path(o["image"])])
+        if o.get("blend"):
+            png_output()
+            sc.render.filepath = "//render.png"
+            bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
     say("FW_DONE")
 
 

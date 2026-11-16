@@ -50,7 +50,7 @@ FINISHES: dict[str, dict[str, Any]] = {
                           "roughness": 0.3, "rough_var": 0.04, "aniso": 0.7, "brushed": 0.05, "grain": 0.0,
                           "grain_mm": 0.05, "coat": 0.0},
     "machined_steel": {"label": "Machined steel", "group": "Metal", "base": "#a9abad", "metallic": 1.0,
-                       "roughness": 0.22, "rough_var": 0.05, "aniso": 0.55, "grain": 0.02, "grain_mm": 0.2,
+                       "roughness": 0.22, "rough_var": 0.025, "aniso": 0.55, "grain": 0.02, "grain_mm": 0.2,
                        "coat": 0.0},
     "stainless_brushed": {"label": "Brushed stainless steel", "group": "Metal", "base": "#b4b2ae", "metallic": 1.0,
                           "roughness": 0.27, "rough_var": 0.04, "aniso": 0.75, "brushed": 0.05, "grain": 0.0,
@@ -170,11 +170,14 @@ def resolve_finish(finish: str, colour: str | None) -> dict[str, Any]:
 # Light positions are relative to the camera: azimuth 0 = from the camera's side, negative = camera's left.
 # dist and size are in units of the part's bounding-box diagonal; power scales with size^2 so exposure is the same
 # for a 10 mm and a 1 m part. Background is composited behind the transparent render (sRGB hex, centre -> edge).
+# floor: albedo of the floor as metal parts see it in reflections. It matches the composited backdrop's tone (a light
+# sweep reflects light grey; the charcoal of "Dark" reflects near black), so a polished wall mirrors what the viewer
+# expects instead of a bright grey plane (AMI-12: on "Dark" the steel wall reflected a 0.3 floor and read as white).
 LIGHTING: dict[str, dict[str, Any]] = {
     "studio": {
         "label": "Studio softbox", "hint": "Soft, even product lighting on a light grey sweep",
         "world": {"top": "#d4d8dd", "horizon": "#a3a8af", "bottom": "#62666c", "strength": 0.55},
-        "background": {"centre": "#f4f5f7", "edge": "#d3d7dc"}, "shadow": 0.75, "exposure": 0.0,
+        "background": {"centre": "#f4f5f7", "edge": "#d3d7dc"}, "shadow": 0.75, "exposure": 0.0, "floor": 0.3,
         "lights": [
             {"name": "Key", "az": -50, "el": 45, "dist": 3.0, "w": 1.4, "h": 1.0, "power": 7.5},
             {"name": "Fill", "az": 60, "el": 20, "dist": 3.2, "w": 1.6, "h": 1.2, "power": 2.5},
@@ -186,7 +189,7 @@ LIGHTING: dict[str, dict[str, Any]] = {
     "dark": {
         "label": "Dark dramatic", "hint": "Rim-lit on charcoal, for hero shots of metal parts",
         "world": {"top": "#3a3e45", "horizon": "#15171a", "bottom": "#050506", "strength": 0.25},
-        "background": {"centre": "#2a2d32", "edge": "#08090b"}, "shadow": 0.9, "exposure": 0.0,
+        "background": {"centre": "#2a2d32", "edge": "#08090b"}, "shadow": 0.9, "exposure": 0.0, "floor": 0.04,
         "lights": [
             {"name": "Key", "az": -60, "el": 40, "dist": 2.6, "w": 0.9, "h": 0.7, "power": 16.0},
             {"name": "Kick left", "az": -120, "el": 15, "dist": 2.4, "w": 0.2, "h": 1.4, "power": 30.0},
@@ -197,7 +200,7 @@ LIGHTING: dict[str, dict[str, Any]] = {
     "technical": {
         "label": "Technical white", "hint": "Bright, flat lighting on pure white for catalogues and datasheets",
         "world": {"top": "#ffffff", "horizon": "#d5d8dc", "bottom": "#7d8187", "strength": 0.6},
-        "background": {"centre": "#ffffff", "edge": "#ffffff"}, "shadow": 0.45, "exposure": 0.0,
+        "background": {"centre": "#ffffff", "edge": "#ffffff"}, "shadow": 0.45, "exposure": 0.0, "floor": 0.3,
         "lights": [
             {"name": "Key", "az": -35, "el": 50, "dist": 2.8, "w": 1.8, "h": 1.4, "power": 26.0},
             {"name": "Fill", "az": 50, "el": 25, "dist": 3.0, "w": 1.8, "h": 1.4, "power": 16.0},
@@ -224,7 +227,15 @@ QUALITY: dict[str, dict[str, Any]] = {
     "final": {"label": "Final", "res": (1920, 1440), "samples_gpu": 256, "samples_cpu": 96, "bounces": 10},
     "turntable": {"label": "Turntable", "res": (960, 720), "samples_gpu": 48, "samples_cpu": 16, "bounces": 8,
                   "frames": 72, "fps": 24},
+    # draft turntable (AMI-14): half the frames at a lower rate (the same 3 s turn), 3/4 resolution, half the samples:
+    # about a sixth of the render work, for checking a look before committing to the full turntable
+    "turntable_draft": {"label": "Quick turntable", "res": (720, 540), "samples_gpu": 24, "samples_cpu": 8,
+                        "bounces": 6, "frames": 36, "fps": 12},
 }
+
+
+def is_turntable(quality: str) -> bool:
+    return quality.startswith("turntable")
 ASPECTS: dict[str, tuple[int, int]] = {"4:3": (4, 3), "16:9": (16, 9), "1:1": (1, 1), "3:4": (3, 4)}
 POSES = {"auto": "Auto (lay long parts down)", "as_modelled": "As modelled"}
 

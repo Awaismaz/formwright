@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Aperture, Box as BoxIcon, Camera, Film, FolderOpen, Info } from "lucide-react";
+import { ArrowLeft, Aperture, Box as BoxIcon, Camera, ChevronDown, Cpu, Film, FolderOpen, Info } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useSession } from "@/lib/session";
 import type { Project } from "@/lib/types";
-import { Button, Card, EmptyState, PageLoader, Progress, Spinner, StatusBadge, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
+import { Button, Card, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Progress, Spinner, StatusBadge, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { IsoThumb } from "@/components/ProjectCard";
 import type { ModuleAppProps } from "../registry";
 import type { Job, Presets, ProjectInfo, Settings } from "./types";
@@ -16,18 +16,40 @@ import { CHECKER, deviceLine, Exports, Gallery, MeshPanel } from "./Gallery";
 
 const ACTIVE = (j?: Job | null) => !!j && (j.state === "queued" || j.state === "running");
 
-const KEY = (pid: string) => `fw_mesh_look_${pid}`;
+const LOOK_KEYS = ["finish", "colour", "lighting", "camera", "aspect", "transparent", "pose", "soften_edges"] as const;
 
-/** The last look used on this project in this browser (a convenience only), else the material's suggestion. */
+/** A look (from the server or a past render) narrowed to the settings, when every preset in it still exists. */
+function asLook(raw: Partial<Settings> | null | undefined, presets: Presets): Settings | null {
+  if (!raw || !presets.finishes.some(f => f.id === raw.finish) || !presets.lighting.some(l => l.id === raw.lighting)
+    || !presets.cameras.some(c => c.id === raw.camera) || !presets.aspects.includes(raw.aspect ?? "")) return null;
+  const out: Record<string, unknown> = {};
+  for (const k of LOOK_KEYS) out[k] = raw[k];
+  return { pose: "auto", soften_edges: true, transparent: false, colour: null, ...(out as Partial<Settings>) } as Settings;
+}
+
+/** The project's saved look (shared by the workspace), else the material's suggestion. */
 function initial(info: ProjectInfo, presets: Presets): Settings {
-  const base: Settings = { finish: info.suggested.finish, colour: info.suggested.colour, lighting: "studio", camera: "hero",
+  return asLook(info.look, presets) ?? { finish: info.suggested.finish, colour: info.suggested.colour, lighting: "studio", camera: "hero",
     aspect: "4:3", transparent: false, pose: "auto", soften_edges: true };
-  try {
-    const saved = JSON.parse(localStorage.getItem(KEY(info.project.id)) ?? "null") as Partial<Settings> | null;
-    if (saved && presets.finishes.some(f => f.id === saved.finish) && presets.lighting.some(l => l.id === saved.lighting)
-      && presets.cameras.some(c => c.id === saved.camera) && presets.aspects.includes(saved.aspect ?? "")) return { ...base, ...saved };
-  } catch { /* storage unavailable */ }
-  return base;
+}
+
+/** First GPU render on this server: Blender prepares the GPU and prints nothing until it is done, so show what is
+ * happening, the elapsed time and an estimate-based bar instead of a bare spinner. */
+function WarmUp({ job, estimate }: { job: Job | undefined; estimate: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const t0 = job?.started_at ? Date.parse(`${job.started_at}Z`) : now;
+  const el = Math.max(0, Math.round((now - t0) / 1000));
+  const mmss = `${Math.floor(el / 60)}:${String(el % 60).padStart(2, "0")}`;
+  return (
+    <div className="flex max-w-sm flex-col items-center gap-2.5 text-center" data-warmup>
+      <Cpu className="h-6 w-6 text-primary" />
+      <div className="text-[13.5px] font-medium text-text">Preparing the GPU for the first render on this server</div>
+      <div className="text-[12.5px] leading-snug">This happens once after the renderer is installed or updated and takes about {Math.round(estimate / 60)} minutes. Later previews take a few seconds.</div>
+      <Progress value={Math.min(95, (el / estimate) * 100)} className="mt-1 w-64" />
+      <div className="tabular-nums text-[12px]" data-elapsed>{mmss} elapsed</div>
+    </div>
+  );
 }
 
 function Picker({ projects, loading, onPick }: { projects: Project[]; loading: boolean; onPick: (id: string) => void }) {
@@ -77,7 +99,18 @@ function Workspace({ pid, presets, canEdit }: { pid: string; presets: Presets; c
   });
   const [settings, setSettings] = useState<Settings | null>(null);
   useEffect(() => { if (info.data && !settings) setSettings(initial(info.data, presets)); }, [info.data, settings, presets]);
-  useEffect(() => { if (settings) try { localStorage.setItem(KEY(pid), JSON.stringify(settings)); } catch { /* storage unavailable */ } }, [settings, pid]);
+  // the look is saved with the project for the whole workspace (a moment after the last change)
+  const savedLook = useRef<string>("");
+  useEffect(() => {
+    if (!settings || !canEdit || !info.data) return;
+    const key = JSON.stringify(settings);
+    if (!savedLook.current) { savedLook.current = info.data.look ? JSON.stringify(asLook(info.data.look, presets)) : key; if (savedLook.current === key) return; }
+    if (key === savedLook.current) return;
+    const t = setTimeout(() => {
+      api.post(`/api/m/mesh/projects/${pid}/look`, settings).then(() => { savedLook.current = key; }).catch(() => { /* retried on the next change */ });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [settings, canEdit, pid, info.data, presets]);
 
   // live preview: one preview in flight at a time; the newest settings win when it finishes
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -123,16 +156,37 @@ function Workspace({ pid, presets, canEdit }: { pid: string; presets: Presets; c
     if (!canEdit && !shown && info.data) setShown(info.data.renders.find(r => r.state === "done") ?? null);
   }, [canEdit, info.data, shown]);
 
-  const submit = async (quality: "final" | "turntable") => {
+  const queue = async (body: Partial<Settings> & { quality: string }) => {
+    const j = await api.post<Job>(`/api/m/mesh/projects/${pid}/renders`, body);
+    const what = body.quality === "final" ? "Final render" : body.quality === "turntable_draft" ? "Quick turntable" : "Turntable";
+    toast.success(j.state === "done" ? "Already rendered with these settings. It's in the gallery." : `${what} queued`);
+    setTab("gallery");
+    await qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] });
+  };
+  const submit = async (quality: "final" | "turntable" | "turntable_draft") => {
     if (!settings) return;
-    setBusy(quality);
-    try {
-      const j = await api.post<Job>(`/api/m/mesh/projects/${pid}/renders`, { ...settings, quality });
-      toast.success(j.state === "done" ? "Already rendered with these settings. It's in the gallery." : quality === "final" ? "Final render queued" : "Turntable queued");
-      setTab("gallery");
-      await qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] });
-    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Render failed to start"); }
+    setBusy(quality.startsWith("turntable") ? "turntable" : quality);
+    try { await queue({ ...settings, quality }); }
+    catch (e) { toast.error(e instanceof ApiError ? e.message : "Render failed to start"); }
     finally { setBusy(null); }
+  };
+  /** Same look as a past render, on the current part (a stale render becomes a fresh one). */
+  const rerender = async (j: Job) => {
+    try {
+      if (j.kind === "export") {
+        await api.post<Job>(`/api/m/mesh/projects/${pid}/exports`, { finish: j.options.finish, colour: j.options.colour ?? null });
+        await qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] });
+      } else {
+        const look = asLook(j.options, presets);
+        if (!look) { toast.error("That render used settings that are no longer offered"); return; }
+        await queue({ ...look, quality: j.options.quality ?? j.kind });
+      }
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Render failed to start"); }
+  };
+  const useLook = (j: Job) => {
+    const look = asLook(j.options, presets);
+    if (look) { setSettings(look); toast.success("Settings applied. The preview updates in a moment."); }
+    else toast.error("That render used settings that are no longer offered");
   };
   const doExport = async () => {
     if (!settings) return;
@@ -177,15 +231,17 @@ function Workspace({ pid, presets, canEdit }: { pid: string; presets: Presets; c
           <div className="relative w-full max-w-[1100px] overflow-hidden rounded-lg border border-border shadow-card"
             style={{ aspectRatio: `${aw} / ${ah}`, maxHeight: "100%", ...(settings.transparent ? CHECKER : { background: "#eef0f3" }) }} data-stage>
             {img ? <img src={img} alt={`${d.project.name} render`} className="absolute inset-0 h-full w-full object-contain" data-preview={shown?.id} />
-              : <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-muted">
-                {previewErr ? <span className="max-w-sm text-center text-danger">{previewErr}</span> : <><Spinner className="h-6 w-6" />Lighting the studio…</>}
+              : <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-sm text-muted">
+                {previewErr ? <span className="max-w-sm text-center text-danger">{previewErr}</span>
+                  : pj?.warming ? <WarmUp job={pj} estimate={pj.warm_estimate_s ?? presets.renderer.warm_up_estimate_s} />
+                  : <><Spinner className="h-6 w-6" />{pj?.state === "queued" ? "Waiting for the renderer…" : pj?.phase && pj.phase !== "Rendering" ? `${pj.phase}…` : "Lighting the studio…"}</>}
               </div>}
             {ACTIVE(pj) && img && (
               <div className="absolute right-3 top-3 flex items-center gap-2 rounded-full border border-border bg-panel/95 px-3 py-1 text-xs text-muted shadow-card" data-previewing>
-                <Spinner className="h-3.5 w-3.5" />{pj?.state === "queued" ? "Waiting for the renderer…" : "Updating preview…"}
+                <Spinner className="h-3.5 w-3.5" />{pj?.state === "queued" ? "Waiting for the renderer…" : pj?.warming ? "Preparing the GPU (first render on this server)…" : "Updating preview…"}
               </div>
             )}
-            {ACTIVE(pj) && <div className="absolute inset-x-0 bottom-0"><Progress value={(pj?.progress ?? 0) * 100} className="h-1 rounded-none" /></div>}
+            {ACTIVE(pj) && !pj?.warming && <div className="absolute inset-x-0 bottom-0"><Progress value={(pj?.progress ?? 0) * 100} className="h-1 rounded-none" /></div>}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-border bg-panel px-4 py-2.5">
@@ -194,7 +250,15 @@ function Workspace({ pid, presets, canEdit }: { pid: string; presets: Presets; c
             {shown && <div className="mt-0.5 truncate" data-device>{canEdit ? "Preview · " : ""}{deviceLine(shown)}</div>}
           </div>
           {canEdit && <>
-            <Button variant="secondary" icon={<Film className="h-4 w-4" />} loading={busy === "turntable"} onClick={() => submit("turntable")} data-action="turntable">Turntable</Button>
+            <Menu>
+              <MenuTrigger asChild>
+                <Button variant="secondary" icon={<Film className="h-4 w-4" />} loading={busy === "turntable"} data-action="turntable">Turntable<ChevronDown className="h-3.5 w-3.5 opacity-70" /></Button>
+              </MenuTrigger>
+              <MenuContent>
+                <MenuItem onSelect={() => submit("turntable_draft")}><span data-action="turntable-draft">Quick turntable</span><span className="ml-auto pl-4 text-xs text-muted">{presets.quality.turntable_draft.frames} frames · {presets.quality.turntable_draft.res[0]} px</span></MenuItem>
+                <MenuItem onSelect={() => submit("turntable")}><span data-action="turntable-full">Full turntable</span><span className="ml-auto pl-4 text-xs text-muted">{presets.quality.turntable.frames} frames · {presets.quality.turntable.res[0]} px</span></MenuItem>
+              </MenuContent>
+            </Menu>
             <Button icon={<Camera className="h-4 w-4" />} loading={busy === "final"} onClick={() => submit("final")} data-action="final">Render final <span className="font-normal opacity-80">· {finalRes}</span></Button>
           </>}
         </div>
@@ -208,10 +272,11 @@ function Workspace({ pid, presets, canEdit }: { pid: string; presets: Presets; c
             <Tab value="mesh">Mesh</Tab>
           </TabList>
           <TabPanel value="gallery" className="min-h-0 flex-1 overflow-y-auto">
-            <Gallery pid={pid} items={renders} canEdit={canEdit} onChanged={() => qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] })} />
+            <Gallery pid={pid} items={renders} canEdit={canEdit} onChanged={() => qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] })}
+              onUse={useLook} onRerender={rerender} />
           </TabPanel>
           <TabPanel value="exports" className="min-h-0 flex-1 overflow-y-auto">
-            <Exports pid={pid} items={exportsL} canEdit={canEdit} busy={busy === "export"} onExport={doExport} finishLabel={finishLabel}
+            <Exports pid={pid} items={exportsL} canEdit={canEdit} busy={busy === "export"} onExport={doExport} finishLabel={finishLabel} onRerender={rerender}
               onChanged={() => qc.invalidateQueries({ queryKey: ["mesh-jobs", pid] })} />
           </TabPanel>
           <TabPanel value="mesh" className="min-h-0 flex-1 overflow-y-auto"><MeshPanel info={d} /></TabPanel>
