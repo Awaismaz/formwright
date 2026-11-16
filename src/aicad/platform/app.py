@@ -1,0 +1,105 @@
+"""Formwright application factory: API + single-page app, one origin."""
+
+from __future__ import annotations
+
+import os
+import secrets
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
+
+from aicad.platform.catalog import seed_catalog
+from aicad.platform.config import ROOT, get_settings
+from aicad.platform.db import init_engine, session_factory, utcnow
+from aicad.platform.models import User
+from aicad.platform.routers import admin, auth, billing, god, journey, projects, team
+from aicad.platform.security import hash_password
+
+WEB_DIST = ROOT / "web" / "dist"
+CSRF_HEADER = "x-fw-csrf"
+CSRF_EXEMPT = {"/api/billing/webhook"}
+CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+       "connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; "
+       "base-uri 'self'; form-action 'self' https://checkout.stripe.com")
+
+
+def ensure_founder(credentials_file: Path) -> None:
+    """First run: create the founder super-admin so God mode is usable. Credentials written to data/ (gitignored)."""
+    s = get_settings()
+    db = session_factory()()
+    try:
+        if db.scalar(select(User).where(User.is_superadmin.is_(True))):
+            return
+        email = s.superadmin_emails[0] if s.superadmin_emails else "founder@formwright.dev"
+        if db.scalar(select(User).where(User.email == email)):
+            return
+        pw = os.environ.get("FW_ADMIN_PASSWORD") or ("Fw-" + secrets.token_urlsafe(12) + "9")
+        db.add(User(email=email, name="Founder", password_hash=hash_password(pw), is_superadmin=True,
+                    email_verified_at=utcnow(), preferences={"units": "mm", "theme": "light"},
+                    god={"enabled": True}))
+        db.commit()
+        credentials_file.parent.mkdir(parents=True, exist_ok=True)
+        credentials_file.write_text(f"Formwright founder (super-admin) account\nemail: {email}\npassword: {pw}\n"
+                                    "Change the password after first sign-in (Settings → Security).\n",
+                                    encoding="utf-8")
+        print(f"Created founder account {email}. Credentials: {credentials_file}")
+    finally:
+        db.close()
+
+
+def create_app() -> FastAPI:
+    s = get_settings()
+    init_engine(s.db_url)
+    db = session_factory()()
+    try:
+        seed_catalog(db)
+    finally:
+        db.close()
+    ensure_founder(s.data_dir / "ADMIN_CREDENTIALS.txt")
+
+    app = FastAPI(title="Formwright", docs_url=None if s.production else "/api/docs", redoc_url=None,
+                  openapi_url=None if s.production else "/api/openapi.json")
+
+    @app.middleware("http")
+    async def security(request: Request, call_next):  # type: ignore[no-untyped-def]
+        path = request.url.path
+        if (path.startswith("/api/") and request.method in ("POST", "PUT", "PATCH", "DELETE")
+                and path not in CSRF_EXEMPT and request.headers.get(CSRF_HEADER) != "1"):
+            return JSONResponse({"detail": "Missing CSRF header"}, status_code=403)
+        resp: Response = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        if not path.startswith("/api/docs"):
+            resp.headers.setdefault("Content-Security-Policy", CSP)
+        if s.cookie_secure:
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return resp
+
+    for r in (auth.router, journey.router, team.router, billing.router, projects.router, admin.router, god.router):
+        app.include_router(r)
+
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    if (WEB_DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> Response:
+        if full_path.startswith("api/"):
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+        f = (WEB_DIST / full_path).resolve()
+        if full_path and WEB_DIST.resolve() in f.parents and f.is_file():
+            return FileResponse(f)
+        index = WEB_DIST / "index.html"
+        if index.is_file():
+            return FileResponse(index, headers={"Cache-Control": "no-cache"})
+        return JSONResponse({"detail": "Frontend not built. Run: cd web && npm install && npm run build"},
+                            status_code=503)
+
+    return app

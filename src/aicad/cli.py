@@ -63,6 +63,33 @@ def _studio(a: argparse.Namespace) -> int:
     return 0
 
 
+def _app(a: argparse.Namespace) -> int:
+    import os
+
+    import uvicorn
+
+    from aicad.platform.app import create_app
+    from aicad.platform.config import get_settings
+    from aicad.studio.app import use_subscription_auth
+
+    os.environ.setdefault("FW_APP_URL", f"http://{a.host}:{a.port}")
+    s = get_settings()
+    if a.api_key:
+        print("Design agent auth: ANTHROPIC_API_KEY (API usage is billed)")
+    elif s.production:
+        print("Production requires --api-key (subscription login is development-only).")
+        return 2
+    else:
+        removed = use_subscription_auth()
+        print("Design agent auth: local Claude Code login (development only)"
+              + (f" - ignoring {', '.join(removed)}" if removed else ""))
+    print(f"Formwright: {s.app_url}   env={s.env}   payments={s.stripe_mode}   god_mode={s.god_mode_enabled}")
+    if not a.no_browser:
+        threading.Timer(2.0, webbrowser.open, args=(s.app_url,)).start()
+    uvicorn.run(create_app(), host=a.host, port=a.port, log_level="warning")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="aicad")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -80,9 +107,17 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--api-key", action="store_true",
                     help="use ANTHROPIC_API_KEY billing instead of the local Claude Code login")
     st.add_argument("--no-browser", action="store_true")
+    ap = sub.add_parser("app", help="Formwright web application (API + UI)")
+    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--api-key", action="store_true",
+                    help="design agent bills ANTHROPIC_API_KEY instead of the local Claude Code login")
+    ap.add_argument("--no-browser", action="store_true")
     a = p.parse_args(argv)
     if a.cmd == "studio":
         return _studio(a)
+    if a.cmd == "app":
+        return _app(a)
     out = a.out or Path("out") / a.spec.stem
 
     if a.cmd == "build":

@@ -4,9 +4,12 @@ version = "0.0.1"
 description = "AI-native engineering design platform (M0 spike)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "argon2-cffi>=23.1",
     "build123d==0.13.0",
     "claude-agent-sdk==0.2.182",
     "fastapi>=0.115",
+    "sqlalchemy>=2.0.36",
+    "stripe>=11.0",
     "uvicorn>=0.30",
     "vtk>=9.3",
 ]
@@ -34,3 +37,9 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/aicad/demo/*" = ["C408", "F403", "F405"]

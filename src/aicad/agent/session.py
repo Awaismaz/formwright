@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -78,10 +79,12 @@ def _brief(d: dict[str, Any], limit: int = 160) -> str:
 
 
 class AgentSession:
-    def __init__(self, workspace: Path, model: str | None = None) -> None:
+    def __init__(self, workspace: Path, model: str | None = None,
+                 on_event: Callable[[dict[str, Any]], None] | None = None) -> None:
         self.workspace = workspace.resolve()
         self.out_dir = self.workspace / "out"
         self.model = model
+        self.on_event = on_event
         self.client: ClaudeSDKClient | None = None
         self.history: list[dict[str, Any]] = []
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -106,6 +109,8 @@ class AgentSession:
 
     def publish(self, ev: dict[str, Any]) -> None:
         ev.setdefault("t", time.time())
+        if self.on_event is not None:
+            self.on_event(ev)  # may enrich ev (e.g. tokens charged) before broadcast
         self.history.append(ev)
         for q in list(self.subscribers):
             q.put_nowait(ev)
