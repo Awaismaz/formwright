@@ -9,7 +9,7 @@ import type { Catalog, Org, Product } from "@/lib/types";
 import { cx, date, money, num, PAGE } from "@/lib/format";
 import { Badge, Button, Card, Input, Modal, PageHeader, PageLoader, Progress, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { PlanCards } from "@/components/PlanCards";
-import { buy } from "./Modules";
+import { AFTER_CHECKOUT, afterCheckout, buy } from "./Modules";
 
 interface Overview {
   org: Org; catalog: Catalog; addons: string[]; can_purchase: boolean;
@@ -86,7 +86,11 @@ export default function Billing() {
 
   useEffect(() => {
     const c = params.get("checkout");
-    if (c === "success") { toast.success("Payment successful — your workspace is updated."); refresh(); }
+    if (c === "success") {
+      toast.success("Payment successful — your workspace is updated."); refresh();
+      const next = afterCheckout();   // real-provider return: continue where the user was
+      if (next) { try { sessionStorage.removeItem(AFTER_CHECKOUT); } catch { /* storage unavailable */ } nav(next.to); }
+    }
     if (c === "canceled") toast("Checkout canceled. No charge was made.");
     if (c) { params.delete("checkout"); params.delete("payment"); setParams(params, { replace: true }); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -287,6 +291,7 @@ export function Checkout() {
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(null); }
   };
 
+  const next = afterCheckout();
   if (p.status === "paid") return (
     <div className="mx-auto max-w-lg px-6 py-16 text-center">
       <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/10"><CheckCircle2 className="h-9 w-9 text-success" /></div>
@@ -299,7 +304,10 @@ export function Checkout() {
         {prod?.kind === "seat" && <p>One more seat was added to {me?.org?.name}. You can invite another teammate now.</p>}
         <p className="mt-2 text-xs text-muted"><a className="link" href={`/api/billing/payments/${p.id}/receipt`} target="_blank" rel="noopener">View the receipt</a> · also in Billing → Payments.</p>
       </Card>
-      <div className="mt-6 flex justify-center gap-2"><Button onClick={() => nav("/app/projects")}>Go to projects</Button><Button variant="secondary" onClick={() => nav("/app/billing")}>View billing</Button></div>
+      <div className="mt-6 flex justify-center gap-2">
+        {next ? <Button onClick={() => { try { sessionStorage.removeItem(AFTER_CHECKOUT); } catch { /* storage unavailable */ } nav(next.to); }}>{next.label}</Button>
+          : <Button onClick={() => nav("/app/projects")}>Go to projects</Button>}
+        <Button variant="secondary" onClick={() => nav("/app/billing")}>View billing</Button></div>
     </div>
   );
 

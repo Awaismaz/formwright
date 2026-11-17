@@ -4,6 +4,91 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-17 (n): Ruthless product audit, then fixes across every area
+
+### Done
+- **Audit** ([docs/reports/AUDIT_2026-11-17.md](reports/AUDIT_2026-11-17.md)). Four independent auditors, each with an
+  isolated app (ports 8771-8774), headless Chrome and their screenshots read, every export opened, the calculators
+  hand-checked. 18 P0, 54 P1, 49 P2, 20 ideas, grouped into six themes: wrong money story, wrong geometry that checks
+  missed, fragile edits, honesty leaks, modules that feel like separate apps, and a long first run with the
+  differentiators hidden. Area reports are in `docs/reports/audit/`.
+- **Fixes** (four fixers in worktrees, branches `polish/{platform,make,ami,studio}`, merged in that order; each wrote
+  `docs/reports/audit/<area>-fixes.md` with a status and evidence per finding):
+  - **Platform** (32/34 fixed):
+    - Runs are now charged per run. The SDK cost is cumulative per session, so follow-ups had been overcharged.
+    - Run budget with a live meter; the balance never goes negative.
+    - Trial raised to 1,000 tokens.
+    - Honest landing page.
+    - Trial access to every Live module.
+    - 24 h email grace and a one-screen onboarding.
+    - Dashboard start box and a "Next for this part" card.
+    - Proration preview, notifications, project actions, phone layout.
+  - **Make modules** (24/29 fixed plus partials):
+    - Dimension placement fixed, and CHK-12 now catches misplaced dimensions.
+    - Sign-offs are bound to the build, with distinct advice wording.
+    - Drawings: editable title block, notes and tolerances.
+    - Honest DFM, with ISO 273 clearance.
+    - Calculation package PDF.
+    - **Release gate "Issue Rev A"**: one staleness rule, carried in the handoff pack.
+    - **Fix-it loop.**
+  - **Assembly / Mesh / Image**:
+    - Fastener grip fixed: bracket on plate gives grip 15, M5x25, 0 clashes.
+    - Through-hole recognition fixed.
+    - Mates follow dimension changes and can be repaired.
+    - Mesh: no white clipping, a quick lane, monotonic progress, revision flags.
+    - Image to CAD shows read and build costs and runs a preflight.
+    - **Fasten these two parts**, **drawing round-trip check** and **assembly renders** built.
+  - **Studio** (all 7 P0):
+    - Exact one-edge picks.
+    - Picks follow dimension changes.
+    - The build worker matches replies by request id.
+    - Plain error messages.
+    - The Source view is superadmin-only.
+    - Undo/redo, keyboard map, SOLIDWORKS mouse, ribbon overflow.
+    - **Repair, don't block**, the **Hole Wizard** and **typed commands** built.
+  - **Master**: after a successful checkout from a module's unlock page, "Open <module>" returns to the module on the
+    part the user came from (STU-18; Make-tab lock and status came from the Make fixer).
+
+### Evidence
+- **Per-branch gates after merging main:**
+  - platform: 357 passed plus paywall tests updated.
+  - make: 393 passed, 1 failed under load.
+  - ami: 418 passed.
+  - studio: 427 passed, 1 failed under load.
+
+  Each load failure passes alone (the machine ran 4 fixers at once).
+- **Final gate on main:** see the commit "Docs: session log (n)" and the line below.
+- **Walkthroughs:**
+  - Platform: new user to a first part in 45 s warm for 45 tokens; Pro to Team preview $150.
+  - Make: Rev A issued, then a change shows Draft since Rev A.
+  - AMI: 0 clashes after insert; HOLE_D change keeps the mates.
+  - Studio: one-edge fillet 9980.69 mm3; undo/redo; ribbon at 1366 px.
+
+### Not done / known
+- **Studio:**
+  - STU-22 (Up To Next/Surface, second direction).
+  - Partials STU-14/16/17/21/23/27/28.
+  - IDEA 2 (agent fills the PropertyManager) is DS-035.
+- **Make:** MAKE-05/06/14 partly done; MAKE-21 not done; IDEA-03/04/05 are MFG-024.
+- **Platform:** PLT-29/34 partly done; IDEA-04/05 are PLT-017.
+- **AMI:**
+  - AMI-10/25 partly done.
+  - Server-start warm-ups not done.
+  - I3/I5 are ASM-018.
+- **Windows race:** `status.json` read while it is being replaced can raise PermissionError (several readers). It needs one
+  shared retrying reader. Also, the background export briefly writes a placeholder build id.
+
+### Parked
+PD-26 (plan allowances: founder call), PD-27..PD-34 (defaults used).
+
+### Next
+1. Founder: decide PD-26 (plan allowances vs measured run cost).
+2. Shared retrying `status.json` reader.
+3. STU-22 end conditions.
+4. DS-035 agent fills the PropertyManager.
+5. Server-start warm-ups (Blender, assembly worker).
+6. Review each `*-fixes.md` "partly" list.
+
 ## 2026-11-17 (m): All eight modules Live; design variants; image-read fix
 
 ### Done

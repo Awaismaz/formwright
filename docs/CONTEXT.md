@@ -50,7 +50,7 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Second workstation (repo at `D:\AI CAD\formwright`, Windows 11 build 26300, 2026-11-16): fresh clone with **no uv, no
   `.venv`, no `web/node_modules`** yet; Node, Git, Chrome and Edge are present. Run `dev-setup` before the gate.
 - Second workstation hardware: Xeon W-2135, 12 logical CPUs, 32 GB RAM, so keep parallel CAD-building agents at
-  about 5 or fewer. Blender is not installed here. uv installed 2026-11-16 (`~/.local/bin`).
+  about 5 or fewer. Blender 5.3 is installed (`C:/Program Files/Blender Foundation/Blender 5.3`; Mesh Studio). uv installed 2026-11-16 (`~/.local/bin`).
 - Orchestration (founder request 2026-11-16): the main session is the master; module agents work in git worktrees
   `D:\AI CAD\fw-worktrees\<module>` (branch `module/<module>`), follow `docs/AGENT_BRIEF.md`, report in
   `docs/reports/`; the master merges. Claude's built-in worktree isolation fails here (d:\ vs D:\ case), so create
@@ -59,11 +59,37 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Workflow recipes live in project skills (`.claude/skills/`, listed in `CLAUDE.md`); `.gitignore` tracks only
   `.claude/skills/` (local settings stay ignored).
 
-## Module status (2026-11-17)
+## Module status (2026-11-17, after the audit)
 All eight modules are Live: Design Studio, Drawing Studio, Image & Drawing to CAD, Assembly Studio, Manufacturing
 Advisor, Engineering Advisor, 3D Print Prep, Mesh Studio (Blender render studio). Downstream modules open on the
-current part from the Studio's **Make** tab; input modules (From Drawing) from the **Library** tab. Platform
-differentiators: similar-part search, change notices, design variants, shop handoff pack (see docs/OPPORTUNITIES.md).
+current part from the Studio's **Make** tab (with status/lock); input modules (From Drawing) from the **Library** tab.
+
+**Platform differentiators:**
+- similar-part search
+- change notices
+- design variants
+- release gate "Issue Rev A" (the single staleness rule for every module output, frozen into the shop handoff pack)
+- fix-it loop from findings
+- Hole Wizard
+- repair-don't-block
+- typed commands
+- fasten-two-parts
+- drawing round-trip check
+- run budget with a live cost meter
+
+**A full product audit ran on 2026-11-17:** `docs/reports/AUDIT_2026-11-17.md`, with area reports and `*-fixes.md` status
+files in `docs/reports/audit/`. Its remaining "partly" and "not done" items are the natural next work.
+
+**Token economics (measured):**
+- a new part costs about 260-280 tokens when the agent starts cold, about 45 when it is warm
+- a change costs about 26
+- the trial is 1,000 tokens
+- plan allowances are the founder's call (PD-26)
+
+Trial workspaces can use every Live module.
+
+**Testing note:** with several agents running, a few slow tests (mesh render, change notice, param edit) can fail
+under load and pass alone. Run the full suite on a quiet machine before deciding a failure is real.
 
 ## Where things stand
 See `docs/PUNCH_LIST.md` (DS-* rows for the Studio) and the latest `docs/SESSION_LOG.md` entry.

@@ -20,7 +20,14 @@ function useWaitlist() {
   return useQuery({ queryKey: ["waitlist"], queryFn: () => api.get<{ modules: string[] }>("/api/waitlist") });
 }
 
-export async function buy(code: string, nav: (to: string) => void) {
+/** Where to go after a successful checkout (e.g. the module opened on the part the user came from). */
+export const AFTER_CHECKOUT = "fw_after_checkout";
+export function afterCheckout(): { to: string; label: string } | null {
+  try { const v = sessionStorage.getItem(AFTER_CHECKOUT); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+
+export async function buy(code: string, nav: (to: string) => void, returnTo?: { to: string; label: string }) {
+  try { if (returnTo) sessionStorage.setItem(AFTER_CHECKOUT, JSON.stringify(returnTo)); else sessionStorage.removeItem(AFTER_CHECKOUT); } catch { /* storage unavailable */ }
   const r = await api.post<{ provider: string; url: string }>("/api/billing/checkout", { product_code: code });
   if (r.provider === "stripe") location.href = r.url; else nav(r.url);
 }
@@ -97,7 +104,7 @@ export function ModulePage() {
   const unlock = async () => {
     if (!addon) return;
     setBusy("buy");
-    try { track("upgrade_clicked", { module: code }); await buy(addon.code, nav); await refresh(); }
+    try { track("upgrade_clicked", { module: code }); await buy(addon.code, nav, { to: `/app/modules/${code}${fromProject ? `?project=${fromProject}` : ""}`, label: `Open ${m.name}` }); await refresh(); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Checkout failed"); } finally { setBusy(null); }
   };
 
