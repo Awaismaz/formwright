@@ -58,14 +58,14 @@ export interface RunEstimate extends RunRange {
 export interface CheckResult { id: string; name: string; passed: boolean; gating: boolean; detail: Record<string, unknown> }
 
 export interface BuildStatus {
-  ok?: boolean; part?: string; material?: string; error?: string; build_id?: number;
+  ok?: boolean; part?: string; material?: string; error?: string; error_plain?: string; build_id?: number;
   fingerprint?: { volume: number; bbox: number[]; faces: number; edges: number; solids: number };
   params?: Record<string, unknown>; checks?: CheckResult[]; expected?: Record<string, unknown>;
   timings_s?: Record<string, number>; traceback?: string;
   param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
-  features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean }[];
-  manual_features?: number;
+  features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean; error?: string }[];
+  manual_features?: number; manual_errors?: RepairItem[];
 }
 
 export interface ManualFeature {
@@ -92,7 +92,16 @@ export interface ManualFeature {
   plane_ref?: string;
   /** sweep: profile and path sketch node ids; loft: section sketch node ids in order */
   profile?: string; path?: string; sections?: string[]; ruled?: boolean;
+  /** fillet/chamfer: kind and direction of each picked edge; body box when picked (picks follow size changes) */
+  edge_refs?: { kind: "line" | "circle" | "other"; dir?: [number, number, number] }[]; ref_bbox?: number[];
+  /** Hole Wizard: ISO fastener hole and its placement on a face by edge distance */
+  spec?: { type: "clearance" | "tapped" | "cbore" | "csk"; size: number; fit?: string; pitch?: number; label?: string };
+  cbore?: { d: number; depth: number }; csk?: { d: number; angle: number };
+  place?: { mode: "corners" | "points"; face: { point: [number, number, number]; normal?: [number, number, number] }; x_dir?: [number, number, number]; dx?: number; dy?: number; pts?: [number, number][] };
 }
+
+/** A manual feature that no longer rebuilds (kept in the tree, flagged for repair). */
+export interface RepairItem { id: string; name: string; op: string; error: string }
 
 export interface Project {
   id: string; name: string; description: string; template: string | null; created_at: string; updated_at: string;

@@ -288,7 +288,8 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   };
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === "INPUT") return;
+      const el = e.target as HTMLElement;
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable) return; // typing elsewhere (STU-11)
       if (e.key === "Escape") { setPending([]); setPendingLine(null); setOffset(null); setTool("select"); }
       if (e.key === "Delete") del();
       if ((e.ctrlKey || e.metaKey) && e.key === "z") undo();

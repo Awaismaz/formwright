@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeftRight, Check, Info, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeftRight, Check, Info, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Button, Field, Input, Tip } from "@/components/ui";
-import { describe, edgeMid } from "@/viewer/measure";
+import { describe, edgeMid, edgeRef } from "@/viewer/measure";
+import HoleWizard, { type HoleApi, type HolePreset } from "./HoleWizard";
 import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
 export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib" | "sketch2d">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base" };
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole Wizard", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base" };
 const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole", "sweep", "loft"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
@@ -61,10 +62,19 @@ export function selectKindsFor(op: FeatureOp): Pick["kind"][] {
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
 const fmt = (v: number) => String(+v.toFixed(3));
 
-export default function FeatureManager({ project, op, editing, preset, topo, selection, manual, onSelection, onSketch, onDone, onCancel, onBusy }: {
+/** Small crosses at the points a feature was originally picked at (shown while editing or repairing it). */
+function pickMarks(e: ManualFeature, size: number): V3[][] {
+  const pts: V3[] = [...(e.edges ?? []), ...(e.faces ?? []).map(f => f.point), ...(e.op === "hole" && !e.place && e.point ? [e.point] : []), ...(e.place ? [e.place.face.point] : [])];
+  const h = size / 2;
+  return pts.flatMap(p => [[[p[0] - h, p[1], p[2]], [p[0] + h, p[1], p[2]]], [[p[0], p[1] - h, p[2]], [p[0], p[1] + h, p[2]]], [[p[0], p[1], p[2] - h], [p[0], p[1], p[2] + h]]] as V3[][]);
+}
+
+export default function FeatureManager({ project, op, editing, preset, topo, selection, manual, onSelection, onSketch, onDone, onCancel, onBusy, repair }: {
   project: Project; op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown>; topo: Topo | null; selection: Pick[];
   manual: ManualFeature[];
   onSelection: (p: Pick[]) => void; onSketch: (s: SketchPreview | null) => void; onDone: () => void; onCancel: () => void; onBusy: (b: boolean) => void;
+  /** the feature failed to rebuild: why (shown with its original picks marked, IDEA 1) */
+  repair?: string | null;
 }) {
   const e = editing;
   const pre = preset ?? {};
@@ -93,7 +103,6 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const picked = op === "pattern" ? pickedAxis(selection, topo) : null;
   const keptPick = axisKey === "pick" && !picked && e ? (e.kind === "circular" ? ax0 : e.step ? { origin: [0, 0, 0] as V3, dir: e.step } : null) : null;
   const [size, setSize] = useState(String(e?.r ?? e?.d ?? e?.t ?? (op === "hole" ? 6.6 : op === "fillet" ? 2 : op === "shell" ? 2 : 1)));
-  const [depth, setDepth] = useState(e?.depth ? String(e.depth) : "");
   const [pattern, setPattern] = useState<"none" | "linear" | "circular">(e?.pattern === "circular" ? "circular" : (e?.count ?? 1) > 1 ? "linear" : (pre.pattern as "linear" | "circular") ?? "none");
   const [count, setCount] = useState(String(e?.count ?? (pre.pattern ? 6 : 1)));
   const [step, setStep] = useState<[string, string, string]>(e?.step ? e.step.map(String) as [string, string, string] : ["20", "0", "0"]);
@@ -147,6 +156,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     return (Object.entries(PRINCIPAL).find(([, v]) => Math.abs(Math.abs(v[0] * n[0] + v[1] * n[1] + v[2] * n[2]) - Math.hypot(...n)) < 1e-9)?.[0] as MirrorPlane | undefined) ?? "face";
   });
   const [busy, setBusy] = useState(false);
+  const hole = useRef<HoleApi | null>(null);
+  const [holeReady, setHoleReady] = useState(false);
 
   const edges = selection.filter(p => p.kind === "edge") as Extract<Pick, { kind: "edge" }>[];
   const planarFaces = selection.filter(p => p.kind === "face" && topo?.faces[p.id]?.type === "plane") as Extract<Pick, { kind: "face" }>[];
@@ -175,17 +186,39 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : { def: REF_PLANES[refBase as RefPlane], name: `${refBase} Plane` };
   const refResolved = planeBase ? resolveRefPlane(planeBase.def, num(planeOff), num(planeAng), rotAxis) : null;
   const mirrorPl = op !== "mirror" ? null : mirrorPlane === "face" ? (plane ? { origin: plane.origin, normal: plane.normal } : null) : { origin: [0, 0, 0] as V3, normal: PRINCIPAL[mirrorPlane] };
+  const marks = e && (op === "fillet" || op === "chamfer" || op === "shell" || op === "draft") && !selection.length && topo
+    ? pickMarks(e, Math.max(2, Math.hypot(topo.bbox[3] - topo.bbox[0], topo.bbox[4] - topo.bbox[1], topo.bbox[5] - topo.bbox[2]) / 40)) : null;
   useEffect(() => {
-    if (op === "extrude" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind, w: num(w), h: num(h), r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 });
-    else if (op === "hole" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind: "circle", r: num(size) / 2, cx: 0, cy: 0 });
+    if (op === "hole") return; // the Hole Wizard draws its own preview
+    if (marks?.length) onSketch({ origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines: marks, cx: 0, cy: 0 });
+    else if (op === "extrude" && plane) onSketch({ origin: plane.origin, normal: plane.normal, xDir: plane.x_dir, kind, w: num(w), h: num(h), r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 });
     else if (mirrorPl) onSketch(planePreview(mirrorPl.origin, mirrorPl.normal, topo));
     else if (refResolved) onSketch(planePreview(refResolved.origin, refResolved.normal, topo));
+    else if (op === "pattern" && topo) { // instance positions of each source, before OK (STU-21)
+      const d = patDir(); const cnt = Math.min(num(patCount), 200);
+      const anchors = manual.filter(m => sources.includes(m.id)).map(m => m.point ?? m.plane?.origin).filter((x): x is V3 => !!x);
+      if (!d || !(cnt >= 2) || !anchors.length) { onSketch(null); return; }
+      const sz = Math.max(1.5, Math.hypot(topo.bbox[3] - topo.bbox[0], topo.bbox[4] - topo.bbox[1], topo.bbox[5] - topo.bbox[2]) / 50);
+      const total = num(patAngle), stepA = (Math.abs(total - 360) < 1e-9 ? total / cnt : total / Math.max(cnt - 1, 1)) * Math.PI / 180;
+      const o = axOrigin.map(num) as V3;
+      const at = (a: V3, k: number): V3 => {
+        if (patKind === "linear") { const s = num(spacing) * k; return [a[0] + d[0] * s, a[1] + d[1] * s, a[2] + d[2] * s]; }
+        const v: V3 = [a[0] - o[0], a[1] - o[1], a[2] - o[2]], th = stepA * k, c = Math.cos(th), s = Math.sin(th);
+        const kv = d[0] * v[0] + d[1] * v[1] + d[2] * v[2];
+        const cr: V3 = [d[1] * v[2] - d[2] * v[1], d[2] * v[0] - d[0] * v[2], d[0] * v[1] - d[1] * v[0]];
+        return [0, 1, 2].map(i => o[i]! + v[i]! * c + cr[i]! * s + d[i]! * kv * (1 - c)) as V3;
+      };
+      const lines: V3[][] = [];
+      for (const a of anchors) for (let k = 1; k < cnt; k++) { const q = at(a, k);
+        lines.push([[q[0] - sz, q[1], q[2]], [q[0] + sz, q[1], q[2]]], [[q[0], q[1] - sz, q[2]], [q[0], q[1] + sz, q[2]]], [[q[0], q[1], q[2] - sz], [q[0], q[1], q[2] + sz]]); }
+      onSketch({ origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines, cx: 0, cy: 0 });
+    }
     else if (op === "sweep" || op === "loft") {
       const lines = usedSketches.flatMap(id => { const s = sketchNodes.find(m => m.id === id); return s?.plane ? sketchLines({ origin: s.plane.origin, normal: s.plane.normal, x_dir: s.plane.x_dir ?? xDirFor(s.plane.normal) }, s.profiles, s.chains) : []; });
       onSketch(lines.length ? { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines, cx: 0, cy: 0 } : null);
     }
     else onSketch(null);
-  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(","), refResolved?.origin.join(","), refResolved?.normal.join(","), sketchPreviewKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [op, plane, kind, w, h, r, cx_, cy_, size, mirrorPl?.origin.join(","), mirrorPl?.normal.join(","), refResolved?.origin.join(","), refResolved?.normal.join(","), sketchPreviewKey, !!marks, selection.length, patKind, patCount, spacing, axisKey, flip, patAngle, axOrigin.join(","), sources.join(","), picked?.label]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onSketch(null), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (op === "pattern" && picked) { setAxisKey("pick"); if (patKind === "circular") setAxOrigin(picked.origin.map(fmt) as [string, string, string]); } }, [picked?.label, patKind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -203,6 +236,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "sweep" ? !!swProfile && !!swPath && swProfile !== swPath
     : op === "loft" ? loftSecs.length >= 2
     : op === "draft" ? !!neutral && (draftFaces.length > 0 || !!e?.faces?.length) && num(draftAngle) > 0
+    : op === "hole" ? holeReady
     : !!plane;
 
   // features are replayed in tree order, whatever order they were ticked in
@@ -215,11 +249,17 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         ? { kind: "circular", axis: { origin: axOrigin.map(num), dir: d }, angle: num(patAngle) }
         : { kind: "linear", step: d.map(c => c * num(spacing)) }) };
     } else if (needsEdges) {
-      const pts = edges.length && topo ? edges.map(p => edgeMid(topo, p.id)) : e?.edges;
-      f = { ...f, edges: pts, [op === "fillet" ? "r" : "d"]: num(size) };
+      // the true middle of each picked edge plus its kind/direction: exactly that edge, also after size changes
+      f = { ...f, [op === "fillet" ? "r" : "d"]: num(size),
+        ...(edges.length && topo ? { edges: edges.map(p => edgeMid(topo, p.id)), edge_refs: edges.map(p => edgeRef(topo, p.id)) } : {}) };
     } else if (op === "hole") {
-      f = { ...f, point: plane!.origin, normal: plane!.normal, d: num(size), depth: depth ? num(depth) : null };
-      if (pattern !== "none" && num(count) > 1) f = { ...f, count: num(count), ...(pattern === "circular" ? { pattern: "circular", center: center.map(num) } : { step: step.map(num) }) };
+      f = { ...f, ...hole.current!.payload() };
+      if (!e && name === TITLE.hole) { // SOLIDWORKS-like default name: "M6 Clearance Hole (4×)"
+        const sp = f.spec as { type: string; size: number } | undefined, pl = f.place as { mode: string; pts?: unknown[] } | undefined;
+        const n = pl ? (pl.mode === "corners" ? 4 : pl.pts?.length ?? 1) : 1;
+        f.name = `${sp ? `M${sp.size} ${{ clearance: "Clearance", tapped: "Tapped", cbore: "Counterbored", csk: "Countersunk" }[sp.type] ?? ""}` : `Ø${f.d}`} Hole${n > 1 ? ` (${n}×)` : ""}`;
+      }
+      if (!f.place && pattern !== "none" && num(count) > 1) f = { ...f, count: num(count), ...(pattern === "circular" ? { pattern: "circular", center: center.map(num) } : { step: step.map(num) }) };
     } else if (op === "shell") {
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
@@ -249,6 +289,18 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     finally { setBusy(false); onBusy(false); }
   };
 
+  const submitRef = useRef(submit); submitRef.current = submit;
+  const okRef = useRef(false); okRef.current = ready && !busy;
+  useEffect(() => {
+    const h = (ev: KeyboardEvent) => {
+      const t = ev.target as HTMLElement | null;
+      if (ev.key === "Escape" && !document.querySelector("[role=menu],[role=dialog]")) { ev.preventDefault(); ev.stopPropagation(); onCancel(); }
+      else if (ev.key === "Enter" && !ev.shiftKey && !(t && /^(TEXTAREA|SELECT|BUTTON)$/.test(t.tagName)) && okRef.current) { ev.preventDefault(); void submitRef.current(); }
+    };
+    addEventListener("keydown", h);
+    return () => removeEventListener("keydown", h);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const featurePicker = (label: string, verb: string) => (
     <div className="rounded-lg border border-border bg-panel2 p-2.5">
       <div className="label mb-1">{label}</div>
@@ -273,10 +325,13 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-primary-soft to-transparent px-3 py-2.5">
         <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : op === "pattern" ? (patKind === "circular" ? "Circular Pattern" : "Linear Pattern") : op === "sweep" ? (mode === "cut" ? "Swept Cut" : "Swept Boss/Base") : op === "loft" ? (mode === "cut" ? "Lofted Cut" : "Lofted Boss/Base") : TITLE[op]}</span>
-        <button onClick={submit} disabled={!ready || busy} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button>
-        <button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button>
+        <Tip content="OK (Enter)" side="bottom"><button onClick={submit} disabled={!ready || busy} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button></Tip>
+        <Tip content="Cancel (Esc)" side="bottom"><button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button></Tip>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
+        {repair && <div className="flex gap-2 rounded-lg border border-warning/50 bg-warning/10 p-2.5 text-[12px]" data-repair-note>
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <span><b>This feature no longer rebuilds:</b> {repair}. {needsEdges || op === "shell" || op === "draft" ? "The crosses mark where it was picked: click the edges or faces again, or change the size, then OK." : "Change its values or placement, then OK."}</span></div>}
         {op === "sweep" || op === "loft" ? <>
           {sketchNodes.length < 2 && <p className="flex gap-1 rounded-lg border border-warning/40 bg-warning/5 p-2.5 text-[12px]"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
             <span>{op === "sweep" ? "A sweep needs two sketches in the tree: a closed profile, and a path (an open chain of lines/arcs) that starts where the profile is, across it."
@@ -360,20 +415,22 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
             : <p className="text-[12px] text-muted">{e?.edges?.length ? `${e.edges.length} edge(s) from the original selection. Click edges to replace.` : "Click edges in the viewer (Ctrl+click for several)."}</p>)
           : op === "shell" ? (planarFaces.length ? <ul className="space-y-0.5">{planarFaces.map(p => <li key={p.id} className="text-[12px]">{topo ? describe(p, topo) : `Face ${p.id}`}</li>)}</ul>
               : <p className="text-[12px] text-muted">{e?.faces?.length ? `${e.faces.length} face(s) from the original selection.` : "Click the face(s) to open (Ctrl+click for several)."}</p>)
-          : (face && topo ? <p className="text-[12px]">{describe(face, topo)} — origin at the picked point</p>
-              : <p className="text-[12px] text-muted">{plane ? "Using the original placement. Click a planar face to move it." : "Click a planar face in the viewer. The point you click becomes the origin."}</p>)}
+          : (face && topo ? <p className="text-[12px]">{describe(face, topo)}{op === "hole" ? "" : " — origin at the picked point"}</p>
+              : <p className="text-[12px] text-muted">{plane ? "Using the original placement. Click a planar face to move it." : op === "hole" ? "Click the flat face to drill." : "Click a planar face in the viewer. The point you click becomes the origin."}</p>)}
         </div>
         <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
         {op === "fillet" && numField("Radius", size, setSize)}
         {op === "chamfer" && numField("Distance", size, setSize)}
         {op === "shell" && numField("Wall thickness", size, setSize)}
         {op === "hole" && <>
-          {numField("Diameter", size, setSize, "mm", "e.g. 6.6 for M6 clearance (ISO 273 medium)")}
-          {numField("Depth", depth, setDepth, "mm", "Leave empty for a through hole")}
-          <div><div className="label mb-1">Pattern</div>{seg<"none" | "linear" | "circular">([["none", "Single"], ["linear", "Linear"], ["circular", "Circular"]], pattern, setPattern)}</div>
-          {pattern !== "none" && numField("Instances", count, setCount, "")}
-          {pattern === "linear" && vec("Spacing (X, Y, Z mm)", step, setStep)}
-          {pattern === "circular" && <>{vec("Axis centre (X, Y, Z mm)", center, setCenter)}<p className="text-[11px] text-muted">The axis runs through this point along the face normal. Defaults to the model centre.</p></>}
+          <HoleWizard editing={e} topo={topo} preset={pre.hole as HolePreset | undefined} face={face && faceN ? { point: face.point, normal: faceN, id: face.id } : null} onSketch={onSketch}
+            onApi={a => { hole.current = a; if (a.ready !== holeReady) setHoleReady(a.ready); }} />
+          {!e?.place && (e?.count ?? 0) > 1 && <>
+            <div><div className="label mb-1">Pattern</div>{seg<"none" | "linear" | "circular">([["none", "Single"], ["linear", "Linear"], ["circular", "Circular"]], pattern, setPattern)}</div>
+            {pattern !== "none" && numField("Instances", count, setCount, "")}
+            {pattern === "linear" && vec("Spacing (X, Y, Z mm)", step, setStep)}
+            {pattern === "circular" && <>{vec("Axis centre (X, Y, Z mm)", center, setCenter)}<p className="text-[11px] text-muted">The axis runs through this point along the face normal. Defaults to the model centre.</p></>}
+          </>}
         </>}
         {op === "extrude" && <>
           {seg<"add" | "cut">([["add", "Boss (add)"], ["cut", "Cut (remove)"]], mode, setMode)}
@@ -391,8 +448,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         </>}
       </div>
       <div className="flex gap-2 border-t border-border p-3">
-        <Button className="flex-1" onClick={submit} loading={busy} disabled={!ready}>{e ? "Update" : "Add"} feature</Button>
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button className="flex-1" onClick={submit} loading={busy} disabled={!ready}>{e ? "Update" : "Add"} feature <span className="ml-1 text-[10.5px] opacity-70">Enter</span></Button>
+        <Button variant="secondary" onClick={onCancel}>Cancel <span className="ml-1 text-[10.5px] opacity-70">Esc</span></Button>
       </div>
     </div>
   );

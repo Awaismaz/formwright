@@ -139,7 +139,11 @@ export default function AppLayout() {
   const loc = useLocation();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [collapsed, setCollapsed] = useStored("fw_sidebar", false);
+  const studio = /^\/app\/projects\/[^/]+\/?$/.test(loc.pathname);
+  // the Design Studio starts with the sidebar collapsed (remembered separately) so the ribbon and viewer get the width (STU-09)
+  const [appCollapsed, setAppCollapsed] = useStored("fw_sidebar", false);
+  const [studioCollapsed, setStudioCollapsed] = useStored("fw_sidebar_studio", true);
+  const [collapsed, setCollapsed] = studio ? [studioCollapsed, setStudioCollapsed] : [appCollapsed, setAppCollapsed];
   const [modsOpen, setModsOpen] = useStored("fw_nav_modules", false);
   const [peek, setPeek] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);

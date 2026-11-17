@@ -126,6 +126,22 @@ def latest_revision(ws: Path) -> int | None:
     return max(nums) if nums else None
 
 
+def current_revision(ws: Path) -> int | None:
+    """The revision the model currently matches (after a restore it is not the latest one); used for undo."""
+    try:
+        n = int((ws / ".fw" / "current_rev").read_text(encoding="utf-8"))
+        return n if (ws / "revisions" / str(n)).is_dir() else latest_revision(ws)
+    except (OSError, ValueError):
+        return latest_revision(ws)
+
+
+def set_current_revision(ws: Path, n: int | None) -> None:
+    if n is None:
+        return
+    (ws / ".fw").mkdir(parents=True, exist_ok=True)
+    (ws / ".fw" / "current_rev").write_text(str(n), encoding="utf-8")
+
+
 # ------------------------------------------------------------------ agent sessions
 _sessions: dict[str, AgentSession] = {}
 _tasks: set[asyncio.Task[None]] = set()
@@ -153,6 +169,7 @@ def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None =
         if last.is_file() and json.loads(last.read_text())["build_id"] == json.loads(status_p.read_text())["build_id"]:
             return None
     n = (nums[-1] + 1) if nums else 1
+    parent = current_revision(ws)  # the state this revision was made from (undo goes back to it)
     d = rev_root / str(n)
     d.mkdir()
     shutil.copy2(model_p, d / "model.py")
@@ -162,8 +179,9 @@ def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None =
             shutil.copy2(ws / "out" / extra, d / extra)
     if (ws / "out" / "views.png").is_file():
         shutil.copy2(ws / "out" / "views.png", d / "views.png")
-    if cause:
-        (d / "cause.json").write_text(json.dumps({"cause": cause[:600], "kind": kind or "edit", "by": by}), encoding="utf-8")
+    (d / "cause.json").write_text(json.dumps({"cause": (cause or "")[:600] or None, "kind": kind or "edit", "by": by,
+                                              "parent": parent}), encoding="utf-8")
+    set_current_revision(ws, n)
     return n
 
 
@@ -480,6 +498,9 @@ async def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_c
 
 @router.get("/projects/{project_id}/source", response_class=PlainTextResponse)
 def project_source(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> str:
+    """The model script, for superadmin support/debugging only (users never see internals; PD parked)."""
+    if not ctx.actor.is_superadmin:
+        raise HTTPException(404)
     f = workspace_for(_project(ctx, project_id)) / "model.py"
     return f.read_text(encoding="utf-8") if f.is_file() else ""
 
@@ -610,8 +631,12 @@ async def _rebuild(p: Project, ws: Path, determinism: bool, fast: bool = False) 
     round-trip check and the 4-view render complete in the background (call schedule_finalize after snapshot)."""
     await wait_finalized(p.id)
     res = await worker.build(p.org_id, ws / "model.py", ws / "out", determinism=determinism, fast=fast)
+    if res.get("starting"):
+        raise HTTPException(503, worker.STARTING)
     if res.get("rc") == -1:
-        raise HTTPException(504, f"Rebuild failed: {res.get('error')}")
+        raise HTTPException(504, "The rebuild took too long and was stopped. Nothing was changed; try again, or "
+                                 "simplify the change." if "timed out" in str(res.get("error"))
+                            else "The geometry engine stopped unexpectedly. Nothing was changed; try again.")
     if not fast:
         t = asyncio.create_task(_render_later(p, ws))
         _tasks.add(t)
@@ -644,16 +669,82 @@ async def restore_revision(project_id: str, n: int, ctx: Ctx = Depends(verified_
     src = ws / "revisions" / str(n) / "model.py"
     if not src.is_file():
         raise HTTPException(404)
+    before = current_revision(ws)
     shutil.copy2(src, ws / "model.py")
     st = await _rebuild(p, ws, determinism=False, fast=True)  # the revision was verified when first built
     schedule_finalize(p, ws)
+    set_current_revision(ws, n)
     p.last_status = _status_summary(st)
     p.updated_at = utcnow()
     audit(ctx.db, "project.revision_restored", ctx.user, p.org_id, target=p.id, revision=n)
     ctx.db.commit()
     if s:
         s.publish({"type": "text", "text": f"Restored revision {n} and rebuilt it (no AI call)."})
-    return {"ok": True, "status_ok": st.get("ok")}
+    return {"ok": True, "status_ok": st.get("ok"), "revision": n, "rev_before": before}
+
+
+def _cause(ws: Path, n: int) -> dict[str, Any]:
+    try:
+        return json.loads((ws / "revisions" / str(n) / "cause.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _parent(ws: Path, n: int) -> int | None:
+    par = _cause(ws, n).get("parent", n - 1)
+    return par if isinstance(par, int) and par >= 1 and (ws / "revisions" / str(par)).is_dir() else None
+
+
+async def _go_to(p: Project, ws: Path, ctx: Ctx, n: int, note: str) -> dict[str, Any]:
+    s = _sessions.get(p.id)
+    if s and s.busy:
+        raise HTTPException(409, "The agent is working — try again when it finishes")
+    await wait_finalized(p.id)
+    shutil.copy2(ws / "revisions" / str(n) / "model.py", ws / "model.py")
+    st = await _rebuild(p, ws, determinism=False, fast=True)
+    schedule_finalize(p, ws)
+    set_current_revision(ws, n)
+    p.last_status = _status_summary(st)
+    p.updated_at = utcnow()
+    audit(ctx.db, "project.undo_redo", ctx.user, p.org_id, target=p.id, revision=n)
+    ctx.db.commit()
+    if s:
+        s.publish({"type": "text", "text": f"{note} (back to revision {n}, no AI call)."})
+    return st
+
+
+@router.post("/projects/{project_id}/undo")
+async def undo(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Ctrl+Z: go back to the revision the current one was made from (no AI, no tokens)."""
+    p = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403)
+    ws = workspace_for(p)
+    cur = current_revision(ws)
+    back = _parent(ws, cur) if cur else None
+    if back is None:
+        raise HTTPException(409, "Nothing to undo")
+    why = _cause(ws, cur).get("cause") or f"revision {cur}"
+    await _go_to(p, ws, ctx, back, f"Undone: {why}")
+    return {"ok": True, "revision": back, "undone": cur, "why": why}
+
+
+class RedoIn(BaseModel):
+    to: int
+
+
+@router.post("/projects/{project_id}/redo")
+async def redo(project_id: str, body: RedoIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Ctrl+Y: re-apply a revision that was undone, if the model is still where the undo left it."""
+    p = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403)
+    ws = workspace_for(p)
+    if not (ws / "revisions" / str(body.to)).is_dir() or _parent(ws, body.to) != current_revision(ws):
+        raise HTTPException(409, "Nothing to redo: the model changed since the undo")
+    why = _cause(ws, body.to).get("cause") or f"revision {body.to}"
+    await _go_to(p, ws, ctx, body.to, f"Redone: {why}")
+    return {"ok": True, "revision": body.to, "why": why}
 
 
 class ParamsIn(BaseModel):
@@ -700,8 +791,9 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
             raise HTTPException(422, f"{name} must be a whole number")
         meta = (_read_status(ws).get("param_meta") or {}).get(name) or {}
         if "min" in meta and val < meta["min"] or "max" in meta and val > meta["max"]:
-            raise HTTPException(422, f"{name} must be between {meta.get('min', '−∞')} and {meta.get('max', '∞')}"
-                                     f"{' ' + meta['unit'] if meta.get('unit') else ''} (limit set by the design)")
+            raise HTTPException(422, f"{meta.get('label') or name} must be between {meta.get('min', '−∞')} and "
+                                     f"{meta.get('max', '∞')}{' ' + meta['unit'] if meta.get('unit') else ''} "
+                                     "(limit set by the design)")
         if float(val) == float(editable[name]):
             continue
         lit = str(int(val)) if was_int else (repr(float(val)) if not float(val).is_integer() else f"{float(val):.1f}")
@@ -712,11 +804,16 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         changes[name] = {"from": editable[name], "to": val}
     if not changes:
         return {"ok": True, "changed": {}}
+    from aicad.platform.plain import build_error
+    from aicad.platform.routers.studio import stamp_manual_refs
+
     await wait_finalized(p.id)  # never snapshot while background exports are writing
+    before = current_revision(ws)
     backup = ws / ".out_backup"
     shutil.rmtree(backup, ignore_errors=True)
     if (ws / "out").is_dir():
         shutil.copytree(ws / "out", backup)
+    new = stamp_manual_refs(new, ws)  # hand-picked edges/faces follow the body when it changes size
     f.write_text(new, encoding="utf-8")
     st = await _rebuild(p, ws, determinism=False, fast=True)
     if not st.get("ok"):
@@ -724,9 +821,9 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         if backup.is_dir():
             shutil.rmtree(ws / "out", ignore_errors=True)
             backup.rename(ws / "out")
-        reason = st.get("error") or ", ".join(c["id"] for c in st.get("checks", []) if c["gating"] and not c["passed"])
-        raise HTTPException(422, f"That change failed the geometry checks ({reason}); the previous model was "
-                                 "restored. Ask the design agent if the change needs a design update.")
+        reason = build_error(st.get("error"), st.get("checks"))
+        raise HTTPException(422, f"That change couldn't be built: {reason}. The previous model was restored. "
+                                 "Ask the design agent if the change needs a design update.")
     shutil.rmtree(backup, ignore_errors=True)
     p.last_status = _status_summary(st)
     p.builds += 1
@@ -737,10 +834,14 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     schedule_finalize(p, ws, rev)
     audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
     ctx.db.commit()
+    meta_all = st.get("param_meta") or {}
+    repairs = st.get("manual_errors") or []
     if s:
         s.publish({"type": "text", "text": "Parameters updated without AI: " + ", ".join(
-            f"`{k}` {v['from']:g} → {v['to']:g}" for k, v in changes.items()) + f" (revision {rev})."})
-    return {"ok": True, "changed": changes, "revision": rev, "build_s": st.get("timings_s", {}).get("total_s")}
+            f"{(meta_all.get(k) or {}).get('label') or k} {v['from']:g} → {v['to']:g}" for k, v in changes.items())
+            + f" (revision {rev})." + (f" {len(repairs)} feature(s) need repair in the feature tree." if repairs else "")})
+    return {"ok": True, "changed": changes, "revision": rev, "rev_before": before, "repairs": repairs,
+            "build_s": st.get("timings_s", {}).get("total_s")}
 
 
 @router.post("/projects/{project_id}/agent/chat")

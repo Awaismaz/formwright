@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Wrench } from "lucide-react";
 import { toast } from "sonner";
@@ -25,6 +26,9 @@ export default function Toolbox({ project, initial, onClose, onDone }: {
   const [code, setCode] = useState<string | null>(initial?.code ?? null);
   const [vals, setVals] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const nav = useNavigate();
+  // SOLIDWORKS users expect a Toolbox part to be a part of its own, not to overwrite the one being designed (STU-16)
+  const [target, setTarget] = useState<"new" | "replace">(project.builds > 0 ? "new" : "replace");
   const item = items.find(i => i.code === code) ?? items[0];
   const cats = useMemo(() => [...new Set(items.map(i => i.category))], [items]);
 
@@ -39,17 +43,23 @@ export default function Toolbox({ project, initial, onClose, onDone }: {
     setBusy(true);
     try {
       const params = Object.fromEntries(item.params.map(p => [p.name, Number(vals[p.name])]));
-      const r = await api.post<{ title: string; build_s: number }>(`/api/projects/${project.id}/toolbox`, { code: item.code, params });
+      const pid = target === "new" ? (await api.post<{ id: string }>("/api/projects", { name: item.name })).id : project.id;
+      const r = await api.post<{ title: string; build_s: number }>(`/api/projects/${pid}/toolbox`, { code: item.code, params });
       track("toolbox_used", { code: item.code });
-      toast.success(`${r.title} created · ${r.build_s ?? "–"} s`); onDone();
+      if (target === "new") { await api.patch(`/api/projects/${pid}`, { name: r.title }).catch(() => {}); toast.success(`${r.title} created as a new part · ${r.build_s ?? "–"} s`); onClose(); nav(`/app/projects/${pid}`); }
+      else { toast.success(`${r.title} created · ${r.build_s ?? "–"} s`); onDone(); }
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not create the component"); }
     finally { setBusy(false); }
   };
 
   return (
     <Modal open onOpenChange={v => !v && onClose()} wide title={<span className="flex items-center gap-2"><Wrench className="h-4 w-4 text-primary" />Toolbox</span>}
-      description="Standard components from repeatable generators — the same inputs always produce the identical model. The current model is kept in Revisions."
-      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={insert} disabled={!item}>{project.builds > 0 ? "Replace model with component" : "Create component"}</Button></>}>
+      description="Standard components from repeatable generators — the same inputs always produce the identical model."
+      footer={<>
+        {project.builds > 0 && <div className="mr-auto inline-flex overflow-hidden rounded border border-border text-[12.5px]" role="group" aria-label="Where to create it">
+          {([["new", "As a new part"], ["replace", "Replace this model"]] as const).map(([k, l]) => <button key={k} onClick={() => setTarget(k)} className={cx("px-2.5 py-1", target === k ? "bg-primary text-white" : "text-muted hover:bg-text/5")}>{l}</button>)}</div>}
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button loading={busy} onClick={insert} disabled={!item}>{target === "replace" && project.builds > 0 ? "Replace model (kept in Revisions)" : "Create part"}</Button></>}>
       {tb.isLoading ? <div className="py-10 text-center text-sm text-muted">Loading…</div> : (
         <div className="grid gap-4 md:grid-cols-[220px_1fr]">
           <div className="max-h-[420px] space-y-3 overflow-y-auto pr-1">

@@ -17,6 +17,7 @@ import type { TbMatch } from "./Toolbox";
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
   | { kind: "user"; text: string } | { kind: "agent"; text: string } | { kind: "error"; text: string }
+  | { kind: "noai"; lines: string[] }
   | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string; ids?: string[]; done?: number }
   | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] };
 
@@ -29,7 +30,14 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
   switch (ev.type) {
     case "reset": return [];
     case "user": return [...items, { kind: "user", text: ev.text }];
-    case "text": return [...items, { kind: "agent", text: ev.text }];
+    case "text": {
+      // edits made without AI (tree, parameters, restore) fold into one quiet, expandable line (STU-19)
+      if (NO_AI.test(ev.text)) {
+        const last = items[items.length - 1];
+        return last?.kind === "noai" ? [...items.slice(0, -1), { kind: "noai", lines: [...last.lines, ev.text] }] : [...items, { kind: "noai", lines: [ev.text] }];
+      }
+      return [...items, { kind: "agent", text: ev.text }];
+    }
     case "error": return [...items, { kind: "error", text: ev.text }];
     case "tool": {
       // Consecutive identical steps without a result ("Updating the design" ×5) collapse into one line with a count.
@@ -50,6 +58,27 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
 }
 
 interface Att { name: string; mime: string; data_b64: string; url: string }
+const NO_AI = /(without AI|no AI call|no AI used)/;
+/** An edit request on an existing model (never offer to replace it with a Toolbox part). */
+const EDIT = /\b(add|adds|change|make (it|the)|chamfer|fillet|round|drill|cut|move|increase|decrease|reduce|remove|delete|modify|extend|shorten|thicken|widen|deepen|enlarge|resize|mirror|pattern|shell|edit|update|fix|replace)\b/i;
+
+function NoAi({ lines }: { lines: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (lines.length === 1) return <div className="px-1 text-[11.5px] text-muted">{lines[0]}</div>;
+  return (
+    <div className="px-1 text-[11.5px] text-muted">
+      <button onClick={() => setOpen(!open)} className="hover:text-text">{open ? "▾" : "▸"} {lines.length} edits without AI</button>
+      {open && <ul className="ml-3 mt-0.5 space-y-0.5">{lines.map((l, i) => <li key={i}>{l}</li>)}</ul>}
+    </div>);
+}
+
+/** Elapsed time while the agent works, so slow is distinguishable from stuck (STU-17). */
+function Elapsed({ since }: { since: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, []);
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return <span className="tabular-nums">{Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}</span>;
+}
 
 async function toAtt(f: File): Promise<Att> {
   if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) throw new Error(`${f.name}: use PNG, JPEG, WebP or GIF`);
@@ -106,7 +135,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   const { me } = useSession();
   const nav = useNavigate();
   const [items, setItems] = useState<ChatItem[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusyS] = useState(false);
+  const [since, setSince] = useState(0);
+  const setBusy = (b: boolean) => { setBusyS(prev => { if (b && !prev) setSince(Date.now()); return b; }); };
   const [text, setText] = useState(() => { try { return sessionStorage.getItem(`fw_starter_${project.id}`) ?? ""; } catch { return ""; } });
   const [atts, setAtts] = useState<Att[]>([]);
   const [drag, setDrag] = useState(false);
@@ -125,7 +156,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
       if (ev.type === "meter") { setMeter(ev); return; }
       if (ev.type === "hello") setBusy(ev.busy);
       if (ev.type === "busy") { setBusy(ev.value); if (!ev.value) setMeter(null); }
-      if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Feature|Created|Imported|Rebuilt)/.test(ev.text))) onActivity();
+      if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Feature|Created|Imported|Rebuilt|Undone|Redone)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
     };
     return () => es.close();
@@ -149,7 +180,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     let t = (override ?? text).trim(); if ((!t && !atts.length) || busy) return;
     if (!t) t = "Model the part shown in the attached reference image(s).";
     // A standard component? Offer the Toolbox (repeatable generator) — the user decides; the agent stays available.
-    if (!override && !skipToolbox && !selection.length && !features.length && !atts.length && onToolbox) {
+    const hasModel = (project.builds ?? 0) > 0;
+    if (!override && !skipToolbox && !selection.length && !features.length && !atts.length && onToolbox && !(hasModel && EDIT.test(t))) {
       try {
         const m = await api.post<{ matches: TbMatch[] }>("/api/toolbox/match", { prompt: t });
         if (m.matches.length) { setOffer({ prompt: t, matches: m.matches }); return; }
@@ -159,7 +191,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     if (features.length && !override) t += "\n\n[Selected feature(s) in the feature tree: " + features.map(f => `“${f}”`).join(", ") + "]";
     try {
       await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
-      if (!override || skipToolbox) { if (!override) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
+      if (!override || skipToolbox) { if (!override || skipToolbox) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
@@ -198,6 +230,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;
           if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={n === items.length - 1 && !busy} onSubmit={a => send(a)} />;
           if (i.kind === "error") return <div key={n} className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-danger">{i.text}</div>;
+          if (i.kind === "noai") return <NoAi key={n} lines={i.lines} />;
           if (i.kind === "tool") return (
             <div key={n} className="flex items-start gap-2 px-1 text-[12px] text-muted">
               <span className="mt-0.5">{i.state === "run" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : i.state === "ok" ? <Check className="h-3.5 w-3.5 text-success" /> : <X className="h-3.5 w-3.5 text-danger" />}</span>
@@ -212,7 +245,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
                 <>·<button onClick={() => undo(i.ev.rev_before as number)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><Undo2 className="h-3 w-3" />Undo this change</button></>}
             </div>);
         })}
-        {busy && <div className="flex items-center gap-2 px-1 text-[12px] text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working…</div>}
+        {busy && <div className="flex items-center gap-2 px-1 text-[12px] text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working… {since > 0 && <Elapsed since={since} />}
+          {(() => { const t = [...items].reverse().find(x => x.kind === "tool"); return t && t.kind === "tool" && t.state === "run" ? <span className="truncate text-muted">· {t.brief}</span> : null; })()}</div>}
       </div>
       <div className={cx("border-t border-border p-3", drag && "bg-primary-soft")} data-tour="prompt"
         onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
@@ -241,9 +275,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
                   <button onClick={() => setAtts(atts.filter((_, j) => j !== i))} className="absolute -right-1.5 -top-1.5 rounded-full bg-chrome p-0.5 text-white" aria-label="Remove image"><X className="h-3 w-3" /></button>
                 </span>))}
             </div>)}
-          <textarea value={text} onChange={e => setText(e.target.value)} rows={4} disabled={busy}
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={4}
             onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
-            onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } }}
+            onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) { e.preventDefault(); send(); } }}
             placeholder={features.length ? "Say what to change, e.g. “make these Ø12” or “move it 10 mm towards the edge”" : selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
             className="input h-auto min-h-[84px] resize-y py-2 leading-relaxed" />
           <div className="mt-2 flex items-center gap-2">
@@ -267,7 +301,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
               <button key={m.code} onClick={() => { setOffer(null); setText(""); onToolbox?.(m); }}
                 className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 text-left hover:border-primary hover:bg-primary-soft">
                 <span><span className="block text-[13.5px] font-medium">Use Toolbox: {m.title}</span>
-                  <span className="text-[12px] text-muted">{m.standard}{m.prefilled.length ? ` · sizes read from your request: ${m.prefilled.join(", ")}` : " · default sizes, adjust before creating"}</span></span>
+                  <span className="text-[12px] text-muted">{[m.standard !== "—" ? m.standard : null, m.prefilled.length ? `sizes read from your request: ${m.prefilled.join(", ")}` : "default sizes, adjust before creating"].filter(Boolean).join(" · ")}</span>
+                  {(project.builds ?? 0) > 0 && <span className="mt-0.5 block text-[11.5px] font-medium text-warning">Replaces the current model (it stays in Revisions)</span>}</span>
                 <span className="text-[12px] font-medium text-primary">Choose →</span>
               </button>))}
           </div>

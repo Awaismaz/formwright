@@ -26,6 +26,9 @@ def summarize(status: dict[str, Any]) -> str:
         d = {k: v for k, v in c["detail"].items() if k not in ("original", "reimported")}
         tag = "PASS" if c["passed"] else ("INFO" if not c["gating"] else "FAIL")
         lines.append(f"[{tag}] {c['id']} {c['name']}: {json.dumps(d, default=str)}")
+    for m in status.get("manual_errors") or []:
+        lines.append(f"[REBUILD ERROR] user's manual feature '{m['name']}' was skipped: {m['error']}. "
+                     "Keep the manual block unchanged unless the user asks; tell the user it needs repair.")
     fp = status.get("fingerprint", {})
     lines.append(f"Measured: bbox {fp.get('bbox')} mm, volume {fp.get('volume')} mm3, "
                  f"solids {fp.get('solids')}, faces {fp.get('faces')}")

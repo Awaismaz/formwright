@@ -107,6 +107,11 @@ export class CadViewer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.15;
+    // SOLIDWORKS-style mouse: middle-drag rotates (left-drag too, for trackpads), Ctrl+middle or right-drag pans,
+    // and the wheel zooms about the cursor (STU-12).
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+    this.controls.zoomToCursor = true;
+    this.buildTriad();
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a93a3, 1.35));
     const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(2, -3, 5); this.scene.add(key);
     const fill = new THREE.DirectionalLight(0xffffff, 0.55); fill.position.set(-4, 3, -2); this.scene.add(fill);
@@ -130,7 +135,7 @@ export class CadViewer {
     dom.addEventListener("pointerdown", this.onDown);
     dom.addEventListener("pointerup", this.onUp);
     dom.addEventListener("pointerleave", () => { this.clearHover(); this.events.onHover?.(null); });
-    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); this.renderTriad(); });
   }
 
   dispose() {
@@ -233,6 +238,26 @@ export class CadViewer {
 
   setView(name: ViewName) {
     const [d, up] = VIEW_DIRS[name];
+    this.lookFrom(d, up);
+  }
+
+  /** Zoom to fit the whole model, keeping the current view direction (CAD "Zoom to Fit", F). */
+  zoomToFit() {
+    const c = this.box.getCenter(new THREE.Vector3());
+    const shift = c.clone().sub(this.controls.target);
+    for (const k of [this.persp, this.ortho]) k.position.add(shift);
+    this.controls.target.copy(c); this.controls.update();
+    this.ortho.zoom = 1; this.updateOrthoFrustum();
+    this.fitProjected();
+  }
+
+  /** "Normal To": look straight at a planar face (its outward normal points at the viewer). */
+  normalTo(n: V3) {
+    const up: V3 = Math.abs(n[2]) > 0.9 ? [0, Math.sign(n[2]), 0] : [0, 0, 1];
+    this.lookFrom(n, up);
+  }
+
+  private lookFrom(d: V3, up: V3) {
     const dir = new THREE.Vector3(...d).normalize();
     const c = this.box.getCenter(new THREE.Vector3());
     const vHalf = THREE.MathUtils.degToRad(this.persp.fov / 2);
@@ -298,6 +323,33 @@ export class CadViewer {
     this.controls.object = this.camera;
     this.camera.lookAt(target);
     this.controls.update();
+  }
+
+  // ---------------------------------------------------------------- orientation triad (bottom-left)
+  private triScene = new THREE.Scene();
+  private triCam = new THREE.OrthographicCamera(-1.7, 1.7, 1.7, -1.7, -10, 10);
+  private buildTriad() {
+    const label = (t: string, color: string) => {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const g = c.getContext("2d")!; g.fillStyle = color; g.font = "bold 44px Inter, Arial, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(t, 32, 34);
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+      s.scale.set(0.55, 0.55, 1); return s;
+    };
+    for (const [d, color, css, t] of [[[1, 0, 0], 0xd03a2f, "#d03a2f", "X"], [[0, 1, 0], 0x2f9a4e, "#2f9a4e", "Y"], [[0, 0, 1], 0x2f62d0, "#2f62d0", "Z"]] as [V3, number, string, string][]) {
+      const v = new THREE.Vector3(...d);
+      this.triScene.add(new THREE.ArrowHelper(v, new THREE.Vector3(), 1, color, 0.28, 0.16));
+      const l = label(t, css); l.position.copy(v.multiplyScalar(1.35)); this.triScene.add(l);
+    }
+  }
+  private renderTriad() {
+    const r = this.renderer, size = 76, el = this.el.getBoundingClientRect();
+    const target = this.controls.target;
+    this.triCam.position.copy(this.camera.position).sub(target).normalize().multiplyScalar(5);
+    this.triCam.up.copy(this.camera.up); this.triCam.lookAt(0, 0, 0);
+    const ac = r.autoClear; r.autoClear = false;
+    r.setScissorTest(true); r.setScissor(6, 6, size, size); r.setViewport(6, 6, size, size);
+    r.clearDepth(); r.render(this.triScene, this.triCam);
+    r.setScissorTest(false); r.setViewport(0, 0, Math.max(el.width, 1), Math.max(el.height, 1)); r.autoClear = ac;
   }
 
   // ---------------------------------------------------------------- display

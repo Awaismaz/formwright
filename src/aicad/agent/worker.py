@@ -6,10 +6,14 @@ organization), recycled every MAX_JOBS builds, on timeout and on crash. Requests
 This is a performance measure, NOT a security boundary: model scripts still run as Python in this
 process (same guarantees as before: secret-free env, import tripwire, timeout). See RISKS R-SEC-05.
 
-Protocol (one JSON object per line):
-  parent -> worker  {"op": "build", "script": str, "out": str, "determinism": bool}
-                    {"op": "render", "stl": str, "png": str, "title": str}
-  worker -> parent  {"ok": bool, "rc": int, "error": str | None, "elapsed_s": float}
+Protocol (one JSON object per line; every request carries an "id" that its reply echoes):
+  worker -> parent  {"ready": true}                                       once, after start-up
+  parent -> worker  {"id": int, "op": "build", "script": str, "out": str, "determinism": bool}
+                    {"id": int, "op": "render", "stl": str, "png": str, "title": str}
+  worker -> parent  {"id": int, "ok": bool, "rc": int, "error": str | None, "elapsed_s": float}
+
+The parent drops any line whose id doesn't match the request it is waiting for (a late "ready", or the reply to a
+request that already timed out), and a worker that is slow to start or times out is killed, never reused (STU-04).
 """
 
 from __future__ import annotations
@@ -90,33 +94,61 @@ def serve() -> None:
             resp["elapsed_s"] = round(time.perf_counter() - t0, 3)
         except Exception as e:  # noqa: BLE001 - report, keep serving
             resp = {"ok": False, "rc": 1, "error": f"{type(e).__name__}: {e}"}
+        try:
+            resp["id"] = json.loads(line).get("id")
+        except (ValueError, AttributeError):
+            resp["id"] = None
         proto.write(json.dumps(resp) + "\n")
 
 
 # ----------------------------------------------------------------------------- parent side
+STARTING = "The geometry engine is starting up. Try again in a moment."
+
+
+class WorkerUnavailable(RuntimeError):
+    """The build worker could not be started (slow machine, crash). Plain message, safe to show."""
+
+
 class Worker:
-    def __init__(self) -> None:
+    START_TIMEOUT_S = 180.0  # a cold start on a loaded machine can take minutes
+
+    def __init__(self, cmd: list[str] | None = None) -> None:
         self.proc: asyncio.subprocess.Process | None = None
         self.jobs = 0
         self.lock = asyncio.Lock()
+        self.cmd = cmd or [sys.executable, "-I", "-m", "aicad.agent.worker"]
+        self._seq = 0
 
     async def _start(self) -> None:
         self.proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-I", "-m", "aicad.agent.worker", env=child_env(),
+            *self.cmd, env=child_env(),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         self.jobs = 0
         assert self.proc.stdout is not None
-        line = await asyncio.wait_for(self.proc.stdout.readline(), 120)
-        if not line:
-            raise RuntimeError("build worker failed to start")
+        try:
+            line = await asyncio.wait_for(self.proc.stdout.readline(), self.START_TIMEOUT_S)
+            if not line or not json.loads(line).get("ready"):
+                raise WorkerUnavailable(STARTING)
+        except (TimeoutError, ValueError, WorkerUnavailable):
+            await self.stop()  # never reuse a half-started worker: its late "ready" would be read as a reply
+            raise WorkerUnavailable(STARTING) from None
 
     async def stop(self) -> None:
         if self.proc and self.proc.returncode is None:
-            self.proc.kill()
+            try:
+                self.proc.kill()
+            except ProcessLookupError:
+                pass
             await self.proc.wait()
         self.proc = None
 
-    async def request(self, req: dict[str, Any], timeout: float) -> dict[str, Any]:
+    async def warm(self) -> None:
+        """Start the worker ahead of the first build (the Studio calls this when a project opens)."""
+        async with self._guard():
+            if self.proc is None or self.proc.returncode is not None:
+                await self._start()
+
+    def _guard(self) -> asyncio.Lock:
         loop = asyncio.get_running_loop()
         if getattr(self, "_loop", None) is not loop:  # process pipes are bound to the loop that created them
             self._loop = loop
@@ -127,23 +159,43 @@ class Worker:
                 except ProcessLookupError:
                     pass
             self.proc = None
-        async with self.lock:
-            if self.proc is None or self.proc.returncode is not None or self.jobs >= MAX_JOBS:
-                await self.stop()
-                await self._start()
+        return self.lock
+
+    async def request(self, req: dict[str, Any], timeout: float) -> dict[str, Any]:
+        async with self._guard():
+            try:
+                if self.proc is None or self.proc.returncode is not None or self.jobs >= MAX_JOBS:
+                    await self.stop()
+                    await self._start()
+            except (WorkerUnavailable, OSError, RuntimeError, TimeoutError):
+                await self.stop()  # also for subclasses with their own _start: never keep a half-started worker
+                return {"ok": False, "rc": -1, "error": STARTING, "starting": True}
             assert self.proc and self.proc.stdin and self.proc.stdout
             self.jobs += 1
+            self._seq += 1
+            rid = self._seq
+            deadline = time.monotonic() + timeout
             try:
-                self.proc.stdin.write((json.dumps(req) + "\n").encode())
+                self.proc.stdin.write((json.dumps({**req, "id": rid}) + "\n").encode())
                 await self.proc.stdin.drain()
-                line = await asyncio.wait_for(self.proc.stdout.readline(), timeout)
+                while True:
+                    line = await asyncio.wait_for(self.proc.stdout.readline(), max(0.0, deadline - time.monotonic()))
+                    if not line:
+                        await self.stop()
+                        return {"ok": False, "rc": -1, "error": "build worker crashed"}
+                    try:
+                        resp = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(resp, dict) or resp.get("ready"):
+                        continue
+                    # module workers (drawing, assembly) don't echo ids; their replies carry no "id" at all
+                    if resp.get("id") == rid or "id" not in resp:
+                        return resp
+                    # anything else (a late "ready", a reply to a request that already timed out) is dropped
             except (TimeoutError, ConnectionError, BrokenPipeError):
                 await self.stop()
                 return {"ok": False, "rc": -1, "error": f"timed out after {timeout:.0f} s"}
-            if not line:
-                await self.stop()
-                return {"ok": False, "rc": -1, "error": "build worker crashed"}
-            return json.loads(line)
 
 
 _workers: dict[str, Worker] = {}
@@ -177,6 +229,13 @@ async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float
 
 async def diff(key: str, a_step: Path, b_step: Path, out: Path, timeout: float = 180) -> dict[str, Any]:
     return await get_worker(key).request({"op": "diff", "a": str(a_step), "b": str(b_step), "out": str(out)}, timeout)
+
+
+async def warm(key: str) -> None:
+    try:
+        await get_worker(key).warm()
+    except (WorkerUnavailable, OSError):
+        pass
 
 
 async def shutdown_all() -> None:

@@ -45,11 +45,34 @@ export function agentDescriptor(p: Pick, t: Topo): string {
   return `${fc.type} face area ${f(fc.area, 2)} mm², ${where}`;
 }
 
+/** The point halfway along an edge (by arc length along its polyline). For a straight edge: the average of its
+ *  two ends — never an end vertex, which would also touch the neighbouring edges (STU-01). */
 export function edgeMid(t: Topo, id: number): V3 {
   const p = t.edges[id]!.pts;
   const n = p.length / 3;
-  const i = Math.floor(n / 2) * 3;
-  return [p[i]!, p[i + 1]!, p[i + 2]!];
+  if (n < 2) return [p[0]!, p[1]!, p[2]!];
+  const at = (i: number): V3 => [p[3 * i]!, p[3 * i + 1]!, p[3 * i + 2]!];
+  const seg: number[] = [];
+  let total = 0;
+  for (let i = 1; i < n; i++) { const l = len(sub(at(i), at(i - 1))); seg.push(l); total += l; }
+  let half = total / 2;
+  for (let i = 1; i < n; i++) {
+    const l = seg[i - 1]!;
+    if (half <= l || i === n - 1) {
+      const a = at(i - 1), b = at(i), k = l > 0 ? Math.min(1, half / l) : 0;
+      return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+    }
+    half -= l;
+  }
+  return at(0);
+}
+
+/** What kind of edge was picked (line direction / circle axis), so the kernel re-finds exactly that edge. */
+export function edgeRef(t: Topo, id: number): { kind: "line" | "circle" | "other"; dir?: V3 } {
+  const e = t.edges[id]!;
+  if (e.type === "line") { const d = lineDir(t, id); return d ? { kind: "line", dir: d } : { kind: "line" }; }
+  if (e.type === "circle" && e.axis) return { kind: "circle", dir: e.axis };
+  return { kind: "other" };
 }
 
 function pointOf(p: Pick): V3 { return p.point; }
@@ -57,7 +80,7 @@ function pointOf(p: Pick): V3 { return p.point; }
 function lineDir(t: Topo, id: number): V3 | null {
   const e = t.edges[id]!;
   if (e.type !== "line") return null;
-  return norm(sub(e.pts.slice(3, 6) as V3, e.pts.slice(0, 3) as V3));
+  return norm(sub(e.pts.slice(-3) as V3, e.pts.slice(0, 3) as V3));
 }
 
 export function measure(sel: Pick[], t: Topo): MeasureResult | null {
