@@ -5,6 +5,7 @@
  */
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
@@ -62,6 +63,14 @@ export class AssemblyViewer {
   private fitted = false;
   onHover?: (p: AsmPick | null) => void;
   onClick?: (p: AsmPick | null, e: PointerEvent) => void;
+  /** Drag gizmo released: the instance's new rigid placement (3x4, row-major) for the server to re-solve. */
+  onDrag?: (id: string, T: number[]) => void;
+  private tc: TransformControls;
+  private tcHelper: THREE.Object3D;
+  private pivot = new THREE.Object3D();
+  private pivotStart = new THREE.Matrix4();
+  private dragId: string | null = null;
+  private dragBase = new THREE.Matrix4();
 
   constructor(private el: HTMLElement, dark: boolean) {
     this.dark = dark;
@@ -84,12 +93,58 @@ export class AssemblyViewer {
     dom.addEventListener("pointerdown", this.onDown);
     dom.addEventListener("pointerup", this.onUp);
     dom.addEventListener("pointerleave", () => { this.drop("hover"); this.onHover?.(null); });
+    this.tc = new TransformControls(this.camera, dom);
+    this.tc.setRotationSnap(THREE.MathUtils.degToRad(15));
+    this.tc.setSize(0.8);
+    this.tcHelper = this.tc.getHelper();
+    this.tcHelper.visible = false;
+    this.scene.add(this.pivot, this.tcHelper);
+    this.tc.addEventListener("dragging-changed", e => {
+      const dragging = !!e.value;
+      this.controls.enabled = !dragging;
+      if (dragging) { this.pivot.updateMatrixWorld(true); this.pivotStart.copy(this.pivot.matrixWorld); return; }
+      const o = this.dragId ? this.insts.get(this.dragId) : undefined;
+      if (!o) return;
+      const T = this.dragDelta().multiply(this.dragBase);
+      const m = T.elements; // column-major
+      this.onDrag?.(o.id, [m[0]!, m[4]!, m[8]!, m[12]!, m[1]!, m[5]!, m[9]!, m[13]!, m[2]!, m[6]!, m[10]!, m[14]!]);
+    });
+    this.tc.addEventListener("objectChange", () => {
+      const o = this.dragId ? this.insts.get(this.dragId) : undefined;
+      if (!o) return;
+      o.group.matrix.copy(this.dragDelta().multiply(this.dragBase));
+      o.group.matrixWorldNeedsUpdate = true;
+    });
     this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); });
+  }
+
+  private dragDelta(): THREE.Matrix4 {
+    this.pivot.updateMatrixWorld(true);
+    return this.pivot.matrixWorld.clone().multiply(this.pivotStart.clone().invert());
+  }
+
+  /** Show a move (translate) or rotate gizmo on one instance, at its centre; null hides it. Free directions only
+   * stay where they are dropped: the server re-solves the mates after every drop. */
+  setGizmo(id: string | null, mode: "translate" | "rotate" = "translate") {
+    const o = id ? this.insts.get(id) : undefined;
+    if (!o || !o.visible || this.explodeF > 1e-6) {
+      this.tc.detach(); this.tcHelper.visible = false; this.dragId = null; return;
+    }
+    if (this.tc.dragging) return;
+    this.dragId = o.id;
+    this.dragBase.copy(o.base);
+    const c = new THREE.Box3().setFromObject(o.group).getCenter(new THREE.Vector3());
+    this.pivot.position.copy(c); this.pivot.quaternion.identity(); this.pivot.scale.set(1, 1, 1);
+    this.pivot.updateMatrixWorld(true);
+    this.tc.setMode(mode);
+    this.tc.attach(this.pivot);
+    this.tcHelper.visible = true;
   }
 
   dispose() {
     this.renderer.setAnimationLoop(null);
     this.ro.disconnect();
+    this.tc.detach(); this.tc.dispose();
     this.controls.dispose();
     for (const p of this.parts.values()) { p.faces.dispose(); p.edges.dispose(); }
     this.renderer.dispose();
@@ -437,6 +492,7 @@ export class AssemblyViewer {
   private onDown = (e: PointerEvent) => { this.downAt = [e.clientX, e.clientY]; };
   private onUp = (e: PointerEvent) => {
     if (!this.downAt || e.button !== 0) return;
+    if (this.tc.axis !== null || this.tc.dragging) { this.downAt = null; return; }  // a gizmo click is not a pick
     const moved = Math.hypot(e.clientX - this.downAt[0], e.clientY - this.downAt[1]) > 4;
     this.downAt = null;
     if (moved) return;

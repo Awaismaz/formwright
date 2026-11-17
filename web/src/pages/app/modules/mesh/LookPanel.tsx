@@ -11,7 +11,7 @@ const SHORT: Record<string, string> = {
   pla: "PLA satin", clay: "Studio clay",
 };
 
-function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+export function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
     <section className="border-b border-border px-4 py-4">
       <div className="mb-2.5 flex items-center justify-between"><div className="label">{title}</div>{aside}</div>
@@ -20,7 +20,7 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
   );
 }
 
-function Seg<T extends string>({ value, options, onChange, name }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void; name: string }) {
+export function Seg<T extends string>({ value, options, onChange, name }: { value: T; options: { id: T; label: string }[]; onChange: (v: T) => void; name: string }) {
   return (
     <div role="radiogroup" aria-label={name} className="flex flex-wrap gap-1 rounded-md bg-panel2 p-1">
       {options.map(o => (
@@ -33,16 +33,18 @@ function Seg<T extends string>({ value, options, onChange, name }: { value: T; o
 }
 
 /** Metallic-looking swatch: the finish colour with a soft highlight, so metals read differently from plastics. */
-function Swatch({ hex, metal, size = 28 }: { hex: string; metal: boolean; size?: number }) {
+export function Swatch({ hex, metal, size = 28 }: { hex: string; metal: boolean; size?: number }) {
   const bg = metal
     ? `linear-gradient(135deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 38%, rgba(0,0,0,.18) 70%, rgba(255,255,255,.25) 100%), ${hex}`
     : `radial-gradient(circle at 30% 28%, rgba(255,255,255,.35), rgba(255,255,255,0) 55%), ${hex}`;
   return <span className="block shrink-0 rounded-full border border-black/10 shadow-inner" style={{ width: size, height: size, background: bg }} />;
 }
 
-export function LookPanel({ presets, value, onChange, suggested, material }: {
+export function LookPanel({ presets, value, onChange, suggested, material, finishSlot }: {
   presets: Presets; value: Settings; onChange: (s: Settings) => void;
   suggested: { finish: string; colour: string | null }; material: string | null;
+  /** replaces the finish picker (assemblies: one finish per part, from its material) */
+  finishSlot?: ReactNode;
 }) {
   const set = (patch: Partial<Settings>) => onChange({ ...value, ...patch });
   const finish = presets.finishes.find(f => f.id === value.finish) ?? presets.finishes[0]!;
@@ -52,7 +54,7 @@ export function LookPanel({ presets, value, onChange, suggested, material }: {
 
   return (
     <div className="text-sm">
-      <Section title="Finish" aside={!isSuggested && <button className="inline-flex items-center gap-1 text-[12px] text-primary hover:underline"
+      {finishSlot ?? <Section title="Finish" aside={!isSuggested && <button className="inline-flex items-center gap-1 text-[12px] text-primary hover:underline"
         onClick={() => set({ finish: suggested.finish, colour: suggested.colour })}><RotateCcw className="h-3 w-3" />Suggested</button>}>
         <div className="mb-3 flex items-start gap-2 rounded-md border border-border bg-panel2/60 px-2.5 py-2 text-[12px] text-muted">
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
@@ -88,7 +90,7 @@ export function LookPanel({ presets, value, onChange, suggested, material }: {
             <div className="mt-1 text-[12px] text-muted">{finish.colours.find(c => c.id === value.colour)?.label}</div>
           </div>
         )}
-      </Section>
+      </Section>}
 
       <Section title="Lighting">
         <div className="grid grid-cols-3 gap-1.5">

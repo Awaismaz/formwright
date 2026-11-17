@@ -36,6 +36,7 @@ DEFAULT_PATHS = [
 ]
 _SAMPLE = re.compile(r"Sample (\d+)/(\d+)")
 _FRAME = re.compile(r"FW_FRAME (\d+)/(\d+)")
+_EXPOSURE = re.compile(r"FW_EXPOSURE (-?[\d.]+) ([\d.]+) ([\d.]+)")
 
 
 class BlenderError(RuntimeError):
@@ -81,12 +82,45 @@ def command(blender: Path, script: Path, args: list[str]) -> list[str]:
             "--python-exit-code", "3", "--python", str(script), "--", *args]
 
 
+class ProgressParser:
+    """Blender log lines -> monotonic progress 0..1 (AMI-14).
+
+    The frame count comes from the job spec, never from the log: Cycles prints its "Sample i/n" lines for frame 1
+    before the script's first "FW_FRAME 1/n" marker, so a count learned from the log would map frame 1's samples to
+    the whole job and then jump back. Progress never decreases.
+    """
+
+    def __init__(self, frames: int = 1) -> None:
+        self.frames = max(1, int(frames))
+        self.done = 0          # frames finished
+        self.value = 0.0
+        self.started = False   # True once the first sample line arrived (the GPU is set up and rendering)
+
+    def feed(self, line: str) -> float | None:
+        """New progress for this line, or None when the line carries none."""
+        m = _FRAME.search(line)
+        if m:
+            self.done = max(self.done, min(int(m.group(1)), self.frames))
+            frac = self.done / self.frames
+        else:
+            m = _SAMPLE.search(line)
+            if not m:
+                return None
+            self.started = True
+            s, n = int(m.group(1)), int(m.group(2))
+            frac = min(0.999, (min(self.done, self.frames - 1) + min(1.0, s / max(1, n))) / self.frames)
+        self.value = max(self.value, frac)
+        return self.value
+
+
 def run(script: Path, job_dir: Path, allowed_root: Path, args: list[str], timeout_s: float,
         on_progress: Callable[[float, str], None] | None = None, log_name: str = "blender.log",
-        blender: Path | None = None) -> dict[str, Any]:
-    """Run `script` in Blender with cwd = job_dir. Returns {"seconds", "files"}; raises BlenderError/Timeout.
+        blender: Path | None = None, frames: int = 1) -> dict[str, Any]:
+    """Run `script` in Blender with cwd = job_dir. Returns {"seconds", "files", "exposure", "startup_s"};
+    raises BlenderError/Timeout.
 
-    Progress: Cycles "Sample i/n" lines and the script's own "FW_FRAME k/n" markers -> on_progress(0..1, phase).
+    Progress: Cycles "Sample i/n" lines and the script's own "FW_FRAME k/n" markers -> on_progress(0..1, phase),
+    with `frames` (from the spec) as the frame count so progress is monotonic.
     """
     job = guard_inside(job_dir, allowed_root)
     guard_inside(script, job)
@@ -112,21 +146,25 @@ def run(script: Path, job_dir: Path, allowed_root: Path, args: list[str], timeou
     timer = threading.Timer(timeout_s, killer)
     timer.daemon = True
     timer.start()
-    frame, frames, err = 0, 1, None
+    err = None
+    exposure: dict[str, float] | None = None
+    startup: float | None = None
+    parser = ProgressParser(frames)
     try:
         assert proc.stdout is not None
         for line in proc.stdout:
             log.write(line)
-            m = _FRAME.search(line)
-            if m:
-                frame, frames = int(m.group(1)), int(m.group(2))
+            frac = parser.feed(line)
+            if frac is not None:
+                if startup is None and parser.started:
+                    startup = time.monotonic() - t0
                 if on_progress:
-                    on_progress(frame / frames, "rendering")
+                    on_progress(frac, "rendering")
                 continue
-            m = _SAMPLE.search(line)
-            if m and on_progress:
-                s, n = int(m.group(1)), int(m.group(2))
-                on_progress(min(0.999, (frame + s / max(1, n)) / frames), "rendering")
+            m = _EXPOSURE.search(line)
+            if m:
+                exposure = {"ev": round(float(m.group(1)), 3), "clip_before": round(float(m.group(2)), 4),
+                            "clip_after": round(float(m.group(3)), 4)}
             if line.startswith("FW_ERROR"):
                 err = line.strip()
         code = proc.wait()
@@ -146,7 +184,8 @@ def run(script: Path, job_dir: Path, allowed_root: Path, args: list[str], timeou
             continue
         guard_inside(rp, job)  # symlinks or junctions pointing outside the job folder are refused
         made.append(rp)
-    return {"seconds": round(secs, 2), "files": sorted(str(p.relative_to(job)) for p in made if p.is_file())}
+    return {"seconds": round(secs, 2), "files": sorted(str(p.relative_to(job)) for p in made if p.is_file()),
+            "exposure": exposure, "startup_s": round(startup, 2) if startup is not None else None}
 
 
 _PROBE = r'''
@@ -189,6 +228,54 @@ def _probe(blender: str, mtime: float) -> dict[str, Any]:
     gpu = next((d["name"] for d in info["devices"] if d["type"] == backend), None)
     return {"available": True, "version": info["version"], "backend": backend, "gpu": gpu,
             "device": "GPU" if backend else "CPU", "engine": "Cycles", "devices": info["devices"]}
+
+
+# ------------------------------------------------------------------ first-render warm-up (AMI-11)
+# The first GPU render after Blender is installed or upgraded (or the graphics driver changes) prepares the GPU
+# kernels: about 2.5-3.5 minutes on an RTX 3070, against 3-5 s later. We cannot see inside that step (Blender prints
+# nothing until it ends), so we record when this server last finished a GPU render with this Blender build and tell
+# the user honestly when the next one may be the slow first one.
+WARM_UP_ESTIMATE_S = 180.0
+
+
+def _engine_file() -> Path:
+    from aicad.platform.config import get_settings
+
+    return get_settings().data_dir / "meshstudio" / "engine.json"
+
+
+def _engine_key(info: dict[str, Any]) -> str | None:
+    b = find_blender()
+    if b is None or info.get("device") != "GPU":
+        return None
+    return f"{b}|{int(b.stat().st_mtime)}|{info.get('backend')}|{info.get('gpu')}"
+
+
+def is_warm(info: dict[str, Any]) -> bool:
+    """True when this server already finished a GPU render with this Blender build (CPU renders need no warm-up)."""
+    key = _engine_key(info)
+    if key is None:
+        return True
+    try:
+        return key in json.loads(_engine_file().read_text(encoding="utf-8")).get("warm", {})
+    except (OSError, ValueError):
+        return False
+
+
+def mark_warm(info: dict[str, Any], startup_s: float | None) -> None:
+    key = _engine_key(info)
+    if key is None:
+        return
+    f = _engine_file()
+    try:
+        data = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault("warm", {})[key] = {"startup_s": startup_s, "at": time.time()}
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    tmp.replace(f)
 
 
 def detect() -> dict[str, Any]:

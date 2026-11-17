@@ -1,8 +1,8 @@
-import { ArrowDownUp, Link2, MousePointerClick, Sparkles, X } from "lucide-react";
+import { ArrowDownUp, Link2, MousePointerClick, Pencil, Sparkles, X } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Button, Input, Toggle } from "@/components/ui";
 import type { AsmPick } from "./viewer";
-import type { AsmView, MateType } from "./types";
+import type { AsmView, Mate, MateType } from "./types";
 import { MATE_ICON } from "./Tree";
 import { Section } from "./bits";
 
@@ -31,19 +31,26 @@ export function describePick(view: AsmView, p: AsmPick, topoFace?: (part: string
   return `${t} · ${inst.display}`;
 }
 
-export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, onValue, flip, onFlip, onAdd, busy, describe }: {
+export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, onValue, flip, onFlip, onAdd, busy, describe, editing, onCancelEdit }: {
   view: AsmView; choice: MateChoice; onChoice: (c: MateChoice) => void; picks: AsmPick[]; onClearPick: (k: number) => void;
   value: string; onValue: (v: string) => void; flip: boolean; onFlip: (v: boolean) => void; onAdd: () => void; busy: boolean;
-  describe: (p: AsmPick) => string;
+  describe: (p: AsmPick) => string; editing?: Mate | null; onCancelEdit?: () => void;
 }) {
   const help = CHOICES.find(c => c.value === choice)!.help;
   const needsValue = choice === "distance" || choice === "angle";
   const ready = picks.length === 2 && (!needsValue || value.trim() !== "");
   return (
     <div data-testid="mate-panel">
+      {editing && (
+        <div className="flex items-center gap-2 border-b border-primary/30 bg-primary-soft/60 px-4 py-2.5 text-[12.5px]" data-testid="mate-editing">
+          <Pencil className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1">Editing <b>{editing.label}</b>{editing.status === "broken" ? ": pick the missing reference in the view." : ". Clear a reference to re-pick it."}</span>
+          <button type="button" onClick={onCancelEdit} className="text-[12px] font-medium text-muted hover:text-text">Cancel</button>
+        </div>
+      )}
       <Section title="Mate type">
         <div className="grid grid-cols-3 gap-1.5">
-          {CHOICES.map(c => (
+          {CHOICES.filter(c => !editing || c.value !== "auto").map(c => (
             <button key={c.value} type="button" onClick={() => onChoice(c.value)} data-mate-type={c.value}
               className={cx("flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[12.5px] transition",
                 choice === c.value ? "border-primary bg-primary-soft font-medium text-primary" : "border-border text-muted hover:border-primary/40 hover:text-text")}>
@@ -89,8 +96,8 @@ export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, o
         </Section>
       )}
       <div className="px-4 py-3.5">
-        <Button className="w-full" icon={<Link2 className="h-4 w-4" />} disabled={!ready || !view.can_edit} loading={busy} onClick={onAdd} data-testid="add-mate">
-          Add mate
+        <Button className="w-full" icon={editing ? <Pencil className="h-4 w-4" /> : <Link2 className="h-4 w-4" />} disabled={!ready || !view.can_edit} loading={busy} onClick={onAdd} data-testid="add-mate">
+          {editing ? "Save mate" : "Add mate"}
         </Button>
         {!view.can_edit && <p className="mt-2 text-[11.5px] text-muted">Viewers can't add mates.</p>}
       </div>

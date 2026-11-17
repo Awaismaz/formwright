@@ -406,9 +406,11 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     from aicad.platform.routers.projects import workspace_for
 
     sent: list[str] = []
+    shown: list[str | None] = []
 
-    async def fake_send(self: AgentSession, prompt: str) -> None:
+    async def fake_send(self: AgentSession, prompt: str, shown_text: str | None = None, **kw: Any) -> None:
         sent.append(prompt)
+        shown.append(kw.get("shown", shown_text))
 
     monkeypatch.setattr(AgentSession, "send", fake_send)
     c = app_client
@@ -434,6 +436,7 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     assert up.json()["upload"]["name"] == "plate.pdf"
     full = _wait(c, uid)
     assert full["upload"]["status"] == "review" and full["upload"]["method"] == "vector", full["upload"]
+    assert full["state"]["name"] == "Test plate"  # AMI-24: the title block's title, not the file name
     assert len(full["read"]["dims"]) == len(TEXTS) and not full["state"]["ready"]
     assert c.get(f"/api/m/image2cad/uploads/{uid}/preview.png").content.startswith(b"\x89PNG")
     assert c.get(f"/api/m/image2cad/uploads/{uid}/source").content.startswith(b"%PDF-")
@@ -454,6 +457,11 @@ def test_api_auth_entitlement_upload_review_and_create(app_client: Any, tmp_path
     time.sleep(0.2)
     assert len(sent) == 1 and "100" in sent[0] and "R5" not in sent[0].split("Rules:")[0]
     assert "[Reference image(s) attached by the user: refs/ref_" in sent[0]
+    # AMI-16: the chat shows a short summary as the user's message; the brief and its rules go to the agent only
+    assert shown[0] is not None and shown[0].startswith("Model from plate.pdf: 6 confirmed values, reference 100 mm")
+    assert "Rules:" not in shown[0] and "Do not measure" not in shown[0]
+    assert shown[0].endswith("[Reference image attached]") and "Values: 100, 40, 25 ±0.1, 60" in shown[0]
+    assert "prompt" not in cr.json()  # the brief is never returned to the browser either
     db = session_factory()()
     p = db.get(Project, pid)
     ws = workspace_for(p)
@@ -488,9 +496,11 @@ def test_api_image_goes_through_vision_and_is_metered(app_client: Any, monkeypat
     from test_platform import signup
 
     calls: list[str] = []
+    budgets: list[float | None] = []
 
-    async def fake_agent(folder: Path, image: str) -> tuple[str, float]:
+    async def fake_agent(folder: Path, image: str, budget_usd: float | None = None) -> tuple[str, float]:
         assert (folder / image).is_file()
+        budgets.append(budget_usd)
         calls.append(image)
         return VISION_ANSWER, 0.05
 
@@ -507,6 +517,8 @@ def test_api_image_goes_through_vision_and_is_metered(app_client: Any, monkeypat
     needs = {n["id"]: n for n in full["state"]["needs"]}
     assert needs["reference"]["answered"] is False and "kind_d2" in needs and "missing_0" in needs
     assert c.get("/api/auth/me").json()["org"]["token_balance"] == before - 5  # $0.05 at $0.01 per token
+    # the read is capped at what the workspace holds, so it can never take the balance below zero (AMI-03)
+    assert budgets == [pytest.approx(before * 0.01)]
 
 
 def test_catalog_marks_image2cad_live_without_claims() -> None:
@@ -541,3 +553,203 @@ def test_vision_copy_is_compact(tmp_path: Path) -> None:
     drawing.save(tmp_path / "preview.png")
     assert vision_copy(tmp_path, "preview.png") == "vision.png"  # line art: PNG is the smaller, sharper copy
     assert not (tmp_path / "vision.jpg").exists()
+
+
+# ----------------------------------------------------------------------------- audit fixes (AMI-03, 15, 24, 25, I1)
+def test_cost_estimate_starts_from_the_measured_run_and_learns(tmp_path: Path) -> None:
+    """AMI-03: with no history the estimate comes from the two measured runs (read 63 / 251, build 275 / 291); after 3 measured runs
+    it is their median, and the upper figure is the 90th percentile (nearest rank)."""
+    from aicad.image2cad import cost
+
+    e = cost.estimate(tmp_path)
+    assert e["read"] == {"tokens": 157, "high": 251, "runs": 0, "basis": "seed"}  # seed [63, 251]
+    assert e["build"]["tokens"] == 283 and e["build"]["basis"] == "seed"       # seed [275, 291]
+    cost.record(tmp_path, "build", 310)
+    e = cost.estimate(tmp_path)["build"]  # pool [310, 275, 291]: median 291, p90 -> 310
+    assert (e["tokens"], e["high"], e["runs"]) == (291, 310, 1)
+    for t in (200, 400):
+        cost.record(tmp_path, "build", t)
+    e = cost.estimate(tmp_path)["build"]  # measured only: [310, 200, 400]
+    assert (e["tokens"], e["high"], e["basis"]) == (310, 400, "measured")
+    cost.record(tmp_path, "read", 0)  # nothing measured: ignored
+    assert cost.estimate(tmp_path)["read"]["runs"] == 0
+    assert cost.percentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.9) == 9
+    chat = tmp_path / "chat.jsonl"
+    chat.write_text("\n".join(json.dumps(e) for e in (
+        {"type": "user", "text": "earlier"}, {"type": "result", "cost_est_usd": 0.4},
+        {"type": "user", "text": "hand-off"}, {"type": "text", "text": "working"})), encoding="utf-8")
+    assert cost.first_result_tokens(chat, 2) == ("pending", None)
+    with chat.open("a", encoding="utf-8") as f:
+        f.write("\n" + json.dumps({"type": "result", "cost_est_usd": 2.75}))
+    assert cost.first_result_tokens(chat, 2) == ("done", 2.75)
+    assert cost.first_result_tokens(tmp_path / "none.jsonl", 0) == ("pending", None)
+
+
+def _set_balance(email: str, tokens: int) -> None:
+    from sqlalchemy import select
+
+    from aicad.platform.db import session_factory
+    from aicad.platform.models import Membership, Organization, User
+
+    db = session_factory()()
+    me = db.scalar(select(User).where(User.email == email))
+    org = db.get(Organization, db.scalar(select(Membership).where(Membership.user_id == me.id)).org_id)
+    org.token_balance = tokens
+    db.commit()
+    db.close()
+
+
+def test_runs_start_only_when_the_balance_covers_the_estimate(app_client: Any, tmp_path: Path,
+                                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    """AMI-03: an image read and a model build each need their upper measured estimate in the balance (402 with
+    the numbers otherwise); the real build cost is recorded and moves the next estimate; the round-trip check
+    draws the built model and finds the confirmed values (AMI-I1)."""
+    from test_drawings import write_model
+    from test_platform import signup
+
+    from aicad.agent.session import AgentSession
+    from aicad.platform.db import session_factory
+    from aicad.platform.models import Project
+    from aicad.platform.routers.projects import workspace_for
+
+    async def fake_send(self: AgentSession, prompt: str, **kw: Any) -> None:
+        return None
+
+    monkeypatch.setattr(AgentSession, "send", fake_send)
+    c = app_client
+    signup(c, "cost@x.com")
+    _unlock(c)
+    est = c.get("/api/m/image2cad/estimate").json()
+    assert est["read"]["tokens"] == 157 and est["build"]["tokens"] == 283 and est["unlimited"] is False
+    assert c.get("/api/m/image2cad/uploads").json()["estimate"]["balance"] == est["balance"]
+    _set_balance("cost@x.com", 50)
+    png = base64.b64encode(_png()).decode()
+    r = c.post("/api/m/image2cad/uploads", json={"filename": "sketch.png", "data_b64": png})
+    assert r.status_code == 402 and "Reading an image takes about 157, up to 251 tokens" in r.json()["detail"]["message"]
+    assert "has 50" in r.json()["detail"]["message"] and r.json()["detail"]["cta"] == "/app/billing#tokens"
+    assert c.get("/api/m/image2cad/uploads").json()["items"] == []  # nothing stored, nothing read
+    pdf = tmp_path / "plate.pdf"
+    make_pdf(pdf)
+    up = c.post("/api/m/image2cad/uploads", json={"filename": "plate.pdf",
+                                                    "data_b64": base64.b64encode(pdf.read_bytes()).decode()})
+    assert up.status_code == 200  # a vector PDF is read from its text: no tokens
+    uid = up.json()["upload"]["id"]
+    full = _wait(c, uid)
+    by = {d["text"]: d["id"] for d in full["read"]["dims"]}
+    front = next(v for v in full["read"]["views"] if v.get("suggest_front"))
+    c.post(f"/api/m/image2cad/uploads/{uid}/review", json={
+        "reference": {"dim": by["100"], "value": 100, "unit": "mm"}, "answers": {"front_view": {"choice": front["id"]}}})
+    _set_balance("cost@x.com", 200)
+    r = c.post(f"/api/m/image2cad/uploads/{uid}/create", json={})
+    assert r.status_code == 402 and "Building the model takes about 283, up to 291 tokens" in r.json()["detail"]["message"]
+    assert c.post(f"/api/m/image2cad/uploads/{uid}/roundtrip").status_code == 409  # no model yet
+    _set_balance("cost@x.com", 300)
+    r = c.post(f"/api/m/image2cad/uploads/{uid}/create", json={})
+    assert r.status_code == 200, r.text
+    pid = r.json()["project_id"]
+    db = session_factory()()
+    p = db.get(Project, pid)
+    ws = workspace_for(p)
+    assert p.name == "Test plate"  # AMI-24: named from the title block
+    # the hand-off run finishes: the platform's run record carries its real cost, recorded once into the estimate
+    from sqlalchemy import select
+
+    from aicad.platform.models import AgentRun
+
+    run = db.scalar(select(AgentRun).where(AgentRun.project_id == pid))
+    assert run is not None and run.status == "running"
+    assert c.get("/api/m/image2cad/estimate").json()["build"]["runs"] == 0      # still running: nothing recorded
+    run.status, run.cost_usd, run.tokens = "ok", 3.1, 310
+    db.commit()
+    db.close()
+    e = c.get("/api/m/image2cad/estimate").json()["build"]
+    assert (e["tokens"], e["high"], e["runs"]) == (291, 310, 1)
+    assert c.get("/api/m/image2cad/estimate").json()["build"]["runs"] == 1  # settled once
+    # AMI-I1: a verified build of FX-DRW-1 (100 x 60 x 20 block) stands in for the agent's model
+    write_model(ws / "out")
+    rt = c.post(f"/api/m/image2cad/uploads/{uid}/roundtrip")
+    assert rt.status_code == 200, rt.text
+    res = rt.json()["roundtrip"]
+    rows = {row["label"]: row for row in res["rows"]}
+    assert rows["100"]["status"] == "match" and rows["60"]["status"] == "match"
+    assert rows["M8x1.25"]["status"] == "skipped" and rows["4X Ø6.6 THRU"]["status"] == "missing"
+    assert res["checked"] == res["matched"] + sum(1 for r in res["rows"] if r["status"] in ("missing", "count"))
+    assert c.get("/api/m/image2cad/uploads").json()["items"][0]["roundtrip"]["checked"] == res["checked"]
+
+
+def test_documentation_items_are_notes_not_questions() -> None:
+    """AMI-15: approval status, tolerances and finish don't change the model, so they never block Create."""
+    raw = vision.parse_block(VISION_ANSWER)
+    assert raw is not None
+    raw["missing"] = [{"what": "Approved status for manufacture"}, {"what": "Tolerances on all sizes"},
+                      {"what": "Surface finish (Ra)"}, {"what": "Material"}, {"what": "Thickness", "why": "one view"},
+                      {"what": "Hole positions"}]
+    st = review.state(vision.to_read(raw), None)
+    missing = [n["question"] for n in st["needs"] if n["kind"] == "missing"]
+    assert missing == ["Missing: Thickness", "Missing: Hole positions"]
+    assert [m["what"] for m in st["documentation"]] == ["Approved status for manufacture", "Tolerances on all sizes",
+                                                        "Surface finish (Ra)", "Material"]
+    for geo in ("Leg thickness", "Second hole diameter", "Keyway depth", "Overall width", "Fillet radii"):
+        assert not review.is_documentation({"what": geo}), geo
+
+
+def test_names_drawing_numbers_and_legend_tags() -> None:
+    """AMI-24 / AMI-25: the project is named from the title, the drawing number stays out of the name, and colour
+    legend tags are stripped from what a dimension measures."""
+    assert review.suggested_name({"part": "Stepped Shaft (FW-33A4AF21)"}, "shaft_drawing.png") == "Stepped Shaft"
+    assert review.drawing_number({"part": "Stepped Shaft (FW-33A4AF21)"}) == "FW-33A4AF21"
+    assert review.suggested_name({"title": {"TITLE": "Bracket", "DRAWING NO.": "B-100"}}, "x.pdf") == "Bracket"
+    assert review.drawing_number({"title": {"TITLE": "Bracket", "DRAWING NO.": "B-100"}}) == "B-100"
+    assert review.suggested_name({"title_text": "Pump cover", "part": "A cast cover"}, "scan.jpg") == "Pump cover"
+    assert review.suggested_name({"part": "A round cast cover with four bolt holes and a spigot"}, "scan.jpg") == "scan"
+    assert review.suggested_name({}, None) is None
+    assert vision.clean_describes("overall length (red: INFERRED)") == "overall length"
+    assert vision.clean_describes("shoulder diameter [blue = SPEC]") == "shoulder diameter"
+    assert vision.clean_describes("keyway depth - green: REF") == "keyway depth"
+    assert vision.clean_describes("red anodised flange width") == "red anodised flange width"
+    raw = vision.parse_block(VISION_ANSWER)
+    assert raw is not None
+    raw.update(title="Stepped Shaft", drawing_no="FW-33A4AF21", projection="first",
+               projection_evidence="ISO first-angle symbol")
+    r = vision.to_read(raw)
+    assert r["title_text"] == "Stepped Shaft" and r["projection"]["value"] == "first"
+    rv = review.clean_review({"reference": {"dim": "d1", "value": 120, "unit": "mm"},
+                              "answers": {"confirm_d2": {"choice": "keep"}, "kind_d2": {"choice": "diameter"},
+                                          "unparsed_0": {"choice": "ignore"}, "unreadable_0": {"choice": "ignore"},
+                                          "missing_0": {"choice": "not_needed"}}}, r)
+    st = review.state(r, rv)
+    p = review.handoff_prompt({"name": "shaft.png"}, r, st, rv)
+    assert "Part name: Stepped Shaft (drawing number FW-33A4AF21: keep it out of the part name)" in p
+    assert "Projection: first angle." in p
+    s = review.handoff_summary({"name": "shaft.png"}, st, rv)
+    assert s.startswith("Model from shaft.png: 2 confirmed values, reference 120 mm (overall length, Side view), "
+                        "1 item not needed.")
+    assert s.endswith("Values: 120, Ø12.") and "Rules" not in s
+
+
+def test_roundtrip_compare_hand_cases(formwright_pdf: Path) -> None:
+    """AMI-I1 against FX-DRW-1 (100 x 60 x 20 block, 4 x Ø8 through 10 from the edges, Ø6 x 10 blind): its Drawing
+    Studio record is the measured side, the confirmed values below are written by hand."""
+    from aicad.image2cad import roundtrip
+
+    rec = json.loads((formwright_pdf.parent / "drawing.json").read_text(encoding="utf-8"))
+    measured = roundtrip.sheet_values(rec)
+    dims = [{"id": str(i), "label": t} for i, t in enumerate(
+        ["100", "60", "20", "4X Ø8 THRU", "Ø6 DEEP 10", "55", "R5", "2X Ø8 THRU", "Ø6 DEEP 12", "Ø7"])]
+    out = roundtrip.compare(dims, measured)
+    st = {r["label"]: r["status"] for r in out["rows"]}
+    assert st == {"100": "match", "60": "match", "20": "match", "4X Ø8 THRU": "match", "Ø6 DEEP 10": "match",
+                  "55": "missing", "R5": "skipped", "2X Ø8 THRU": "count", "Ø6 DEEP 12": "missing", "Ø7": "missing"}
+    assert (out["matched"], out["checked"], out["skipped"], out["ok"]) == (5, 9, 1, False)
+    # inches: 3.937 in = 99.9998 mm (within the sheet's 0.01 mm), 0.315 in = 8.001 mm
+    inch = roundtrip.compare([{"id": "a", "label": "3.937"}, {"id": "b", "label": "4X Ø.315 THRU"}], measured, "in")
+    assert [r["status"] for r in inch["rows"]] == ["match", "match"] and inch["ok"]
+
+
+def test_long_vision_texts_end_at_a_word() -> None:
+    from aicad.image2cad.vision import _s
+
+    t = "ISO projection symbol in the title block PROJECTION field: concentric circles on the left, truncated cone outline"
+    assert _s(t, 200) == t
+    out = _s(t, 80)
+    assert len(out) <= 80 and out.endswith("…") and t.startswith(out[:-1]) and not out[:-1].endswith("concen")

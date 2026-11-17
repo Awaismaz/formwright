@@ -221,6 +221,8 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
         notes.append("TOLERANCES AND FITS SHOWN AT INDIVIDUAL DIMENSIONS ARE ENTERED BY THE USER.")
     if rev == "DRAFT" and latest is not None:
         notes.append(f"DRAFT: CHANGES SINCE REV {latest['rev']} ARE NOT ISSUED.")
+    # Parameters with no unambiguous match (mapping["unmapped"]) are listed in the Drawing Studio panel, never on the
+    # sheet: model parameter names are not manufacturing information (and a reader takes them for missing sizes).
     notes += [n.upper() for n in notes_extra]
     notes += ed["notes"]
     sheet = compose(an, shown_dims, shown_callouts, notes, opts, sheet_meta, rev_rows)

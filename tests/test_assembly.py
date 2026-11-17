@@ -477,6 +477,168 @@ def test_api_full_flow(app_client: Any, tmp_path: Path) -> None:
     assert c.get("/api/m/assembly/assemblies").json()["items"] == []
 
 
+def _pocket_plate(path: Path, T: float, hole_d: float) -> Path:
+    from build123d import Align, Box, Cylinder, Pos, export_step
+
+    part = Box(80, 50, T, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    part -= Pos(0, 0, T - 4) * Box(30, 20, 4, align=(Align.CENTER, Align.CENTER, Align.MIN))   # pocket floor: +Z too
+    part -= Pos(30, 15, -1) * Cylinder(hole_d / 2, T + 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    export_step(part, str(path))
+    return path
+
+
+def test_references_follow_their_role_through_dimension_changes(tmp_path: Path) -> None:
+    """AMI-05: after a rebuild a mate reference maps to the face that plays the same role, not the nearest or an
+    identical one. Plate 10 → 12 thick: the top face (z 10 → 12) is the top face, although the pocket floor moved
+    to z = 8, nearer the old top. Hole Ø6.6 → Ø9: the hole face and its upper rim follow the same axis."""
+    from aicad.assembly import geometry, service
+
+    old = geometry.prepare(tmp_path / "o", step=str(_pocket_plate(tmp_path / "o.step", 10, 6.6)))
+    new = geometry.prepare(tmp_path / "n", step=str(_pocket_plate(tmp_path / "n.step", 12, 9.0)))
+    ro = json.loads((tmp_path / "o" / "refs.json").read_text(encoding="utf-8"))
+    rn = json.loads((tmp_path / "n" / "refs.json").read_text(encoding="utf-8"))
+    roles = (service._hole_faces(old), service._hole_faces(new))
+
+    def follow(pool: str, pick: Any) -> dict[str, Any]:
+        k = next(int(k) for k, r in ro[pool].items() if pick(r))
+        nid, same = service.match_ref(ro[pool][str(k)], k, ro[pool], rn[pool], *(roles if pool == "faces" else (set(), set())),
+                                      100.0, face=pool == "faces")
+        assert nid is not None and not same
+        return rn[pool][str(nid)]
+
+    top = follow("faces", lambda r: r["kind"] == "plane" and r["v"][2] > 0.99 and abs(r["p"][2] - 10) < 1e-9)
+    assert top["p"][2] == pytest.approx(12.0, abs=1e-9)
+    hole = follow("faces", lambda r: r["kind"] == "axis" and abs(r["r"] - 3.3) < 1e-9)
+    assert hole["r"] == pytest.approx(4.5, abs=1e-9) and hole["p"][:2] == pytest.approx([30, 15], abs=1e-9)
+    rim = follow("edges", lambda r: r["kind"] == "axis" and r["r"] and abs(r["r"] - 3.3) < 1e-9 and abs(r["p"][2] - 10) < 1e-9)
+    assert rim["r"] == pytest.approx(4.5, abs=1e-9) and rim["p"][2] == pytest.approx(12.0, abs=1e-9)
+    # the bottom face is unchanged geometry: kept as identical
+    k = next(int(k) for k, r in ro["faces"].items() if r["kind"] == "plane" and r["v"][2] < -0.99)
+    nid, same = service.match_ref(ro["faces"][str(k)], k, ro["faces"], rn["faces"], *roles, 100.0, face=True)
+    assert same and rn["faces"][str(nid)]["p"][2] == pytest.approx(0.0, abs=1e-12)
+
+
+def _demo_project(c: Any, name: str, script: str) -> tuple[str, Path]:
+    import subprocess
+    import sys
+
+    from aicad.platform.db import session_factory
+    from aicad.platform.models import Project
+    from aicad.platform.routers.projects import workspace_for
+
+    pid = c.post("/api/projects", json={"name": name}).json()["id"]
+    db = session_factory()()
+    ws = workspace_for(db.get(Project, pid))
+    db.close()
+    src = (Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo" / script).read_text(encoding="utf-8")
+    (ws / "model.py").write_text(src, encoding="utf-8")
+    subprocess.run([sys.executable, "-I", "-m", "aicad.agent.runner", str(ws / "model.py"), str(ws / "out")],
+                   cwd=ws, timeout=240, check=True)
+    return pid, ws
+
+
+def test_demo_bracket_on_plate_fasten_fix_and_refresh(app_client: Any, tmp_path: Path) -> None:
+    """The audit case (AMI-01/05/06/07/17, AMI-I2) on the shipped demo parts: L bracket (5 mm leg, Ø5.5 holes) on
+    the mounting plate (10 mm, Ø6.6 holes), one bracket hole concentric with a plate hole.
+
+    Hand values: grip = 5 + 10 = 15 mm. M5 (Ø5.5 = ISO 273 medium): L ≥ 15 + 2 × 1.0 (ISO 7089 washers)
+    + 4.7 (ISO 4032 m) + 2 × 0.8 (2 P) = 23.3 → M5×25. After the bracket hole opens to Ø6.6 (M6):
+    L ≥ 15 + 2 × 1.6 + 5.2 + 2 × 1.0 = 25.4 → M6×30."""
+    from test_platform import signup
+
+    c = app_client
+    signup(c, "fasten@x.com")
+    pay = c.post("/api/billing/checkout", json={"product_code": "addon_assembly"}).json()["payment_id"]
+    c.post(f"/api/billing/payments/{pay}/simulate", json={"outcome": "success"})
+    plate_pid, _ = _demo_project(c, "Mounting Plate", "mounting_plate.py")
+    br_pid, _ = _demo_project(c, "L Bracket", "l_bracket.py")
+    v = c.post("/api/m/assembly/assemblies", json={"project_id": plate_pid}).json()
+    aid, plate = v["assembly"]["id"], v["instances"][0]["id"]
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/instances", json={"project_id": br_pid}).json()
+    br = v["result"]["instance"]
+    v = c.patch(f"/api/m/assembly/assemblies/{aid}/instances/{br}",
+                json={"T": xform.to12(xform.translate((2, 17.5, 10)))}).json()
+    data_dir = tmp_path / "data"
+    org = c.get("/api/auth/me").json()["org"]["id"]
+
+    def refs(iid: str, view: dict[str, Any]) -> dict[str, Any]:
+        inst = next(i for i in view["instances"] if i["id"] == iid)
+        return json.loads((data_dir / "assemblies" / org / "_parts" / inst["part"] / "refs.json").read_text(encoding="utf-8"))
+
+    def hole_face(iid: str, view: dict[str, Any], x: float, y: float) -> int:
+        return next(int(k) for k, f in refs(iid, view)["faces"].items() if f["kind"] == "axis"
+                    and abs(abs(f["v"][2]) - 1) < 1e-9 and abs(f["p"][0] - x) < 1e-9 and abs(f["p"][1] - y) < 1e-9)
+
+    top, bottom = _plane_face(v, data_dir, org, plate, 1.0, 10.0), _plane_face(v, data_dir, org, br, -1.0, 0.0)
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/mates", json={
+        "type": "coincident", "a": {"inst": plate, "kind": "face", "id": top}, "b": {"inst": br, "kind": "face", "id": bottom}}).json()
+    coin = v["mates"][-1]["id"]
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/mates", json={
+        "type": "concentric", "a": {"inst": plate, "kind": "face", "id": hole_face(plate, v, 50, 30)},
+        "b": {"inst": br, "kind": "face", "id": hole_face(br, v, 48, 12.5)}}).json()
+    assert v["mates"][-1]["a_desc"] == "Ø6.6 hole" and v["mates"][-1]["b_desc"] == "Ø5.5 hole"     # AMI-20
+    assert v["mates"][0]["a_desc"] == "+Z face" and v["mates"][0]["b_desc"] == "−Z face"
+
+    def bracket_z(view: dict[str, Any]) -> float:
+        return float(xform.pt(xform.from12(next(i for i in view["instances"] if i["id"] == br)["T"]), (0, 0, 0))[2])
+
+    assert bracket_z(v) == pytest.approx(10.0, abs=1e-6)
+    # AMI-06: edit the mate in place (coincident → distance 2 mm, then back)
+    v = c.patch(f"/api/m/assembly/assemblies/{aid}/mates/{coin}", json={"type": "distance", "value": 2}).json()
+    assert bracket_z(v) == pytest.approx(12.0, abs=1e-6) and v["mates"][0]["type"] == "distance"
+    v = c.patch(f"/api/m/assembly/assemblies/{aid}/mates/{coin}", json={"type": "coincident"}).json()
+    assert bracket_z(v) == pytest.approx(10.0, abs=1e-6) and v["mates"][0]["value"] == 0
+    r = c.patch(f"/api/m/assembly/assemblies/{aid}/mates/{coin}", json={"type": "concentric"})
+    assert r.status_code == 409 and "Concentric needs" in r.json()["detail"]
+    br_hole = next(h["id"] for h in v["parts"][next(i for i in v["instances"] if i["id"] == br)["part"]]["holes"]
+                   if h["axis"][2] != 0 and h["center"][:2] == [48.0, 12.5])
+    plate_hole = next(h["id"] for h in v["parts"][v["instances"][0]["part"]]["holes"] if h["center"][:2] == [50.0, 30.0])
+    # AMI-01: the plate's larger Ø6.6 hole under the bracket is part of the grip
+    plan = c.post(f"/api/m/assembly/assemblies/{aid}/fasteners/propose",
+                  json={"inst": br, "hole": br_hole, "pattern": False}).json()
+    h = plan["holes"][0]
+    assert h["probe"]["kind"] == "through" and h["probe"]["grip"] == pytest.approx(15.0, abs=1e-9)
+    assert {m["inst"] for m in h["probe"]["members"]} == {br, plate}
+    assert h["proposal"]["summary"] == "Hex bolt ISO 4017 M5×25 + 2 washers + nut"
+    assert h["proposal"]["length"]["L_min"] == pytest.approx(15 + 2 * 1.0 + 4.7 + 2 * 0.8, abs=1e-9)
+    assert not h["proposal"].get("no_room") and not h["proposal"]["warnings"]
+    # AMI-17: from the plate's larger hole the answer names the real situation
+    plan = c.post(f"/api/m/assembly/assemblies/{aid}/fasteners/propose",
+                  json={"inst": plate, "hole": plate_hole, "pattern": False}).json()
+    assert "Ø5.5 (M5 clearance)" in plan["holes"][0]["proposal"]["error"]
+    # AMI-I2: the two parts share one coaxial pair; mismatched, with a one-click fix through HOLE_D
+    pairs = c.post(f"/api/m/assembly/assemblies/{aid}/fasteners/pairs", json={"a": plate, "b": br}).json()
+    assert len(pairs["pairs"]) == 1 and pairs["ok"] == 1
+    p0 = pairs["pairs"][0]
+    assert p0["target"] == {"inst": br, "hole": br_hole} and p0["grip"] == pytest.approx(15.0, abs=1e-9)
+    fix = p0["mismatch"]["fix"]
+    assert fix["param"] == "HOLE_D" and fix["from"] == 5.5 and fix["to"] == 6.6 and fix["project_id"] == br_pid
+    # insert the M5 stack: zero clashes reported, zero interferences in the full check
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/fasteners/accept",
+               json={"targets": [p0["target"]], "pattern": False}).json()
+    assert v["result"]["inserted"] == 1 and v["result"]["clashes"] == []
+    an = c.post(f"/api/m/assembly/assemblies/{aid}/analyse").json()["analysis"]
+    assert an["interference"]["count"] == 0
+    # one-click part fix: HOLE_D 5.5 → 6.6 in the bracket's project (deterministic edit + rebuild), then refresh
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/fix-hole", json={"inst": br, "param": "HOLE_D", "value": 6.6}).json()
+    res = v["result"]
+    assert res["refreshed"] == 1 and res["references_lost"] == 0 and res["broken_mates"] == []
+    assert res["references_followed"] == 5          # the user concentric + 4 stack concentrics on the hole that grew
+    assert res["stacks_to_check"] == 1
+    g = next(g for g in v["groups"] if g["kind"] == "fastener")
+    assert "M6" in g["check"]["text"] and g["check"]["summary"] == "Hex bolt ISO 4017 M6×30 + 2 washers + nut"
+    assert all(m["status"] != "broken" for m in v["mates"])
+    assert c.get(f"/api/m/assembly/where-used/{br_pid}").json()["items"] == [
+        {"id": aid, "name": v["assembly"]["name"], "instances": 1, "stale": 0, "broken_mates": 0}]
+    # update the stack: M6×30, still no clash
+    v = c.post(f"/api/m/assembly/assemblies/{aid}/groups/{g['id']}/refit").json()
+    assert v["result"]["summary"] == "Hex bolt ISO 4017 M6×30 + 2 washers + nut" and v["result"]["clashes"] == []
+    assert not any(g.get("check") for g in v["groups"])
+    an = c.post(f"/api/m/assembly/assemblies/{aid}/analyse").json()["analysis"]
+    assert an["interference"]["count"] == 0
+
+
 def test_catalog_marks_assembly_live(app_client: Any) -> None:
     cat = app_client.get("/api/billing/catalog").json()
     m = next(x for x in cat["modules"] if x["code"] == "assembly")

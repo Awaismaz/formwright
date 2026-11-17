@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Boxes, ClipboardList, Download, FileBox, Link2, Move, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Wrench,
+  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Button, EmptyState, Input, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
-import type { AsmView, FitPlan, Mate, V3 } from "./types";
+import type { AsmView, Clash, FitPlan, HoleFix, Mate, RefreshResult, V3 } from "./types";
 import type { AsmPick, FaceMark } from "./viewer";
 import { Viewport, topoCache } from "./Viewport";
 import { Tree } from "./Tree";
 import { MatePanel, describePick, type MateChoice } from "./MatePanel";
 import { FastenPanel, holeLabel, type FitOpts } from "./FastenPanel";
-import { BomPanel, CheckPanel } from "./CheckPanel";
+import { BomPanel, CheckPanel, plural } from "./CheckPanel";
+import { PairPanel } from "./PairPanel";
 import { InsertDialog } from "./InsertDialog";
-import { SolveChip, mm } from "./bits";
+import { Segmented, SolveChip, mm } from "./bits";
 
 const BASE = "/api/m/assembly";
 type TabKey = "mate" | "fasten" | "check" | "bom";
@@ -44,6 +45,12 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const [insertOpen, setInsertOpen] = useState(false);
   const [editName, setEditName] = useState<string | null>(null);
   const [step, setStep] = useState("10");
+  const [editing, setEditing] = useState<Mate | null>(null);
+  const [fmode, setFmode] = useState<"hole" | "pair">("hole");
+  const [pair, setPair] = useState<[string | null, string | null]>([null, null]);
+  const [fitKey, setFitKey] = useState<string | null>(null);
+  const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate">("translate");
+  const keepPicks = useRef(false);
 
   const run = useCallback(async (label: string, fn: () => Promise<AsmView>, ok?: string | ((v: AsmView) => string | null)) => {
     setBusy(label);
@@ -66,7 +73,11 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   });
   const plan = fitQ.data && target && fitQ.data.holes.some(h => h.inst === target.inst) ? fitQ.data : null;
 
-  useEffect(() => { setPicks([]); setClashFocus(null); setRowFocus(null); }, [tab]);
+  useEffect(() => {
+    if (keepPicks.current) keepPicks.current = false;
+    else { setPicks([]); setEditing(null); }
+    setClashFocus(null); setRowFocus(null);
+  }, [tab]);
   useEffect(() => {
     if (!view) return;
     const ids = new Set(view.instances.map(i => i.id));
@@ -91,7 +102,34 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const onMate = (mid: string, body: Record<string, unknown> | null) => body
     ? run("mate", () => api.patch<AsmView>(`${A}/mates/${mid}`, body))
     : run("mate", () => api.del<AsmView>(`${A}/mates/${mid}`), "Mate deleted");
+  const startEdit = (m: Mate) => {
+    keepPicks.current = tab !== "mate";
+    setTab("mate"); setEditing(m);
+    setChoice(m.type); setMval(String(m.value ?? 0)); setMflip(m.flip);
+    const sides: AsmPick[] = [];
+    if (!m.a_lost) sides.push({ ...m.a, point: [0, 0, 0] });
+    if (!m.b_lost) sides.push({ ...m.b, point: [0, 0, 0] });
+    setPicks(sides);
+  };
+  const saveEdit = async (m: Mate) => {
+    if (picks.length !== 2) return;
+    const [a, b] = picks as [AsmPick, AsmPick];
+    const same = (p: AsmPick, x: Mate["a"]) => p.inst === x.inst && p.kind === x.kind && p.id === x.id;
+    const body: Record<string, unknown> = { type: choice === "auto" ? m.type : choice, flip: mflip };
+    if (choice === "distance" || choice === "angle") body.value = Number(mval);
+    if (!(same(a, m.a) && !m.a_lost)) body.a = { inst: a.inst, kind: a.kind, id: a.id };
+    if (!(same(b, m.b) && !m.b_lost)) body.b = { inst: b.inst, kind: b.kind, id: b.id };
+    const v = await run("add-mate", () => api.patch<AsmView>(`${A}/mates/${m.id}`, body));
+    if (v) {
+      setEditing(null); setPicks([]);
+      const n = v.mates.find(x => x.id === m.id);
+      if (n?.status === "conflict") toast.error(`${n.label} conflicts with the other mates. It is kept but not applied.`);
+      else if (n?.status === "broken") toast.warning(`${n.label} still has a missing reference. Pick it in the view.`);
+      else toast.success(`${n?.label ?? "Mate"} updated`);
+    }
+  };
   const addMate = async () => {
+    if (editing) return saveEdit(editing);
     if (picks.length !== 2) return;
     const [a, b] = picks as [AsmPick, AsmPick];
     const v = await run("add-mate", () => api.post<AsmView>(`${A}/mates`, {
@@ -115,13 +153,26 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
       if (n) toast.error(`${n} interference${n > 1 ? "s" : ""} found`); else toast.success("No interference");
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   };
+  const knownIssues = () => {
+    const bits: string[] = [];
+    const nc = view.solve?.conflicts.length ?? 0;
+    if (nc) bits.push(plural(nc, "conflicting mate"));
+    const nb = view.mates.filter(m => m.status === "broken").length;
+    if (nb) bits.push(plural(nb, "broken mate"));
+    if (view.analysis && !view.analysis.stale && view.analysis.interference.count) bits.push(plural(view.analysis.interference.count, "interference"));
+    return bits;
+  };
   const exportStep = async () => {
     setBusy("export");
     try {
       const r = await api.post<{ export: AsmView["export"] }>(`${A}/export`);
       setView({ ...view, export: r.export });
-      if (r.export?.ok) {
-        toast.success(`STEP exported: ${r.export.instances} instances, re-import verified`);
+      const issues = knownIssues();
+      if (r.export?.ok && issues.length) {
+        toast.warning(`STEP exported with ${issues.join(" and ")}. Re-import verified (${plural(r.export.instances, "instance")}).`);
+        const a = document.createElement("a"); a.href = r.export.url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
+      } else if (r.export?.ok) {
+        toast.success(`STEP exported: ${plural(r.export.instances, "instance")}, re-import verified`);
         const a = document.createElement("a"); a.href = r.export.url; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
       } else toast.error("STEP exported, but the re-import check did not match. Check the file before use.");
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
@@ -131,14 +182,51 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
       const id = (v.result as { instance?: string } | undefined)?.instance;
       return `${v.instances.find(i => i.id === id)?.display ?? "Part"} inserted`;
     });
-    if (v) { setInsertOpen(false); setSel((v.result as { instance?: string } | undefined)?.instance ?? null); }
+    if (v) {
+      const id = (v.result as { instance?: string } | undefined)?.instance ?? null;
+      setInsertOpen(false); setSel(id); setFitKey(id);
+    }
+  };
+  const fitted = (v: AsmView) => {
+    const r = v.result as { inserted?: number; clashes?: Clash[] } | undefined;
+    const n = r?.inserted ?? 0;
+    const cl = r?.clashes ?? [];
+    if (cl.length) {
+      toast.error(`${plural(n, "fastener stack")} inserted, but ${cl.length === 1 ? "it clashes" : "they clash"}: ` +
+        cl.slice(0, 2).map(c => `${c.a_name} ↔ ${c.b_name} ${mm(c.volume_mm3, 1)} mm³`).join(", ") + ". See Check.", { duration: 9000 });
+      return null;
+    }
+    return `${plural(n, "fastener stack")} inserted · no interference with the other parts`;
   };
   const acceptFit = async () => {
     if (!target) return;
-    const v = await run("fit", () => api.post<AsmView>(`${A}/fasteners/accept`, { ...target, ...fit }),
-      v => `${(v.result as { inserted?: number } | undefined)?.inserted ?? 0} fastener stack(s) inserted`);
+    const v = await run("fit", () => api.post<AsmView>(`${A}/fasteners/accept`, { ...target, ...fit }), fitted);
     if (v) setTarget(null);
   };
+  const acceptPairs = (targets: { inst: string; hole: number }[]) =>
+    run("fit", () => api.post<AsmView>(`${A}/fasteners/accept`, { targets, style: fit.style, washers: fit.washers, pattern: false }), fitted);
+  const refreshed = (v: AsmView) => {
+    const r = v.result as Partial<RefreshResult> | undefined;
+    const lost = r?.broken_mates?.length ?? 0;
+    const tail = [r?.references_followed ? `${plural(r.references_followed, "mate reference")} followed the change` : "",
+      r?.stacks_to_check ? `${plural(r.stacks_to_check, "fastener stack")} to check` : ""].filter(Boolean).join(" · ");
+    if (lost) {
+      toast.warning(`Refreshed, but ${plural(lost, "mate")} lost a reference. Use Repair on ${lost === 1 ? "it" : "each"} in the mates list.`, { duration: 9000 });
+      return null;
+    }
+    if (r?.stacks_to_check) { toast.warning(`Part refreshed. ${tail}: use Update on the flagged stack.`, { duration: 9000 }); return null; }
+    return tail ? `Part refreshed · ${tail}` : "Part refreshed to its latest build";
+  };
+  const fixHole = (inst: string, fix: HoleFix) =>
+    run("fix", () => api.post<AsmView>(`${A}/fix-hole`, { inst, param: fix.param, value: fix.to }), v => {
+      const msg = refreshed(v);
+      return msg ? `${fix.project}: ${fix.label} ${fix.from} → ${fix.to}, rebuilt and checked. ${msg}` : null;
+    });
+  const refit = (gid: string) => run("refit", () => api.post<AsmView>(`${A}/groups/${gid}/refit`), v => {
+    const r = v.result as { summary?: string; clashes?: Clash[] } | undefined;
+    if (r?.clashes?.length) { toast.error(`Stack updated to ${r.summary}, but it clashes. See Check.`); return null; }
+    return `Stack updated: ${r?.summary ?? ""}`;
+  });
 
   // ---- viewer state per tab
   const picking: ("face" | "edge")[] = tab === "mate" ? ["face", "edge"] : ["face"];
@@ -151,6 +239,12 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
         if (prev.length === 1 && prev[0]!.inst === p.inst) { toast.info(`Pick the second reference on another part (not ${inst?.display}).`); return prev; }
         return prev.length >= 2 ? [p] : [...prev, p];
       });
+      return;
+    }
+    if (tab === "fasten" && fmode === "pair") {
+      const inst = p ? view.instances.find(i => i.id === p.inst) : undefined;
+      if (!inst || inst.group) return;
+      setPair(([a, b]) => (a === inst.id || b === inst.id) ? [a, b] : !a ? [inst.id, b] : !b ? [a, inst.id] : [b, inst.id]);
       return;
     }
     if (tab === "fasten") {
@@ -184,9 +278,19 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const ghost = focusPair ? new Set([focusPair.a, focusPair.b]) : null;
   const selected = bomFocus ?? (row ? [row.a, row.b] : sel && tab !== "mate" && tab !== "fasten" ? [sel] : []);
   const measure: [V3, V3] | null = row && row.status === "clear" ? [row.pa, row.pb] : null;
-  const hint = tab === "mate" ? (picks.length === 0 ? "Pick the first face or edge" : picks.length === 1 ? "Pick a face or edge on another part" : "Ready: Add mate")
+  const hint = tab === "mate" ? (picks.length === 0 ? "Pick the first face or edge" : picks.length === 1 ? "Pick a face or edge on another part" : editing ? "Ready: Save mate" : "Ready: Add mate")
+    : tab === "fasten" && fmode === "pair" ? (pair[0] && pair[1] ? "Fastening the two parts" : "Click two parts")
     : tab === "fasten" ? (target ? holeLabel(view, target.inst, target.hole) : "Click a hole to fit fasteners") : null;
   const selInst = view.instances.find(i => i.id === sel);
+  const movable = !!selInst && view.can_edit && !selInst.fixed && !(selInst.dof && (selInst.dof.dof === 0 || selInst.dof.spin));
+  const gizmo = movable && tab !== "mate" && tab !== "fasten" && explode === 0 ? { id: selInst!.id, mode: gizmoMode } : null;
+  if (tab === "fasten" && fmode === "pair") {
+    for (const id of pair) if (id) {
+      const i = view.instances.find(x => x.id === id);
+      const part = i ? view.parts[i.part] : undefined;
+      if (part) marks.push({ inst: id, faces: part.holes.flatMap(h => h.faces), color: 0x22a85a, opacity: 0.4 });
+    }
+  }
   const solve = view.solve;
   const home = view.home_project;
   const exp = view.export;
@@ -211,6 +315,9 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
         {solve && view.instances.length > 0 && <SolveChip status={solve.status} solve={solve} />}
         <div className="ml-auto flex items-center gap-2">
           {view.can_edit && <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setInsertOpen(true)} data-testid="insert">Insert</Button>}
+          {view.instances.length > 0 && <Tip content="Product render of this assembly in Mesh Studio, exploded or not, each part in the finish its material suggests" side="bottom">
+            <Link to={`/app/modules/mesh?assembly=${aid}`} data-testid="render-assembly"
+              className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2"><Camera className="h-4 w-4" />Render</Link></Tip>}
           {exp && !exp.stale && <a href={exp.url} className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2" data-testid="step-download">
             <Download className="h-4 w-4" />STEP</a>}
           {view.can_edit && <Tip content="Assembly STEP (AP214) with sub-assemblies, part names and placements; re-imported to verify" side="bottom">
@@ -225,11 +332,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             <Tree view={view} selected={sel} onSelect={setSel} canEdit={view.can_edit} onPatch={patchInst}
               onDelete={iid => run("del", () => api.del<AsmView>(`${A}/instances/${iid}`), "Instance deleted")}
               onDeleteGroup={gid => run("del", () => api.del<AsmView>(`${A}/groups/${gid}`), "Fastener stack removed")}
-              onRefresh={iid => run("refresh", () => api.post<AsmView>(`${A}/instances/${iid}/refresh`), v => {
-                const r = v.result as { references_lost?: number } | undefined;
-                return r?.references_lost ? `Refreshed: ${r.references_lost} mate reference(s) lost` : "Part refreshed to its latest build";
-              })}
-              onMate={onMate} hoverMate={setHoverMate} focusMate={hoverMate?.id ?? null} />
+              onRefresh={iid => run("refresh", () => api.post<AsmView>(`${A}/instances/${iid}/refresh`), refreshed)}
+              onMate={onMate} hoverMate={setHoverMate} focusMate={hoverMate?.id ?? editing?.id ?? null} onEdit={startEdit} onRefit={refit} />
           </div>
           {selInst && view.can_edit && !selInst.fixed && (
             <div className="border-t border-border p-3" data-testid="move-box">
@@ -257,7 +361,10 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
                       </div>
                     ))}
                   </div>
-                  {selInst.dof && selInst.dof.dof < 6 && <p className="mt-2 text-[11px] text-muted">Mates re-apply after each move, so only the free directions change.</p>}
+                  <div className="mt-2 flex items-center gap-2 text-[12px]"><span className="text-muted">Drag in view</span>
+                    <div className="flex-1"><Segmented size="sm" value={gizmoMode} onChange={setGizmoMode}
+                      options={[{ value: "translate", label: "Move" }, { value: "rotate", label: "Rotate" }]} /></div></div>
+                  <p className="mt-2 text-[11px] text-muted">{tab === "mate" || tab === "fasten" ? "The drag handles show in the Check and BOM tabs. " : ""}{selInst.dof && selInst.dof.dof < 6 ? "Mates re-apply after each move, so only the free directions change." : "Drag the arrows or rings, or step it here."}</p>
                 </>
               )}
             </div>
@@ -274,6 +381,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
               clashes={clashPairs.map(p => p.mesh!)} clashFocus={clashFocus} measure={measure} explode={explode} onExplode={setExplode}
               onPick={onPick} hint={hint} describe={tab === "mate" ? describe : undefined}
               thumbKey={view.can_edit && view.thumb_rev !== view.assembly.rev ? view.assembly.rev : null}
+              gizmo={gizmo} fitKey={fitKey} onDrag={(iid, T) => patchInst(iid, { T })}
               onThumb={(png, rev) => { api.post(`${A}/thumbnail`, { png_b64: png, rev }).then(() => qc.setQueryData(key, (old: AsmView | undefined) => old ? { ...old, thumb_rev: rev } : old)).catch(() => {}); }} />
           )}
           {row && <div className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 rounded-full border border-border bg-panel/95 px-3 py-1 text-[12px] shadow-card">
@@ -292,11 +400,20 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             </TabList>
             <TabPanel value="mate">
               <MatePanel view={view} choice={choice} onChoice={setChoice} picks={picks} onClearPick={k => setPicks(p => p.filter((_, j) => j !== k))}
-                value={mval} onValue={setMval} flip={mflip} onFlip={setMflip} onAdd={addMate} busy={busy === "add-mate"} describe={describe} />
+                value={mval} onValue={setMval} flip={mflip} onFlip={setMflip} onAdd={addMate} busy={busy === "add-mate"} describe={describe}
+                editing={editing} onCancelEdit={() => { setEditing(null); setPicks([]); }} />
             </TabPanel>
             <TabPanel value="fasten">
-              <FastenPanel view={view} target={target} onTarget={setTarget} opts={fit} onOpts={setFit} plan={plan} loading={fitQ.isFetching}
-                error={fitQ.error ? (fitQ.error as Error).message : null} onInsert={acceptFit} busy={busy === "fit"} />
+              <div className="border-b border-border px-4 py-2.5">
+                <Segmented value={fmode} onChange={v => { setFmode(v); setTarget(null); }} options={[
+                  { value: "hole", label: "Pick a hole", title: "Fit fasteners to one hole or a hole pattern" },
+                  { value: "pair", label: "Two parts", title: "Fit every lined-up hole between two parts" }]} />
+              </div>
+              {fmode === "hole"
+                ? <FastenPanel view={view} target={target} onTarget={setTarget} opts={fit} onOpts={setFit} plan={plan} loading={fitQ.isFetching}
+                    error={fitQ.error ? (fitQ.error as Error).message : null} onInsert={acceptFit} busy={busy === "fit"} />
+                : <PairPanel view={view} aid={aid} pair={pair} onPair={setPair} style={fit.style} washers={fit.washers}
+                    onInsert={acceptPairs} onFix={fixHole} busy={busy} />}
             </TabPanel>
             <TabPanel value="check">
               <CheckPanel view={view} onRun={runCheck} busy={busy === "check"} focus={clashFocus} onFocus={setClashFocus} rowFocus={rowFocus} onRowFocus={setRowFocus} />
@@ -307,7 +424,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
           </Tabs>
           {exp && (
             <div className={cx("mx-4 my-3 rounded border px-3 py-2 text-[11.5px]", exp.ok ? "border-success/25 bg-success/5 text-success" : "border-warning/30 bg-warning/5 text-warning")}>
-              Last STEP: {exp.instances} instances, {exp.groups} sub-assemblies; re-import {exp.ok ? "matched" : "did not match"} (placement deviation {mm(exp.placement_dev_mm, 9)} mm){exp.stale ? ". The assembly changed since." : "."}
+              Last STEP: {plural(exp.instances, "instance")}, {plural(exp.groups, "sub-assembly", "sub-assemblies")}; re-import {exp.ok ? "matched" : "did not match"} (placement deviation {mm(exp.placement_dev_mm, 9)} mm){exp.stale ? ". The assembly changed since." : "."}
+              {!exp.stale && knownIssues().length > 0 && <span className="mt-1 block font-medium text-warning">Exported with {knownIssues().join(" and ")}.</span>}
             </div>
           )}
         </aside>
