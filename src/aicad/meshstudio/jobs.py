@@ -1,6 +1,8 @@
-"""Background render queue: a small pool of worker threads, each driving one external Blender process at a time.
+"""Background render queue: worker threads, each driving one external Blender process at a time.
 
-Priorities: previews jump ahead of exports, finals and turntables. Caps: per-workspace pending jobs and a global
+Two lanes (AMI-13): a *quick* lane for previews and mesh exports (seconds each) and a *long* lane for finals and
+turntables (minutes). Each lane has its own worker, so an export or a preview never waits behind a 10-minute
+turntable; within a lane, previews jump ahead of exports and finals ahead of turntables. Caps: per-workspace pending jobs and a global
 queue length (callers get a clear "queue full" error). Job state lives in `job.json` inside the job folder, so the
 gallery survives restarts; jobs that were running when the server stopped are reported as interrupted.
 """
@@ -23,6 +25,7 @@ log = logging.getLogger(__name__)
 
 LISTENERS: list[Callable[[Path, dict[str, Any]], None]] = []  # called with (job_dir, job) when a job ends
 PRIORITY = {"preview": 0, "export": 1, "final": 2, "turntable": 3}
+LANE = {"preview": "quick", "export": "quick", "final": "long", "turntable": "long"}
 MAX_PENDING_PER_ORG = 6
 MAX_PENDING_TOTAL = 30
 ACTIVE = ("queued", "running")
@@ -57,18 +60,20 @@ def write_job(d: Path, job: dict[str, Any]) -> None:
 
 class RenderQueue:
     def __init__(self, workers: int | None = None) -> None:
-        self.workers = workers or max(1, int(os.environ.get("FW_MESH_WORKERS", "1")))
-        self._q: queue.PriorityQueue[tuple[int, int, str]] = queue.PriorityQueue()
+        long_workers = workers or max(1, int(os.environ.get("FW_MESH_WORKERS", "1")))
+        self.workers = {"quick": 1, "long": long_workers}
+        self._q: dict[str, queue.PriorityQueue[tuple[int, int, str]]] = {k: queue.PriorityQueue() for k in self.workers}
         self._seq = itertools.count()
         self._lock = threading.Lock()
-        self._live: dict[str, dict[str, Any]] = {}   # job id -> {"dir", "org", "run", "state"}
-        self._threads: list[threading.Thread] = []
+        self._live: dict[str, dict[str, Any]] = {}   # job id -> {"dir", "org", "run", "state", "lane"}
+        self._threads: dict[str, list[threading.Thread]] = {k: [] for k in self.workers}
 
-    def _ensure_threads(self) -> None:
-        while len(self._threads) < self.workers:
-            t = threading.Thread(target=self._loop, name=f"mesh-render-{len(self._threads)}", daemon=True)
+    def _ensure_threads(self, lane: str) -> None:
+        ts = self._threads[lane]
+        while len(ts) < self.workers[lane]:
+            t = threading.Thread(target=self._loop, args=(lane,), name=f"mesh-{lane}-{len(ts)}", daemon=True)
             t.start()
-            self._threads.append(t)
+            ts.append(t)
 
     def is_live(self, job_id: str) -> bool:
         with self._lock:
@@ -79,14 +84,18 @@ class RenderQueue:
             return sum(1 for j in self._live.values() if org is None or j["org"] == org)
 
     def position(self, job_id: str) -> int | None:
-        """1-based place among queued jobs (by priority, then arrival), or None when not queued."""
+        """1-based place among the queued jobs of its lane (by priority, then arrival), or None when not queued."""
         with self._lock:
-            items = sorted(self._q.queue)
+            rec = self._live.get(job_id)
+            if rec is None or rec["state"] != "queued":
+                return None
+            items = sorted(self._q[rec["lane"]].queue)
             ids = [i for _, _, i in items if self._live.get(i, {}).get("state") == "queued"]
         return ids.index(job_id) + 1 if job_id in ids else None
 
     def submit(self, job_dir: Path, job: dict[str, Any], run: Callable[[Path, dict[str, Any]], None]) -> None:
         """Queue `run(job_dir, job)`; it must update job.json itself. Raises QueueFull."""
+        lane = LANE.get(job["kind"], "long")
         with self._lock:
             if job["id"] in self._live:
                 return
@@ -95,13 +104,13 @@ class RenderQueue:
                                 "or cancel one first.")
             if len(self._live) >= MAX_PENDING_TOTAL:
                 raise QueueFull("The render queue is full right now. Try again in a few minutes.")
-            self._live[job["id"]] = {"dir": job_dir, "org": job["org"], "run": run, "state": "queued"}
-            self._q.put((PRIORITY.get(job["kind"], 5), next(self._seq), job["id"]))
-        self._ensure_threads()
+            self._live[job["id"]] = {"dir": job_dir, "org": job["org"], "run": run, "state": "queued", "lane": lane}
+            self._q[lane].put((PRIORITY.get(job["kind"], 5), next(self._seq), job["id"]))
+        self._ensure_threads(lane)
 
-    def _loop(self) -> None:
+    def _loop(self, lane: str) -> None:
         while True:
-            _, _, jid = self._q.get()
+            _, _, jid = self._q[lane].get()
             with self._lock:
                 rec = self._live.get(jid)
                 if rec is None:  # cancelled while queued

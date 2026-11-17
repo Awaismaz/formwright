@@ -85,13 +85,17 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       </ul>
     </SampleFrame>),
   assembly: () => (
-    <SampleFrame title="Assembly — Damper sub-assembly (5 parts)">
+    <SampleFrame title="Assembly — demo L bracket on the demo mounting plate">
       <div className="grid gap-4 md:grid-cols-2">
         <div><div className="label mb-2">Tree & mates</div>
-          <ul className="space-y-1 font-mono text-[12px]">{["▾ damper_asm", "   ├ body (fixed)", "   ├ piston ⟷ body: concentric, slide", "   ├ rod ⟷ piston: rigid", "   ├ cap ⟷ body: coincident", "   └ 2× M6 bolt ⟷ cap: concentric"].map(l => <li key={l}>{l}</li>)}</ul>
-          <div className="mt-3 text-xs text-muted">DOF: 1 (slide along Z) · fully constrained otherwise</div></div>
-        <div><div className="label mb-2">Interference & clearance</div>
-          <FindingsTable rows={[["rod / cap", "Clearance 0.15 mm", "ok", "—"], ["piston / body", "Interference 0.02 mm³", "high", "Reduce piston Ø by 0.05 mm"], ["bolt / body", "Thread engagement 1.8×d", "ok", "—"]]} /></div>
+          <ul className="space-y-1 font-mono text-[12px]">{["▾ Mounting Plate assembly", "   ├ (f) Mounting Plate<1>", "   ├ (−) L Bracket<1>", "   └ ▸ Fastener stack 1 M5×25", "Coincident  +Z face ↔ −Z face", "Concentric  Ø6.6 hole ↔ Ø5.5 hole"].map(l => <li key={l} className="whitespace-pre">{l}</li>)}</ul>
+          <div className="mt-3 text-xs text-muted">(f) fixed · (−) can still move: mates show what is left free · Check: 0 interferences (exact B-rep boolean)</div></div>
+        <div><div className="label mb-2">Fastener auto-fit (picked hole Ø5.5)</div>
+          <table className="w-full text-[12.5px] tabular-nums"><tbody className="divide-y divide-border">
+            {[["Grip measured", "5 + 10 = 15 mm"], ["Washers ISO 7089", "2 × 1.0 mm"], ["Nut m ISO 4032", "4.7 mm"], ["Protrusion 2 × P", "1.6 mm"], ["Minimum length", "≥ 23.3 mm → M5×25 (ISO 888)"]].map(([k, v]) => (
+              <tr key={k}><td className="py-1.5 pr-3 text-muted">{k}</td><td className="py-1.5 text-right">{v}</td></tr>))}
+          </tbody></table>
+          <div className="mt-2 flex items-center gap-2 text-xs text-muted"><Badge tone="warning">VERIFY</Badge>ISO tables and a stated rule, not a joint calculation.</div></div>
       </div>
     </SampleFrame>),
   image2cad: () => (
@@ -112,11 +116,12 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       <FindingsTable rows={[["mesh", "Watertight, 1 shell", "ok", "—"], ["boss_ribs", "Wall 0.8 mm < 2 perimeters", "med", "Increase to 1.2 mm"], ["lid_lip", "Overhang 62° unsupported", "high", "Rotate 180° or add chamfer"], ["orientation", "Best: top face down", "ok", "Support area −71%"]]} />
     </SampleFrame>),
   mesh: () => (
-    <SampleFrame title="Mesh Studio — concept renders">
-      <div className="grid grid-cols-3 gap-3">{["Brushed steel", "Anodised blue", "Matte black"].map((m, i) => (
-        <div key={m} className="overflow-hidden rounded-lg border border-border"><div className="aspect-square" style={{ background: ["radial-gradient(circle at 35% 30%,#f2f4f7,#8d96a3 60%,#4a525e)", "radial-gradient(circle at 35% 30%,#9cc2ff,#2a5db0 60%,#122a55)", "radial-gradient(circle at 35% 30%,#7a7f88,#2b2e33 60%,#111)"][i] }} />
-          <div className="px-2 py-1.5 text-xs">{m}</div></div>))}</div>
-      <p className="mt-3 text-xs text-muted">Mesh outputs are for visualisation and are kept separate from precision B-rep CAD.</p>
+    <SampleFrame title="Mesh Studio: product renders of the demo Pipe Flange">
+      <div className="grid grid-cols-3 gap-3">{([["steel-dark", "Machined steel · Dark dramatic"], ["anodised-blue", "Anodised blue · Studio softbox"], ["black-oxide", "Black oxide · Technical white"]] as const).map(([f, m]) => (
+        <figure key={f} className="overflow-hidden rounded-lg border border-border">
+          <img src={`/samples/mesh-flange-${f}.jpg`} alt={`Demo Pipe Flange rendered in ${m}`} width={360} height={360} loading="lazy" className="block aspect-square w-full object-cover" />
+          <figcaption className="px-2 py-1.5 text-xs">{m}</figcaption></figure>))}</div>
+      <p className="mt-3 text-xs text-muted">Rendered by Formwright Mesh Studio (Blender Cycles) from a demo part, not from your data. Renders are visualisations of a tessellated mesh, kept separate from the exact CAD model.</p>
     </SampleFrame>),
 };
 

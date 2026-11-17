@@ -782,7 +782,10 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
     s.run_id = run.id  # type: ignore[attr-defined]
     s.run_budget_usd = budget * metering.USD_PER_TOKEN if budget is not None else None
     s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files, "run_id": run.id, "budget_tokens": budget}
-    t = asyncio.create_task(s.send(text))
+    shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief
+    if shown and files:
+        shown += "\n\n[Reference image attached]"
+    t = asyncio.create_task(s.send(text, shown=shown) if shown else s.send(text))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
     track(ctx.db, "prompt_sent", ctx.user, p.org_id, chars=len(text))

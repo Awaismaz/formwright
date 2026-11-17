@@ -72,6 +72,30 @@ def _extent_along(shape: Shape, origin: Any, d: Any) -> tuple[float, float]:
     return min(vals), max(vals)
 
 
+def _open_both_ends(shape: Shape, top: Any, bot: Any, d: Any, r: float) -> bool:
+    """True when the material just beyond *both* ends of a hole is air: on the axis and at 0.7 r around it (so a
+    counterbore's floor or a blind bottom counts as closed, while a smaller coaxial hole beyond does not open it)."""
+    from build123d import Vector
+
+    ref = [1.0, 0.0, 0.0] if abs(d[0]) < 0.9 else [0.0, 1.0, 0.0]
+    e1 = _sub(ref, [d[k] * _dot(ref, d) for k in range(3)])
+    n1 = _norm(e1)
+    e1 = [x / n1 for x in e1]
+    e2 = [d[1] * e1[2] - d[2] * e1[1], d[2] * e1[0] - d[0] * e1[2], d[0] * e1[1] - d[1] * e1[0]]
+    eps = max(0.05, 0.02 * r)
+    offs = [[0.0, 0.0, 0.0]] + [[0.7 * r * (math.cos(a) * e1[k] + math.sin(a) * e2[k]) for k in range(3)]
+                                for a in (0.0, math.pi / 2, math.pi, 3 * math.pi / 2)]
+    for end, sgn in ((top, 1.0), (bot, -1.0)):
+        for o in offs:
+            p = [end[k] + sgn * d[k] * eps + o[k] for k in range(3)]
+            try:
+                if shape.is_inside(Vector(*p)):
+                    return False
+            except Exception:  # noqa: BLE001 - classifier failure: be conservative (blind)
+                return False
+    return True
+
+
 def _cyl_info(face: Any) -> dict[str, Any] | None:
     s = BRepAdaptor_Surface(face.wrapped)
     t = s.GetType()
@@ -247,19 +271,25 @@ def recognize(shape: Shape) -> dict[str, Any]:
             continue
         other[fid] = "freeform face"
 
-    def finish(g: dict[str, Any]) -> dict[str, Any]:
+    def finish(g: dict[str, Any], hole: bool = True) -> dict[str, Any]:
         d = _axis_key(g["axis"])
         o = g["origin"]
         mid_t = (g["lo"] + g["hi"]) / 2
         f0 = _foot([0.0, 0.0, 0.0], o, d)
         base_t = _dot(_sub(o, f0), d)
         c = [f0[i] + d[i] * (base_t + mid_t) for i in range(3)]
-        plo, phi = _extent_along(shape, c, d)
         depth = g["hi"] - g["lo"]
         top = [c[i] + d[i] * (depth / 2) for i in range(3)]
         bot = [c[i] - d[i] * (depth / 2) for i in range(3)]
-        through = abs(depth - (phi - plo)) < 0.05 or (abs(depth / 2 - phi) < 0.05 and abs(-depth / 2 - plo) < 0.05)
         from build123d import Vector
+
+        if hole:
+            # through = both ends of this hole open to air *locally* (AMI-02): a hole through a 5 mm bracket leg is
+            # through even though the part is 40 mm tall along that axis
+            through = _open_both_ends(shape, top, bot, d, g["r"])
+        else:
+            plo, phi = _extent_along(shape, c, d)
+            through = abs(depth - (phi - plo)) < 0.05
 
         if through:
             open_end, into = bot, list(d)
@@ -276,7 +306,7 @@ def recognize(shape: Shape) -> dict[str, Any]:
                 "dir": [_r(x, 6) for x in into]}
 
     holes = sorted((finish(g) for g in holes_raw.values()), key=lambda h: (h["d"], h["center"]))
-    bosses = sorted((finish(g) for g in bosses_raw.values()), key=lambda h: -h["d"])
+    bosses = sorted((finish(g, hole=False) for g in bosses_raw.values()), key=lambda h: -h["d"])
     hole_fids = {f for h in holes for f in h["faces"]}
 
     # ---- rotational repetition (gear teeth, splines, spokes, slots around an axis)

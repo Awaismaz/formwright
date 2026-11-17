@@ -1,6 +1,6 @@
 """Formwright Mesh Studio scene script. Runs ONLY inside a separate Blender process:
 
-    blender -b --factory-startup --python scene.py -- <job_dir> <geometry.npz>
+    blender -b --factory-startup --python scene.py -- <job_dir> <geometry.npz> [<geometry.npz> ...]
 
 It is never imported by Formwright (Blender is GPL; we only drive it from the command line). The SPEC line below is
 replaced with the job's preset values by `aicad.meshstudio.scene.build_script`, so each job folder holds a
@@ -19,7 +19,8 @@ SPEC = {}  # @@SPEC@@
 
 ARGV = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 JOB = os.path.abspath(ARGV[0])
-GEOM = os.path.abspath(ARGV[1])
+GEOMS = [os.path.abspath(a) for a in ARGV[1:]]  # one mesh per distinct part (assemblies share them)
+GEOM = GEOMS[0]
 
 
 def out_path(name):
@@ -40,10 +41,10 @@ sc.unit_settings.system = "METRIC"
 sc.unit_settings.length_unit = "MILLIMETERS"
 
 
-def build_part():
-    d = np.load(GEOM)
+def build_mesh(path, name="Part"):
+    d = np.load(path)
     v, f, n = d["v"], d["f"], d["n"]
-    me = bpy.data.meshes.new("Part")
+    me = bpy.data.meshes.new(name)
     me.vertices.add(len(v))
     me.vertices.foreach_set("co", v.ravel())
     me.loops.add(f.size)
@@ -54,9 +55,32 @@ def build_part():
     me.validate(clean_customdata=False)
     me.shade_smooth()
     me.normals_split_custom_set(n.astype(np.float64).reshape(-1, 3))
-    ob = bpy.data.objects.new(SPEC["object"]["name"], me)
+    return me
+
+
+def build_part():
+    ob = bpy.data.objects.new(SPEC["object"]["name"], build_mesh(GEOM))
     sc.collection.objects.link(ob)
     return ob
+
+
+def build_assembly(pivot):
+    """One object per placed instance; instances of the same part share one mesh, each with its own finish."""
+    mats = [make_material(m, False) for m in SPEC["materials"]]
+    meshes = {}
+    for p in SPEC["parts"]:
+        if p["geom"] not in meshes:
+            meshes[p["geom"]] = build_mesh(GEOMS[p["geom"]], "Part %d" % p["geom"])
+        me = meshes[p["geom"]]
+        if not me.materials:
+            me.materials.append(mats[p["material"]])
+        ob = bpy.data.objects.new(p["name"], me)
+        sc.collection.objects.link(ob)
+        ob.material_slots[0].link = "OBJECT"
+        ob.material_slots[0].material = mats[p["material"]]
+        ob.parent = pivot
+        set_matrix(ob, p["matrix"])
+        ob["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
 
 
 def node(nt, kind, loc, **inputs):
@@ -258,21 +282,76 @@ def configure_render(r):
     sc.render.film_transparent = True
     sc.render.resolution_x, sc.render.resolution_y = r["res"]
     sc.render.resolution_percentage = 100
-    sc.render.image_settings.file_format = "PNG"
-    sc.render.image_settings.color_mode = "RGBA"
-    sc.render.image_settings.color_depth = "8"
-    sc.render.image_settings.compression = 40
+    linear_output()
     sc.view_settings.view_transform = r["view"]
     sc.view_settings.look = r["look"]
     sc.view_settings.exposure = r["exposure"]
     sc.render.use_persistent_data = True
 
 
+def linear_output():
+    """Renders are written as linear half-float EXR first, so exposure can be chosen from the real highlight values
+    before the view transform compresses them (see expose_and_write)."""
+    im = sc.render.image_settings
+    im.file_format = "OPEN_EXR"
+    im.color_mode = "RGBA"
+    im.color_depth = "16"
+    im.exr_codec = "ZIP"
+
+
+def png_output():
+    im = sc.render.image_settings
+    im.file_format = "PNG"
+    im.color_mode = "RGBA"
+    im.color_depth = "8"
+    im.compression = 40
+
+
+def _object_mins(path):
+    """Per-pixel minimum of R, G, B (linear) over the part's opaque pixels: a pixel whose minimum channel is high is
+    near white after the view transform, i.e. a blown highlight with no colour or detail left."""
+    img = bpy.data.images.load(path)
+    w, h = img.size
+    px = np.empty(w * h * 4, dtype=np.float32)
+    img.pixels.foreach_get(px)
+    bpy.data.images.remove(img)
+    px = px.reshape(-1, 4)
+    return px[px[:, 3] >= 0.98, :3].min(axis=1)
+
+
+def expose_and_write(exr_paths, png_paths):
+    """Highlight protection (AMI-12). Measure the share of the part's pixels that would land in the view transform's
+    white shoulder; when it exceeds the allowed share, lower the exposure just enough (never brighten, never more
+    than the floor). One exposure for every frame, so a turntable doesn't flicker. Then write the display-referred
+    PNGs with the scene's colour management and delete the linear files."""
+    r = SPEC["render"]
+    ae = r.get("auto_exposure") or {}
+    step = max(1, len(exr_paths) // 12)
+    mins = np.concatenate([_object_mins(p) for p in exr_paths[::step]]) * (2.0 ** r["exposure"])
+    ev, before = 0.0, 0.0
+    if mins.size and ae:
+        before = float((mins >= ae["shoulder"]).mean())
+        if before > ae["max_fraction"]:
+            q = float(np.quantile(mins, 1.0 - ae["max_fraction"]))
+            ev = max(ae["min_ev"], math.log2(ae["shoulder"] / q))
+    after = float((mins * 2.0 ** ev >= ae.get("shoulder", 1.0)).mean()) if mins.size else 0.0
+    sc.view_settings.exposure = r["exposure"] + ev
+    png_output()
+    for src, dst in zip(exr_paths, png_paths):
+        img = bpy.data.images.load(src)
+        img.save_render(dst, scene=sc)
+        bpy.data.images.remove(img)
+        os.remove(src)
+    say("FW_EXPOSURE %.4f %.5f %.5f" % (ev, before, after))
+
+
 def main():
     mode = SPEC["mode"]
-    part = build_part()
+    assembly = bool(SPEC.get("parts"))
+    part = None if assembly else build_part()
     simple = mode == "export"
-    part.data.materials.append(make_material(SPEC["material"], simple))
+    if part is not None:
+        part.data.materials.append(make_material(SPEC["material"], simple))
     if mode == "export":
         bpy.ops.object.select_all(action="DESELECT")
         part.select_set(True)
@@ -294,9 +373,12 @@ def main():
     pivot = bpy.data.objects.new("Turntable", None)
     sc.collection.objects.link(pivot)
     pivot.location = SPEC["pivot"]
-    part.parent = pivot
-    set_matrix(part, SPEC["object"]["matrix"])
-    part["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
+    if assembly:
+        build_assembly(pivot)
+    else:
+        part.parent = pivot
+        set_matrix(part, SPEC["object"]["matrix"])
+        part["formwright"] = "Visualisation mesh tessellated from the verified model; not the exact geometry."
     build_world(SPEC["lighting"]["world"])
     build_lights(SPEC["lighting"]["lights"])
     build_floor(SPEC["floor"])
@@ -315,9 +397,6 @@ def main():
         pivot.keyframe_insert("rotation_euler", index=2, frame=n + 1)
         frames_dir = out_path(o["frames_dir"])
         os.makedirs(frames_dir, exist_ok=True)
-        if o.get("blend"):
-            sc.render.filepath = "//frames/f_"
-            bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
         # one animation render keeps the device, kernels and scene loaded between frames (much faster than
         # rendering each frame as a separate still)
         def _frame_done(scene, *args):
@@ -327,13 +406,21 @@ def main():
         sc.render.filepath = out_path(os.path.join(o["frames_dir"], "f_"))
         sc.render.use_file_extension = True
         bpy.ops.render.render(animation=True)
-    else:
-        if o.get("blend"):
-            sc.render.filepath = "//render.png"
+        exrs = [out_path(os.path.join(o["frames_dir"], "f_%04d.exr" % k)) for k in range(1, n + 1)]
+        expose_and_write(exrs, [p[:-4] + ".png" for p in exrs])
+        if o.get("blend"):  # saved after exposure, so the scene reproduces the delivered frames
+            png_output()
+            sc.render.filepath = "//frames/f_"
             bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
-        sc.render.filepath = out_path(o["image"])
+    else:
+        sc.render.filepath = out_path("linear.exr")
         bpy.ops.render.render(write_still=True)
         say("FW_FRAME 1/1")
+        expose_and_write([out_path("linear.exr")], [out_path(o["image"])])
+        if o.get("blend"):
+            png_output()
+            sc.render.filepath = "//render.png"
+            bpy.ops.wm.save_as_mainfile(filepath=out_path(o["blend"]), compress=True, copy=True)
     say("FW_DONE")
 
 

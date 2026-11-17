@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layers, Maximize2, Minus, Plus } from "lucide-react";
 import { cx } from "@/lib/format";
+import { spreadPins } from "./pins";
 
 /** ``corner``: the pin marks the top-right corner of a text box (so the text stays visible), else its centre. */
 export interface Pin { id: string; x: number; y: number; n: number; title: string; tone: "read" | "ask" | "ref" | "off" | "done"; corner?: boolean }
@@ -23,6 +24,7 @@ export default function SourcePane({ src, pins, boxes, hot, onHot, onPick }: {
   const [view, setView] = useState({ z: 1, x: 0, y: 0 });
   const [showViews, setShowViews] = useState(true);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null);
+  const shift = useMemo(() => (nat ? spreadPins(pins, nat.w, nat.h, view.z) : {}), [pins, nat, view.z]);
 
   const fit = useCallback(() => {
     const el = wrap.current;
@@ -85,7 +87,7 @@ export default function SourcePane({ src, pins, boxes, hot, onHot, onPick }: {
           <button key={p.id} type="button" data-pin={p.id} title={p.title} aria-label={p.title}
             onMouseEnter={() => onHot(p.id)} onMouseLeave={() => onHot(null)} onClick={() => onPick(p.id)}
             className="absolute" style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%`, transformOrigin: p.corner ? "0 100%" : "50% 50%",
-              transform: p.corner ? `translate(-4px, -100%) scale(${1 / view.z})` : `translate(-50%, -50%) scale(${1 / view.z})` }}>
+              transform: `translateX(${(shift[p.id] ?? 0) / view.z}px) ` + (p.corner ? `translate(-4px, -100%) scale(${1 / view.z})` : `translate(-50%, -50%) scale(${1 / view.z})`) }}>
             <span className={cx("flex h-[20px] min-w-[20px] items-center justify-center rounded-full border-2 px-1 text-[10.5px] font-bold shadow-md transition-transform",
               TONE[p.tone], hot === p.id && "scale-[1.35]", p.tone === "ask" && "animate-[pulse_2s_ease-in-out_infinite]")}>
               {p.n || (p.tone === "done" ? "✓" : "?")}

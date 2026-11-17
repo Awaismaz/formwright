@@ -13,4 +13,4 @@ DISCLOSURE = ("Visualisation only. Renders and meshes are made from a tessellate
               "edges softened for display. They are not the exact model: use the STEP for engineering, inspection "
               "and manufacturing.")
 
-VERSION = "2"  # scene-script version: bump on any change that alters a render, so cached renders are rebuilt
+VERSION = "3"  # scene-script version: bump on any change that alters a render, so cached renders are rebuilt

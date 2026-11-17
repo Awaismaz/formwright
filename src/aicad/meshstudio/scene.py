@@ -19,6 +19,10 @@ from aicad.meshstudio import VERSION, framing, presets
 
 TEMPLATE = Path(__file__).with_name("blender_scene.py")
 MARK = "SPEC = {}  # @@SPEC@@"
+# Highlight protection (AMI-12): Khronos PBR Neutral starts compressing towards white at 0.76 (0.8 minus its 0.04
+# Fresnel offset). A part pixel whose *minimum* linear channel reaches that shoulder comes out near white with no
+# colour or detail. At most 2 % of the part may sit there; otherwise exposure is lowered just enough (at most 4 EV).
+AUTO_EXPOSURE = {"shoulder": 0.76, "max_fraction": 0.02, "min_ev": -4.0}
 
 
 @dataclass(frozen=True)
@@ -27,7 +31,7 @@ class Options:
     colour: str | None = None
     lighting: str = "studio"
     camera: str = "hero"
-    quality: str = "preview"          # preview | final | turntable
+    quality: str = "preview"          # preview | final | turntable | turntable_draft
     aspect: str = "4:3"
     transparent: bool = False
     pose: str = "auto"                # auto | as_modelled
@@ -91,7 +95,8 @@ def build_spec(geom: dict[str, Any], hull_mm: np.ndarray, opts: Options, device:
     res = [long_side, round(long_side * ah / aw)] if aw >= ah else [round(long_side * aw / ah), long_side]
     res = [int(r) - int(r) % 2 for r in res]
     cam = presets.CAMERAS[opts.camera]
-    frame_pts = framing.turntable_points(pts, np.zeros(2)) if opts.quality == "turntable" else pts
+    turn = presets.is_turntable(opts.quality)
+    frame_pts = framing.turntable_points(pts, np.zeros(2)) if turn else pts
     camera = framing.frame_camera(frame_pts, cam, (aw, ah))
     light = presets.LIGHTING[opts.lighting]
     centre = (pts.min(axis=0) + pts.max(axis=0)) / 2
@@ -102,9 +107,10 @@ def build_spec(geom: dict[str, Any], hull_mm: np.ndarray, opts: Options, device:
     mat = presets.resolve_finish(opts.finish, opts.colour)
     mat["label"] = presets.FINISHES[opts.finish]["label"]
     rend = device_block(device, opts.quality)
-    rend.update(res=res, view="Khronos PBR Neutral", look="None", exposure=light["exposure"])
+    rend.update(res=res, view="Khronos PBR Neutral", look="None", exposure=light["exposure"],
+                auto_exposure=AUTO_EXPOSURE)
     spec = {
-        "version": VERSION, "mode": "turntable" if opts.quality == "turntable" else "render",
+        "version": VERSION, "mode": "turntable" if turn else "render",
         "object": {"name": name[:60] or "Part", "matrix": [[round(float(x), 7) for x in row] for row in m]},
         "pivot": [0.0, 0.0, 0.0],
         "material": mat,
@@ -112,13 +118,46 @@ def build_spec(geom: dict[str, Any], hull_mm: np.ndarray, opts: Options, device:
         "scale": {"rough_noise": round(1.0 / (diag * 0.25), 4)},
         "lighting": {"world": {k: _hex_lin(light["world"][k]) for k in ("top", "horizon", "bottom")}
                      | {"strength": light["world"]["strength"]}, "lights": lights},
-        "floor": {"z": 0.0, "size": round(diag * 40, 5), "albedo": [0.3, 0.3, 0.3]},
+        "floor": {"z": 0.0, "size": round(diag * 40, 5), "albedo": [light.get("floor", 0.3)] * 3},
         "camera": camera, "render": rend,
-        "turntable": {"frames": q["frames"], "fps": q["fps"]} if opts.quality == "turntable" else None,
+        "turntable": {"frames": q["frames"], "fps": q["fps"]} if turn else None,
         "outputs": outputs,
         "post": {"background": None if opts.transparent else light["background"], "shadow": light["shadow"],
                  "aspect": [aw, ah]},
     }
+    return spec
+
+
+def build_assembly_spec(items: list[dict[str, Any]], opts: Options, device: dict[str, Any], name: str,
+                        outputs: dict[str, Any]) -> dict[str, Any]:
+    """Scene for an assembly (AMI-I4). `items`, one per visible instance: {"name", "hull_mm" (part-local convex
+    hull, mm), "T" (4x4 part -> assembly, mm, explode offset included), "geom" (index of its mesh file on the
+    command line), "finish", "colour"}. Framing, lights and floor come from the union of the placed parts; each
+    instance gets its own object (instances of one part share the mesh) and the material of its finish."""
+    if not items:
+        raise ValueError("The assembly has no visible parts to render.")
+    world = np.vstack([np.asarray(it["hull_mm"], float) @ np.asarray(it["T"])[:3, :3].T + np.asarray(it["T"])[:3, 3]
+                       for it in items])
+    spec = build_spec({"bbox_mm": [float(x) for x in world.max(axis=0) - world.min(axis=0)]}, world, opts, device,
+                      name, outputs)
+    root = np.asarray(spec["object"]["matrix"], float)
+    mats: list[dict[str, Any]] = []
+    index: dict[tuple[str, str | None], int] = {}
+    parts = []
+    for it in items:
+        key = (it["finish"], it.get("colour"))
+        if key not in index:
+            m = presets.resolve_finish(*key)
+            m["label"] = presets.FINISHES[key[0]]["label"]
+            index[key] = len(mats)
+            mats.append(m)
+        tm = np.array(it["T"], float)
+        tm[:3, 3] *= 0.001  # meshes are in metres
+        world_m = root @ tm
+        parts.append({"name": str(it["name"])[:60], "geom": int(it["geom"]), "material": index[key],
+                      "matrix": [[round(float(x), 7) for x in row] for row in world_m]})
+    spec["parts"] = parts
+    spec["materials"] = mats
     return spec
 
 

@@ -23,6 +23,7 @@ import { offsetPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { SimilarPartsDialog } from "@/components/SimilarParts";
+import { WhereUsed } from "./modules/assembly/WhereUsed";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
@@ -34,7 +35,7 @@ const MAKE: Record<string, Omit<MakeModule, "code">> = {
   print: { name: "3D Print Prep", icon: <Printer className="h-5 w-5" />, tip: "Prepare this part for 3D printing: checks, orientation, export" },
   engineering: { name: "Engineering Advisor", icon: <Gauge className="h-5 w-5" />, tip: "Engineering calculations pre-filled from this part" },
   assembly: { name: "Assemble", icon: <Boxes className="h-5 w-5" />, tip: "Mate with other parts, check clashes, fit ISO fasteners" },
-  mesh: { name: "Product Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
+  mesh: { name: "Render", icon: <Camera className="h-5 w-5" />, tip: "Photoreal renders and turntables of this part (visualisation)" },
 };
 
 /** Live input modules offered on the Library tab: they bring outside geometry into this part. */
@@ -81,6 +82,7 @@ export default function ProjectStudio() {
   const [delTarget, setDelTarget] = useState<string | null>(null);
 
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const owned = useMemo(() => new Set(me?.org?.god_unlock ? Object.keys(MAKE) : me?.org?.modules ?? []), [me?.org]);
   const deliv = useDeliverables(id);
   const make = useMemo<MakeModule[]>(() => (catalog.data?.modules ?? []).filter(m => m.status === "live" && MAKE[m.code])
     .map(m => {
@@ -257,6 +259,7 @@ export default function ProjectStudio() {
             onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
             : <button onClick={() => setEditing(true)} className="max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
           <ProjectStatus p={p} />
+          {owned.has("assembly") && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
         </div>}
         right={<>
           <Tip content={leftOpen ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => setLeftOpen(!leftOpen)} className={cx("rounded p-1 hover:bg-text/5", leftOpen ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>
@@ -275,6 +278,8 @@ export default function ProjectStudio() {
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
             empty={mf.length ? <div className="absolute bottom-10 rounded bg-panel/90 px-3 py-1.5 text-[12.5px] text-muted shadow-card">No solid yet: {mf.length} reference feature(s) in the tree. Add a boss, revolve, sweep or loft to create the body.</div>
+              : p.agent?.busy && /^From .+ \(Image & Drawing to CAD\)/.test(p.description) /* AMI-26: first build from a drawing */
+              ? <div className="text-center text-sm text-muted"><Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />Building from {/^From (.+?) \(Image/.exec(p.description)?.[1]}…<div className="mt-1 text-[12.5px]">The design agent is modelling from your confirmed values.</div></div>
               : <div className="text-center text-sm text-muted"><Icon name="box" className="mx-auto mb-2 h-10 w-10 text-muted/40" />Describe a part to the design agent, model it by hand, or start from a library part
               <div className="mt-3 flex flex-wrap justify-center gap-2">
                 <button onClick={() => openPm("sketch", null, { feature: "extrude", mode: "add" })} className="pointer-events-auto rounded-md border border-primary/50 bg-primary-soft px-3 py-1.5 text-[12.5px] font-medium text-primary hover:border-primary">Sketch on a plane</button>

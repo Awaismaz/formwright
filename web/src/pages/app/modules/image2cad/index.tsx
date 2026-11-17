@@ -8,7 +8,8 @@ import { ago, cx } from "@/lib/format";
 import { Badge, PageLoader, StatusBadge } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import ReviewScreen from "./Review";
-import { BASE, type UploadSummary } from "./types";
+import { CostStrip } from "./Cost";
+import { BASE, type Estimate, type UploadSummary } from "./types";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp";
 
@@ -38,7 +39,7 @@ function fileToB64(f: File): Promise<string> {
 function Home({ targetProject, onOpen }: { targetProject: string | null; onOpen: (id: string) => void }) {
   const qc = useQueryClient();
   const q = useQuery({
-    queryKey: ["i2c-uploads"], queryFn: () => api.get<{ items: UploadSummary[]; max_mb: number; can_edit: boolean }>(`${BASE}/uploads`),
+    queryKey: ["i2c-uploads"], queryFn: () => api.get<{ items: UploadSummary[]; max_mb: number; can_edit: boolean; estimate: Estimate }>(`${BASE}/uploads`),
     refetchInterval: d => (d.state.data?.items.some(i => i.status === "reading") ? 1500 : false),
   });
   const proj = useQuery({ queryKey: ["project", targetProject], enabled: !!targetProject,
@@ -110,8 +111,9 @@ function Home({ targetProject, onOpen }: { targetProject: string | null; onOpen:
             <div className="text-[15px] font-semibold">{busy ? "Uploading…" : "Drop a drawing, sketch or photo"}</div>
             <div className="max-w-xl text-[13px] text-muted">
               PDF drawings (vector or scanned, up to {q.data?.max_mb ?? 20} MB) or PNG, JPG and WebP images (up to 12 MB).
-              Vector PDFs are read exactly from their text. Scans, sketches and photos are read by AI vision, which uses tokens.
+              Vector PDFs are read exactly from their text, with no tokens. Scans, sketches and photos are read by AI vision.
             </div>
+            {q.data?.estimate && <CostStrip e={q.data.estimate} />}
             <button type="button" disabled={busy} onClick={() => input.current?.click()}
               className="pointer-events-auto mt-1 inline-flex h-9 items-center gap-2 rounded border border-transparent bg-primary px-4 text-sm font-medium text-primary-fg shadow-sm hover:brightness-110 disabled:opacity-50">
               Choose a file
@@ -160,6 +162,10 @@ function Row({ u, onOpen, onDelete }: { u: UploadSummary; onOpen: (id: string) =
           </div>
           {u.status === "failed" && u.error && <div className="truncate text-xs text-danger">{u.error}</div>}
         </div>
+        {u.roundtrip && u.roundtrip.checked > 0 && (
+          <span className={cx("text-[12px] tabular-nums", u.roundtrip.matched === u.roundtrip.checked ? "text-success" : "text-warning")}
+            title="Confirmed values found on the model's drawing">{u.roundtrip.matched}/{u.roundtrip.checked} on the model</span>
+        )}
         <StatusChip u={u} />
       </button>
       {u.status === "created" && u.project_id && (

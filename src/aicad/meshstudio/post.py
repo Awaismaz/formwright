@@ -88,3 +88,18 @@ def coverage_bbox(path: Path, bg_threshold: float = 12.0) -> tuple[float, float,
     ys, xs = np.nonzero(mask)
     h, w = mask.shape
     return xs.min() / w, ys.min() / h, (xs.max() + 1) / w, (ys.max() + 1) / h
+
+
+BLOWN_LEVEL = 230   # 8-bit sRGB: inside Khronos PBR Neutral's white shoulder (linear 0.76 -> about 227)
+BLOWN_MAX = 0.02    # share of the part's pixels allowed to sit there before a render is flagged
+
+
+def blown_fraction(path: Path) -> float | None:
+    """Post-render highlight check (AMI-12) on a transparent render: the share of the part's opaque pixels whose
+    darkest channel is at or above BLOWN_LEVEL, i.e. near white with no colour or detail. None when the image has
+    no opaque pixels (or no alpha to tell the part from the background)."""
+    im = np.asarray(Image.open(path).convert("RGBA"))
+    obj = im[..., 3] >= 250
+    if not obj.any() or obj.all():
+        return None
+    return float((im[..., :3].min(axis=2)[obj] >= BLOWN_LEVEL).mean())

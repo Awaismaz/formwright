@@ -44,6 +44,7 @@ export function FastenPanel({ view, target, onTarget, opts, onOpts, plan, loadin
   const prop = first?.proposal;
   const lens = prop?.length;
   const uniform = plan ? plan.stacks.length <= 1 && plan.failed === 0 : true;
+  const noRoom = !!plan?.holes.some(h => h.proposal.ok && h.proposal.no_room);
   return (
     <div data-testid="fasten-panel">
       <div className="flex items-start gap-2.5 border-b border-border bg-gradient-to-b from-accent/[.07] to-transparent px-4 py-3.5">
@@ -137,7 +138,14 @@ export function FastenPanel({ view, target, onTarget, opts, onOpts, plan, loadin
                   <p className="text-[11px] leading-snug text-muted">{prop.rule}</p>
                 </>
               ) : (
-                <div className="flex items-start gap-2 rounded border border-danger/30 bg-danger/5 p-2.5 text-[12.5px] text-danger"><XCircle className="mt-px h-4 w-4 shrink-0" />{prop.error}</div>
+                <div className="rounded border border-danger/30 bg-danger/5 p-2.5 text-[12.5px] text-danger">
+                  <div className="flex items-start gap-2"><XCircle className="mt-px h-4 w-4 shrink-0" />{prop.error}</div>
+                  {first?.probe.mismatch && (
+                    <Button size="sm" variant="secondary" className="mt-2 w-full" data-testid="fit-smaller"
+                      onClick={() => { onOpts({ ...opts, pattern: false }); onTarget({ inst: first.probe.mismatch!.inst, hole: first.probe.mismatch!.hole }); }}>
+                      Fit M{first.probe.mismatch.size} from the {first.probe.mismatch.name} hole</Button>
+                  )}
+                </div>
               )}
               {!uniform && (
                 <div className="rounded border border-border">
@@ -162,11 +170,13 @@ export function FastenPanel({ view, target, onTarget, opts, onOpts, plan, loadin
       )}
       {target && (
         <div className="sticky bottom-0 z-10 border-t border-border bg-panel/95 px-4 py-3 backdrop-blur">
-          <Button variant="accent" className="w-full" icon={<Wrench className="h-4 w-4" />} disabled={!plan || plan.ok === 0 || !view.can_edit || loading}
+          <Button variant={noRoom ? "secondary" : "accent"} className="w-full" icon={<Wrench className="h-4 w-4" />} disabled={!plan || plan.ok === 0 || !view.can_edit || loading}
             loading={busy} onClick={onInsert} data-testid="fit-insert">
-            {plan && plan.ok > 1 ? `Insert ${plan.ok} stacks` : "Insert stack"}
+            {noRoom ? "Insert anyway (will clash)" : plan && plan.ok > 1 ? `Insert ${plan.ok} stacks` : "Insert stack"}
           </Button>
-          <p className="mt-1.5 text-[11px] leading-snug text-muted">Inserted as Toolbox parts, mated concentric with the hole and seated on the faces.</p>
+          <p className="mt-1.5 text-[11px] leading-snug text-muted">{noRoom
+            ? "Another part is in the way of the head or nut (see the warning). Move it, flip the stack or change the washers first."
+            : "Inserted as Toolbox parts, mated concentric with the hole and seated on the faces, then checked for interference."}</p>
         </div>
       )}
     </div>

@@ -14,7 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from aicad.meshstudio import DISCLOSURE, jobs, presets, runner, scene, service
+from aicad.assembly import AssemblyInputError
+from aicad.assembly import store as asm_store
+from aicad.meshstudio import DISCLOSURE, assembly_render, jobs, presets, runner, scene, service
+from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
@@ -65,7 +68,7 @@ class RenderIn(BaseModel):
     colour: str | None = Field(default=None, max_length=20)
     lighting: str = Field(default="studio", max_length=20)
     camera: str = Field(default="hero", max_length=20)
-    quality: Literal["preview", "final", "turntable"] = "preview"
+    quality: Literal["preview", "final", "turntable", "turntable_draft"] = "preview"
     aspect: str = Field(default="4:3", max_length=8)
     transparent: bool = False
     pose: str = Field(default="auto", max_length=20)
@@ -73,7 +76,29 @@ class RenderIn(BaseModel):
 
     def options(self) -> scene.Options:
         try:
-            return scene.Options(**self.model_dump()).validate()
+            return scene.Options(**self.model_dump(include=set(RenderIn.model_fields))).validate()
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+
+
+class AssemblyRenderIn(RenderIn):
+    finish: str = Field(default="clay", max_length=40)  # assemblies take each part's finish from its material
+    explode: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class LookIn(BaseModel):
+    finish: str = Field(max_length=40)
+    colour: str | None = Field(default=None, max_length=20)
+    lighting: str = Field(default="studio", max_length=20)
+    camera: str = Field(default="hero", max_length=20)
+    aspect: str = Field(default="4:3", max_length=8)
+    transparent: bool = False
+    pose: str = Field(default="auto", max_length=20)
+    soften_edges: bool = True
+
+    def options(self) -> scene.Options:
+        try:
+            return scene.Options(**self.model_dump(include=set(RenderIn.model_fields))).validate()
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
 
@@ -104,7 +129,9 @@ def get_presets(ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
     dev = runner.detect()
     return {**presets.catalog(), "disclosure": DISCLOSURE,
             "renderer": {"available": bool(dev.get("available")), "engine": "Cycles",
-                         "device": dev.get("device"), "gpu": dev.get("gpu"), "reason": dev.get("reason")}}
+                         "device": dev.get("device"), "gpu": dev.get("gpu"), "reason": dev.get("reason"),
+                         "warm": runner.is_warm(dev) if dev.get("available") else True,
+                         "warm_up_estimate_s": runner.WARM_UP_ESTIMATE_S}}
 
 
 @router.get("/projects/{pid}")
@@ -119,7 +146,10 @@ def project(pid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
     except Exception as e:
         raise HTTPException(422, "This model couldn't be tessellated for rendering") from e
     material = info.get("material")
-    return {"project": {"id": p.id, "name": p.name, "material": material, "build_id": info["build_id"]},
+    bid = info["build_id"]
+    rev = service.revisions(ws).get(int(bid)) if bid is not None else None
+    return {"project": {"id": p.id, "name": p.name, "material": material, "build_id": bid, "revision": rev},
+            "look": service.get_look(ws),
             "suggested": presets.map_material(material if isinstance(material, str) else None),
             "mesh": {k: geom[k] for k in ("triangles", "vertices", "tolerance_mm", "bbox_mm", "volume_mm3",
                                           "checks")},
@@ -148,6 +178,14 @@ def render(pid: str, body: RenderIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, 
           cached=bool(out.get("cached")))
     ctx.db.commit()
     return out
+
+
+@router.post("/projects/{pid}/look")
+def save_look(pid: str, body: LookIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    """Remember the project's look for everyone in the workspace (AMI-23)."""
+    ctx.require_role("engineer")
+    p = _project(ctx, pid)
+    return service.save_look(workspace_for(p), body.options(), ctx.user.id)
 
 
 @router.post("/projects/{pid}/exports")
@@ -199,4 +237,91 @@ def download(pid: str, jid: str, name: str, dl: int = 0, ctx: Ctx = Depends(mesh
     headers = {"Cache-Control": "private, max-age=3600"}
     if dl:
         return FileResponse(path, media_type=service.FILES[name], filename=fname, headers=headers)
+    return FileResponse(path, media_type=service.FILES[name], headers=headers)
+
+
+# ------------------------------------------------------------------ assemblies (AMI-I4)
+def _asm_base(aid: str) -> str:
+    return f"/api/m/mesh/assemblies/{aid}/jobs"
+
+
+def _assembly(ctx: Ctx, aid: str) -> tuple[Any, dict[str, Any], Any]:
+    """(org part-cache root, assembly document, render folder) for an assembly of the caller's organisation."""
+    org = ctx.require_org()
+    try:
+        root = asm_store.org_root(get_settings().data_dir, org.id)
+        doc = asm_store.load(root, aid)
+    except AssemblyInputError:
+        doc = None
+    if doc is None or doc.get("org_id") != org.id:
+        raise HTTPException(404, "Assembly not found")
+    return root, doc, assembly_render.workspace(get_settings().data_dir, org.id, aid)
+
+
+@router.get("/assemblies/{aid}")
+def assembly(aid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    root, doc, ws = _assembly(ctx, aid)
+    try:
+        return {**assembly_render.info(ws, root, doc, _asm_base(aid)), "disclosure": DISCLOSURE}
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.get("/assemblies/{aid}/jobs")
+def assembly_jobs(aid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    _, _, ws = _assembly(ctx, aid)
+    return service.list_jobs(ws, _asm_base(aid))
+
+
+@router.post("/assemblies/{aid}/renders")
+def assembly_render_(aid: str, body: AssemblyRenderIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    ctx.require_role("engineer")
+    root, doc, ws = _assembly(ctx, aid)
+    opts = body.options()
+    org = ctx.require_org()
+    try:
+        out = assembly_render.request(ws, root, doc, opts, body.explode, org.id, ctx.user.id, _asm_base(aid))
+    except (FileNotFoundError, jobs.QueueFull, runner.BlenderError, ValueError) as e:
+        raise _err(e) from e
+    if opts.quality != "preview":
+        audit(ctx.db, "mesh.render_requested", ctx.user, org.id, target=aid, job=out["id"], quality=opts.quality,
+              assembly=True)
+    track(ctx.db, "mesh_render", ctx.user, org.id, quality=opts.quality, finish="assembly",
+          cached=bool(out.get("cached")))
+    ctx.db.commit()
+    return out
+
+
+@router.get("/assemblies/{aid}/jobs/{jid}")
+def assembly_job(aid: str, jid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    _, _, ws = _assembly(ctx, aid)
+    v = service.job_view(ws, jid, _asm_base(aid))
+    if v is None:
+        raise HTTPException(404, "Render not found")
+    return v
+
+
+@router.delete("/assemblies/{aid}/jobs/{jid}")
+def assembly_delete(aid: str, jid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    ctx.require_role("engineer")
+    _, _, ws = _assembly(ctx, aid)
+    try:
+        ok = service.delete_job(ws, jid)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e)) from e
+    if not ok:
+        raise HTTPException(404, "Render not found")
+    return {"ok": True}
+
+
+@router.get("/assemblies/{aid}/jobs/{jid}/files/{name}")
+def assembly_download(aid: str, jid: str, name: str, dl: int = 0, ctx: Ctx = Depends(mesh_ctx)) -> FileResponse:
+    _, doc, ws = _assembly(ctx, aid)
+    path = service.file_path(ws, jid, name)
+    if path is None:
+        raise HTTPException(404, "File not found")
+    stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in doc["name"])[:60] or "assembly"
+    headers = {"Cache-Control": "private, max-age=3600"}
+    if dl:
+        return FileResponse(path, media_type=service.FILES[name], filename=f"{stem}_{jid[:6]}_{name}", headers=headers)
     return FileResponse(path, media_type=service.FILES[name], headers=headers)

@@ -270,15 +270,20 @@ def _within_thread(shape: Any, ax: tuple[np.ndarray, np.ndarray, float]) -> bool
     return bool(np.max(radial) <= r + 2e-3)
 
 
-def interference(instances: list[dict[str, Any]], vol_tol: float = 1e-6) -> dict[str, Any]:
-    """Pairwise exact interference. Each instance: {id, step, T, bbox, thread?}. Returns pairs with overlap."""
+def interference(instances: list[dict[str, Any]], vol_tol: float = 1e-6,
+                 only: list[str] | None = None) -> dict[str, Any]:
+    """Pairwise exact interference. Each instance: {id, step, T, bbox, thread?}. Returns pairs with overlap.
+    ``only``: check just the pairs that involve one of these instance ids (e.g. a stack that was just inserted)."""
     n = len(instances)
+    focus = set(only) if only is not None else None
     boxes = [_aabb(i, i["bbox"]) for i in instances]
     world = {}
     out = []
     checked = 0
     for a in range(n):
         for b in range(a + 1, n):
+            if focus is not None and instances[a]["id"] not in focus and instances[b]["id"] not in focus:
+                continue
             (amin, amax), (bmin, bmax) = boxes[a], boxes[b]
             if np.any(amin > bmax + 1e-6) or np.any(bmin > amax + 1e-6):
                 continue
@@ -471,9 +476,41 @@ def probe(instances: list[dict[str, Any]], target: dict[str, Any]) -> dict[str, 
             res.append(_line_intervals(shape, pl, ul, t0, t1))
         return res
 
-    seat_r = r_hole + max(0.15, 0.08 * r_hole)
+    def margin(r: float) -> float:
+        return max(0.15, 0.08 * r)
+
+    seat_r = r_hole + margin(r_hole)
+    # a washer seats on material up to about its outer radius (ISO 7089 OD ≈ 2 d), so a member whose own coaxial
+    # hole is larger than the picked one (Ø6.6 plate under a Ø5.5 bracket) is still clamped: probe it there (AMI-01)
+    r_cap = 1.9 * r_hole + 1.0
+
+    def coaxial_holes(inst: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+        T = xform.from12(inst["T"])
+        out = []
+        for k, h in enumerate(inst.get("holes") or []):
+            hp = (h.get("exact") or {}).get("p") or h["center"]
+            hc = xform.pt(T, hp)
+            hd = xform.unit(xform.vec(T, h["axis"]))
+            w = hc - c
+            if abs(abs(float(hd @ u)) - 1) < 1e-6 and float(np.linalg.norm(w - u * float(w @ u))) < 0.01:
+                out.append((k, h))
+        return out
+
+    def seat_radii(inst: dict[str, Any]) -> list[float]:
+        rs = {round(h["d"] / 2, 6) for _k, h in coaxial_holes(inst) if h["d"] / 2 > r_hole + 1e-6}
+        rs |= {round(f * r_hole, 6) for f in (1.25, 1.5)}          # unrecognised larger holes (fallback)
+        return [seat_r] + [r + margin(r) for r in sorted(rs) if r + margin(r) <= r_cap]
+
+    def full_ring(per_angle: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
+        spans = []
+        for a, b in per_angle[0]:
+            if all(any(oa <= a + 0.02 and ob >= b - 0.02 for oa, ob in other) for other in per_angle[1:]):
+                spans.append((a, b))
+        return spans
+
     warnings: list[str] = []
     seat: dict[str, list[tuple[float, float]]] = {}
+    seat_rad: dict[str, float] = {}
     for inst in instances:
         lo, hi = _aabb(inst, inst["bbox"])
         # skip parts far from the axis (cheap reject: distance from the axis to the box)
@@ -482,20 +519,21 @@ def probe(instances: list[dict[str, Any]], target: dict[str, Any]) -> dict[str, 
         w = ctr - c
         if float(np.linalg.norm(w - u * float(w @ u))) > rad + 3 * r_hole + 1:
             continue
-        per_angle = intervals(inst, ring(seat_r))
-        common = per_angle[0]
-        if all(not x for x in per_angle):
+        # material present at every angle around the axis = a seat / clamped member. Try the picked hole's ring
+        # first, then the rings just outside this part's own larger coaxial holes.
+        spans: list[tuple[float, float]] = []
+        touched = False
+        for rr in (seat_radii(inst) if inst["id"] != tgt["id"] else [seat_r]):
+            per_angle = intervals(inst, ring(rr))
+            if all(not x for x in per_angle):
+                continue
+            touched = True
+            spans = full_ring(per_angle)
+            if spans:
+                seat_rad[inst["id"]] = rr
+                break
+        if not touched:
             continue
-        # material present at every angle around the hole = a seat / clamped member
-        spans = []
-        for a, b in common:
-            ok = True
-            for other in per_angle[1:]:
-                if not any(oa <= a + 0.02 and ob >= b - 0.02 for oa, ob in other):
-                    ok = False
-                    break
-            if ok:
-                spans.append((a, b))
         if not spans and inst["id"] == tgt["id"]:
             warnings.append("The material around the hole is not continuous (hole near an edge?).")
         seat[inst["id"]] = spans
@@ -577,6 +615,22 @@ def probe(instances: list[dict[str, Any]], target: dict[str, Any]) -> dict[str, 
             if coaxial and ts is not None and ts["d"] == D:
                 th = (h, float((hc - c) @ u))
         if th is None:
+            # a smaller coaxial *clearance* hole is the common real case (Ø6.6 picked over a Ø5.5 hole): say so and
+            # offer the smaller size through both (AMI-17)
+            smaller = None
+            for k, h in coaxial_holes(inst):
+                sz = fasteners.size_for_clearance(h["d"])
+                if sz is not None and sz["d"] < D and h.get("through"):
+                    smaller = (k, h, sz)
+                    break
+            if smaller is not None:
+                k, h, sz = smaller
+                return {"kind": "blocked", "hole_d": hole["d"], "grip": 0.0, "members": _clean(members),
+                        "warnings": warnings, "mismatch": {"inst": rm["inst"], "name": rm["name"], "hole": k,
+                                                           "d": h["d"], "size": sz["d"]},
+                        "reason": f"The {rm['name']} hole is Ø{h['d']:g} (M{sz['d']} clearance), smaller than this "
+                                  f"Ø{hole['d']:g} hole (M{D}). Fit M{sz['d']} through both from the {rm['name']} "
+                                  f"hole, or open that hole to Ø{hole['d']:g}."}
             return {"kind": "blocked", "hole_d": hole["d"], "grip": 0.0, "members": _clean(members),
                     "warnings": warnings,
                     "reason": f"{rm['name']} has no M{D} tapped hole on this axis (the screw would hit solid material)."}
@@ -637,7 +691,7 @@ def probe(instances: list[dict[str, Any]], target: dict[str, Any]) -> dict[str, 
         inst = by_id[mem["inst"]]
         T = xform.from12(inst["T"])
         Ti = xform.inv(T)
-        s = ring(seat_r)[0]
+        s = ring(seat_rad.get(mem["inst"], seat_r))[0]
         return _face_at(load(inst["step"]), xform.pt(Ti, s), xform.unit(xform.vec(Ti, u)), t)
 
     head_mem = members[-1] if head_at == "end" else members[0]

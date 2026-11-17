@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Boxes, Info, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Boxes, Info, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago } from "@/lib/format";
-import { Button, EmptyState, Input, Modal, PageLoader, StatusBadge } from "@/components/ui";
+import { Button, EmptyState, Input, Modal, PageLoader, Spinner, StatusBadge } from "@/components/ui";
 import { IsoThumb } from "@/components/ProjectCard";
 import type { ModuleAppProps } from "../registry";
 import type { AsmSummary, AsmView } from "./types";
@@ -33,6 +33,10 @@ export default function AssemblyStudio({ projectId }: ModuleAppProps) {
 function OpenForProject({ pid, onOpen }: { pid: string; onOpen: (id: string | null) => void }) {
   const started = useRef(false);
   const [err, setErr] = useState<ApiError | null>(null);
+  const [stage, setStage] = useState<"find" | "engine" | "snapshot">("find");
+  const [t0] = useState(() => Date.now());
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 500); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -40,6 +44,9 @@ function OpenForProject({ pid, onOpen }: { pid: string; onOpen: (id: string | nu
       try {
         const r = await api.get<{ assembly: AsmSummary | null }>(`${BASE}/for-project/${pid}`);
         if (r.assembly) { onOpen(r.assembly.id); return; }
+        setStage("engine");
+        await api.post(`${BASE}/warm`).catch(() => undefined);
+        setStage("snapshot");
         const v = await api.post<AsmView>(`${BASE}/assemblies`, { project_id: pid });
         onOpen(v.assembly.id);
       } catch (e) { setErr(e as ApiError); }
@@ -55,7 +62,29 @@ function OpenForProject({ pid, onOpen }: { pid: string; onOpen: (id: string | nu
       </div>
     );
   }
-  return <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted"><PageLoader />Preparing the assembly…</div>;
+  const steps: { key: typeof stage; label: string }[] = [
+    { key: "find", label: "Looking for this project's assembly" },
+    { key: "engine", label: "Starting the geometry engine" },
+    { key: "snapshot", label: "Snapshotting the part: exact faces, recognised holes" },
+  ];
+  const at = steps.findIndex(s => s.key === stage);
+  return (
+    <div className="flex h-full items-center justify-center p-8" data-testid="asm-preparing">
+      <div className="w-[min(420px,100%)] rounded-lg border border-border bg-panel p-5 shadow-card">
+        <div className="mb-3 flex items-center gap-2 text-[14px] font-semibold"><Boxes className="h-4 w-4 text-primary" />Preparing the assembly
+          <span className="ml-auto text-[12px] font-normal tabular-nums text-muted">{Math.round((now - t0) / 1000)} s</span></div>
+        <ol className="space-y-2 text-[13px]">
+          {steps.map((s, k) => (
+            <li key={s.key} className={k > at ? "text-muted/60" : k < at ? "text-muted" : "font-medium"}>
+              <span className="inline-flex items-center gap-2">{k === at ? <Spinner className="h-3.5 w-3.5" /> : <span className="inline-block h-3.5 w-3.5 text-center">{k < at ? "✓" : "·"}</span>}{s.label}</span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-3 text-[11.5px] leading-snug text-muted">The first start on this server loads the CAD kernel and can take about half a
+          minute. After that, inserting parts and solving mates takes well under a second.</p>
+      </div>
+    </div>
+  );
 }
 
 function AssemblyList({ onOpen }: { onOpen: (id: string) => void }) {
@@ -65,6 +94,7 @@ function AssemblyList({ onOpen }: { onOpen: (id: string) => void }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [del, setDel] = useState<AsmSummary | null>(null);
+  useEffect(() => { api.post(`${BASE}/warm`).catch(() => undefined); }, []);  // start the geometry engine early (AMI-08)
   if (q.isLoading) return <PageLoader />;
   if (q.error) return <div className="p-10 text-center text-sm text-muted">{(q.error as Error).message}</div>;
   const items = q.data?.items ?? [];
@@ -110,6 +140,13 @@ function AssemblyList({ onOpen }: { onOpen: (id: string) => void }) {
                 </div>
                 <div className="flex flex-1 flex-col gap-2 p-3.5">
                   <div className="truncate text-sm font-semibold">{a.name}</div>
+                  {(!!a.broken_mates || !!a.stale_parts || !!a.stacks_to_check) && (
+                    <div className="flex flex-wrap gap-1 text-[11px] font-medium">
+                      {!!a.broken_mates && <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-1.5 py-px text-danger"><AlertTriangle className="h-3 w-3" />{a.broken_mates} broken mate{a.broken_mates > 1 ? "s" : ""}</span>}
+                      {!!a.stale_parts && <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-px text-warning"><RefreshCw className="h-3 w-3" />{a.stale_parts === 1 ? "part updated" : `${a.stale_parts} parts updated`}</span>}
+                      {!!a.stacks_to_check && <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-px text-warning">{a.stacks_to_check} stack{a.stacks_to_check > 1 ? "s" : ""} to check</span>}
+                    </div>
+                  )}
                   <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
                     {a.status && a.instances ? <SolveChip status={a.status} compact dof={a.dof} spins={a.free_spins} /> : <span>Empty</span>}<span>{ago(a.updated_at)}</span>
                   </div>
