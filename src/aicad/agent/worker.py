@@ -167,7 +167,8 @@ class Worker:
                 if self.proc is None or self.proc.returncode is not None or self.jobs >= MAX_JOBS:
                     await self.stop()
                     await self._start()
-            except (WorkerUnavailable, OSError):
+            except (WorkerUnavailable, OSError, RuntimeError, TimeoutError):
+                await self.stop()  # also for subclasses with their own _start: never keep a half-started worker
                 return {"ok": False, "rc": -1, "error": STARTING, "starting": True}
             assert self.proc and self.proc.stdin and self.proc.stdout
             self.jobs += 1
@@ -186,7 +187,10 @@ class Worker:
                         resp = json.loads(line)
                     except ValueError:
                         continue
-                    if isinstance(resp, dict) and resp.get("id") == rid:
+                    if not isinstance(resp, dict) or resp.get("ready"):
+                        continue
+                    # module workers (drawing, assembly) don't echo ids; their replies carry no "id" at all
+                    if resp.get("id") == rid or "id" not in resp:
                         return resp
                     # anything else (a late "ready", a reply to a request that already timed out) is dropped
             except (TimeoutError, ConnectionError, BrokenPipeError):

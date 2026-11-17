@@ -17,8 +17,8 @@ PARAMS = dict(D1=D1, L1=L1, D2=D2, L2=L2, KW=KW, KD=KD, KL=KL)
 PARAM_META = {
     "D1": {"min": 5, "max": 100, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Journal Ø"},
     "L1": {"min": 5, "max": 200, "step": 1, "unit": "mm", "group": "Shaft", "label": "Journal length"},
-    "D2": {"min": 6, "max": 120, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Centre Ø"},
-    "L2": {"min": 10, "max": 400, "step": 1, "unit": "mm", "group": "Shaft", "label": "Centre length"},
+    "D2": {"min": 6, "max": 120, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Middle section Ø"},
+    "L2": {"min": 10, "max": 400, "step": 1, "unit": "mm", "group": "Shaft", "label": "Middle section length"},
     "KW": {"min": 2, "max": 30, "step": 0.5, "unit": "mm", "group": "Keyway", "label": "Keyway width"},
     "KD": {"min": 1, "max": 15, "step": 0.1, "unit": "mm", "group": "Keyway", "label": "Keyway depth"},
     "KL": {"min": 5, "max": 200, "step": 1, "unit": "mm", "group": "Keyway", "label": "Keyway length"},
