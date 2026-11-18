@@ -4,6 +4,52 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (v) — Engineering hygiene: IO round-trip matrix, licence audit + SBOM, agent run record, repeatability (IO-008, LEG-002, AGT-009, EVAL-008)
+
+Branch `wip/eng-hygiene` (worktree `fw-wt/eng-hygiene`). Reports: docs/reports/io-roundtrip.md,
+docs/reports/repeatability.md, docs/legal/LICENSES.md. PD-56. No live model calls (PD-41): replay and fakes only.
+
+### Done
+- IO-008: coordinate/unit round-trip matrix with an asymmetric off-origin analytic fixture (block + corner boss +
+  hole): part STEP (unit entity, exact bbox/volume/feature), STL, 3MF (unit), GLB (metres, +Y up, mapped back), drawing
+  DXF ($INSUNITS, true size, no mirror via the hole-minus-boss vector), .fwpart export → install → rebuild, assembly
+  STEP (rotated + moved instance against hand transforms), Print Prep STL/3MF writers and inch uploads. Meshes are also
+  checked for a positive signed volume (mirror detection). Readers written from the format specs (`tests/io_helpers.py`).
+- Bugs fixed: (1) `.fwpart` import verification compared sizes/counts only, so a translated or mirrored rebuild was
+  reported "Identical": `native.part.compare` now takes `placement()` (bbox corners + centre of mass) and the import
+  route passes it; (2) the OCP version was recorded as "unknown" in build status, `.fwpart` manifests and the
+  pipeline (installed wheel is `cadquery-ocp-novtk`). Noted, not changed: assembly STEP leaves of one product share
+  its name after re-import (positions correct).
+- LEG-002: `scripts/sbom.py` (offline; uv.lock closure with environment markers for Linux/Windows targets + installed
+  metadata; npm lockfile) writes CycloneDX 1.5 SBOMs for the server (120 packages) and web (277) plus `licenses.json`;
+  classes permissive / weak / strong / network copyleft / proprietary / unknown (OR = best option, AND = worst);
+  bundled native libraries listed (OCCT LGPL-2.1+exception, FreeImage, LibRaw, FreeType in the OCP wheel; Claude Code
+  CLI in the agent SDK); allow-list with usage notes; `docs/legal/LICENSES.md`. No GPL/AGPL dependency.
+- AGT-009: `agent/runrecord.py` + session hooks: every turn writes `.fw/runs/<run id>/run.json` (id = the AgentRun
+  metering row when the app runs it): prompt hash + redacted excerpt (policy), model requested/used, app/Python/SDK/CLI/
+  build123d/OCP/Toolbox versions, tokens (agent's turn total + per-response sum, repeated responses counted once), cost
+  (agent report, list-price estimate, live meter), timings (connect, first response, builds, other tools, model API,
+  total), tool calls by name, per-build verdicts, final checks, outcome. Super-admin endpoints list/read them; nothing
+  reaches the chat stream, the files endpoint or exports. Failed turns are recorded too.
+- EVAL-008: `aicad repeat` (`eval/repeat.py`): same prompt N× (default 5) in fresh workspaces; fake (default) / replay
+  / live (explicit flag + confirmation); report.json + report.md with per-metric statistics, check pass rates,
+  identical-to-modal share and a verdict.
+
+### Verified how
+- New tests: test_io_roundtrip (10), test_sbom (4), test_run_record (6, replay cassette with hand-written usage; app
+  route + admin-only access), test_repeat (5: fake ×5 identical; replayed ×5 with known thicknesses → volume stdev
+  exactly 4000 mm³). Targeted suites re-run: native formats, AI quality, agent, assembly, drawings, print. ruff clean.
+  Web not touched (no tsc/vitest/vite needed).
+
+### Not done / limits
+- No UI for run records (API only); Mesh Studio (Blender) exports not in the IO matrix (IO-008b); live variance not
+  measured (needs PD-41 approval); licence findings are engineering readings, counsel still needed (LEG-003/004).
+
+### Next
+- Merge; then a God-mode "Runs" panel on the admin console if wanted; IO-008b when Blender runs in CI.
+
+---
+
 ## 2026-11-18 (u) — Design Office Phase 5: deliverables, release, calibration, timeline (CD-014, CD-015, DRW-014, CD-018…020)
 
 Branch `wip/office-phase5` (worktree `fw-wt/office-phase5`). Report: docs/reports/design-office.md, Phase 5. PD-55.

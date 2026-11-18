@@ -42,4 +42,5 @@ No test may make a paid or subscription model call: drive agent turns with a rep
 - **EVAL-003**: `aicad bench` (`src/aicad/eval/`): 20 prompts with analytic expectations; `--dry` / `--replay DIR`
   free, `--live [--record DIR]` spends tokens (estimate + confirmation first). Gate on CHK results and the
   expectations, never on the agent's own claims.
-- **AGT-009**: a run record (model id, versions, timings, tokens) stored server-side, never shown to users.
+- **AGT-009** (done): `agent/runrecord.py` writes `.fw/runs/<id>/run.json` per turn from `AgentSession.send`/`_handle` (never published as an event). If you add a phase, tool or outcome, record it there; read it via `/api/admin/projects/{id}/runs`. Prompt policy `FW_RUN_RECORD_PROMPTS` (hash | redacted (default) | raw, dev only).
+- **EVAL-008** (done): `aicad repeat --case P01` (fake ×5), `--replay DIR`, `--live` (confirmed) for variance.

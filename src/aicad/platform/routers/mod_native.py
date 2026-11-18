@@ -426,7 +426,8 @@ async def _rebuild_verified(p: Project, ws: Any, pkg: c.Package) -> tuple[dict[s
             raise HTTPException(422, "The part could not be rebuilt and its exact geometry could not be read either. "
                                      "Nothing was imported.")
         state = "fallback"
-    diffs = fpart.compare(expected, st.get("fingerprint"))
+    diffs = fpart.compare(expected, st.get("fingerprint"), expected_place=fpart.placement(geo),
+                          got_place=fpart.placement(st))
     state = state or ("identical" if not diffs else "mismatch")
     ver = {"state": state, "label": STATES[state], "diffs": diffs, "reason": reason,
            "step_identical": bool(geo.get("step_sha256")) and st.get("step_sha256") == geo.get("step_sha256"),

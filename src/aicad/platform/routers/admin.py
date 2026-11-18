@@ -329,3 +329,31 @@ def system(ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
             "agent_auth": "API key" if os.environ.get("ANTHROPIC_API_KEY") else "local Claude Code login (dev only)",
             "python": platform.python_version(), "build123d": version("build123d"),
             "claude_agent_sdk": version("claude-agent-sdk"), "superadmins": list(s.superadmin_emails)}
+
+
+# ------------------------------------------------------------------ AGT-009 agent run records (super-admin only)
+def _run_project(project_id: str, ctx: Ctx) -> Project:
+    p = ctx.db.get(Project, project_id)
+    if p is None:
+        raise HTTPException(404)
+    return p
+
+
+@router.get("/projects/{project_id}/runs")
+def agent_runs(project_id: str, limit: int = 50, ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
+    """Run records of a project's design-agent turns, newest first. Internal telemetry: never shown to users."""
+    from aicad.agent import runrecord
+    from aicad.platform.routers.projects import workspace_for
+
+    return {"items": runrecord.list_runs(workspace_for(_run_project(project_id, ctx)), limit)}
+
+
+@router.get("/projects/{project_id}/runs/{run_id}")
+def agent_run(project_id: str, run_id: str, ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
+    from aicad.agent import runrecord
+    from aicad.platform.routers.projects import workspace_for
+
+    rec = runrecord.load(workspace_for(_run_project(project_id, ctx)), run_id)
+    if rec is None:
+        raise HTTPException(404)
+    return rec

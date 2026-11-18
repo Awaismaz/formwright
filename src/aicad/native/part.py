@@ -244,8 +244,26 @@ def fallback_source(name: str, material: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------------------------------- verification
-def compare(expected: dict[str, Any], got: dict[str, Any] | None) -> list[str]:
-    """Plain differences between two geometry fingerprints ([] = identical within kernel round-off)."""
+PLACE_TOL_MM = 1e-3  # bbox corners and centre of mass: far below any modelling tolerance, far above kernel round-off
+
+
+def placement(st: dict[str, Any] | None) -> dict[str, Any]:
+    """Where the part sits (IO-008): bounding-box corners and centre of mass, from a build status or a manifest's
+    ``geometry`` block. Sizes, volume and topology counts alone cannot see a moved or mirrored rebuild."""
+    st = st or {}
+    mass = st.get("mass") if isinstance(st.get("mass"), dict) else {}
+    out: dict[str, Any] = {}
+    if isinstance(st.get("bbox_minmax"), list) and len(st["bbox_minmax"]) == 6:
+        out["bbox_minmax"] = st["bbox_minmax"]
+    if isinstance(mass.get("com_mm"), list) and len(mass["com_mm"]) == 3:
+        out["com_mm"] = mass["com_mm"]
+    return out
+
+
+def compare(expected: dict[str, Any], got: dict[str, Any] | None, *, expected_place: dict[str, Any] | None = None,
+            got_place: dict[str, Any] | None = None) -> list[str]:
+    """Plain differences between two geometry fingerprints ([] = identical within kernel round-off). With
+    ``placement()`` of both sides, a rebuild that is moved or mirrored (same size and counts) is reported too."""
     if not got:
         return ["the model did not rebuild"]
     diffs = []
@@ -261,7 +279,25 @@ def compare(expected: dict[str, Any], got: dict[str, Any] | None) -> list[str]:
     eb, gb = expected.get("bbox") or [], got.get("bbox") or []
     if len(eb) != 3 or len(gb) != 3 or any(abs(float(a) - float(b)) > 1e-4 for a, b in zip(eb, gb, strict=True)):
         diffs.append(f"size: {_box(eb)} in the file, {_box(gb)} rebuilt")
+    ep, gp = expected_place or {}, got_place or {}
+    for k, label in (("bbox_minmax", "bounding box corners"), ("com_mm", "centre of mass")):
+        a, b = ep.get(k), gp.get(k)
+        if a is None or b is None:
+            continue
+        try:
+            moved = len(a) != len(b) or any(abs(float(x) - float(y)) > PLACE_TOL_MM for x, y in zip(a, b, strict=True))
+        except (TypeError, ValueError):
+            moved = True
+        if moved:
+            diffs.append(f"position: {label} differ ({_pt(a)} in the file, {_pt(b)} rebuilt)")
     return diffs
+
+
+def _pt(v: Any) -> str:
+    try:
+        return "(" + ", ".join(f"{float(x):.3f}" for x in v) + ") mm"
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 def _box(b: list[Any]) -> str:

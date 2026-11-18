@@ -67,6 +67,9 @@ multiprocessing, asyncio, pickle and similar modules, and calls to eval, exec, o
 It is a tripwire, **not a sandbox**: the container sandbox is parked as PD-10 / SEC-004. Fixtures and demo scripts must
 pass it.
 
+## Units and frames on export (IO-008)
+STEP/STL/3MF are mm, Z up, model frame; GLB is metres, +Y up (`export_gltf` turns -90 deg about X: glTF (x, y, z) = (X, Z, -Y)/1000). Any new exporter gets a row in `tests/test_io_roundtrip.py` (asymmetric off-origin fixture; compare corners, signed volume and a feature position, not just sizes). The OCP wheel installed is `cadquery-ocp-novtk`: include that name in version lookups.
+
 ## API doubts
 Read the installed source, not memory: `uv run python -c "import build123d, inspect; print(inspect.getsourcefile(build123d))"`.
 Upstream docs: https://build123d.readthedocs.io (the in-app agent may fetch only that host).

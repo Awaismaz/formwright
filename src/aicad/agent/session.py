@@ -30,6 +30,7 @@ from aicad.agent.blocks import extract_brief, extract_review
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
 from aicad.agent.replay import make_client
+from aicad.agent.runrecord import RunRecorder
 from aicad.agent.tools import make_cad_server
 
 BUILTIN_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "WebFetch"]
@@ -246,6 +247,9 @@ class AgentSession:
         self._budget_hit = False
         self._result_seen = False
         self._tool_names: dict[str, str] = {}  # merged into the next result event (e.g. rev_before for undo)
+        self._rec: RunRecorder | None = None  # AGT-009 run record of the current turn (server-side, admin only)
+        self._last_run_cost: float | None = None
+        self.last_run_record: dict[str, Any] | None = None
         self._state_dir = self.workspace / ".fw"
         self._load()
 
@@ -342,7 +346,14 @@ class AgentSession:
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         self._run_costs, self._budget_hit, self._result_seen = {}, False, False
+        self._last_run_cost = None
         started, failed = time.time(), False
+        build_before = (self._status() or {}).get("build_id")
+        try:
+            self._rec = RunRecorder(self.workspace, prompt=prompt, mode=self.mode, requested_model=self.model,
+                                    run_id=str(self.turn_meta.get("run_id") or "") or None)
+        except Exception:  # noqa: BLE001 - telemetry never blocks a run
+            self._rec = None
         try:
             try:
                 client = await self.ensure_connected()
@@ -351,6 +362,8 @@ class AgentSession:
                     raise
                 self.session_id, self.client = None, None
                 client = await self.ensure_connected()
+            if self._rec is not None:
+                self._rec.mark("connected")
             await client.query(prompt)
             stopping = False
             async for msg in client.receive_response():
@@ -374,10 +387,29 @@ class AgentSession:
                               "duration_s": round(time.time() - started, 1), "cost_est_usd": self.run_spent_usd,
                               "budget_stopped": self._budget_hit, **self.turn_meta})
                 self.turn_meta = {}
+            self._write_run_record(failed, build_before)
             self.busy = False
             self.publish({"type": "busy", "value": False})
 
+    def _write_run_record(self, failed: bool, build_before: Any) -> None:
+        """AGT-009: persist the turn's run record (never published to the chat; read by the admin console only)."""
+        rec, self._rec = self._rec, None
+        if rec is None:
+            return
+        try:
+            self.last_run_record = rec.finish(failed=failed, budget_stopped=self._budget_hit,
+                                              run_cost_usd=self._last_run_cost if self._last_run_cost is not None
+                                              else (self.run_spent_usd or None), meter_usd=self.run_spent_usd,
+                                              build_id_before=build_before)
+            rec.write()
+        except Exception:
+            import logging
+
+            logging.getLogger("aicad.agent").warning("run record not written", exc_info=True)
+
     def _handle(self, msg: Any) -> None:
+        if self._rec is not None:
+            self._rec.observe(msg)
         if isinstance(msg, SystemMessage) and msg.subtype == "init":
             self.auth = msg.data.get("apiKeySource")
             self.publish({"type": "system", "model": "Formwright design agent"})
@@ -419,9 +451,10 @@ class AgentSession:
             self.session_id = msg.session_id
             self._persist_session()
             self._result_seen = True
+            self._last_run_cost = self._run_cost(msg.total_cost_usd)
             self.publish({"type": "result", "subtype": msg.subtype, "turns": msg.num_turns,
                           "duration_s": round(msg.duration_ms / 1000, 1),
-                          "cost_est_usd": self._run_cost(msg.total_cost_usd), "budget_stopped": self._budget_hit,
+                          "cost_est_usd": self._last_run_cost, "budget_stopped": self._budget_hit,
                           **self.turn_meta})
             self.turn_meta = {}
 

@@ -81,7 +81,7 @@ def kernel_versions() -> dict[str, str]:
     from importlib.metadata import PackageNotFoundError, version
 
     out = {}
-    for label, names in (("build123d", ("build123d",)), ("ocp", ("cadquery-ocp", "cadquery_ocp"))):
+    for label, names in (("build123d", ("build123d",)), ("ocp", ("cadquery-ocp", "cadquery_ocp", "cadquery-ocp-novtk"))):
         for n in names:
             try:
                 out[label] = version(n)

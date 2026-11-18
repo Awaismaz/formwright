@@ -361,7 +361,7 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
             manual_errors=ns.get("__fw_manual_errors__") or [],
             bbox_minmax=_bbox_minmax(shape),
             fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
-            env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp")},
+            env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp", "cadquery-ocp-novtk")},
         )
 
         if fast:

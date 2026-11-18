@@ -1,0 +1,3126 @@
+{
+ "bomFormat": "CycloneDX",
+ "specVersion": "1.5",
+ "serialNumber": "urn:uuid:54a7c675-c8dd-5de0-8766-a0234486464c",
+ "version": 1,
+ "metadata": {
+  "component": {
+   "type": "application",
+   "name": "formwright-server",
+   "version": "0.0.1"
+  },
+  "tools": {
+   "components": [
+    {
+     "type": "application",
+     "name": "formwright scripts/sbom.py"
+    }
+   ]
+  }
+ },
+ "components": [
+  {
+   "type": "library",
+   "name": "annotated-doc",
+   "version": "0.0.6",
+   "purl": "pkg:pypi/annotated-doc@0.0.6",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/annotated-doc@0.0.6",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "annotated-types",
+   "version": "0.8.0",
+   "purl": "pkg:pypi/annotated-types@0.8.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/annotated-types@0.8.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "anyio",
+   "version": "4.16.0",
+   "purl": "pkg:pypi/anyio@4.16.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/anyio@4.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "anytree",
+   "version": "2.13.0",
+   "purl": "pkg:pypi/anytree@2.13.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/anytree@2.13.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "argon2-cffi",
+   "version": "25.1.0",
+   "purl": "pkg:pypi/argon2-cffi@25.1.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/argon2-cffi@25.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "argon2-cffi-bindings",
+   "version": "26.2.0",
+   "purl": "pkg:pypi/argon2-cffi-bindings@26.2.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/argon2-cffi-bindings@26.2.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ast-serialize",
+   "version": "0.13.1",
+   "purl": "pkg:pypi/ast-serialize@0.13.1",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/ast-serialize@0.13.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "asttokens",
+   "version": "3.0.2",
+   "purl": "pkg:pypi/asttokens@3.0.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/asttokens@3.0.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: metadata 'Apache 2.0'"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "attrs",
+   "version": "26.1.0",
+   "purl": "pkg:pypi/attrs@26.1.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/attrs@26.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "bd-materials",
+   "version": "0.2.6",
+   "purl": "pkg:pypi/bd-materials@0.2.6",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/bd-materials@0.2.6",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "build123d",
+   "version": "0.13.0",
+   "purl": "pkg:pypi/build123d@0.13.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/build123d@0.13.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cadquery-ocp-novtk",
+   "version": "8.0.1.1.0",
+   "purl": "pkg:pypi/cadquery-ocp-novtk@8.0.1.1.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cadquery-ocp-novtk@8.0.1.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "Open CASCADE Technology (OCCT) 8.0",
+     "licenses": [
+      {
+       "expression": "LGPL-2.1-only WITH OCCT-exception-1.0"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared libraries (TK*.dll / .so), loaded by the OCP bindings"
+      }
+     ]
+    },
+    {
+     "type": "library",
+     "name": "FreeImage",
+     "licenses": [
+      {
+       "expression": "FreeImage OR GPL-2.0-only OR GPL-3.0-only"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared library; used under the FreeImage Public Licence (FIPL, MPL-1.1 based) option"
+      }
+     ]
+    },
+    {
+     "type": "library",
+     "name": "LibRaw",
+     "licenses": [
+      {
+       "expression": "LGPL-2.1-only OR CDDL-1.0"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared library (raw.dll)"
+      }
+     ]
+    },
+    {
+     "type": "library",
+     "name": "FreeType",
+     "licenses": [
+      {
+       "expression": "FTL OR GPL-2.0-only"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared library; used under the FTL option"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cadquery-ocp-proxy",
+   "version": "8.0.1.1.0",
+   "purl": "pkg:pypi/cadquery-ocp-proxy@8.0.1.1.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cadquery-ocp-proxy@8.0.1.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "certifi",
+   "version": "2026.10.23",
+   "purl": "pkg:pypi/certifi@2026.10.23",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/certifi@2026.10.23",
+   "licenses": [
+    {
+     "license": {
+      "id": "MPL-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "weak-copyleft"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cffi",
+   "version": "2.1.1",
+   "purl": "pkg:pypi/cffi@2.1.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cffi@2.1.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT-0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "charset-normalizer",
+   "version": "3.5.2",
+   "purl": "pkg:pypi/charset-normalizer@3.5.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/charset-normalizer@3.5.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "claude-agent-sdk",
+   "version": "0.2.182",
+   "purl": "pkg:pypi/claude-agent-sdk@0.2.182",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/claude-agent-sdk@0.2.182",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "Claude Code CLI (bundled executable)",
+     "licenses": [
+      {
+       "expression": "LicenseRef-Anthropic-Commercial-Terms"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "separate executable started as a subprocess"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "click",
+   "version": "8.5.1",
+   "purl": "pkg:pypi/click@8.5.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/click@8.5.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cloudpickle",
+   "version": "3.1.2",
+   "purl": "pkg:pypi/cloudpickle@3.1.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cloudpickle@3.1.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "colorama",
+   "version": "0.4.6",
+   "purl": "pkg:pypi/colorama@0.4.6",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/colorama@0.4.6",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "contourpy",
+   "version": "1.4.0",
+   "purl": "pkg:pypi/contourpy@1.4.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/contourpy@1.4.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cryptography",
+   "version": "50.0.2",
+   "purl": "pkg:pypi/cryptography@50.0.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cryptography@50.0.2",
+   "licenses": [
+    {
+     "expression": "Apache-2.0 OR BSD-3-Clause"
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "cycler",
+   "version": "0.12.1",
+   "purl": "pkg:pypi/cycler@0.12.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/cycler@0.12.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: LICENSE in the wheel (metadata field holds a copyright line)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "dataclasses-json",
+   "version": "0.6.7",
+   "purl": "pkg:pypi/dataclasses-json@0.6.7",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/dataclasses-json@0.6.7",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "deprecated",
+   "version": "3.0.1",
+   "purl": "pkg:pypi/deprecated@3.0.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/deprecated@3.0.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "executing",
+   "version": "2.3.0",
+   "purl": "pkg:pypi/executing@2.3.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/executing@2.3.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ezdxf",
+   "version": "1.4.5",
+   "purl": "pkg:pypi/ezdxf@1.4.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ezdxf@1.4.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "fastapi",
+   "version": "0.163.1",
+   "purl": "pkg:pypi/fastapi@0.163.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/fastapi@0.163.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "flexcache",
+   "version": "0.3",
+   "purl": "pkg:pypi/flexcache@0.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/flexcache@0.3",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "flexparser",
+   "version": "0.4",
+   "purl": "pkg:pypi/flexparser@0.4",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/flexparser@0.4",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "fonttools",
+   "version": "4.68.0",
+   "purl": "pkg:pypi/fonttools@4.68.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/fonttools@4.68.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "h11",
+   "version": "0.16.0",
+   "purl": "pkg:pypi/h11@0.16.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/h11@0.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "httpcore",
+   "version": "1.0.9",
+   "purl": "pkg:pypi/httpcore@1.0.9",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/httpcore@1.0.9",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "httpcore2",
+   "version": "2.16.0",
+   "purl": "pkg:pypi/httpcore2@2.16.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/httpcore2@2.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "httpx",
+   "version": "0.28.1",
+   "purl": "pkg:pypi/httpx@0.28.1",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/httpx@0.28.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "httpx2",
+   "version": "2.16.0",
+   "purl": "pkg:pypi/httpx2@2.16.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/httpx2@2.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "idna",
+   "version": "3.20",
+   "purl": "pkg:pypi/idna@3.20",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/idna@3.20",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "iniconfig",
+   "version": "2.3.1",
+   "purl": "pkg:pypi/iniconfig@2.3.1",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/iniconfig@2.3.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ipython",
+   "version": "9.18.1",
+   "purl": "pkg:pypi/ipython@9.18.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ipython@9.18.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ipython-pygments-lexers",
+   "version": "1.1.1",
+   "purl": "pkg:pypi/ipython-pygments-lexers@1.1.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ipython-pygments-lexers@1.1.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "jedi",
+   "version": "0.20.1",
+   "purl": "pkg:pypi/jedi@0.20.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/jedi@0.20.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "jiter",
+   "version": "0.19.0",
+   "purl": "pkg:pypi/jiter@0.19.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/jiter@0.19.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "joblib",
+   "version": "1.6.0",
+   "purl": "pkg:pypi/joblib@1.6.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/joblib@1.6.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "jsonschema",
+   "version": "4.26.0",
+   "purl": "pkg:pypi/jsonschema@4.26.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/jsonschema@4.26.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "jsonschema-specifications",
+   "version": "2025.9.1",
+   "purl": "pkg:pypi/jsonschema-specifications@2025.9.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/jsonschema-specifications@2025.9.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "kiwisolver",
+   "version": "1.5.1",
+   "purl": "pkg:pypi/kiwisolver@1.5.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/kiwisolver@1.5.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: license file in the wheel (metadata field holds the text)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "lib3mf",
+   "version": "2.5.0",
+   "purl": "pkg:pypi/lib3mf@2.5.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/lib3mf@2.5.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "librt",
+   "version": "0.16.0",
+   "purl": "pkg:pypi/librt@0.16.0",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/librt@0.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "marshmallow",
+   "version": "3.26.2",
+   "purl": "pkg:pypi/marshmallow@3.26.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/marshmallow@3.26.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "matplotlib",
+   "version": "3.11.2",
+   "purl": "pkg:pypi/matplotlib@3.11.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/matplotlib@3.11.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "PSF-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: matplotlib licence agreement (PSF-based) in the wheel"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "matplotlib-inline",
+   "version": "0.2.2",
+   "purl": "pkg:pypi/matplotlib-inline@0.2.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/matplotlib-inline@0.2.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mcp",
+   "version": "2.3.0",
+   "purl": "pkg:pypi/mcp@2.3.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/mcp@2.3.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mcp-types",
+   "version": "2.3.0",
+   "purl": "pkg:pypi/mcp-types@2.3.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/mcp-types@2.3.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mpmath",
+   "version": "1.3.0",
+   "purl": "pkg:pypi/mpmath@1.3.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/mpmath@1.3.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mypy",
+   "version": "2.4.1",
+   "purl": "pkg:pypi/mypy@2.4.1",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/mypy@2.4.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mypy-extensions",
+   "version": "1.2.0",
+   "purl": "pkg:pypi/mypy-extensions@1.2.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/mypy-extensions@1.2.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "narwhals",
+   "version": "2.28.0",
+   "purl": "pkg:pypi/narwhals@2.28.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/narwhals@2.28.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "numpy",
+   "version": "2.5.5",
+   "purl": "pkg:pypi/numpy@2.5.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/numpy@2.5.5",
+   "licenses": [
+    {
+     "expression": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "OpenBLAS (scipy-openblas)",
+     "licenses": [
+      {
+       "expression": "BSD-3-Clause"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared library"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ocp-gordon",
+   "version": "0.3.1",
+   "purl": "pkg:pypi/ocp-gordon@0.3.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ocp-gordon@0.3.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ocpsvg",
+   "version": "0.7.0",
+   "purl": "pkg:pypi/ocpsvg@0.7.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ocpsvg@0.7.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: upstream repository LICENSE (wheel metadata empty)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "openai",
+   "version": "3.55.0",
+   "purl": "pkg:pypi/openai@3.55.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/openai@3.55.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "opentelemetry-api",
+   "version": "1.45.2",
+   "purl": "pkg:pypi/opentelemetry-api@1.45.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/opentelemetry-api@1.45.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "packaging",
+   "version": "26.3",
+   "purl": "pkg:pypi/packaging@26.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/packaging@26.3",
+   "licenses": [
+    {
+     "expression": "Apache-2.0 OR BSD-2-Clause"
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "parso",
+   "version": "0.8.7",
+   "purl": "pkg:pypi/parso@0.8.7",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/parso@0.8.7",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pathspec",
+   "version": "1.1.1",
+   "purl": "pkg:pypi/pathspec@1.1.1",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/pathspec@1.1.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MPL-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "weak-copyleft"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pdfminer-six",
+   "version": "20260107",
+   "purl": "pkg:pypi/pdfminer-six@20260107",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pdfminer-six@20260107",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pexpect",
+   "version": "4.9.0",
+   "purl": "pkg:pypi/pexpect@4.9.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pexpect@4.9.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "ISC"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: upstream LICENSE (not installed on Windows)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pillow",
+   "version": "13.0.0",
+   "purl": "pkg:pypi/pillow@13.0.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pillow@13.0.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT-CMU"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pint",
+   "version": "0.26.2",
+   "purl": "pkg:pypi/pint@0.26.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pint@0.26.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "platformdirs",
+   "version": "4.14.5",
+   "purl": "pkg:pypi/platformdirs@4.14.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/platformdirs@4.14.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pluggy",
+   "version": "1.7.0",
+   "purl": "pkg:pypi/pluggy@1.7.0",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/pluggy@1.7.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "prompt-toolkit",
+   "version": "3.0.53",
+   "purl": "pkg:pypi/prompt-toolkit@3.0.53",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/prompt-toolkit@3.0.53",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "psutil",
+   "version": "7.2.2",
+   "purl": "pkg:pypi/psutil@7.2.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/psutil@7.2.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ptyprocess",
+   "version": "0.7.0",
+   "purl": "pkg:pypi/ptyprocess@0.7.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/ptyprocess@0.7.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "ISC"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: upstream LICENSE (not installed on Windows)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pure-eval",
+   "version": "0.2.4",
+   "purl": "pkg:pypi/pure-eval@0.2.4",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pure-eval@0.2.4",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "py-lib3mf",
+   "version": "2.5.0",
+   "purl": "pkg:pypi/py-lib3mf@2.5.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/py-lib3mf@2.5.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-2-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: lib3mf LICENSE (Linux aarch64 wheel of lib3mf)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pycparser",
+   "version": "3.12",
+   "purl": "pkg:pypi/pycparser@3.12",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pycparser@3.12",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pydantic",
+   "version": "2.14.3",
+   "purl": "pkg:pypi/pydantic@2.14.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pydantic@2.14.3",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pydantic-core",
+   "version": "2.50.4",
+   "purl": "pkg:pypi/pydantic-core@2.50.4",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pydantic-core@2.50.4",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pygltflib",
+   "version": "1.16.5",
+   "purl": "pkg:pypi/pygltflib@1.16.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pygltflib@1.16.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pygments",
+   "version": "2.21.0",
+   "purl": "pkg:pypi/pygments@2.21.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pygments@2.21.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-2-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pyjwt",
+   "version": "2.15.1",
+   "purl": "pkg:pypi/pyjwt@2.15.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pyjwt@2.15.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pyparsing",
+   "version": "3.3.3",
+   "purl": "pkg:pypi/pyparsing@3.3.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pyparsing@3.3.3",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pypdfium2",
+   "version": "5.15.2",
+   "purl": "pkg:pypi/pypdfium2@5.15.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pypdfium2@5.15.2",
+   "licenses": [
+    {
+     "expression": "Apache-2.0 OR BSD-3-Clause"
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: pypdfium2 REUSE metadata (PDFium is BSD-3-Clause)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pytest",
+   "version": "9.2.0",
+   "purl": "pkg:pypi/pytest@9.2.0",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/pytest@9.2.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "python-dateutil",
+   "version": "4.0.0",
+   "purl": "pkg:pypi/python-dateutil@4.0.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/python-dateutil@4.0.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "python-multipart",
+   "version": "0.0.33",
+   "purl": "pkg:pypi/python-multipart@0.0.33",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/python-multipart@0.0.33",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "pywin32",
+   "version": "312",
+   "purl": "pkg:pypi/pywin32@312",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/pywin32@312",
+   "licenses": [
+    {
+     "license": {
+      "id": "PSF-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: pywin32 licence (PSF), Windows only"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "referencing",
+   "version": "0.37.0",
+   "purl": "pkg:pypi/referencing@0.37.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/referencing@0.37.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "reportlab",
+   "version": "5.1.0",
+   "purl": "pkg:pypi/reportlab@5.1.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/reportlab@5.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: LICENSE.txt in the wheel (metadata field holds prose)"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "requests",
+   "version": "2.34.2",
+   "purl": "pkg:pypi/requests@2.34.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/requests@2.34.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "rpds-py",
+   "version": "2026.9.1",
+   "purl": "pkg:pypi/rpds-py@2026.9.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/rpds-py@2026.9.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "ruff",
+   "version": "0.17.5",
+   "purl": "pkg:pypi/ruff@0.17.5",
+   "scope": "excluded",
+   "bom-ref": "pkg:pypi/ruff@0.17.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "scikit-learn",
+   "version": "1.9.1",
+   "purl": "pkg:pypi/scikit-learn@1.9.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/scikit-learn@1.9.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "scipy",
+   "version": "1.18.1",
+   "purl": "pkg:pypi/scipy@1.18.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/scipy@1.18.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "override: LICENSE.txt in the wheel (metadata field holds the text)"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "OpenBLAS (scipy-openblas)",
+     "licenses": [
+      {
+       "expression": "BSD-3-Clause"
+      }
+     ],
+     "properties": [
+      {
+       "name": "formwright:linking",
+       "value": "shared library"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "sniffio",
+   "version": "1.3.1",
+   "purl": "pkg:pypi/sniffio@1.3.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/sniffio@1.3.1",
+   "licenses": [
+    {
+     "expression": "MIT OR Apache-2.0"
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "sqlalchemy",
+   "version": "2.1.8",
+   "purl": "pkg:pypi/sqlalchemy@2.1.8",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/sqlalchemy@2.1.8",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "sse-starlette",
+   "version": "3.7.0",
+   "purl": "pkg:pypi/sse-starlette@3.7.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/sse-starlette@3.7.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "stack-data",
+   "version": "0.6.3",
+   "purl": "pkg:pypi/stack-data@0.6.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/stack-data@0.6.3",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "starlette",
+   "version": "1.10.0",
+   "purl": "pkg:pypi/starlette@1.10.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/starlette@1.10.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "stripe",
+   "version": "17.0.0",
+   "purl": "pkg:pypi/stripe@17.0.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/stripe@17.0.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "svgelements",
+   "version": "1.9.6",
+   "purl": "pkg:pypi/svgelements@1.9.6",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/svgelements@1.9.6",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "svgpathtools",
+   "version": "1.8.0",
+   "purl": "pkg:pypi/svgpathtools@1.8.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/svgpathtools@1.8.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "svgwrite",
+   "version": "1.4.3",
+   "purl": "pkg:pypi/svgwrite@1.4.3",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/svgwrite@1.4.3",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "sympy",
+   "version": "1.14.0",
+   "purl": "pkg:pypi/sympy@1.14.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/sympy@1.14.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "threadpoolctl",
+   "version": "3.8.0",
+   "purl": "pkg:pypi/threadpoolctl@3.8.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/threadpoolctl@3.8.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "threejs-materials",
+   "version": "1.2.5",
+   "purl": "pkg:pypi/threejs-materials@1.2.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/threejs-materials@1.2.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "traitlets",
+   "version": "5.16.1",
+   "purl": "pkg:pypi/traitlets@5.16.1",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/traitlets@5.16.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "trianglesolver",
+   "version": "1.2",
+   "purl": "pkg:pypi/trianglesolver@1.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/trianglesolver@1.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "truststore",
+   "version": "0.10.5",
+   "purl": "pkg:pypi/truststore@0.10.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/truststore@0.10.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing-extensions",
+   "version": "4.16.0",
+   "purl": "pkg:pypi/typing-extensions@4.16.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/typing-extensions@4.16.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "PSF-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing-inspect",
+   "version": "0.9.0",
+   "purl": "pkg:pypi/typing-inspect@0.9.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/typing-inspect@0.9.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "typing-inspection",
+   "version": "0.4.5",
+   "purl": "pkg:pypi/typing-inspection@0.4.5",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/typing-inspection@0.4.5",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "tzdata",
+   "version": "2026.6",
+   "purl": "pkg:pypi/tzdata@2026.6",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/tzdata@2026.6",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "urllib3",
+   "version": "2.8.0",
+   "purl": "pkg:pypi/urllib3@2.8.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/urllib3@2.8.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "uvicorn",
+   "version": "0.54.0",
+   "purl": "pkg:pypi/uvicorn@0.54.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/uvicorn@0.54.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "vtk",
+   "version": "9.7.2",
+   "purl": "pkg:pypi/vtk@9.7.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/vtk@9.7.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "wcwidth",
+   "version": "0.9.4",
+   "purl": "pkg:pypi/wcwidth@0.9.4",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/wcwidth@0.9.4",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata classifier"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "webcolors",
+   "version": "24.8.0",
+   "purl": "pkg:pypi/webcolors@24.8.0",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/webcolors@24.8.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-3-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License"
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "wrapt",
+   "version": "2.5.2",
+   "purl": "pkg:pypi/wrapt@2.5.2",
+   "scope": "required",
+   "bom-ref": "pkg:pypi/wrapt@2.5.2",
+   "licenses": [
+    {
+     "license": {
+      "id": "BSD-2-Clause"
+     }
+    }
+   ],
+   "properties": [
+    {
+     "name": "formwright:license-class",
+     "value": "permissive"
+    },
+    {
+     "name": "formwright:license-source",
+     "value": "metadata License-Expression"
+    }
+   ]
+  }
+ ]
+}
