@@ -239,8 +239,16 @@ async def warm(key: str) -> None:
 
 
 async def shutdown_all() -> None:
+    loop = asyncio.get_running_loop()
     for w in list(_workers.values()):
-        await w.stop()
+        if getattr(w, "_loop", None) in (None, loop):
+            await w.stop()
+        elif w.proc is not None and w.proc.returncode is None:  # started by another (possibly closed) loop
+            try:
+                w.proc.kill()
+            except ProcessLookupError:
+                pass
+            w.proc = None
     _workers.clear()
 
 

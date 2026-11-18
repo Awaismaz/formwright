@@ -99,8 +99,16 @@ async def call(key: str, req: dict[str, Any], timeout: float = 180) -> dict[str,
 
 async def shutdown_all() -> None:
     """Stop every worker from inside the event loop that started it (clean pipe shutdown)."""
+    loop = asyncio.get_running_loop()
     for w in list(_workers.values()):
-        await w.stop()
+        if getattr(w, "_loop", None) in (None, loop):
+            await w.stop()
+        elif w.proc is not None and w.proc.returncode is None:  # started by another (possibly closed) loop
+            try:
+                w.proc.kill()
+            except ProcessLookupError:
+                pass
+            w.proc = None
     _workers.clear()
 
 
