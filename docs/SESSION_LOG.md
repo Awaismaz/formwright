@@ -4,6 +4,20 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (a) — Coordinator: batches 23-28 merged + pushed
+
+- Merged into main and pushed: drawing depth (PD-58), engineering hygiene (PD-56), studio intelligence (PD-57), agent
+  platform (PD-59), sheet metal (PD-60), Design Office phase 6 (PD-61). PD numbers renumbered at merge where branches
+  collided; doc conflicts resolved by keeping both sides.
+- Verified: full suite after batch 23-25 = 623 passed; after batch 26-28 = 702 passed + 1 Blender mesh test that failed
+  under load and passed alone (`test_highlight_protection_...`). ruff clean, tsc clean, vitest 126, vite build OK.
+- Flake note: `test_datasheet_shots_go_stale_and_requeue` failed twice under load before the sheet-metal merge made
+  `runner.finalize()` write status.json atomically (likely cause: a half-written status.json read as "no build"); it
+  passed in the full run since.
+- Founder to-do: open one "Export for SOLIDWORKS" zip in SW 2025 (EVAL-005); decide PD-41/PD-48 (live agent runs).
+- Next: remaining engineering backlog (ASM-012 golden fixtures, EVAL-006 render similarity, sheet-metal corner relief,
+  fw-edit for more feature kinds); founder/legal items stay with the founder.
+
 ## 2026-11-18 (w) — Agent platform: LLMProvider, second provider, SOLIDWORKS STEP pathway, Blender IO rows (AGT-001, AGT-013, CAD-070, IO-008b)
 
 Branch `wip/agent-platform` (worktree `fw-wt/agent-platform`), not merged. PD-59. No live model calls: fakes,
