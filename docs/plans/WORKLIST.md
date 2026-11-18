@@ -25,4 +25,5 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 18 | 'Why should I buy this' page (/why): sourced cost of conventional work, risks vs Formwright, worked examples (plate → planetary gearbox), interactive ROI calculator, hire-vs-buy, token explainer; button on landing | UX-021 | In progress (agent) |
 | 19 | Installable app (PWA): manifest, icons, service worker (never caches API), install button + iPhone steps, standalone polish, mobile/tablet layout pass of key screens; desktop-only bridges hidden on mobile | UX-018, UX-022 | In progress (agent) |
 | 20 | Landing: animated phone mockup showing the installable app | UX-020 | In progress (landing agent) |
+| 21 | Native file formats .fwpart / .fwasm / .fwdrw / .fwprog: full parametric model travels between accounts (no recognition), verified by rebuild fingerprint; untrusted-input security (zip guards, hashes, tripwire, isolated rebuild); export + import everywhere | IO-020…IO-024 | In progress (agent) |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |
