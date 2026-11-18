@@ -80,7 +80,9 @@ def _has(nums: list[tuple[str, float]], label: str, v: float) -> bool:
                for k, n in nums)
 
 
-def deterministic(ticket: dict[str, Any], state: dict[str, Any]) -> list[str]:
+def deterministic(ticket: dict[str, Any], state: dict[str, Any], sizes: bool = True) -> list[str]:
+    """Gating checks, then (``sizes``: programs without an ICD) the sizes the brief states. With an ICD, the
+    orchestrator adds the interface conformance measurement instead (``aicad.office.conformance``)."""
     findings: list[str] = []
     if not state.get("builds"):
         return ["There is no build of this part yet."]
@@ -90,6 +92,8 @@ def deterministic(ticket: dict[str, Any], state: dict[str, Any]) -> list[str]:
             findings += [f"Gating check {c.get('id')} ({c.get('name')}) fails on the latest build." for c in failed]
         else:
             findings.append("The latest build does not pass its gating checks.")
+    if not sizes:
+        return findings
     nums = model_numbers(state)
     for label, v in brief_dimensions(ticket_text(ticket)):
         if not _has(nums, label, v):

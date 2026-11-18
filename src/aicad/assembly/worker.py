@@ -26,6 +26,12 @@ def _handle(req: dict[str, Any]) -> Any:
     op = req.get("op")
     if op == "prepare":
         return geometry.prepare(Path(req["dest"]), step=req.get("step"), toolbox_spec=req.get("toolbox"))
+    if op == "placeholder":  # CD-011: envelope solid with interface features, then the usual snapshot
+        from aicad.assembly import placeholder
+
+        dest = Path(req["dest"])
+        src = placeholder.write(dest / "source.step", req["spec"])
+        return geometry.prepare(dest, step=str(src))
     if op == "ping":
         return {"warm": True}
     if op == "interference":

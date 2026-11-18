@@ -4,6 +4,51 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (t) — Design Office Phase 4: skeleton + ICD, placeholders, swap-in, change requests (CD-010…013)
+
+Branch `wip/office-phase4` (worktree `fw-wt/office-phase4`). Report: docs/reports/design-office.md, Phase 4.
+
+### Done
+- CD-010 skeleton + ICD: deterministic layout engine (`office/icd.py`, datums A|B|C, roles block / shaft / hub / gear,
+  hole patterns, shaft/bore ISO 286 fits, seating faces, gear meshes, validity incl. ISO 7089 washer spacing); the
+  "Architecture and interfaces" gate is real (edit numbers, approve; Run waits for it); ICD page (table, detail,
+  measured rows, history, CRs); ICD excerpt + `fw-icd` block in the specialist prompt; Gage's deterministic ICD
+  conformance measurement (`office/conformance.py`) replaces the lexical size check for ICD programs.
+- CD-011 placeholders (`assembly/placeholder.py`, worker op), program assembly built at ICD approval (sub-assembly
+  documents + nested final), mates by interface name, swap-in on Gage approval (same instances, mates re-attached,
+  interference re-run, clashes → Changes requested on the part), level integration fits bolts into the ICD joints.
+- CD-012 change requests (agent `fw-change-request` block or engineer): Archie's rule + optional AI note; ICD
+  versioning; affected tickets reopened with the delta; placeholders regenerated; CR lane on the board.
+- CD-013 live program assembly view (Assembly tab): translucent placeholders, solid real parts, fitted drop + glow,
+  clashes, explode, per-item tooltip.
+- ASM-021 nested sub-assemblies in Assembly Studio (copy with a link; insert / refresh / remove; tree sections;
+  STEP sub-assembly nodes). Merged main (collaboration, native formats): `.fwprog` import keeps the ICD and asks for a
+  rebuild of the program assembly; `.fwasm` export of an assembly with placeholders is a clear 409.
+
+### Verified how
+- `tests/test_office_icd.py` 18 tests (hand-checked layout, ISO 286 limits, conformance on fixture parts with measured
+  values, placeholders, assembly from placeholders, swap-in keeps every mate, CR accept / reject / AI reject, rule
+  unit, tenant isolation); Phase 2/3 office suites updated and passing; vitest `office/icd.test.ts` 6 tests.
+- Full gate after merging main: pytest 563 passed, 1 failed (the budget test: the new washer rule rejected the layout's own 4-hole M3 pattern on a 30 x 20 block, so the generator now picks 2 holes / a larger PCD when washers would overlap; office suites rerun: 53 passed); ruff clean; tsc clean; vitest 110 passed; vite build ok.
+- Browser walkthrough (puppeteer-core 25.18.1, port 8804, throwaway data dir, `FW_OFFICE_FAKE_AGENTS=1`, 1.2 s
+  steps): program → ICD review + edit form → approve → placeholder assembly (4 placeholders, 7 mates by interface name,
+  0 clashes) with tooltip → Run → CR-1 (IF-01 Ø6.6 → 7) accepted, ICD v2 → parts swapped in (glow) → complete: 4 real
+  parts, 39 mates, 4 fastener stacks, 0 clashes; exploded; ICD history v2; final assembly nested in Assembly Studio
+  (Base / Drive sections, fully positioned, 18 free spins); phone width. 0 console / page errors. Screenshots:
+  docs/reports/design-office/phase4/. Fixes from the screenshots: cramped card header + stale "fitted" chip, stale
+  assembly summary, live view missing refreshes in an event burst, an integration that finished while a CR reopened
+  its parts (now goes back to the backlog). Server stopped, scratch data deleted.
+
+### Not done / limits
+- No live AI run (PD-48). Conceptual layout only (translations, row of stations); no bearing / key / dowel interfaces;
+  the office does not take Assembly Studio's per-document lock. See the report's Limitations.
+
+### Parked
+- PD-54 (Phase 4 defaults).
+
+### Next
+- Phase 5: drawings and release from the ICD (CD-014), richer layouts and interface kinds, calibration (CD-015).
+
 ## 2026-11-18 (s) — Collaboration: teams, permissions, sharing, branches, merge requests (branch wip/collab)
 
 **Done** (PLT-010, PLT-017 review queue part, PLT-020…024, CAD-062):

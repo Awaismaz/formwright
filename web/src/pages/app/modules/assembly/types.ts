@@ -13,15 +13,24 @@ export interface InstDof { dof: number; rot: number; trans: number; spin: boolea
 export interface Instance {
   id: string; name: string; display: string; part: string; T: number[]; fixed: boolean; visible: boolean;
   group: string | null; stale: boolean; source_missing: boolean; dof: InstDof | null;
+  /** Nested sub-assembly this instance belongs to (a copy of another assembly, kept in sync by Refresh). */
+  sub?: string | null;
   source: { kind: "project"; project_id: string; build_id: string; rev: string | null }
-    | { kind: "toolbox"; code: string; params: Record<string, number>; version: number };
+    | { kind: "toolbox"; code: string; params: Record<string, number>; version: number }
+    | { kind: "placeholder"; program_id: string; item_id: string; icd_version: number };
+}
+
+/** A nested sub-assembly: another assembly inserted as a group (stale when its source changed since the copy). */
+export interface SubAsm {
+  id: string; kind: "subassembly"; name: string; assembly_id: string; rev: number | null; T: number[];
+  stale: boolean; source_missing: boolean; source_name: string | null;
 }
 
 export interface Hole { id: number; d: number; axis: V3; center: V3; depth: number; through: boolean; faces: number[] }
 export interface HolePattern { kind: string; d: number; count: number; holes: number[] }
 
 export interface PartView {
-  key: string; name: string; kind: "project" | "toolbox"; material: string | null; standard: string | null;
+  key: string; name: string; kind: "project" | "toolbox" | "placeholder"; material: string | null; standard: string | null;
   code: string | null; params: Record<string, number> | null; bbox: number[]; center: V3; volume: number;
   holes: Hole[]; patterns: HolePattern[]; topo_url: string;
 }
@@ -79,6 +88,7 @@ export interface AsmView {
   assembly: { id: string; name: string; project_id: string | null; rev: number; created_at: string; updated_at: string };
   home_project: { id: string; name: string } | null;
   instances: Instance[]; parts: Record<string, PartView>; mates: Mate[]; groups: Group[]; solve: Solve | null;
+  subassemblies?: SubAsm[]; office?: { program: string; level: string } | null;
   explode: Record<string, V3>; analysis: Analysis | null; export: ExportInfo | null; bom: Bom; can_edit: boolean; thumb_rev: number | null;
   result?: Record<string, unknown>;
 }

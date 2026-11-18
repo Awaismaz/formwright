@@ -40,13 +40,17 @@ interface TreeProps {
   focusMate: string | null;
   onEdit: (m: Mate) => void;
   onRefit: (gid: string) => void;
+  onRefreshSub?: (gid: string) => void;
+  onDeleteSub?: (gid: string) => void;
 }
 
 export function Tree(p: TreeProps) {
   const { view } = p;
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const loose = view.instances.filter(i => !i.group);
-  const groups = view.groups.map(g => ({ g, items: view.instances.filter(i => i.group === g.id) })).filter(x => x.items.length);
+  const loose = view.instances.filter(i => !i.group && !i.sub);
+  const groups = view.groups.filter(g => !(g as { sub?: string }).sub)
+    .map(g => ({ g, items: view.instances.filter(i => i.group === g.id) })).filter(x => x.items.length);
+  const subs = (view.subassemblies ?? []).map(s => ({ s, items: view.instances.filter(i => i.sub === s.id) })).filter(x => x.items.length);
   const userMates = view.mates.filter(m => !m.group);
   const stackMates = view.mates.filter(m => m.group);
   const problems = view.mates.filter(m => m.status !== "ok" && m.status !== "suppressed");
@@ -60,6 +64,33 @@ export function Tree(p: TreeProps) {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1">
         {loose.map(i => <Row key={i.id} i={i} {...p} />)}
+        {subs.map(({ s, items }) => {
+          const isOpen = open[s.id] ?? true;
+          const parts = items.filter(i => !i.group);
+          const stacks = new Set(items.filter(i => i.group).map(i => i.group)).size;
+          return (
+            <div key={s.id} data-sub={s.id}>
+              <div className="group flex items-center gap-1 px-2 py-1 text-[12.5px] hover:bg-text/[.04]">
+                <button type="button" onClick={() => setOpen(o => ({ ...o, [s.id]: !isOpen }))} className="rounded p-0.5 text-muted hover:text-text">
+                  {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                </button>
+                <Layers className="h-3.5 w-3.5 shrink-0 text-primary" />
+                <span className="min-w-0 flex-1 truncate font-medium" title={`Sub-assembly: a copy of ${s.source_name ?? s.name}`}>{s.name}</span>
+                <span className="text-[11px] tabular-nums text-muted">{parts.length}</span>
+                {s.stale && p.canEdit && p.onRefreshSub && <Tip content="The source assembly changed since this copy. Refresh brings it in again (mates to other parts are kept).">
+                  <button type="button" onClick={() => p.onRefreshSub!(s.id)} data-refresh-sub={s.id}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-1.5 text-[10.5px] font-semibold text-warning hover:bg-warning/20">
+                    <RefreshCw className="h-3 w-3" />Updated</button></Tip>}
+                {p.canEdit && p.onDeleteSub && <Tip content="Remove this sub-assembly"><button type="button" onClick={() => p.onDeleteSub!(s.id)}
+                  className="hidden rounded p-0.5 text-muted hover:text-danger group-hover:block"><Trash2 className="h-3.5 w-3.5" /></button></Tip>}
+              </div>
+              {isOpen && <div className="ml-4 border-l border-border">
+                {parts.map(i => <Row key={i.id} i={i} {...p} />)}
+                {stacks > 0 && <div className="flex items-center gap-1.5 px-2 py-1 text-[12px] text-muted"><Wrench className="h-3.5 w-3.5 text-accent" />{stacks} fastener stack{stacks > 1 ? "s" : ""}</div>}
+              </div>}
+            </div>
+          );
+        })}
         {groups.map(({ g, items }) => {
           const isOpen = open[g.id] ?? brokenIn(g.id);
           const anySel = items.some(i => i.id === p.selected);
@@ -120,7 +151,9 @@ function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh }: {
         className={cx("rounded p-0.5", i.visible ? "text-muted hover:text-text" : "text-muted/50")}>
         {i.visible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
       </button>
-      {i.source.kind === "toolbox" ? <Circle className="h-3 w-3 shrink-0 text-accent" /> : <Box className="h-3.5 w-3.5 shrink-0 text-primary" />}
+      {i.source.kind === "toolbox" ? <Circle className="h-3 w-3 shrink-0 text-accent" />
+        : i.source.kind === "placeholder" ? <Tip content="Placeholder from the Design Office: the envelope with its interfaces, until the real part is approved"><Box className="h-3.5 w-3.5 shrink-0 text-warning" /></Tip>
+          : <Box className="h-3.5 w-3.5 shrink-0 text-primary" />}
       <StatePrefix i={i} />
       <button type="button" onClick={() => onSelect(sel ? null : i.id)} className={cx("min-w-0 flex-1 truncate text-left", !i.visible && "text-muted")}
         title={i.display}>{i.display}</button>

@@ -41,6 +41,9 @@ standard parts.
 - description: one or two sentences with the key sizes, material and interfaces you can infer. Say when a size is \
 assumed.
 - Keep names short and specific ("Output shaft", "Motor plate"). Plain engineering language.
+- Optional, for the layout and the interfaces (ICD) that follow approval: "envelope": [L, W, H] in mm (a turned \
+part or gear: [D, D, length]); "mounts_on": the name of the part it is fixed to; for gears "module" and "teeth". \
+Leave them out when you can't infer them: the office assumes and marks the assumption.
 
 Answer with a short paragraph, then exactly one fenced block:
 ```fw-plan
@@ -99,10 +102,12 @@ def normalise_plan(raw: Any, source: str) -> dict[str, Any] | None:
                 qty = 1
             tb = p.get("toolbox") if p.get("toolbox") in {c for _, c in _TOOLBOX_HINTS} else None
             n_parts += 1
-            parts.append({"id": f"p{n_parts}", "name": name, "family": fam,
-                          "complexity": 1 if fam == "standard" else clamp_complexity(p.get("complexity")),
-                          "qty": qty, "description": desc,
-                          "toolbox": (tb or toolbox_code(f"{name} {desc}")) if fam == "standard" else None})
+            part = {"id": f"p{n_parts}", "name": name, "family": fam,
+                    "complexity": 1 if fam == "standard" else clamp_complexity(p.get("complexity")),
+                    "qty": qty, "description": desc,
+                    "toolbox": (tb or toolbox_code(f"{name} {desc}")) if fam == "standard" else None}
+            part.update(_layout_hints(p, fam))
+            parts.append(part)
         if parts:
             subs.append({"id": f"s{len(subs) + 1}", "name": _s(s["name"], 80),
                          "description": _s(s.get("description"), 300), "parts": parts})
@@ -112,6 +117,32 @@ def normalise_plan(raw: Any, source: str) -> dict[str, Any] | None:
         if isinstance(raw.get("assumptions"), list) else []
     return {"source": source, "summary": _s(raw.get("summary"), 400), "assumptions": assumptions,
             "subassemblies": subs}
+
+
+def _layout_hints(p: dict[str, Any], fam: str) -> dict[str, Any]:
+    """Archie's optional layout hints, validated (anything odd is dropped: the layout engine assumes instead)."""
+    out: dict[str, Any] = {}
+    if fam == "standard":
+        return out
+    env = p.get("envelope")
+    if isinstance(env, list) and len(env) == 3:
+        try:
+            e = [float(x) for x in env]
+            if all(0.5 <= x <= 5000 for x in e):
+                out["envelope"] = e
+        except (TypeError, ValueError):
+            pass
+    if isinstance(p.get("mounts_on"), str) and p["mounts_on"].strip():
+        out["mounts_on"] = _s(p["mounts_on"], 80)
+    if fam == "gear":
+        try:
+            if p.get("module") is not None and 0.3 <= float(p["module"]) <= 20:
+                out["module"] = float(p["module"])
+            if p.get("teeth") is not None and 8 <= int(p["teeth"]) <= 300:
+                out["teeth"] = int(p["teeth"])
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def parse_plan(text: str) -> dict[str, Any] | None:
@@ -156,6 +187,68 @@ async def run_agent(folder: Path, name: str, brief: str, notes: str = "",
     prompt = f"Program: {name}\n\nBrief:\n{brief}"
     if notes.strip():
         prompt += f"\n\nThe engineering manager reviewed your previous plan and asks for these changes:\n{notes}"
+    texts: list[str] = []
+    cost: float | None = None
+    async for msg in query(prompt=prompt, options=opts):
+        if isinstance(msg, AssistantMessage):
+            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
+        elif isinstance(msg, ResultMessage):
+            cost = msg.total_cost_usd
+    return "\n".join(texts), cost
+
+
+# --------------------------------------------------------------------------- Archie on a change request (CD-012)
+CR_MAX_TOKENS = 60
+CR_INSTRUCTIONS = """You are Archie, the Chief Designer. A part designer asks to change an interface of the \
+program (the ICD). A deterministic check has already confirmed the change fits inside the frozen envelopes and both \
+parts can take it. Judge only whether the change is justified by the program brief and the reason given, and whether \
+it risks the product (strength, fit, assembly). Answer with one short sentence, then exactly one fenced block:
+```fw-cr-decision
+{"decision": "accept" | "reject", "reason": "one short sentence"}
+```"""
+_CR_BLOCK = re.compile(r"```fw-cr-decision\s*\n(.*?)\n?```", re.DOTALL)
+
+
+def cr_prompt(doc: dict[str, Any], c: dict[str, Any], why: str) -> str:
+    vals = ", ".join(f"{k}: {c['before'].get(k)} -> {v}" for k, v in c["values"].items())
+    return (f"Program: {doc['name']}\n\nBrief:\n{doc['brief'][:2000]}\n\nChange request {c['id']} on "
+            f"{c['interface']} {c['interface_name']}: {vals}.\nReason given: {c['reason']}\n"
+            f"Deterministic check: {why}")
+
+
+def parse_cr_decision(text: str) -> dict[str, Any] | None:
+    found = None
+    for m in _CR_BLOCK.finditer(text or ""):
+        try:
+            d = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("decision") in ("accept", "reject"):
+            found = {"decision": d["decision"], "reason": _s(d.get("reason"), 300)}
+    if found is not None:
+        found["note"] = _s(_CR_BLOCK.sub("", text or ""), 300)
+    return found
+
+
+async def run_cr_review(folder: Path, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+    """One text-only turn (same shape as the planning turn). Tests and simulated mode replace it."""
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        ResultMessage,
+        TextBlock,
+        query,
+    )
+
+    from aicad.agent.session import AGENT_BUFFER_BYTES
+
+    folder.mkdir(parents=True, exist_ok=True)
+    opts = ClaudeAgentOptions(
+        cwd=str(folder), tools=[], allowed_tools=[], permission_mode="dontAsk",
+        system_prompt={"type": "preset", "preset": "claude_code", "append": CR_INSTRUCTIONS},
+        setting_sources=[], max_turns=1, max_buffer_size=AGENT_BUFFER_BYTES)
+    if budget_usd is not None:
+        opts.max_budget_usd = max(0.01, budget_usd)
     texts: list[str] = []
     cost: float | None = None
     async for msg in query(prompt=prompt, options=opts):

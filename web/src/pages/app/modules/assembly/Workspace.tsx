@@ -341,7 +341,9 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
               onDelete={iid => run("del", () => api.del<AsmView>(`${A}/instances/${iid}`), "Instance deleted")}
               onDeleteGroup={gid => run("del", () => api.del<AsmView>(`${A}/groups/${gid}`), "Fastener stack removed")}
               onRefresh={iid => run("refresh", () => api.post<AsmView>(`${A}/instances/${iid}/refresh`), refreshed)}
-              onMate={onMate} hoverMate={setHoverMate} focusMate={hoverMate?.id ?? editing?.id ?? null} onEdit={startEdit} onRefit={refit} />
+              onMate={onMate} hoverMate={setHoverMate} focusMate={hoverMate?.id ?? editing?.id ?? null} onEdit={startEdit} onRefit={refit}
+              onRefreshSub={gid => run("refresh", () => api.post<AsmView>(`${A}/subassemblies/${gid}/refresh`), "Sub-assembly refreshed")}
+              onDeleteSub={gid => run("del", () => api.del<AsmView>(`${A}/subassemblies/${gid}`), "Sub-assembly removed")} />
           </div>
           {selInst && view.can_edit && !selInst.fixed && (
             <div className="border-t border-border p-3" data-testid="move-box">
@@ -443,7 +445,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
           )}
         </aside>
       </div>
-      <InsertDialog open={insertOpen} onOpenChange={setInsertOpen} busy={busy === "insert"} onInsert={insert} />
+      <InsertDialog open={insertOpen} onOpenChange={setInsertOpen} busy={busy === "insert"} onInsert={insert} current={view.assembly.id}
+        onInsertSub={async aid => { const v = await run("insert", () => api.post<AsmView>(`${A}/subassemblies`, { assembly_id: aid }), "Sub-assembly inserted"); if (v) { setInsertOpen(false); setFitKey(aid); } }} />
     </div>
   );
 }

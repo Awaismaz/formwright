@@ -141,6 +141,9 @@ async def assembly_bytes(ctx: Ctx, aid: str, history: bool = True, refs: bool = 
         meta = store.part(root, key)
         if meta is None:
             raise HTTPException(409, "A part of this assembly is missing. Remove and re-insert it, then export.")
+        if meta["kind"] == "placeholder":
+            raise HTTPException(409, f"{meta['name']} is a Design Office placeholder: export this assembly once the "
+                                     "real parts are in, or export the whole program.")
         if meta["kind"] == "project":
             p = projects.get(meta["project_id"])
             if p is None:
@@ -556,10 +559,14 @@ async def _import_program(ctx: Ctx, parsed: dict[str, Any], filename: str, trust
                            int(src.get("concurrency") or 1) if isinstance(src.get("concurrency"), int) else 1,
                            int(budget.get("tokens") or 0) if isinstance(budget.get("tokens"), int) else 0,
                            "standard" if src.get("planner") != "archie" else "archie")
-    keep = ("key", "status", "plan", "plan_history", "gates", "items", "tickets", "ticket_seq", "budget", "planner")
+    keep = ("key", "status", "plan", "plan_history", "gates", "items", "tickets", "ticket_seq", "budget", "planner",
+            "skeleton", "icd", "change_requests")
     for k in keep:
         if k in src:
             doc[k] = src[k]
+    if (doc.get("icd") or {}).get("status") == "approved":  # the program assembly lives in the old workspace
+        doc["assembly"] = {"status": "failed", "summary": "Imported from a file: rebuild the program assembly from "
+                                                          "its interfaces."}
     for t in doc.get("tickets", []):
         t["project_id"] = pmap.get(t.pop("project", None) or "")
         t["assembly_id"] = amap.get(t.pop("assembly", None) or "")

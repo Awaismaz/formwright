@@ -14,7 +14,8 @@ import type { Topo } from "@/viewer/types";
 import type { V3 } from "./types";
 
 export interface AsmPick { inst: string; kind: "face" | "edge"; id: number; point: V3 }
-export interface InstSpec { id: string; part: string; T: number[]; visible: boolean; fastener: boolean }
+/** ``tone: "placeholder"`` draws an envelope body translucent orange (Design Office placeholders, CD-013). */
+export interface InstSpec { id: string; part: string; T: number[]; visible: boolean; fastener: boolean; tone?: "placeholder" }
 export type AsmView = "Iso" | "Front" | "Top" | "Right" | "Back" | "Bottom" | "Left";
 export interface FaceMark { inst: string; faces: number[]; color: number; opacity?: number }
 
@@ -24,11 +25,13 @@ const VIEWS: Record<AsmView, [V3, V3]> = {
   Top: [[0, 0, 1], [0, 1, 0]], Bottom: [[0, 0, -1], [0, -1, 0]], Right: [[1, 0, 0], [0, 0, 1]], Left: [[-1, 0, 0], [0, 0, 1]],
 };
 const FASTENER = { light: 0x8f99a8, dark: 0x7d8796 };
+const PLACEHOLDER = 0xf08c2e;
+const FIT_MS = 900;
 
 interface PartGeo { topo: Topo; faces: THREE.BufferGeometry; triFace: Int32Array; edges: THREE.BufferGeometry }
 interface InstObj {
   id: string; part: string; group: THREE.Group; mesh: THREE.Mesh; edges: THREE.LineSegments;
-  base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; fastener: boolean; visible: boolean;
+  base: THREE.Matrix4; mat: THREE.MeshStandardMaterial; fastener: boolean; visible: boolean; tone?: "placeholder";
 }
 
 function m4(T: number[]): THREE.Matrix4 {
@@ -61,6 +64,7 @@ export class AssemblyViewer {
   private lastPicks: AsmPick[] = [];
   private lastMarks: FaceMark[] = [];
   private fitted = false;
+  private anims = new Map<string, number>();
   onHover?: (p: AsmPick | null) => void;
   onClick?: (p: AsmPick | null, e: PointerEvent) => void;
   /** Drag gizmo released: the instance's new rigid placement (3x4, row-major) for the server to re-solve. */
@@ -115,7 +119,7 @@ export class AssemblyViewer {
       o.group.matrix.copy(this.dragDelta().multiply(this.dragBase));
       o.group.matrixWorldNeedsUpdate = true;
     });
-    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); });
+    this.renderer.setAnimationLoop(() => { this.controls.update(); this.stepAnims(); this.renderer.render(this.scene, this.camera); });
   }
 
   private dragDelta(): THREE.Matrix4 {
@@ -189,7 +193,7 @@ export class AssemblyViewer {
         o = { id: s.id, part: s.part, group, mesh, edges, base: new THREE.Matrix4(), mat, fastener: s.fastener, visible: true };
         this.insts.set(s.id, o);
       }
-      o.base = m4(s.T); o.fastener = s.fastener; o.visible = s.visible;
+      o.base = m4(s.T); o.fastener = s.fastener; o.visible = s.visible; o.tone = s.tone;
       o.group.visible = s.visible;
       this.place(o); this.tint(o);
     }
@@ -197,21 +201,48 @@ export class AssemblyViewer {
     if (!this.fitted && this.insts.size) { this.fitted = true; this.setView("Iso"); }
   }
 
+  /** A part just replaced its placeholder: it drops into place and glows briefly (call only without reduced motion). */
+  animateFit(id: string) {
+    if (this.insts.has(id)) this.anims.set(id, performance.now());
+  }
+
+  private stepAnims() {
+    if (!this.anims.size) return;
+    const now = performance.now();
+    for (const [id, t0] of this.anims) {
+      const o = this.insts.get(id);
+      if (!o) { this.anims.delete(id); continue; }
+      const k = Math.min(1, (now - t0) / FIT_MS);
+      if (k >= 1) this.anims.delete(id);
+      this.place(o); this.tint(o);
+    }
+  }
+
   private place(o: InstObj) {
     const off = this.offsets[o.id] ?? [0, 0, 0];
-    const t = new THREE.Matrix4().makeTranslation(off[0] * this.explodeF, off[1] * this.explodeF, off[2] * this.explodeF);
+    const t0 = this.anims.get(o.id);
+    const k = t0 === undefined ? 1 : Math.min(1, (performance.now() - t0) / FIT_MS);
+    const lift = (1 - (1 - Math.pow(1 - k, 3))) * this.radius * 0.18;   // ease-out drop from above
+    const t = new THREE.Matrix4().makeTranslation(off[0] * this.explodeF, off[1] * this.explodeF, off[2] * this.explodeF + lift);
     o.group.matrix.copy(t.multiply(o.base));
     o.group.matrixWorldNeedsUpdate = true;
     o.group.updateMatrixWorld(true);
   }
 
   private tint(o: InstObj) {
-    const base = o.fastener ? (this.dark ? FASTENER.dark : FASTENER.light) : this.pal.face;
+    const ph = o.tone === "placeholder";
+    const base = ph ? PLACEHOLDER : o.fastener ? (this.dark ? FASTENER.dark : FASTENER.light) : this.pal.face;
     const c = new THREE.Color(base);
     if (this.selected.has(o.id)) c.lerp(new THREE.Color(this.pal.select), 0.4);
     o.mat.color.copy(c);
-    o.mat.metalness = o.fastener ? 0.55 : 0.25;
-    o.mat.roughness = o.fastener ? 0.38 : 0.5;
+    o.mat.metalness = o.fastener ? 0.55 : ph ? 0.05 : 0.25;
+    o.mat.roughness = o.fastener ? 0.38 : ph ? 0.8 : 0.5;
+    if (o.mat.transparent !== ph || (ph && o.mat.opacity !== 0.4)) {
+      o.mat.transparent = ph; o.mat.opacity = ph ? 0.4 : 1; o.mat.depthWrite = !ph; o.mat.needsUpdate = true;
+    }
+    const t0 = this.anims.get(o.id);
+    const glow = t0 === undefined ? 0 : Math.max(0, 1 - (performance.now() - t0) / FIT_MS);
+    o.mat.emissive.setRGB(0.12 * glow, 0.55 * glow, 0.25 * glow);
   }
 
   setExplode(offsets: Record<string, V3>, f: number) {
@@ -441,6 +472,15 @@ export class AssemblyViewer {
   }
 
   // ---------------------------------------------------------------- picking
+  /** The instance under the pointer, translucent placeholders included (for status tooltips). */
+  instanceAt(clientX: number, clientY: number): string | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const nx = ((clientX - r.left) / r.width) * 2 - 1, ny = -((clientY - r.top) / r.height) * 2 + 1;
+    this.ray.setFromCamera(new THREE.Vector2(nx, ny), this.camera);
+    const hit = this.ray.intersectObjects([...this.insts.values()].filter(o => o.visible).map(o => o.mesh), false)[0];
+    return hit ? (hit.object.userData.inst as string) : null;
+  }
+
   setPicking(kinds: ("face" | "edge")[]) {
     this.picking = new Set(kinds);
     if (!kinds.length) this.drop("hover");

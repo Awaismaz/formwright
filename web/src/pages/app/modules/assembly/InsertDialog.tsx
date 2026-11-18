@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Box, Lock, Wrench } from "lucide-react";
+import { Box, Layers, Lock, Wrench } from "lucide-react";
 import { api } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Spinner, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { IsoThumb } from "@/components/ProjectCard";
-import type { Sources, ToolboxComp } from "./types";
+import type { AsmSummary, Sources, ToolboxComp } from "./types";
 
-export function InsertDialog({ open, onOpenChange, onInsert, busy }: {
+export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onInsertSub }: {
   open: boolean; onOpenChange: (v: boolean) => void; busy: boolean;
   onInsert: (body: { project_id: string } | { toolbox: { code: string; params: Record<string, number> } }) => void;
+  /** Nested assemblies: insert another assembly as a sub-assembly. */
+  current?: string; onInsertSub?: (assemblyId: string) => void;
 }) {
   const q = useQuery({ queryKey: ["asm-sources"], queryFn: () => api.get<Sources>("/api/m/assembly/sources"), enabled: open, staleTime: 30_000 });
+  const asms = useQuery({ queryKey: ["asm-list"], queryFn: () => api.get<{ items: AsmSummary[] }>("/api/m/assembly/assemblies"),
+    enabled: open && !!onInsertSub, staleTime: 10_000 });
   const [tab, setTab] = useState("projects");
   const [code, setCode] = useState<string | null>(null);
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -34,7 +38,21 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy }: {
       description="Project parts come in at their latest verified build. Toolbox parts are generated from standard tables.">
       {!q.data ? <PageLoader /> : (
         <Tabs value={tab} onValueChange={setTab}>
-          <TabList><Tab value="projects"><Box className="h-4 w-4" />Project parts</Tab><Tab value="toolbox"><Wrench className="h-4 w-4" />Toolbox</Tab></TabList>
+          <TabList><Tab value="projects"><Box className="h-4 w-4" />Project parts</Tab><Tab value="toolbox"><Wrench className="h-4 w-4" />Toolbox</Tab>
+            {onInsertSub && <Tab value="subs"><Layers className="h-4 w-4" />Sub-assembly</Tab>}</TabList>
+          {onInsertSub && <TabPanel value="subs" className="pt-4">
+            <p className="mb-2 text-[12px] text-muted">The assembly goes in as one sub-assembly with its own mates and fastener stacks. It is a copy: when the source assembly changes, the tree shows “Updated” and Refresh brings it in again.</p>
+            <div className="grid max-h-[52vh] gap-2 overflow-y-auto sm:grid-cols-2">
+              {(asms.data?.items ?? []).filter(a => a.id !== current).map(a => (
+                <button key={a.id} type="button" disabled={busy || a.instances === 0} onClick={() => onInsertSub(a.id)} data-insert-sub={a.id}
+                  className={cx("card flex items-center gap-3 p-2.5 text-left transition", a.instances ? "hover:shadow-pop" : "cursor-not-allowed opacity-60")}>
+                  <Layers className="h-5 w-5 shrink-0 text-primary" />
+                  <span className="min-w-0"><span className="block truncate text-[13px] font-semibold">{a.name}</span>
+                    <span className="text-[11.5px] text-muted">{a.instances} parts · {a.mates} mates</span></span>
+                </button>))}
+              {asms.data && asms.data.items.filter(a => a.id !== current).length === 0 && <div className="col-span-2 py-8 text-center text-sm text-muted">No other assemblies yet.</div>}
+            </div>
+          </TabPanel>}
           <TabPanel value="projects" className="pt-4">
             <div className="grid max-h-[52vh] gap-3 overflow-y-auto sm:grid-cols-3">
               {q.data.projects.map(p => (
