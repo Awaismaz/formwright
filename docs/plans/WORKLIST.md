@@ -15,7 +15,7 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 8 | Phase 2 Design Office: program model, Archie brief → tree → tickets, Jira board, estimates + roll-up, roster, avatars + animations | CD-001…005, CD-017 | Done (merged) |
 | 9 | Phase 3: orchestrator (concurrency, critical path, budget), specialist part agents, Gage checker, ticket comments | CD-006…009, CD-016 | Done (merged; live multi-agent run parked PD-48) |
 | 10 | Phase 4: skeleton + ICD, placeholder bodies, mates by ICD name, swap-in, change requests, live program assembly (+ nested sub-assemblies) | CD-010…013 | Done (merged) |
-| 11 | Phase 5: program deliverables (drawings, DFM, BOM, release), estimate calibration, timeline; + better layouts, bearing/key/dowel interfaces, frame-tolerant measurement, shared assembly lock | CD-014, CD-015 | In progress (agent) |
+| 11 | Phase 5: program deliverables (drawings, DFM, BOM, release), estimate calibration, timeline; + better layouts, bearing/key/dowel interfaces, frame-tolerant measurement, shared assembly lock | CD-014, CD-015 | Done (merged 28de67b) |
 | 12 | AI quality: brief echo-back approval gate, recorded/replay provider, structured self-critique, 20-prompt benchmark | CAD-028, AGT-002, AGT-006, EVAL-003 | Done (merged); live benchmark parked PD-41 |
 | 13 | Mesh test `test_scene_script_refuses_outputs_outside_its_job_folder` timed out (Blender rendered before checking the output path) | — | Done: paths validated before any render (12 s); test_mesh 90/90 |
 | 14 | Mesh render failed on a founder model (degenerate triangle broke custom normals) | — | Done: triangles cleaned before normals; regression test; test_mesh 91/91 |

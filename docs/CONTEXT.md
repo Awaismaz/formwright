@@ -108,7 +108,7 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-54).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-55).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
@@ -124,14 +124,15 @@ mobile/tablet pass; Formwright native files in every module (.fwpart/.fwasm/.fwd
 .fwcalc/.fwprint/.fwread, opened by the installed app); collaboration (teams, permissions, sharing, presence,
 comments, branches + merge requests). DB backup taken before collaboration went live: `data/backups/` (local only).
 
-**In flight:** `wip/office-phase5` (worktree `C:/Users/Awais/Desktop/fw-wt/office-phase5`): program deliverables
-(drawings, BOM, DFM, release pack), calibration + timeline, better layouts, bearing/key/dowel interfaces,
-frame-tolerant measurement, shared assembly lock. If it is on GitHub but not merged into main, it is unfinished. Status
-2026-11-18 evening: Design Office Phase 5 complete on that branch, gate green, committed, not pushed, waiting for the
-master to merge (report: docs/reports/design-office.md Phase 5; PD-55). Drawing Studio VERSION 1.1.3 (faceted gear
-flanks are no longer read as chamfers). Calibration keeps simulated runs in their own profile.
+**Design Office phase 5 merged + pushed (2026-11-18 night):** program deliverables (Ortho part + assembly drawings
+with BOM/balloons, Smithy DFM summary, program BOM, "Release program" → tagged parts + release pack), estimate
+calibration (EMA per family, simulated runs in their own profile) + Timeline tab, bearing-seat/key/dowel interfaces,
+frame-tolerant Gage (24 axis rotations), shared assembly lock (in-memory, single server — PD-53). Report:
+docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3. Nothing is in flight on branches.
+Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
+review gate, change notices after release).
 
-**Next after phase 5:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
+**Next:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
 
 **Process rules (founder):** push after every merge; update CONTEXT/PUNCH_LIST/SESSION_LOG/DECISIONS/WORKLIST at
