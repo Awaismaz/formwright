@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileWarning, History, Info,
+  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileDown, FileWarning, History, Info,
   Lock, Plus, RefreshCw, Ruler, ShieldAlert, ShieldCheck, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,8 @@ import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
+import { NativeImportButton } from "@/components/NativeImport";
+import { saveNative } from "@/components/NativeExport";
 import { ModuleHeader, PartCard } from "../ModuleHeader";
 import { DEFAULT_OPTIONS, EMPTY_EDITS, localStamp, type DrawingEdits, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
 
@@ -41,8 +43,11 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
     <div>
     <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null} />
     <div className="mx-auto max-w-7xl px-6 py-6">
-      <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
-      <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <div><h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
+          <p className="mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p></div>
+        <NativeImportButton accept=".fwdrw" size="sm">Import .fwdrw</NativeImportButton>
+      </div>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>Views are exact hidden-line projections of your model. Dimensions are tagged <b className="text-[#0b3d91]">spec</b> when they equal a declared model parameter and <i className="text-[#9a3412]">inferred</i> when measured from the geometry. Every sheet is consistency-checked and stamped <b>NOT APPROVED FOR MANUFACTURE</b>: an engineer must review it.</div>
@@ -121,6 +126,7 @@ export function DrawingActions({ pid, rec, canEdit, verified, stale, busy, onReg
           <MenuContent>
             <MenuItem icon={<Download />} onSelect={() => { location.href = file("sheet.svg"); }}>SVG (issue copy)</MenuItem>
             <MenuItem icon={<Eye />} onSelect={() => { location.href = file("sheet.pdf", "review"); }}>Review copy PDF (tags and legend)</MenuItem>
+            <MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/drawings/${pid}/export`, "drawing.fwdrw", "fwdrw"); }}>Formwright drawing (.fwdrw) with its model</MenuItem>
           </MenuContent>
         </Menu>
       </>}

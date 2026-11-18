@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArchiveRestore, Copy, ExternalLink, FolderKanban, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Ruler,
-  ScanSearch, Search, Trash2, X,
+  Archive, ArchiveRestore, Copy, Download, ExternalLink, FileDown, FileUp, FolderKanban, LayoutGrid, List, MoreHorizontal,
+  Pencil, Plus, Ruler, ScanSearch, Search, Trash2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -14,6 +14,8 @@ import { Button, EmptyState, Input, Menu, MenuContent, MenuItem, MenuSeparator, 
 import ProjectCard, { ProjectStatus } from "@/components/ProjectCard";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import { MatchRow, SimilarPartsDialog, type Match } from "@/components/SimilarParts";
+import { PartExportDialog, saveNative } from "@/components/NativeExport";
+import { START_ACCEPT, startFromFile } from "@/components/StartBox";
 
 type Sort = "updated" | "name" | "size" | "created";
 const SORTS: [Sort, string][] = [["updated", "Last updated"], ["name", "Name"], ["size", "Size"], ["created", "Date created"]];
@@ -34,6 +36,10 @@ export default function Projects() {
   const [confirm, setConfirm] = useState<Project | null>(null);
   const [renaming, setRenaming] = useState<{ p: Project; name: string } | null>(null);
   const [similar, setSimilar] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<Project | null>(null);
+  const [drag, setDrag] = useState(false);
+  const [allBusy, setAllBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const list = useQuery({ queryKey: ["projects", archived], queryFn: () => api.get<{ items: Project[] }>(`/api/projects?archived=${archived}`) });
 
   useEffect(() => { if (params.get("new") === "1") { setNewOpen(true); params.delete("new"); setParams(params, { replace: true }); } }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -68,6 +74,16 @@ export default function Projects() {
     try { const d = await api.post<Project>(`/api/projects/${p.id}/duplicate`); toast.success(`Saved as “${d.name}”`, { action: { label: "Open", onClick: () => nav(`/app/projects/${d.id}`) } }); refresh(); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not duplicate"); }
   };
+  const onFile = async (f: File | undefined) => {
+    if (!f || viewer) return;
+    try { await startFromFile(f, nav, (list.data?.items ?? []).map(p => p.name)); refresh(); }
+    catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not open that file"); }
+  };
+  const downloadAll = async () => {
+    setAllBusy(true);
+    await saveNative("/api/native/projects/export-all", "projects.zip", "zip");
+    setAllBusy(false);
+  };
   const rename = async () => {
     if (!renaming?.name.trim()) return;
     await call(() => api.patch(`/api/projects/${renaming.p.id}`, { name: renaming.name.trim() }), "Project renamed");
@@ -80,6 +96,7 @@ export default function Projects() {
         <MenuItem icon={<ExternalLink />} onSelect={() => window.open(`/app/projects/${p.id}`, "_blank", "noopener")}>Open in new tab</MenuItem>
         {!viewer && <MenuItem icon={<Pencil />} onSelect={() => setRenaming({ p, name: p.name })}>Rename…</MenuItem>}
         {!viewer && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
+        {p.builds > 0 && <MenuItem icon={<FileDown />} onSelect={() => setExporting(p)}>Download as .fwpart…</MenuItem>}
         {p.builds > 0 && <MenuItem icon={<ScanSearch />} onSelect={() => setSimilar(p.id)}>Find similar parts</MenuItem>}
         {!viewer && <><MenuSeparator />
           {archived ? <MenuItem icon={<ArchiveRestore />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: false }), "Project restored")}>Restore</MenuItem>
@@ -92,9 +109,18 @@ export default function Projects() {
   const dims = bySize.data?.dims;
 
   return (
-    <div className={PAGE}>
+    <div className={cx(PAGE, drag && "rounded-xl ring-2 ring-primary/40")}
+      onDragOver={e => { if (!viewer && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDrag(false); }}
+      onDrop={e => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]); }}>
+      <input ref={fileRef} type="file" accept={START_ACCEPT} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
       <PageHeader title="Projects" subtitle="Each project holds a part: its model, checks, revisions, exports and design conversation."
-        actions={!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
+        actions={<>
+          <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={allBusy} onClick={() => void downloadAll()}
+            title="Every built project as Formwright parts (.fwpart) in one zip">Download all</Button>
+          {!viewer && <Button variant="secondary" icon={<FileUp className="h-4 w-4" />} onClick={() => fileRef.current?.click()}
+            title="Formwright files (.fwpart, .fwasm, .fwdrw, .fwprog), STEP, drawings or photos">Import</Button>}
+          {!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>}</>} />
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search by name, or by size: ${units === "in" ? "4.7 x 3.1 in" : "120x80x10"}`} className="px-9" aria-label="Search projects by name or size" />
@@ -166,6 +192,7 @@ export default function Projects() {
         <Input autoFocus value={renaming?.name ?? ""} maxLength={120} onChange={e => renaming && setRenaming({ ...renaming, name: e.target.value })} onKeyDown={e => e.key === "Enter" && rename()} aria-label="Project name" />
       </Modal>
       {similar && <SimilarPartsDialog projectId={similar} open onClose={() => setSimilar(null)} />}
+      {exporting && <PartExportDialog open projectId={exporting.id} name={exporting.name} onOpenChange={o => { if (!o) setExporting(null); }} />}
     </div>
   );
 }

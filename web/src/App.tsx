@@ -19,6 +19,7 @@ import Settings from "@/pages/app/Settings";
 import Help from "@/pages/app/Help";
 import NotFound from "@/pages/NotFound";
 import NotFoundPanel from "@/components/NotFoundPanel";
+import NativeImportHost from "@/components/NativeImport";
 
 const ProjectStudio = lazy(() => import("@/pages/app/ProjectStudio"));
 const Admin = lazy(() => import("@/pages/admin/Admin"));
@@ -67,7 +68,7 @@ export default function App() {
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/invite" element={<AcceptInvite />} />
         <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
-        <Route path="/app" element={<RequireAuth><JourneyGate><AppLayout /></JourneyGate></RequireAuth>}>
+        <Route path="/app" element={<RequireAuth><JourneyGate><AppLayout /><NativeImportHost /></JourneyGate></RequireAuth>}>
           <Route index element={<Dashboard />} />
           <Route path="projects" element={<Projects />} />
           <Route path="projects/:id" element={<ProjectStudio />} />

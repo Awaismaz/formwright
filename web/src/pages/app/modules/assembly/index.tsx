@@ -11,6 +11,7 @@ import type { ModuleAppProps } from "../registry";
 import type { AsmSummary, AsmView } from "./types";
 import { SolveChip } from "./bits";
 import Workspace from "./Workspace";
+import { NativeImportButton } from "@/components/NativeImport";
 
 export const BASE = "/api/m/assembly";
 
@@ -115,7 +116,10 @@ function AssemblyList({ onOpen }: { onOpen: (id: string) => void }) {
             <p className="mt-0.5 text-sm text-muted">Put verified parts and standard components together, check fits and clashes, and fasten them.</p>
           </div>
         </div>
-        <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New assembly</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <NativeImportButton accept=".fwasm">Import .fwasm</NativeImportButton>
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New assembly</Button>
+        </div>
       </div>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
