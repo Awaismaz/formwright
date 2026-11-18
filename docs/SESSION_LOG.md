@@ -4,6 +4,37 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (b) — Quality fixtures: golden assembly fixtures FX-04/05/06 + advisory render similarity (ASM-012, EVAL-006)
+
+Branch `wip/quality-fixtures` (worktree `fw-wt/quality-fixtures`), not merged. PD-62. No live model calls.
+
+### Done
+- ASM-012: `src/aicad/fixtures/` — `harness.py` (build parts, CHK-02..05 vs hand sums, STEP, mate solve from perturbed
+  starts, hand placements, mechanism freedoms, exact interference, hand min distances, mass + centre of mass, BOM,
+  motion sweep), `fx04_bolted_bracket.py`, `fx05_keyed_shaft.py`, `fx06_hinged_arm.py` (original designs, parametric
+  build123d scripts + Toolbox fasteners / bearing / gear / dowel, every expected value a hand formula),
+  `python -m aicad.fixtures [--write]`. `specs/fixtures/<fx>/assembly.json` (generated definition) +
+  `provenance.json` + `specs/fixtures/README.md`.
+- EVAL-006: `src/aicad/eval/render_similarity.py` (silhouette SSIM + edge IoU, numpy + Pillow); logged as advisory in
+  `aicad bench` (`--save-renders`, `--ref-renders`), `aicad repeat` (`--render`) and the run record
+  (`render_similarity` vs the previous review render).
+
+### Verified
+- `tests/test_fixtures_asm.py` 10 passed (≈20 s): all three fixtures pass every check; FX-04 mass = hand
+  392.03 g, protrusion 3.6 mm; FX-05 freedoms 3, clearances 2.0 / 11.0 mm; FX-06 sweep collides at exactly −40, −30,
+  210, 220° (hand contact −25.11° / 205.11°), edge gap at −25° = 0.0486 mm = formula; broken variants fail.
+- `tests/test_render_similarity.py` 9 passed: hand IoUs on synthetic images, real VTK sheets in bench/repeat/run record.
+- Gate: ruff clean; assembly, assembly motion/AI, ai_quality, repeat, sbom, run_record, plate, library + new tests pass.
+
+### Not done / limits
+- Fixtures are code + data, not seeded Studio/Assembly projects (could become God-mode demos later).
+- The solver's own `dof` sums per instance; the fixtures use the Jacobian nullity. Not changed in the solver.
+- Render similarity is not perceptual and depends on identical framing (same renderer, same views).
+
+### Next
+- Merge `wip/quality-fixtures`; optionally seed FX-04..06 as demo assemblies; EVAL-004 FX-02/03 part fixtures in the
+  same `specs/fixtures/` form.
+
 ## 2026-11-19 (a) — Coordinator: batches 23-28 merged + pushed
 
 - Merged into main and pushed: drawing depth (PD-58), engineering hygiene (PD-56), studio intelligence (PD-57), agent

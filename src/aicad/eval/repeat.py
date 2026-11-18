@@ -18,6 +18,11 @@ Modes (no model call unless ``--live`` is given explicitly):
     uv run aicad repeat --case B02 --replay rep-cassettes --out rep-out
 
 Variance is judged on the deterministic build outputs only, never on the agent's own words.
+
+Render similarity (EVAL-006, advisory, never gating): when the runs leave a review sheet (live builds always do;
+``--render`` makes fake / replayed runs render too), each run's sheet is kept as ``<out>/renders/run-NN.png`` and
+compared with the first run's (``eval/render_similarity``). Scores are logged per run and summarised; they never
+change the verdict.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from aicad.eval import render_similarity
 from aicad.eval.benchmark import (
     BENCH_SUFFIX,
     HIGH_TOKENS,
@@ -86,7 +92,7 @@ def geometry_key(m: dict[str, Any]) -> str | None:
 
 
 async def run_once(prompt: str, ws: Path, client_factory: Any, expect: dict[str, Any] | None = None,
-                   model: str | None = None) -> dict[str, Any]:
+                   model: str | None = None, keep_render: Path | None = None) -> dict[str, Any]:
     """One independent run in an empty workspace. ``client_factory(options)`` builds the agent client."""
     from aicad.agent.session import AgentSession
 
@@ -117,6 +123,13 @@ async def run_once(prompt: str, ws: Path, client_factory: Any, expect: dict[str,
              tokens_platform=round(cost / USD_PER_TOKEN) if cost else 0,
              errors=[e.get("text") for e in events if e.get("type") == "error"])
     m["key"] = geometry_key(m)
+    views = ws / "out" / "views.png"
+    if keep_render is not None and views.is_file():
+        import shutil
+
+        keep_render.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(views, keep_render)
+        m["render"] = keep_render.name
     if expect is not None:
         m["expect_passed"] = bool(score(expect, st, topo).get("passed"))
     return m
@@ -131,6 +144,24 @@ def _stats(vals: list[float]) -> dict[str, Any]:
     return {"n": len(vals), "mean": round(mean, 6), "stdev": round(sd, 6), "min": min(vals), "max": max(vals),
             "spread": round(max(vals) - min(vals), 6), "cv": round(sd / abs(mean), 6) if mean else None,
             "distinct": len({round(v, 6) for v in vals})}
+
+
+def attach_render_similarity(runs: list[dict[str, Any]], render_dir: Path) -> dict[str, Any] | None:
+    """EVAL-006: each run's kept render compared with the first run's (advisory). Adds ``render_similarity`` to the
+    runs that have one and returns the summary, or None when no run left a render."""
+    have = [r for r in runs if r.get("render")]
+    if not have:
+        return None
+    ref = render_dir / have[0]["render"]
+    scores = []
+    for r in have:
+        sim = render_similarity.compare_files(ref, render_dir / r["render"])
+        if sim is None:
+            r["render_similarity"] = {"available": False, "reason": "unreadable", "advisory": True}
+            continue
+        r["render_similarity"] = {"available": True, "vs": have[0]["render"], **sim}
+        scores.append(float(sim["score"]))
+    return {**render_similarity.summary(scores), "reference": have[0]["render"]}
 
 
 def summarise(runs: list[dict[str, Any]], *, mode: str, prompt: str, case: str | None) -> dict[str, Any]:
@@ -173,6 +204,10 @@ def markdown(report: dict[str, Any]) -> str:
              + (f" · met the case expectation {s['expect_pass_rate']:.0%}" if "expect_pass_rate" in s else ""), ""]
     if s.get("note"):
         lines += [f"> {s['note']}", ""]
+    rs = s.get("render_similarity")
+    if rs:
+        lines += [f"Render similarity to {rs['reference']} (advisory, never gating): "
+                  + (f"mean {rs['mean']:.3f}, min {rs['min']:.3f} over {rs['n']} run(s)" if rs.get("n") else "none"), ""]
     lines += ["| Metric | n | mean | stdev | min | max | spread | CV | distinct |", "|---|---|---|---|---|---|---|---|---|"]
     for k, m in s["metrics"].items():
         if m.get("n"):
@@ -181,8 +216,9 @@ def markdown(report: dict[str, Any]) -> str:
     if s["check_pass_rate"]:
         lines += ["", "| Check | pass rate |", "|---|---|"]
         lines += [f"| {c} | {v:.0%} |" for c, v in s["check_pass_rate"].items()]
-    lines += ["", "| Run | Built | Gates | Volume mm³ | Size mm | Faces | Features | Builds | Time s |",
-              "|---|---|---|---|---|---|---|---|---|"]
+    lines += ["", "| Run | Built | Gates | Volume mm³ | Size mm | Faces | Features | Builds | Time s |"
+              + (" Render sim (advisory) |" if rs else ""),
+              "|---|---|---|---|---|---|---|---|---|" + ("---|" if rs else "")]
     yn = {True: "yes", False: "no", None: "–"}
     for i, r in enumerate(report["runs"], 1):
         size = " × ".join(f"{r[k]:g}" for k in ("bbox_x", "bbox_y", "bbox_z")) if r.get("built") else "–"
@@ -190,8 +226,15 @@ def markdown(report: dict[str, Any]) -> str:
         lines.append(f"| {i} | {yn[r.get('built')]} | {yn[r.get('gates_ok')]} | {vol} | {size} | "
                      f"{r.get('faces') if r.get('faces') is not None else '–'} | "
                      f"{r.get('features') if r.get('features') is not None else '–'} | {r.get('builds', 0)} | "
-                     f"{r.get('duration_s', '–')} |")
+                     f"{r.get('duration_s', '–')} |"
+                     + (f" {_sim(r.get('render_similarity'))} |" if rs else ""))
     return "\n".join(lines) + "\n"
+
+
+def _sim(r: dict[str, Any] | None) -> str:
+    if not r:
+        return "–"
+    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "–")
 
 
 def fake_cassette(reference: str) -> dict[str, Any]:
@@ -209,11 +252,11 @@ def _replay_files(path: Path) -> list[Path]:
 async def run_series(prompt: str, runs: int, mode: str, out: Path, *, reference: str | None = None,
                      replay: Path | None = None, record: Path | None = None, expect: dict[str, Any] | None = None,
                      case: str | None = None, model: str | None = None,
-                     factory_for: Any = None) -> dict[str, Any]:
+                     factory_for: Any = None, render: bool = False) -> dict[str, Any]:
     """Run the series and write ``report.json`` + ``report.md`` to ``out``. ``factory_for(i)`` (tests) overrides the
-    client factory of run i."""
+    client factory of run i. ``render``: fake / replayed runs render their review sheet too (live runs always do)."""
     from aicad.agent import worker
-    from aicad.agent.replay import RecordingClient, ReplayClient
+    from aicad.agent.replay import RecordingClient, ReplayClient, load_cassette
     from aicad.agent.session import provider_client
 
     out.mkdir(parents=True, exist_ok=True)
@@ -228,22 +271,32 @@ async def run_series(prompt: str, runs: int, mode: str, out: Path, *, reference:
                     if not reference:
                         raise ValueError("fake mode needs a reference solution (use --case)")
                     cas = fake_cassette(reference)
+                    if render:
+                        cas["render"] = True
                     factory = lambda o, cas=cas: ReplayClient(o, cas, worker_key="repeat")
                 elif mode == "replay":
                     f = cassettes[i % len(cassettes)]
-                    factory = lambda o, f=f: ReplayClient(o, f, worker_key="repeat")
+                    src: Any = f
+                    if render:
+                        src = {**load_cassette(f), "render": True}
+                    factory = lambda o, src=src: ReplayClient(o, src, worker_key="repeat")
                 elif record is not None:
                     rec = record / f"run-{i + 1:02d}.json"
                     factory = lambda o, rec=rec: RecordingClient(o, rec)
                 else:
                     factory = provider_client
-                r = await run_once(prompt, Path(tmp) / f"run-{i + 1:02d}", factory, expect, model)
+                r = await run_once(prompt, Path(tmp) / f"run-{i + 1:02d}", factory, expect, model,
+                                   keep_render=out / "renders" / f"run-{i + 1:02d}.png")
                 rows.append(r)
                 print(f"  run {i + 1}/{runs}: {'built' if r['built'] else 'no build'}  "
                       f"gates {'PASS' if r['gates_ok'] else 'FAIL'}  volume {r.get('volume')}", flush=True)
         finally:
             await worker.shutdown_all()
-    report = {"summary": summarise(rows, mode=mode, prompt=prompt, case=case), "runs": rows}
+    summary = summarise(rows, mode=mode, prompt=prompt, case=case)
+    rsim = attach_render_similarity(rows, out / "renders")
+    if rsim is not None:
+        summary["render_similarity"] = rsim
+    report = {"summary": summary, "runs": rows}
     (out / "report.json").write_text(json.dumps(report, indent=1, default=str), encoding="utf-8")
     (out / "report.md").write_text(markdown(report), encoding="utf-8")
     return report
@@ -270,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="with --live: agent model override")
     ap.add_argument("--api-key", action="store_true", help="with --live: bill ANTHROPIC_API_KEY instead of the login")
     ap.add_argument("--out", type=Path, default=Path("repeat-out"), help="report folder (report.json, report.md)")
+    ap.add_argument("--render", action="store_true",
+                    help="fake / replay: render each run's review sheet for the advisory render similarity")
     a = ap.parse_args(argv)
     if not 1 <= a.runs <= 50:
         print("--runs must be between 1 and 50")
@@ -308,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Repeatability ({mode}): {case['id'] if case else 'custom prompt'} x {a.runs}")
     report = asyncio.run(run_series(prompt, a.runs, mode, a.out, reference=reference, replay=a.replay,
                                     record=a.record, expect=case["expect"] if case else None,
-                                    case=case["id"] if case else None, model=a.model))
+                                    case=case["id"] if case else None, model=a.model, render=a.render))
     print(f"{report['summary']['verdict']}  -> {a.out / 'report.md'}")
     return 0
 

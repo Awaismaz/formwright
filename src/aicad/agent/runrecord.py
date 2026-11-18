@@ -3,7 +3,8 @@
 What one record holds: the prompt (as a SHA-256 hash, plus a redacted excerpt or the raw text only when the policy
 allows), the model ids requested and used, app / SDK / agent CLI / kernel / Toolbox versions, token counts and cost
 estimates, wall-clock timings per phase, tool-call counts, the build outcomes seen during the turn and the final
-check outcome, and how the turn ended.
+check outcome, how the turn ended, and (EVAL-006, advisory) how similar the turn's last review render is to the
+render the part had before the turn (``render_similarity``; never part of the verdict).
 
 This is engineering telemetry for the founder and support. It contains agent internals (tool names, model ids), so
 it is **never** sent to the Studio UI or included in exports: only the super-admin console reads it
@@ -33,6 +34,7 @@ SCHEMA = "formwright.agent-run/1"
 POLICY_ENV = "FW_RUN_RECORD_PROMPTS"
 POLICIES = ("hash", "redacted", "raw")
 EXCERPT_CHARS = 2000
+RENDER_MAX_BYTES = 20_000_000  # a review sheet is ~0.2 MB; anything bigger is not kept for the comparison
 KEEP_RUNS = 200  # per workspace; older records are pruned
 _RUN_ID = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 
@@ -128,13 +130,46 @@ class RunRecorder:
             "model": {"requested": requested_model, "used": []},
             "versions": versions(), "agent": {}, "tokens": {}, "cost_usd": {}, "timings_s": {},
             "tools": {"calls": 0, "by_name": {}, "errors": 0, "builds": 0}, "builds": [], "checks": None,
-            "outcome": {}}
+            "outcome": {}, "render_similarity": None}
         self._marks: dict[str, float] = {}
         self._open: dict[str, tuple[str, float]] = {}  # tool_use id -> (name, start)
         self._tool_time: dict[str, float] = {"build": 0.0, "other": 0.0}
         self._usage: dict[str, dict[str, int]] = {}  # message id -> max usage seen
         self._usage_model: dict[str, str] = {}
         self._result: dict[str, Any] | None = None
+        self._render_before = self._read_render()
+
+    def _read_render(self) -> bytes | None:
+        try:
+            f = self.workspace / "out" / "views.png"
+            return f.read_bytes() if f.is_file() and f.stat().st_size <= RENDER_MAX_BYTES else None
+        except OSError:
+            return None
+
+    def _render_similarity(self) -> dict[str, Any]:
+        """EVAL-006 (advisory, never gating): the review render after the turn vs the one before it."""
+        after = self._read_render()
+        base = {"advisory": True, "gating": False, "basis": "review render before this turn"}
+        if after is None:
+            return {**base, "available": False, "reason": "no render after the turn"}
+        if self._render_before is None:
+            return {**base, "available": False, "reason": "no earlier render to compare with"}
+        if after == self._render_before:
+            return {**base, "available": True, "unchanged": True, "score": 1.0}
+        try:
+            import io
+
+            from PIL import Image
+
+            from aicad.eval import render_similarity
+
+            with Image.open(io.BytesIO(self._render_before)) as a, Image.open(io.BytesIO(after)) as b:
+                a.load()
+                b.load()
+                sim = render_similarity.compare_sheets(a, b)
+        except Exception:  # noqa: BLE001 - telemetry never breaks a run
+            return {**base, "available": False, "reason": "render unreadable"}
+        return {**base, "available": True, "unchanged": False, **sim}
 
     # -------------------------------------------------------------- feeding
     def mark(self, phase: str) -> None:
@@ -250,6 +285,10 @@ class RunRecorder:
         rec["checks"] = st
         status = ("failed" if failed else "stopped_budget" if budget_stopped else
                   "ok" if self._result and not r.get("is_error") else "error" if self._result else "stopped")
+        try:
+            rec["render_similarity"] = self._render_similarity()
+        except Exception:  # noqa: BLE001 - telemetry never breaks a run
+            rec["render_similarity"] = None
         rec["outcome"] = {"status": status, "result_subtype": r.get("subtype"), "is_error": r.get("is_error"),
                           "agent_turns": r.get("num_turns"), "budget_stopped": budget_stopped,
                           "agent_session": r.get("session_id"),

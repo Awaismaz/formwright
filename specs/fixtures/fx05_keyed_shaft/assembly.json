@@ -1,0 +1,839 @@
+{
+ "schema": "formwright.fixture-assembly/1",
+ "fixture": "FX-05",
+ "title": "Keyed shaft, bearings, housing and gear",
+ "units": "mm, g, degrees",
+ "params": {
+  "bearing": 6204,
+  "housing_W": 80.0,
+  "housing_H": 58.0,
+  "bore_d": 30.0,
+  "fix_hole_d": 9.0,
+  "fix_xy": 30.0,
+  "steps": [
+   [
+    30.0,
+    20.0
+   ],
+   [
+    30.0,
+    26.0
+   ],
+   [
+    25.0,
+    20.0
+   ],
+   [
+    30.0,
+    18.0
+   ]
+  ],
+  "key_b": 6.0,
+  "key_h": 6.0,
+  "key_L": 18.0,
+  "key_t1": 3.5,
+  "key_t2": 2.8,
+  "key_z0": 86.0,
+  "gear_m": 2.0,
+  "gear_z": 30,
+  "gear_B": 20.0
+ },
+ "parts": [
+  {
+   "key": "housing",
+   "name": "FX-05 bearing housing",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "cast_iron_gray",
+   "params": {
+    "housing_W": 80.0,
+    "housing_H": 58.0,
+    "bore_d": 30.0,
+    "fix_hole_d": 9.0,
+    "fix_xy": 30.0,
+    "bearing": 6204
+   },
+   "hand": {
+    "bbox": [
+     80.0,
+     80.0,
+     58.0
+    ],
+    "volume_mm3": 286656.600099,
+    "solids": 1
+   }
+  },
+  {
+   "key": "bearing",
+   "name": "Ball bearing 6204",
+   "kind": "toolbox",
+   "standard": "ISO 15 (envelope)",
+   "designation": "6204",
+   "material": "steel_4140",
+   "params": {
+    "code": "bearing",
+    "SERIES": 6204
+   },
+   "hand": {
+    "bbox": [
+     47.0,
+     47.0,
+     14.0
+    ],
+    "volume_mm3": 12715.955626,
+    "solids": 15
+   }
+  },
+  {
+   "key": "shaft",
+   "name": "FX-05 output shaft",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "steel_1045",
+   "params": {
+    "steps": [
+     [
+      30.0,
+      20.0
+     ],
+     [
+      30.0,
+      26.0
+     ],
+     [
+      25.0,
+      20.0
+     ],
+     [
+      30.0,
+      18.0
+     ]
+    ],
+    "key_b": 6.0,
+    "key_t1": 3.5,
+    "key_L": 18.0,
+    "key_z0": 86.0
+   },
+   "hand": {
+    "bbox": [
+     26.0,
+     26.0,
+     115.0
+    ],
+    "volume_mm3": 40481.017088,
+    "solids": 1
+   }
+  },
+  {
+   "key": "key",
+   "name": "Parallel key 6×6×18",
+   "kind": "fixture",
+   "standard": "DIN 6885-1 form B",
+   "designation": null,
+   "material": "steel_1045",
+   "params": {
+    "key_b": 6.0,
+    "key_h": 6.0,
+    "key_L": 18.0
+   },
+   "hand": {
+    "bbox": [
+     6.0,
+     6.0,
+     18.0
+    ],
+    "volume_mm3": 648.0,
+    "solids": 1
+   }
+  },
+  {
+   "key": "gear",
+   "name": "FX-05 spur gear m2 z30, keyed",
+   "kind": "fixture",
+   "standard": "ISO 53 profile (Toolbox)",
+   "designation": null,
+   "material": "steel_1045",
+   "params": {
+    "gear_m": 2.0,
+    "gear_z": 30,
+    "gear_B": 20.0,
+    "key_b": 6.0,
+    "key_t2": 2.8
+   },
+   "hand": {
+    "bbox": [
+     64.0,
+     63.786648,
+     20.0
+    ],
+    "volume_mm3": 50327.315671,
+    "solids": 1
+   }
+  }
+ ],
+ "instances": [
+  {
+   "id": "housing",
+   "part": "housing",
+   "fixed": true,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": null
+  },
+  {
+   "id": "bearing_a",
+   "part": "bearing",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "bearing_b",
+   "part": "bearing",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    44.0
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "shaft",
+   "part": "shaft",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    -16.0
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "key",
+   "part": "key",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    5.5,
+    0.0,
+    0.0,
+    1.0,
+    70.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": "shaft"
+  },
+  {
+   "id": "gear",
+   "part": "gear",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    69.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": "shaft"
+  }
+ ],
+ "mates": [
+  {
+   "id": "m_bearing_a_axis",
+   "type": "concentric",
+   "a": "housing",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bearing_a",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_bearing_a_shoulder",
+   "type": "coincident",
+   "a": "housing",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     14.0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   },
+   "b": "bearing_a",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     14.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_bearing_b_axis",
+   "type": "concentric",
+   "a": "housing",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bearing_b",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_bearing_b_shoulder",
+   "type": "coincident",
+   "a": "housing",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     44.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bearing_b",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_shaft_axis",
+   "type": "concentric",
+   "a": "housing",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "shaft",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_shaft_collar",
+   "type": "coincident",
+   "a": "bearing_a",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     14.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "shaft",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     30.0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_key_floor",
+   "type": "coincident",
+   "a": "shaft",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     5.5,
+     95.0
+    ],
+    "v": [
+     0,
+     1,
+     0
+    ]
+   },
+   "b": "key",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     9
+    ],
+    "v": [
+     0,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "id": "m_key_side",
+   "type": "coincident",
+   "a": "shaft",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     -3.0,
+     6.5,
+     95.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   },
+   "b": "key",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     -3.0,
+     1,
+     9
+    ],
+    "v": [
+     -1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": "m_key_end",
+   "type": "coincident",
+   "a": "shaft",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     6.5,
+     86.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "key",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     1,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_gear_axis",
+   "type": "concentric",
+   "a": "shaft",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     85.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "gear",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_gear_shoulder",
+   "type": "coincident",
+   "a": "shaft",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     85.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "gear",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_gear_key",
+   "type": "coincident",
+   "a": "key",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     3.0,
+     3.0,
+     9
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   },
+   "b": "gear",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     3.0,
+     10.0,
+     10
+    ],
+    "v": [
+     -1,
+     0,
+     0
+    ]
+   }
+  }
+ ],
+ "joints": [
+  {
+   "id": "j_shaft",
+   "type": "revolute",
+   "name": "Output shaft",
+   "p": [
+    0,
+    0,
+    0
+   ],
+   "dir": [
+    0,
+    0,
+    1
+   ],
+   "insts": [
+    "shaft",
+    "key",
+    "gear"
+   ],
+   "limits": null
+  }
+ ],
+ "motion": [
+  {
+   "name": "full turn",
+   "driver": "j_shaft",
+   "start": 0.0,
+   "end": 360.0,
+   "steps": 6,
+   "collide": []
+  }
+ ],
+ "expected": {
+  "dof": 3,
+  "interference": "none (contacts only)",
+  "thread_engagement": [],
+  "contacts": [
+   {
+    "a": "bearing_a",
+    "b": "housing",
+    "min_distance_mm": 0.0,
+    "why": "outer ring in its Ø47 seat"
+   },
+   {
+    "a": "bearing_b",
+    "b": "housing",
+    "min_distance_mm": 0.0,
+    "why": "outer ring in its Ø47 seat"
+   },
+   {
+    "a": "shaft",
+    "b": "bearing_a",
+    "min_distance_mm": 0.0,
+    "why": "journal in the inner ring, collar against it"
+   },
+   {
+    "a": "shaft",
+    "b": "bearing_b",
+    "min_distance_mm": 0.0,
+    "why": "journal in the inner ring"
+   },
+   {
+    "a": "shaft",
+    "b": "housing",
+    "min_distance_mm": 2.0,
+    "why": "Ø26 collar in the Ø30 bore: (30 − 26) / 2"
+   },
+   {
+    "a": "key",
+    "b": "shaft",
+    "min_distance_mm": 0.0,
+    "why": "key in its keyway"
+   },
+   {
+    "a": "key",
+    "b": "gear",
+    "min_distance_mm": 0.0,
+    "why": "key drives the hub keyway side"
+   },
+   {
+    "a": "gear",
+    "b": "housing",
+    "min_distance_mm": 11.0,
+    "why": "gear face above the housing top: 69 − 58"
+   }
+  ],
+  "bom": [
+   {
+    "part": "FX-05 bearing housing",
+    "qty": 1
+   },
+   {
+    "part": "Ball bearing 6204",
+    "qty": 2
+   },
+   {
+    "part": "FX-05 output shaft",
+    "qty": 1
+   },
+   {
+    "part": "Parallel key 6×6×18",
+    "qty": 1
+   },
+   {
+    "part": "FX-05 spur gear m2 z30, keyed",
+    "qty": 1
+   }
+  ],
+  "mass_g": 2981.500236,
+  "com_mm": [
+   0.0,
+   -0.001961,
+   36.593019
+  ]
+ }
+}
