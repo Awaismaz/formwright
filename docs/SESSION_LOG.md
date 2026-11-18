@@ -29,13 +29,17 @@ Branch `wip/office-phase5` (worktree `fw-wt/office-phase5`). Report: docs/report
 
 ### Verified how
 - `tests/test_office_phase5.py` (9 tests, fake agents), Phase 3 / 4 office suites, `tests/test_drawings.py` (28),
-  vitest `office/timeline.test.ts` (7). Full gate: see the commit (pytest, ruff, tsc, vitest, vite build).
+  vitest `office/timeline.test.ts` (7). Full gate after merging main: pytest 573 passed (22 min, machine shared with
+  other work), ruff clean, tsc clean, vitest 117 passed, vite build OK.
 - Browser walkthrough (puppeteer-core 25.18.1, port 8805, throwaway data dir, `FW_OFFICE_FAKE_AGENTS=1`, 1.2 s
   steps, God mode paywall/token bypass): standard-planner gear reducer "Gearbox GB-3" (14 tickets: housing base,
   cover, 4 bearing caps, 8 cover bolts, input / output shafts in 6205 seats, pinion 18 / gear 54 keyed, bearings)
   → ICD review (13 interfaces incl. 2 bearing seats and a key) → placeholder assembly (7 placeholders, 23 mates, 0
-  clashes) → Run → every part swapped in, 0 clashes, bearings seated by Fitz → deliverables → release. Numbers and
-  screenshots: docs/reports/design-office/phase5/ (see below).
+  clashes) → Run → every part swapped in, 0 clashes, bearings seated by Fitz → Ortho 7 sheets (CHK-12 pass after the
+  gear fix) + assembly drawing 1:5 with 14 BOM lines / 14 balloons → Smithy 7 parts → Release rev A from the UI: 7
+  parts issued and tagged "GG3 Rev A", pack 31 files / 6.9 MB downloaded (200, application/zip) → timeline (by ticket,
+  by agent) and calibration panel → drawers (estimate vs actual). 0 console / page errors. Screenshots:
+  docs/reports/design-office/phase5/. Server stopped, scratch data deleted.
 
 ### Not done / limitations
 - No live AI run (PD-48): calibration learned only in the simulated profile. Layout is still a row with vertical

@@ -482,7 +482,8 @@ assembly `Workspace.tsx`, `types.ts`; `test_office_icd.py` (gear reducer: bearin
 `test_office_orchestrator.py` (helper runs without deliverables).
 
 ## Verification
-- `tests/test_office_phase5.py` (8 tests, fake agents only): calibration EMA hand-computed (4 → 3.4, 4 → 5.2, floor,
+- `tests/test_office_phase5.py` (9 tests, fake agents only; one checks the tooth phasing on two real Toolbox gears:
+  395 mm³ of overlap unphased, none phased): calibration EMA hand-computed (4 → 3.4, 4 → 5.2, floor,
   ceiling, 4 → 3.4 → 2.89, profiles, MAPE 50 / 35 / 26.7); timeline on a hand-computed DAG (A 0–10, B 0–20, C 10–15,
   E 15–19, D 20–26, F 26–29 at 2 agents; critical path B → D → F; waits, lanes, CR marker); BOM from fixture rows and
   the DFM summary (relative cost 2.5 / 1.0); new kinds laid out by hand (6204 seats Z −14..0 / −40..−26, key 6 × 6 × 18
@@ -491,8 +492,22 @@ assembly `Workspace.tsx`, `types.ts`; `test_office_icd.py` (gear reducer: bearin
   passes with its transform, strict fails, a wrong part stays wrong); the shared lock; end to end deliverables +
   release (2 sheets passing CHK-12, assembly drawing with BOM and balloons, BOM, DFM, timeline lanes, calibration
   snapshotted into a new plan, rev A with both parts issued and tagged, pack contents and hashes verified).
-- Phase 3 / 4 suites pass; vitest `office/timeline.test.ts` (7).
-- Browser walkthrough: see SESSION_LOG (screenshots in `docs/reports/design-office/phase5/`).
+- Phase 3 / 4 suites pass; `tests/test_drawings.py` passes with the gear-facet fix; vitest `office/timeline.test.ts` (7).
+- Browser walkthrough (puppeteer-core 25.18.1, port 8805, throwaway data, simulated agents, 1.2 s steps): the
+  standard gear reducer "Gearbox GB-3" (16 tickets incl. the 2 deliverables). ICD: 13 interfaces (5 bolted joints,
+  2 bearing seats 6205 × 2, 2 shaft fits, a DIN 6885 key 8 × 7, 2 seating faces, the 18 / 54 mesh); placeholder
+  assembly 7 placeholders, 23 mates, 0 clashes; every part swapped in with 0 clashes, bearings seated by Fitz, final
+  assembly 0 clashes. Ortho: 7 part sheets passing CHK-12 (scales 1:50 to 2:1) and the A3 assembly drawing at 1:5 with
+  a 14-line BOM and 14 balloons; Smithy: 7 parts (CNC milling / turning, relative cost 1.00× to 11.37×). BOM: 7 make /
+  7 buy lines, 46 pieces, 8.93 kg. Release rev A: 7 parts issued at rev A and tagged "GG3 Rev A", pack 31 files,
+  6.9 MB (STEP per part + assembly STEP, 8 PDF + 8 DXF drawings, BOM CSV, DFM CSV / JSON, ICD JSON, .fwprog, README,
+  manifest). Timeline: planned 41 min at 3 agents vs 23 min of simulated agent time, 8 min waiting for the engineer
+  (the gear sheets before the fix); calibration moved 6 families in the simulated profile. 0 console / page errors.
+  Screenshots: `docs/reports/design-office/phase5/`.
+- Found by the walkthrough and fixed: the gear envelope (pitch circle → tip circle), tooth phasing of meshing gears
+  (the real gears collided: 395 mm³), Drawing Studio reading faceted involute flanks as 121 "chamfers" (gear sheets
+  failed CHK-12; drawing VERSION 1.1.3), the BOM listing a shared bearing twice, Smithy's top finding preferring the
+  chosen process.
 
 ## Limitations (honest)
 - No live AI run yet (PD-48): calibration has only learned from simulated agents here, so the live constants are
@@ -506,6 +521,10 @@ assembly `Workspace.tsx`, `types.ts`; `test_office_icd.py` (gear reducer: bearin
 - The release pack issues each part's own release; a part whose drawing fails CHK-12 blocks the whole release.
 - Frame fit uses axis-aligned rotations only; a part modelled at an arbitrary angle still fails (with a clear note).
 - The shared lock is in memory (one web process, PD-53).
+- Interference checks with seated ball bearings take minutes on this machine (OCCT booleans on every ball); the
+  simulated gearbox took about 15 min end to end, most of it in those checks.
+- Gage does not check a gear's tooth phase (the assembly phases the second gear of a mesh; the part is modelled with
+  a tooth on +X of its own frame, as the ICD excerpt says).
 
 ## What remains for the Design Office
 1. A live multi-agent run (PD-48) and an API key before other users (PD-09); then real calibration.
