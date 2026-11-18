@@ -108,7 +108,7 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-55).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-58).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
@@ -130,14 +130,10 @@ calibration (EMA per family, simulated runs in their own profile) + Timeline tab
 frame-tolerant Gage (24 axis rotations), shared assembly lock (in-memory, single server — PD-53). Report:
 docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3.
 
-**In flight (worktrees under `C:/Users/Awais/Desktop/fw-wt/`, WORKLIST 23-25):** `wip/drawing-depth` (threads, detail
-views, GD&T from explicit input, STEP→drawing), `wip/studio-intel` (agent fills the PropertyManager, change-impact preview). Unmerged = unfinished.
-docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3. Nothing is in flight on branches.
-**Drawing depth (branch `wip/drawing-depth`, 2026-11-18):** cosmetic threads (ISO 261 table `aicad/threads.py`, Hole Wizard toggle +
-Cosmetic Thread feature, STEP header + `part.threads.json`), detail views, GD&T only from input (user or ICD, CD-021), STEP → drawing
-(all inferred). Drawing Studio VERSION 1.2.0; defaults PD-58. GD&T and threads are never inferred from geometry: keep it that way.
-Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
-review gate, change notices after release).
+**Batch 23-25 merged + pushed (2026-11-18 night):** drawing depth (threads, detail views, GD&T only from explicit
+input / ICD, STEP→drawing; PD-58), engineering hygiene (IO matrix, SBOM, run record, repeatability; PD-56), studio
+intelligence (agent fills the PropertyManager, change-impact preview, datasheet pack; PD-57). Full suite 623 passed.
+Nothing in flight on branches. Parked decisions now PD-35…PD-58.
 
 **Engineering hygiene (merged 2026-11-18, 63a9887):** every design-agent turn writes a server-side run record `.fw/runs/<id>/run.json` (AGT-009; super-admin API only, prompt hashed + redacted by default, PD-56); licence audit + CycloneDX SBOMs in `docs/legal/` (regenerate with `uv run python scripts/sbom.py` after any dependency change; `tests/test_sbom.py` fails on a stale SBOM or an un-allow-listed copyleft licence); IO round-trip matrix `docs/reports/io-roundtrip.md`; `aicad repeat` repeatability harness (fake/replay by default).
 **Studio intelligence (branch `wip/studio-intel`, 2026-11-18):** DS-035 the design agent answers a small edit with a
