@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boardLanes, canDrop, estimateMinutes, fmtEta, fmtMinutes, planPreview, progressAfterMove } from "./model";
+import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, fmtEta, fmtMinutes, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
 import type { Constants, Item, Plan, Ticket } from "./types";
 
 // Same numbers as src/aicad/office/estimates.py (the server sends them as `constants`).
@@ -67,5 +67,44 @@ describe("board", () => {
     expect(progressAfterMove({ ...t, milestones: ["approved"] }, "in_review", K)).toBe(0);
     expect(canDrop(t, "ready")).toBe(false);
     expect(canDrop(t, "in_review")).toBe(true);
+  });
+});
+
+describe("the running office (Phase 3)", () => {
+  it("labels held-back tickets", () => {
+    expect(runChip({ run_status: "waiting_capacity" })).toEqual({ label: "Waiting for capacity", tone: "warning" });
+    expect(runChip({ run_status: "retry", run: { attempt: 2 } })?.label).toBe("Retry 2");
+    expect(runChip({ run_status: "blocked" })?.tone).toBe("danger");
+    expect(runChip({ run_status: "designing", paused: true })?.label).toBe("Paused");
+    expect(runChip({ run_status: "manual" })?.label).toBe("You took over");
+    expect(runChip({ run_status: "designing" })).toBeNull();
+  });
+  it("summarises the run state", () => {
+    const base = { working: 2, waiting: 0, blocked: 1 };
+    expect(orchestratorLabel(undefined, 3).label).toBe("Not running");
+    expect(orchestratorLabel({ ...base, state: "running" }, 3).label).toBe("Running · 2 of 3 working · 1 needs you");
+    expect(orchestratorLabel({ ...base, state: "running", capacity_until: Date.now() / 1000 + 60 }, 3).label).toBe("Waiting for capacity");
+    expect(orchestratorLabel({ ...base, state: "stopped", reason: "budget" }, 3)).toEqual({ label: "Stopped: budget reached", tone: "danger" });
+    expect(orchestratorLabel({ ...base, state: "paused" }, 3).label).toBe("Pausing · 2 finishing");
+    expect(orchestratorLabel({ ...base, working: 0, state: "paused" }, 3).label).toBe("Paused");
+  });
+  it("tones the budget at 80 and 100 %", () => {
+    expect(budgetTone(79, 100).tone).toBe("primary");
+    expect(budgetTone(80, 100).tone).toBe("warning");
+    expect(budgetTone(100, 100)).toEqual({ pct: 100, tone: "danger" });
+    expect(budgetTone(5, 0).pct).toBe(0);
+  });
+  it("finds fresh hand-offs per ticket", () => {
+    const now = Date.parse("2026-11-18T10:00:10Z");
+    const ev = (seq: number, t: string, tid: string, from: string, to: string) => ({ seq, t, type: "ticket.handoff", program_id: "p", ticket_id: tid,
+      actor: { kind: "agent" as const, name: from }, text: "", data: { from, to } });
+    const m = recentHandoffs([ev(1, "2026-11-18T10:00:08Z", "t1", "mill", "gage"), ev(2, "2026-11-18T10:00:09Z", "t1", "gage", "fitz"),
+      ev(3, "2026-11-18T09:59:00Z", "t2", "hex", "mill")], now);
+    expect(m.get("t1")).toEqual({ from: "gage", to: "fitz", seq: 2 });
+    expect(m.has("t2")).toBe(false);
+  });
+  it("never lets Gage design", () => {
+    expect(assignable("part")).not.toContain("gage");
+    expect(assignable("integration")).toEqual(["fitz"]);
   });
 });

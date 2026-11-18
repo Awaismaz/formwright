@@ -310,14 +310,22 @@ def _finish_run(project_id: str) -> None:
 
 
 def get_session(p: Project, ctx: Ctx) -> AgentSession:
+    return session_for(p, ctx.user.id, ctx.god_on("bypass_tokens"))
+
+
+def session_for(p: Project, user_id: str, god_tokens: bool, client_factory: Any = None) -> AgentSession:
+    """The project's agent session (one per project), driven by ``user_id``. The Design Office runs part agents
+    through this too; ``client_factory`` swaps the model client (development fakes only)."""
     s = _sessions.get(p.id)
     if s is None:
-        s = AgentSession(workspace_for(p), on_event=_on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens")),
-                         worker_key=p.org_id)
+        s = AgentSession(workspace_for(p), on_event=_on_event(p.id, user_id, god_tokens), worker_key=p.org_id)
         s.run_id = None  # type: ignore[attr-defined]
         _sessions[p.id] = s
     else:  # refresh who is driving (token attribution, god flags)
-        s.on_event = _on_event(p.id, ctx.user.id, ctx.god_on("bypass_tokens"))
+        s.on_event = _on_event(p.id, user_id, god_tokens)
+    if client_factory is not None and s.client_factory is not client_factory:
+        s.client_factory = client_factory
+        s.client = None
     return s
 
 

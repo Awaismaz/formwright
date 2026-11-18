@@ -14,7 +14,7 @@ export function useProgram(pid: string | undefined) {
     queryKey: ["office-program", pid], enabled: !!pid,
     queryFn: () => api.get<Program>(`${BASE}/programs/${pid}`),
     // the live stream drives updates; polling is the safety net (and picks up Studio builds on linked parts)
-    refetchInterval: q => (q.state.data?.status === "planning" ? 1500 : 15_000),
+    refetchInterval: q => (q.state.data?.status === "planning" ? 1500 : q.state.data?.orchestrator?.state === "running" ? 5000 : 15_000),
   });
 }
 
@@ -35,7 +35,7 @@ export function useProgramEvents(pid: string | undefined) {
       try { ev = JSON.parse(m.data); } catch { return; }
       if (ev.type === "hello") { setLive(true); return; }
       const e = ev as OfficeEvent;
-      setRecent(r => [e, ...r.filter(x => x.seq !== e.seq)].slice(0, 6));
+      setRecent(r => [e, ...r.filter(x => x.seq !== e.seq)].slice(0, 40));
       // coalesce bursts (approval opens many tickets at once)
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {

@@ -19,8 +19,9 @@ export function AutoRunNote({ className }: { className?: string }) {
   return (
     <div className={cx("flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft/50 px-3 py-2 text-[12.5px] text-text", className)}>
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-      <span>Archie plans programs today. <b>Auto-run arrives with the orchestrator</b>: until then you move tickets on the board,
-        and <b>Start</b> opens the part in Design Studio with its brief ready to send.</span>
+      <span>Archie plans the program; press <b>Run</b> on a program and the office works its tickets: Hex reuses Toolbox and
+        company parts, specialists design each part in its own Design Studio project, Gage checks every part, Fitz assembles.
+        The Design Office is in Preview: estimates are estimates, and drawings, interfaces (ICD) and release come later.</span>
     </div>
   );
 }
@@ -65,7 +66,8 @@ function RosterCard({ a }: { a: RosterAgent }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="text-[14px] font-semibold" style={{ color: a.colour }}>{a.name}</span>
-          {a.phase > 2 && <Badge className="ml-auto" tone="neutral">{a.phase === 3 ? "Auto-run soon" : "Later"}</Badge>}
+          {a.phase > 3 && <Badge className="ml-auto" tone="neutral">Later</Badge>}
+          {a.code === "benny" && <span className="ml-auto" title="Sheet-metal tools are not in the app yet: Benny designs sheet parts as solids and says so"><Badge tone="neutral">Solids only</Badge></span>}
         </div>
         <div className="truncate text-[11.5px] text-muted">{a.role}</div>
         <div className="mt-1 truncate text-[12px]">{a.line}</div>
@@ -87,6 +89,14 @@ function InboxRow({ i, canEdit }: { i: InboxItem; canEdit: boolean }) {
       qc.invalidateQueries({ queryKey: ["office-home"] });
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
   };
+  if (i.kind === "blocked") return (
+    <Link to={`/app/office/programs/${i.program_id}?ticket=${i.ticket_id}`} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
+      <AgentAvatar code={i.specialist ?? "gage"} state="blocked" size={30} still />
+      <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium"><span className="font-mono text-[11px] text-muted">{i.key}</span> {i.title}</div>
+        <div className="line-clamp-2 text-[11.5px] text-warning">{i.reason ?? "Needs your decision"}</div></div>
+      <ArrowRight className="h-4 w-4 shrink-0 text-muted" />
+    </Link>
+  );
   if (i.kind === "brief") return (
     <button onClick={() => nav(`/app/office/programs/${i.program_id}`)} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
       <AgentAvatar code="archie" state="review" size={30} />
@@ -169,7 +179,7 @@ export default function OfficeHome() {
               <div className="flex items-baseline justify-between"><span className="text-2xl font-semibold tabular-nums">{num(d.budget.spent)}</span>
                 <span className="text-[12px] text-muted">of {num(d.budget.tokens)} budgeted</span></div>
               <Progress className="mt-2" value={pct} tone={pct >= 100 ? "danger" : pct >= 80 ? "warning" : "primary"} />
-              <p className="mt-2 text-[11.5px] text-muted">Archie's planning plus Design Studio runs on linked parts, across all programs.</p>
+              <p className="mt-2 text-[11.5px] text-muted">Archie's planning, the part agents' Design Studio runs and Gage's reviews, across all programs.</p>
             </Card>
           </section>
         </aside>

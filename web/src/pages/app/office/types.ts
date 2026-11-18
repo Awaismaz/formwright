@@ -23,7 +23,16 @@ export interface Item {
   rollup: Rollup; eta: Eta | null;
 }
 
-export interface Comment { id: string; by: Actor; text: string; t: string }
+export interface Comment { id: string; by: Actor; text: string; t: string; delivery?: "queued" | "delivered" | "stored" }
+
+/** What the orchestrator is doing with a ticket (server: office/orchestrator.py). */
+export type RunStatus = "queued" | "searching" | "designing" | "reviewing" | "integrating" | "waiting_capacity" | "retry"
+  | "blocked" | "done" | "manual" | "paused";
+export interface TicketRun {
+  status?: RunStatus; next?: string; agent?: string; agent_label?: string; line?: string; attempt?: number;
+  review_round?: number; next_try_at?: number; blocked?: string; started_at?: string;
+}
+export interface Reuse { source: "toolbox" | "project"; title: string; found: string; code?: string; project_id?: string }
 
 export interface Ticket {
   id: string; key: string; item_id: string; kind: "part" | "standard" | "integration"; title: string; brief: string;
@@ -31,6 +40,17 @@ export interface Ticket {
   milestones: string[]; progress: number; project_id: string | null; assembly_id: string | null;
   depends_on: string[]; comments: Comment[]; checks: { ok: boolean } | null; tokens: number;
   agent_state: AgentState; updated_at: string;
+  /** Phase 3: who holds the ticket now, its live status line, and the engineer's controls. */
+  agent?: string; agent_label?: string | null; line?: string | null; run_status?: RunStatus | null; run?: TicketRun | null;
+  paused?: boolean; taken_over?: boolean; priority?: "high" | "normal" | "low"; review_tokens?: number; spent?: number;
+  reuse?: Reuse | null; integration?: { summary?: string; clashes?: unknown[] } | null;
+}
+
+export type OrchestratorState = "idle" | "running" | "paused" | "stopped" | "complete";
+export interface Orchestrator {
+  state: OrchestratorState; reason?: "budget" | "balance" | null; by?: string | null; started_at?: string | null;
+  capacity_until?: number | null; bypass?: boolean; working: number; waiting: number; blocked: number;
+  active?: number; simulated?: boolean;
 }
 
 export interface Gate { code: string; name: string; mandatory: boolean; status: string; note?: string; by?: string; at?: string }
@@ -46,7 +66,8 @@ export interface Program {
   plan_estimate?: { tickets: number; estimate_min: number; eta: Eta };
   gates: Gate[]; items: Item[]; tickets: Ticket[]; columns: { code: Column; label: string }[];
   counts: Record<Column, number>; rollup: Rollup | null; eta: Eta | null; concurrency: number;
-  budget: { tokens: number; planning_tokens: number; spent: number };
+  budget: { tokens: number; planning_tokens: number; spent: number; pct?: number; level?: "ok" | "warn" | "stop" };
+  orchestrator?: Orchestrator;
   constants: Constants; families: { code: Family; label: string; specialist: string }[];
   created_at: string; updated_at: string; can_edit?: boolean;
 }
@@ -54,7 +75,7 @@ export interface Program {
 export interface ProgramSummary {
   id: string; name: string; key: string; status: ProgramStatus; planner: string; created_at: string; updated_at: string;
   rollup: Rollup | null; eta: Eta | null; counts: Record<Column, number>; budget: Program["budget"]; gates: Gate[];
-  concurrency: number; tickets: number; brief: string;
+  concurrency: number; tickets: number; brief: string; orchestrator?: Orchestrator;
 }
 
 export interface RosterAgent {
@@ -63,7 +84,7 @@ export interface RosterAgent {
 }
 
 export interface InboxItem {
-  kind: "brief" | "ticket"; program_id: string; program: string; at: string; title: string;
+  kind: "brief" | "ticket" | "blocked"; reason?: string | null; program_id: string; program: string; at: string; title: string;
   ticket_id?: string; key?: string; specialist?: string; checks?: { ok: boolean } | null; source?: string;
 }
 
