@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (AI quality: brief gate CAD-028, replay AGT-002, self-r
 
 | Status | Items |
 |---|---|
-| Done | 180 |
+| Done | 181 |
 | In Progress | 23 |
 | Backlog | 80 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **301** |
+| **Total** | **302** |
 
 Recomputed from the rows at every merge.
 
@@ -390,6 +390,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | UX-018 | UX | Mobile/tablet layout pass for the app shell and studio | P2 | Backlog | M2 | LT | Eng | UX-002 | Usable at 768 px | — | Marketing is responsive; studio is desktop-first |
 | UX-019 | UX | **Sidebar fixes**: Design Studio listed first in Modules (was filtered out); Modules always expanded (no collapse); collapsed rail 64 px with 40×40 items, 20 px icons, separators, tooltips, active highlight (was lost); data-driven nav sections | P1 | Done | M2 | MVP | Eng | — | All modules visible; collapsed rail readable | `web/src/layouts/AppLayout.tsx`; browser walkthrough (7 screenshots, active state per route) | Founder bug report 2026-11-18 |
 | UX-020 | UX | **Live landing page** (founder request): hero = scripted Design Studio replay around a live, orbitable three.js part (real Toolbox flange GLB, build stages blank → bore → holes), machinist status words, feature tree, gating checks, STEP chip; scroll-triggered tour (Design Studio sketcher, Toolbox carousel, STEP import + recognition with teeth highlighted, Assembly bolted joint exploding, Drawing, Advisors) and Design Office **Coming soon** with a looping sprint board; parallax, reveal-on-scroll, reduced-motion end states | P1 | Done | M2 | MVP | Eng | UX-010 | Honest labels (Replay / Real Formwright geometry / Illustration / Coming soon); no console errors; no horizontal scroll at 390 px; three.js lazy-loaded | `web/src/components/HeroVisual.tsx`, `web/src/components/landing/*`, `scripts/landing_assets.py`, `heroTimeline.test.ts`; browser walk desktop/mobile/reduced-motion (SESSION_LOG 2026-11-18 p) | gear.glb is 457 KB (involute flanks); recognition lines are the real recognizer output for that gear |
+| UX-021 | UX | **"Why Formwright" buyer page** `/why` (founder request): promise + computed hero stats, cost of conventional work with cited sources, risk → fix cards, worked examples with arithmetic, interactive ROI calculator (live catalog prices), hire vs buy, token explainer, FAQ, CTAs; header/footer nav link | P1 | Done | M2 | MVP | Eng | UX-020 | Stats computed from one tested model; sources and estimate labels in small print; no fabricated customers; reduced-motion end states; no console errors; no horizontal scroll at 390 px | `web/src/pages/marketing/Why.tsx`, `web/src/pages/marketing/why/*` (`roi.test.ts`, 12 cases); browser walk desktop/mobile/reduced/dark (SESSION_LOG 2026-11-18 q) | Claims/defaults parked PD-45; landing button added by the landing work |
 | INF-001 | Infra | uv venv (Py3.12), lockfile, pinned deps | P0 | Done | M1 | MVP | Eng | ARC-010 | Fresh clone → `uv sync` → tests pass | `pyproject.toml`, `uv.lock`, `.venv` Py 3.12.13 | Fresh clone on 2nd workstation: `uv sync` + `npm ci` → 82 passed, ruff clean, tsc + vite OK (2026-11-16) |
 | INF-002 | Infra | SQLite persistence + local artifact store | P0 | Done | M1 | MVP | Eng | INF-001 | Migration + tests | SQLAlchemy + SQLite + filesystem workspaces |  |
 | INF-003 | Infra | CI (lint, type, tests, no paid calls) incl. Linux runner | P0 | Backlog | M1 | MVP | Eng | GOV-004 | CI green on Win + Linux | — | R-TEC-07 |
