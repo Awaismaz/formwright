@@ -4,6 +4,67 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
+
+### Done
+- New module `airender`: AI marketing visuals of a verified part via the OpenAI Images API (edit with the part's
+  reference render) on the workspace's own OpenAI key. Refine → Review → Generate; gallery with download, variation,
+  again, use prompt. Report: docs/reports/ai-render.md.
+- Key stored Fernet-encrypted (server secret `FW_SECRET_KEY`, dev secret in data/), masked hint only, admin-managed,
+  deletable; per-workspace consent to send the reference and prompt to OpenAI.
+- Prompt refinement: deterministic template + one-shot Claude polish (no tools), geometry clause and "Avoid" list
+  always enforced at send time. Entry points: Make tab, Mesh Studio header, Modules, sidebar, Settings card.
+
+### Verified
+- `pytest tests/test_airender.py` 11 pass (all OpenAI/Claude calls mocked), test_platform pass; vitest 4 new;
+  ruff, tsc, vite build clean. Browser walkthrough on port 8797 with a throwaway data dir and `FW_AI_RENDER_FAKE=1`:
+  0 console errors besides the deliberate rejected-key 400; screenshots reviewed and fixes made.
+
+### Not done / blocked
+- No real OpenAI call made (needs the founder's key). Punch-list id MSH-012 was already taken, so this is MSH-013.
+
+### Decisions parked
+- PD-43 (model/size/quality defaults, polish metering), PD-44 (BYO only, included with the Design Studio; platform
+  key later).
+
+### Next
+- Founder adds a key and runs one real render per scene to tune prompts and ETA figures.
+## 2026-11-18 (q) — "Why Formwright" buyer page (UX-021), branch wip/why-buy
+
+**Done**
+- New marketing page `/why` (`web/src/pages/marketing/Why.tsx`, lazy route in `App.tsx`; "Why Formwright" link in the shared marketing header and footer, `layouts/MarketingLayout.tsx`). Sections: hero (promise + 4 count-up stats + animated "one medium part" race card), cost of conventional work (BLS/SHRM-cited), 9 risk → fix cards, 5 worked examples with the arithmetic shown, interactive ROI calculator, hire-vs-buy, token explainer with per-token prices, FAQ, CTAs (trial / pricing / demo mailto), sources and disclaimer.
+- One pure cost model, `web/src/pages/marketing/why/roi.ts`: complexity profiles, cheapest top-up combination, ROI (conventional vs Formwright labour + plan + top-ups, savings, speed-up, payback in working days), hero stats computed from the calculator's default scenario (10 medium parts/mo, US$70/h, 25 % review, Pro: 28× sooner first model, 71 % lower cost, 3.6× parts per engineer-hour, ≈ US$60k/yr), worked-example costs, hire-vs-buy. Plans and packs are read live from `/api/billing/catalog` with catalog-mirroring fallbacks.
+- Motion: own reveal/count-up hooks (`why/motion.tsx`, independent of the landing components), bar transitions; everything settles to its end state under prefers-reduced-motion. Chart colours copper (conventional) vs Forge blue (Formwright), validated with the dataviz palette validator in light and dark (CVD ΔE ≥ 25, contrast ≥ 3:1); direct value labels and a legend.
+
+**Verified how**
+- `roi.test.ts`: 12 hand-computed cases (default scenario to the cent, Team offshore scenario, pack optimisation, no-payback case, worked examples, hire cost, formatting). `npx tsc --noEmit`, `npm test` (54 pass), `npx vite build` pass.
+- Browser walk (puppeteer-core 25.18.1, headless Chrome) on port 8800 with a throwaway data dir: desktop 1440, mobile 390, reduced motion, dark calculator; every section screenshotted; calculator scenarios: default, 20 simple/offshore/50 % review/Team (US$956/mo saving, matches the test), 40 complex/consultancy/Pro, 2 simple/offshore/80 % review (loss case). 0 console errors, 0 px horizontal overflow. Fixes from the screenshots: single-prefix money ranges, collapsed "73–73 %", token table layout, loss-case wording, FTE workload line.
+
+**Not done / limitations**
+- Salary/rate figures are well-known public figures cited by publication, not re-fetched this session; consultancy, offshore and CAD-seat ranges are labelled estimates. Conventional hours and per-part token counts are modelled estimates, labelled as such. Parked as PD-45.
+- The landing page button to `/why` is added by the landing agent (Landing.tsx not touched).
+
+**Next step**: founder review of the copy and the default scenario; legal review of savings claims before public launch.
+## 2026-11-18 (q) — 2D drafting without a model (DRW-017), branch wip/drafting-2d
+
+### Done
+- Drawing Studio: "New 2D drawing" (per org, revisions per save) with a drafting editor: draw / modify / annotate /
+  dimension ribbon, ISO 128 layers, snaps + ortho/polar + typed coordinates, associative measured dimensions with
+  ± / deviations / limits / fits, hatch with planar-face detection, notes, leaders, balloons, ISO 21920 surface and
+  ISO 1101 GD&T frames (user-entered), datum symbols, revision table; SVG / PDF / CAD-native DXF exports; templates
+  (gasket, washer, plate) and an assist that reads common requests without AI (agent fallback mocked in tests).
+  Details, limits and parked defaults (DRW-PD-10..14): `docs/reports/drawings.md` §DRW-017.
+
+### Verified
+- pytest `tests/test_drawings.py` + `tests/test_drawings_2d.py` 41 passed; ruff clean; tsc, vitest 42, vite build.
+- Browser walkthrough on port 8796 with a throwaway data dir (deleted): plate with holes + dimensions + tolerance +
+  datum + GD&T + Ra, PDF / DXF / SVG downloads; gasket from the assist; bush half-section (fillet, chamfer, hatch,
+  mirror, trim, revision preview). 0 console errors.
+
+### Not done / next
+- Dimensions to midpoints / intersections, hatch angles, user layers, blocks, DXF import into a 2D drawing; open the
+  DXF in SOLIDWORKS / AutoCAD by hand. Copy DRW-PD-10..14 into DECISIONS.md when merging.
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done

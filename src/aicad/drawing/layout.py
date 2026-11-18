@@ -46,6 +46,11 @@ LAYERS: dict[str, tuple[float, list[float] | None, str]] = {
     "tb": (0.35, None, "#111111"),
     "tbthin": (0.18, None, "#444444"),
     "banner": (0.6, None, "#b91c1c"),
+    # 2D drafting (DRW-017): ISO 128-2 narrow lines at 0.25 with the 0.5 wide line, construction never printed
+    "center_n": (0.25, [8.0, 1.5, 1.0, 1.5], "#333333"),
+    "dim_n": (0.25, None, "#222222"),
+    "hatch_n": (0.25, None, "#333333"),
+    "construction": (0.13, [1.0, 1.0], "#5b7db1"),
 }
 LEGEND = [("120", "regular", "spec", "SPEC: equals a declared model parameter"),
           ("120", "italic", "inferred", "INFERRED: measured from the model geometry"),
@@ -702,7 +707,7 @@ def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first
     """Title block (ISO 7200 fields) and the revision table of issued revisions, in the bottom-right corner.
     A4 uses a compact block so the views keep a sensible scale (MAKE-07)."""
     g = Group()
-    compact = size == "A4"
+    compact = size in ("A4", "ANSI A")
     x0 = W - FRAME["right"] - TB_W
     yb = H - FRAME["bottom"]
     hb, h1, h2, h3, h4 = (6.0, 9.5, 7.5, 7.5, 6.5) if compact else (8.0, 12.0, 9.0, 9.0, 8.0)
@@ -738,7 +743,7 @@ def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first
     if src:
         g.text(x0 + TB_W - 1.2, r1 + lab + 0.7, lab, src, anchor="end", color="label", kind="title")
     cell(x0, r2, 62, h2, "MATERIAL", meta.get("material") or "Not specified")
-    cell(x0 + 62, r2, 20, h2, "UNITS", "mm")
+    cell(x0 + 62, r2, 20, h2, "UNITS", meta.get("units") or "mm")
     cell(x0 + 82, r2, 22, h2, "SCALE", scale_txt)
     g.line("tbthin", x0 + 104, r2, x0 + 104, r2 + h2)
     g.text(x0 + 105.2, r2 + lab + 0.7, lab, "PROJECTION", color="label", kind="title")

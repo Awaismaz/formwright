@@ -8,7 +8,7 @@ import { cx } from "@/lib/format";
 
 const LINKS = [
   { to: "/#how", label: "How it works" }, { to: "/#modules", label: "Modules" },
-  { to: "/#trust", label: "Security" }, { to: "/pricing", label: "Pricing" },
+  { to: "/#trust", label: "Security" }, { to: "/why", label: "Why Formwright" }, { to: "/pricing", label: "Pricing" },
 ];
 
 export default function MarketingLayout() {
@@ -57,7 +57,7 @@ export default function MarketingLayout() {
             <p className="mt-4 max-w-xs text-sm text-chrome-muted">The AI design engineer for mechanical teams. From idea to verified, editable CAD.</p>
           </div>
           {[
-            { h: "Product", l: [["How it works", "/#how"], ["Modules", "/#modules"], ["Pricing", "/pricing"], ["Start free trial", "/signup"]] },
+            { h: "Product", l: [["How it works", "/#how"], ["Modules", "/#modules"], ["Why Formwright", "/why"], ["Pricing", "/pricing"], ["Start free trial", "/signup"]] },
             { h: "Company", l: [["Security", "/#trust"], ["Contact", "mailto:hello@formwright.dev"], ["Enterprise sales", "mailto:sales@formwright.dev?subject=Formwright%20Enterprise"]] },
             { h: "Legal", l: [["Terms of service", "/legal/terms"], ["Privacy policy", "/legal/privacy"], ["Acceptable use", "/legal/aup"]] },
           ].map(c => (

@@ -24,6 +24,7 @@ import NativeImportHost from "@/components/NativeImport";
 const ProjectStudio = lazy(() => import("@/pages/app/ProjectStudio"));
 const Admin = lazy(() => import("@/pages/admin/Admin"));
 const Office = lazy(() => import("@/pages/app/office"));
+const Why = lazy(() => import("@/pages/marketing/Why"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useSession();
@@ -59,6 +60,7 @@ export default function App() {
         <Route element={<MarketingLayout />}>
           <Route path="/" element={<Landing />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/why" element={<Why />} />
           <Route path="/legal/:doc" element={<Legal />} />
         </Route>
         <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />

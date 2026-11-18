@@ -55,9 +55,11 @@ export default function Modules() {
                 <div className="flex items-center gap-1.5">
                   {wl.data?.modules.includes(m.code) && <Badge tone="primary"><Bell className="h-3 w-3" />On list</Badge>}
                   <StatusBadge status={m.status} />
+                  {m.beta && <Badge tone="accent">Beta</Badge>}
                 </div>
               </div>
               <h3 className="mt-4 text-[15px] font-semibold">{m.name}</h3>
+              {m.tags?.filter(t => t !== "Beta").map(t => <span key={t} className="mt-1 text-[11.5px] font-medium text-muted">{t}</span>)}
               <p className="mt-1.5 flex-1 text-[13px] leading-relaxed text-muted">{m.summary}</p>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-[12px]">
                 {has ? <span className="inline-flex items-center gap-1 font-medium text-success"><Check className="h-3.5 w-3.5" />{org?.on_trial && !org.expired ? "In your trial" : "In your plan"}</span>

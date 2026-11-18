@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (AI quality: brief gate CAD-028, replay AGT-002, self-r
 
 | Status | Items |
 |---|---|
-| Done | 179 |
+| Done | 182 |
 | In Progress | 23 |
 | Backlog | 80 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **300** |
+| **Total** | **303** |
 
 Recomputed from the rows at every merge.
 
@@ -141,6 +141,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DRW-014 | Drawing | BOM table on assembly drawings | P1 | In Progress | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | BOM data exposed at /api/m/assembly/assemblies/{id}/bom | No drawing table yet |
 | DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Done | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | Out-of-date drawings regenerate; revision rows ('Regenerated: L 120→150'); byte-identical SVG for same model+options |  |
 | DRW-016 | Drawing | STEP-in → auto drawing (wedge W4 candidate) | P1 | Backlog | M2 | LT | Eng | IO-005, DRW-002 | Pilot-rated usefulness ≥ agreed bar | — | Inferred dims only, clearly labelled |
+| DRW-017 | Drawing | 2D drafting without a model: "New 2D drawing" document (per org, revisions) with drafting tools, associative ISO 129 dimensions, annotations, SVG/PDF/DXF export, templates + assist | P1 | Done | M2 | LT | Eng | DRW-004, DRW-005, IO-007 | Draw a plate with holes and dimensions in the browser, export PDF/DXF; DXF opens in CAD with ISO layers/linetypes; tenant-isolated; honest "no model" labelling | `tests/test_drawings_2d.py` (13: values/tolerances, associativity, validation, sheet check, gasket/plate/washer analytic positions, prompt reader, mocked AI, SVG/PDF/DXF parse-back incl. real DIMENSION/HATCH entities, ISO02W100/ISO04W100 linetypes, ezdxf audit 0 errors, API CRUD/revisions/409/422/403/other-org 404/exports); vitest `draft/geom.test.ts` (10: values, ISO 129 placement, snaps, ortho/polar, typed input, trim/offset/fillet/chamfer, move/copy/rotate, hatch incl. T-junction faces); browser walkthrough port 8796 (plate + dims + tolerance + datum + GD&T + Ra, PDF/DXF/SVG 200; bush half-section with fillet/chamfer/hatch/mirror; gasket from the assist), 0 console errors; docs/reports/drawings.md §DRW-017 | 2D-only sheets are labelled "2D ONLY · NO MODEL" (title block, header badge, Check tab): no CHK-12, only a sheet layout check. Limits in the report |
 
 ### ASM — assemblies
 
@@ -337,6 +338,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | MSH-009 | Mesh | Mesh vs B-rep labelling; defensible conversion only | P2 | Done | M5 | LT | Eng | — | UI label + conversion limits doc | 'Visualisation, not the exact model' in UI, PNG metadata, STL/OBJ/GLB, README |  |
 | MSH-010 | Mesh | Benchmark: scripted vs generative 3D models vs hybrid | P2 | Backlog | M5 | LT | Eng | MSH-002 | Report per VALIDATION §5 | — | |
 | MSH-011 | Mesh | Hybrid pipeline if benchmark favours it | P2 | Backlog | M5 | LT | Eng | MSH-010 | ADR | — | |
+| MSH-013 | Mesh | AI Render Studio: OpenAI image generation on the customer's own key (BYO), reference render keeps the geometry | P2 | Done | M5 | LT | Eng | MSH-001 | Key encrypted at rest, consent, refine → review → generate, gallery; all external calls mocked in tests | `aicad/airender/*`, `routers/mod_airender.py`, `web/.../modules/airender/*`; tests/test_airender.py 11 pass (key round-trip + never in responses/DB/logs, 401/429/safety mapping, refiner template + mocked Claude path, job lifecycle with mocked OpenAI, real SDK request through a mock transport); vitest prompt helpers 4; browser walkthrough with the dev fake (docs/reports/ai-render.md) | Never called the real OpenAI API; PD-43, PD-44 |
 | MSH-012 | Mesh | GPU render path on local RTX 8000 vs cloud cost comparison | P2 | Done | M5 | LT | Eng | MSH-001 | Measured cost/latency | OptiX RTX 3070 vs Xeon CPU: final 1920×1440 38.5 s (256 spp) vs 334.6 s (96 spp); ~23× per sample | Cloud GPU not compared |
 
 ## E. Shared platform, security, UX, infra, docs
@@ -389,6 +391,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | UX-018 | UX | Mobile/tablet layout pass for the app shell and studio | P2 | Backlog | M2 | LT | Eng | UX-002 | Usable at 768 px | — | Marketing is responsive; studio is desktop-first |
 | UX-019 | UX | **Sidebar fixes**: Design Studio listed first in Modules (was filtered out); Modules always expanded (no collapse); collapsed rail 64 px with 40×40 items, 20 px icons, separators, tooltips, active highlight (was lost); data-driven nav sections | P1 | Done | M2 | MVP | Eng | — | All modules visible; collapsed rail readable | `web/src/layouts/AppLayout.tsx`; browser walkthrough (7 screenshots, active state per route) | Founder bug report 2026-11-18 |
 | UX-020 | UX | **Live landing page** (founder request): hero = scripted Design Studio replay around a live, orbitable three.js part (real Toolbox flange GLB, build stages blank → bore → holes), machinist status words, feature tree, gating checks, STEP chip; scroll-triggered tour (Design Studio sketcher, Toolbox carousel, STEP import + recognition with teeth highlighted, Assembly bolted joint exploding, Drawing, Advisors) and Design Office **Coming soon** with a looping sprint board; parallax, reveal-on-scroll, reduced-motion end states | P1 | Done | M2 | MVP | Eng | UX-010 | Honest labels (Replay / Real Formwright geometry / Illustration / Coming soon); no console errors; no horizontal scroll at 390 px; three.js lazy-loaded | `web/src/components/HeroVisual.tsx`, `web/src/components/landing/*`, `scripts/landing_assets.py`, `heroTimeline.test.ts`; browser walk desktop/mobile/reduced-motion (SESSION_LOG 2026-11-18 p) | gear.glb is 457 KB (involute flanks); recognition lines are the real recognizer output for that gear |
+| UX-021 | UX | **"Why Formwright" buyer page** `/why` (founder request): promise + computed hero stats, cost of conventional work with cited sources, risk → fix cards, worked examples with arithmetic, interactive ROI calculator (live catalog prices), hire vs buy, token explainer, FAQ, CTAs; header/footer nav link | P1 | Done | M2 | MVP | Eng | UX-020 | Stats computed from one tested model; sources and estimate labels in small print; no fabricated customers; reduced-motion end states; no console errors; no horizontal scroll at 390 px | `web/src/pages/marketing/Why.tsx`, `web/src/pages/marketing/why/*` (`roi.test.ts`, 12 cases); browser walk desktop/mobile/reduced/dark (SESSION_LOG 2026-11-18 q) | Claims/defaults parked PD-45; landing button added by the landing work |
 | INF-001 | Infra | uv venv (Py3.12), lockfile, pinned deps | P0 | Done | M1 | MVP | Eng | ARC-010 | Fresh clone → `uv sync` → tests pass | `pyproject.toml`, `uv.lock`, `.venv` Py 3.12.13 | Fresh clone on 2nd workstation: `uv sync` + `npm ci` → 82 passed, ruff clean, tsc + vite OK (2026-11-16) |
 | INF-002 | Infra | SQLite persistence + local artifact store | P0 | Done | M1 | MVP | Eng | INF-001 | Migration + tests | SQLAlchemy + SQLite + filesystem workspaces |  |
 | INF-003 | Infra | CI (lint, type, tests, no paid calls) incl. Linux runner | P0 | Backlog | M1 | MVP | Eng | GOV-004 | CI green on Win + Linux | — | R-TEC-07 |
@@ -422,7 +425,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | A11 Revisions/undo/versioning | CAD-012, PLT-002, UX-006 |
 | B DFM/process/cost/report | MFG-001, MFG-010..020 |
 | C Engineering advisor | ENG-001..012 |
-| D Mesh Studio | MSH-001..012 |
+| D Mesh Studio | MSH-001..013 |
 | E Workspaces/versioning/permissions | PLT-001, PLT-002, PLT-004, PLT-010 |
 | E Viewer | UX-004, UX-005 |
 | E Orchestration/jobs/metering | AGT-004, PLT-003, PLT-005 |
