@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileWarning, History, Info,
+  AlertTriangle, ArrowLeft, Box, CheckCircle2, ChevronDown, Download, Eye, EyeOff, FileDown, FileWarning, History, Info,
   Lock, Plus, RefreshCw, Ruler, ShieldAlert, ShieldCheck, X, XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
+import { saveNative } from "@/components/NativeExport";
 import { ModuleHeader, PartCard } from "../ModuleHeader";
 import DraftEditor from "./draft/DraftEditor";
 import { DraftStrip } from "./draft/DraftHome";
@@ -126,6 +127,7 @@ export function DrawingActions({ pid, rec, canEdit, verified, stale, busy, onReg
           <MenuContent>
             <MenuItem icon={<Download />} onSelect={() => { location.href = file("sheet.svg"); }}>SVG (issue copy)</MenuItem>
             <MenuItem icon={<Eye />} onSelect={() => { location.href = file("sheet.pdf", "review"); }}>Review copy PDF (tags and legend)</MenuItem>
+            <MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/drawings/${pid}/export`, "drawing.fwdrw", "fwdrw"); }}>Formwright drawing (.fwdrw) with its model</MenuItem>
           </MenuContent>
         </Menu>
       </>}

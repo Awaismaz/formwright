@@ -10,10 +10,11 @@ import { cx, num } from "@/lib/format";
 import { Button } from "./ui";
 import { Icon } from "./icons";
 import { createProject, useTemplates } from "./NewProjectDialog";
+import { isNativeFile, NATIVE_ACCEPT, openNativeImport } from "@/lib/native";
 
 const STEP_EXT = /\.(step|stp)$/i;
 const DRAWING_EXT = /\.(pdf|png|jpe?g|webp)$/i;
-export const START_ACCEPT = ".step,.stp,.pdf,.png,.jpg,.jpeg,.webp";
+export const START_ACCEPT = `.step,.stp,.pdf,.png,.jpg,.jpeg,.webp,${NATIVE_ACCEPT},.zip`;
 
 export async function fileToB64(f: File): Promise<string> {
   const buf = new Uint8Array(await f.arrayBuffer());
@@ -38,8 +39,13 @@ export function uniqueName(name: string, existing: string[]): string {
   return `${name} (${n})`;
 }
 
-/** Hand a file to the right flow: STEP → a new project with the exact import; PDF/photo → Image & Drawing to CAD. */
+/** Hand a file to the right flow: Formwright file → native import (full parametric model, verified); STEP → a new
+ *  project with the exact import; PDF/photo → Image & Drawing to CAD. */
 export async function startFromFile(file: File, nav: (to: string) => void, existing: string[], onStep?: (msg: string) => void) {
+  if (isNativeFile(file.name)) {
+    openNativeImport(file);
+    return;
+  }
   if (STEP_EXT.test(file.name)) {
     onStep?.("Importing the STEP and recognising its features…");
     const p = await createProject(uniqueName(file.name.replace(STEP_EXT, "").slice(0, 80) || "Imported part", existing), null, `Imported from ${file.name}`);
@@ -56,7 +62,7 @@ export async function startFromFile(file: File, nav: (to: string) => void, exist
     nav(`/app/modules/image2cad?upload=${r.upload.id}`);
     return;
   }
-  throw new ApiError(415, "Drop a STEP file (.step, .stp), a PDF drawing or a photo (PNG, JPEG, WebP).");
+  throw new ApiError(415, "Drop a Formwright file (.fwpart, .fwasm, .fwdrw, .fwprog), a STEP file (.step, .stp), a PDF drawing or a photo (PNG, JPEG, WebP).");
 }
 
 /** The Dashboard's one way in: describe a part, or drop what you already have. Templates are suggestions under it. */
@@ -121,7 +127,7 @@ export default function StartBox({ existing }: { existing: string[] }) {
       <div className={cx("card relative overflow-hidden p-4 transition sm:p-5", drag && "border-primary ring-2 ring-primary/30")}
         onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
         onDrop={e => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]); }}>
-        <label htmlFor="start-brief" className="flex items-center gap-2 text-[15px] font-semibold"><Sparkles className="h-4 w-4 text-accent" />Describe a part, or drop a STEP, PDF drawing or photo</label>
+        <label htmlFor="start-brief" className="flex items-center gap-2 text-[15px] font-semibold"><Sparkles className="h-4 w-4 text-accent" />Describe a part, or drop a Formwright file, STEP, PDF drawing or photo</label>
         <textarea id="start-brief" value={text} disabled={!!busy || viewer} rows={3}
           onChange={e => { setText(e.target.value); if (picked && e.target.value !== picked.prompt) setPicked(null); }}
           onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void start(); } }}

@@ -16,6 +16,8 @@ import type { ModuleAppProps } from "../registry";
 import { Section, Seg } from "../mesh/LookPanel";
 import { ConsentCard, OpenAIKeyCard, Setup, useIntegration } from "./Connect";
 import { etaSeconds, keepsGeometry, negativesToText, refineKey, sizeLabel, textToNegatives, wordCount, type AirSettings } from "./prompt";
+import { FileButtons } from "@/components/NativeExport";
+import { moduleExportUrl } from "@/lib/native";
 import type { AirJob, Choice, Options, ProjectInfo, Refined } from "./types";
 
 const ACTIVE = (j?: AirJob | null) => !!j && (j.state === "queued" || j.state === "running");
@@ -376,6 +378,7 @@ export default function AIRenderStudio({ projectId }: ModuleAppProps) {
           <BoxIcon className="h-3.5 w-3.5 text-muted" /><span className="max-w-[240px] truncate font-medium">{name ?? "…"}</span><span className="text-muted">verified model</span></div>}
         <div className="ml-auto flex items-center gap-2">
           {pid && <Link to={`/app/modules/mesh?project=${pid}`} className="hidden text-[12px] text-muted hover:text-primary md:inline">Exact renders in Mesh Studio →</Link>}
+          <FileButtons ext="fwrender" saveUrl={pid && ready ? moduleExportUrl("ai", pid) : null} saveName={`${name ?? "ai-renders"}.fwrender`} />
           {ready && <Button size="sm" variant="ghost" icon={<Settings2 className="h-4 w-4" />} onClick={() => setSettingsOpen(true)} data-action="air-settings">OpenAI</Button>}
           {pid && ready && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change project</Button>}
         </div>

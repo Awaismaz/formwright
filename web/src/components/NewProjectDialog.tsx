@@ -9,6 +9,7 @@ import { Button, Field, Input, Modal } from "./ui";
 import { Icon } from "./icons";
 import { cx } from "@/lib/format";
 import { startFromFile, uniqueName } from "./StartBox";
+import { isNativeFile, NATIVE_ACCEPT, openNativeImport } from "@/lib/native";
 
 export function useTemplates() {
   return useQuery({ queryKey: ["templates"], queryFn: () => api.get<{ items: Template[] }>("/api/templates"), staleTime: Infinity });
@@ -46,6 +47,7 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
 
   const onFile = async (f: File | undefined) => {
     if (!f) return;
+    if (isNativeFile(f.name)) { onOpenChange(false); openNativeImport(f); return; }
     setBusy("file");
     try { await startFromFile(f, nav, (projects.data?.items ?? []).map(p => p.name)); onOpenChange(false); await qc.invalidateQueries({ queryKey: ["projects"] }); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not open that file"); }
@@ -71,10 +73,10 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
       footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={submit} loading={busy === "create"} disabled={!name.trim() || !!busy}>Create project</Button></>}>
       <div className="grid gap-5">
         <div className="grid gap-2 sm:grid-cols-2">
-          <input ref={stepRef} type="file" accept=".step,.stp" hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={stepRef} type="file" accept={`.step,.stp,${NATIVE_ACCEPT}`} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <input ref={drawRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <button type="button" disabled={!!busy} onClick={() => stepRef.current?.click()} className={tile(false)}>
-            <FileUp className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Import a STEP file</div><div className="text-xs text-muted">Exact solid, features recognised and editable</div></div>
+            <FileUp className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Import a STEP or Formwright file</div><div className="text-xs text-muted">STEP: exact solid, features recognised. .fwpart: the full parametric model</div></div>
           </button>
           <button type="button" disabled={!!busy} onClick={() => drawRef.current?.click()} className={tile(false)}>
             <ScanLine className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">From a drawing, sketch or photo</div><div className="text-xs text-muted">PDF, PNG or JPEG; every value read is shown for review</div></div>

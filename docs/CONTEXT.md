@@ -33,6 +33,9 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   goes inside `components/DesktopOnly.tsx`. Compact layouts: `lib/media.ts` (PHONE < 768, COMPACT < 1024).
 
 ## Architecture in one screen
+- Formwright files (IO-020…025): every module saves/opens its work as a signed, checksummed zip (`.fwpart .fwasm .fwdrw
+  .fwprog .fwrender .fwmfg .fwcalc .fwprint .fwread`), one container in `src/aicad/native/`, spec `docs/FORMATS.md`.
+  Imports are untrusted input; parts are rebuilt and verified against the exported fingerprint.
 - `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
   `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),
   `worker.py` (warm per-org build worker).
