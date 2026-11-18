@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
+import { Link, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Bell, ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, CircleHelp, Coins, CreditCard, FolderKanban, Home,
+  Bell, ChevronsLeft, ChevronsRight, CircleHelp, Coins, CreditCard, FolderKanban, Home,
   LayoutGrid, Lock, LogOut, MailWarning, Menu as MenuIcon, Moon, Search, Settings as SettingsIcon, Shield, Sun, Users,
   UserRound, X, Zap,
 } from "lucide-react";
@@ -28,29 +28,44 @@ function useStored(key: string, initial: boolean): [boolean, (v: boolean) => voi
   return [c, (v) => { setC(v); try { localStorage.setItem(key, v ? "1" : "0"); } catch { /* ignore */ } }];
 }
 
-function NavItem({ to, icon, label, collapsed, end, tour, right, indent }: {
-  to: string; icon: React.ReactNode; label: string; collapsed: boolean; end?: boolean; tour?: string; right?: React.ReactNode; indent?: boolean;
-}) {
+/** One sidebar entry. The nav is data: add an entry to a section in `navSections` and it shows in the expanded
+ * sidebar, the collapsed icon rail and the phone drawer alike. */
+export interface NavEntry {
+  to: string; label: string; icon: React.ReactNode;
+  /** active only on exactly this route, not its children */
+  end?: boolean;
+  /** custom active test, for entries whose page lives under another route (Design Studio → /app/projects/:id) */
+  active?: (path: string) => boolean;
+  tour?: string;
+  /** trailing marker in the expanded sidebar (Preview tag, lock) */
+  right?: React.ReactNode;
+}
+export interface NavSectionDef { label: string; items: NavEntry[] }
+
+function NavItem({ item, collapsed, path }: { item: NavEntry; collapsed: boolean; path: string }) {
+  const { to, icon, label, end, tour, right, active } = item;
+  // Active state is computed here, not via NavLink's className function: the collapsed rail wraps the link in a
+  // tooltip trigger (Radix Slot), which merges className as a string and would drop the function.
+  const p = path.replace(/\/+$/, "") || "/";
+  const on = active ? active(path) : end ? p === to : p === to || p.startsWith(to + "/");
   const link = (
-    <NavLink to={to} end={end} data-tour={tour}
-      className={({ isActive }) => cx("group flex items-center gap-3 rounded px-2.5 text-[13px] transition",
-        indent ? "h-8 pl-[34px]" : "h-9",
-        isActive ? "bg-primary text-white shadow-sm" : "text-chrome-fg/85 hover:bg-white/[.07] hover:text-white",
-        collapsed && "justify-center px-0 pl-0")}>
-      <span className={cx("shrink-0", indent ? "h-3.5 w-3.5 [&>svg]:h-3.5 [&>svg]:w-3.5" : "h-4 w-4 [&>svg]:h-4 [&>svg]:w-4")}>{icon}</span>
+    <Link to={to} data-tour={tour} aria-label={collapsed ? label : undefined} aria-current={on ? "page" : undefined}
+      className={cx("group flex items-center rounded transition",
+        collapsed ? "mx-auto h-10 w-10 justify-center rounded-md" : "h-9 gap-3 px-2.5 text-[13px]",
+        on ? "bg-primary text-white shadow-sm" : "text-chrome-fg/85 hover:bg-white/[.07] hover:text-white")}>
+      <span className={cx("shrink-0", collapsed ? "h-5 w-5 [&>svg]:h-5 [&>svg]:w-5" : "h-4 w-4 [&>svg]:h-4 [&>svg]:w-4")}>{icon}</span>
       {!collapsed && <span className="flex-1 truncate">{label}</span>}
       {!collapsed && right}
-    </NavLink>
+    </Link>
   );
   return collapsed ? <Tip content={label}>{link}</Tip> : link;
 }
 
-function Section({ label, collapsed, children }: { label: string; collapsed: boolean; children: React.ReactNode }) {
+function Section({ label, collapsed, first, children }: { label: string; collapsed: boolean; first?: boolean; children: React.ReactNode }) {
   return (
-    <div className="mt-5">
-      {!collapsed ? <div className="mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-[.12em] text-chrome-muted">{label}</div>
-        : <div className="mx-auto mb-2 h-px w-6 bg-white/10" />}
-      <div className="space-y-0.5">{children}</div>
+    <div className={collapsed ? (first ? "mt-3" : "mt-3 border-t border-white/[.08] pt-3") : "mt-5"} role="group" aria-label={label}>
+      {!collapsed && <div className="mb-1.5 px-2.5 text-[10.5px] font-semibold uppercase tracking-[.12em] text-chrome-muted">{label}</div>}
+      <div className={collapsed ? "space-y-1.5" : "space-y-0.5"}>{children}</div>
     </div>
   );
 }
@@ -144,7 +159,6 @@ export default function AppLayout() {
   const [appCollapsed, setAppCollapsed] = useStored("fw_sidebar", false);
   const [studioCollapsed, setStudioCollapsed] = useStored("fw_sidebar_studio", true);
   const [collapsed, setCollapsed] = studio ? [studioCollapsed, setStudioCollapsed] : [appCollapsed, setAppCollapsed];
-  const [modsOpen, setModsOpen] = useStored("fw_nav_modules", false);
   const [peek, setPeek] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -188,14 +202,37 @@ export default function AppLayout() {
   const dark = user?.preferences?.theme === "dark";
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
   const lowTokens = !unlimited && (org?.token_balance ?? 0) < LOW_TOKENS;
-  const modules = (catalog.data?.modules ?? []).filter(m => m.code !== "design" && m.status === "live");
-  const onModules = loc.pathname.startsWith("/app/modules");
-  const showMods = (modsOpen || (onModules && !folded));
+  const path = loc.pathname;
+  const inStudio = (p: string) => /^\/app\/projects\/[^/]+\/?$/.test(p);
+  // Design Studio is first (UX-019); it opens where the Modules page sends it: the projects list, whose parts open in the Studio.
+  const moduleItems: NavEntry[] = [...(catalog.data?.modules ?? [])]
+    .sort((a, b) => Number(b.code === "design") - Number(a.code === "design"))
+    .map(m => ({
+      to: m.code === "design" ? "/app/projects" : `/app/modules/${m.code}`,
+      label: m.name, icon: <Icon name={m.icon} />,
+      active: m.code === "design" ? inStudio : undefined,
+      right: m.status !== "live" ? <span className="rounded border border-white/15 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-chrome-muted">Preview</span>
+        : m.code !== "design" && !owned.has(m.code) ? <Lock className="h-3 w-3 text-chrome-muted" aria-label="Not in your plan" /> : undefined,
+    }));
+  const navSections: NavSectionDef[] = [
+    { label: "Workspace", items: [
+      { to: "/app", end: true, icon: <Home />, label: "Home" },
+      { to: "/app/projects", icon: <FolderKanban />, label: "Projects", tour: "nav-projects", active: (p) => /^\/app\/projects\/?$/.test(p) },
+      { to: "/app/modules", end: true, icon: <LayoutGrid />, label: "All modules", tour: "nav-modules" },
+    ] },
+    ...(moduleItems.length ? [{ label: "Modules", items: moduleItems }] : []),
+    { label: "Account", items: [
+      { to: "/app/billing", icon: <CreditCard />, label: "Billing & tokens" },
+      { to: "/app/team", icon: <Users />, label: "Team" },
+      { to: "/app/settings", icon: <SettingsIcon />, label: "Settings" },
+      ...(me?.user?.is_superadmin ? [{ to: "/app/admin", icon: <Shield />, label: "Admin console" }] : []),
+    ] },
+  ];
 
   const sidebar = (f: boolean) => (<>
     <div className={cx("flex h-14 items-center border-b border-white/[.06]", f ? "justify-center" : "px-4")}>
-      <Link to="/app" aria-label="Formwright home">{f ? <LogoMark size={26} /> : <Logo size={24} dark />}</Link>
-      <button className="ml-auto rounded p-1.5 text-chrome-muted hover:text-white md:hidden" onClick={() => setMobileOpen(false)} aria-label="Close menu"><X className="h-4 w-4" /></button>
+      <Link to="/app" aria-label="Formwright home">{f ? <LogoMark size={28} /> : <Logo size={24} dark />}</Link>
+      <button className={cx("ml-auto rounded p-1.5 text-chrome-muted hover:text-white md:hidden", f && "hidden")} onClick={() => setMobileOpen(false)} aria-label="Close menu"><X className="h-4 w-4" /></button>
     </div>
     {!f && org && (
       <Menu>
@@ -215,30 +252,11 @@ export default function AppLayout() {
         </MenuContent>
       </Menu>
     )}
-    <nav className="flex-1 overflow-y-auto px-2.5 pb-4">
-      <Section label="Workspace" collapsed={f}>
-        <NavItem to="/app" end icon={<Home />} label="Home" collapsed={f} />
-        <NavItem to="/app/projects" icon={<FolderKanban />} label="Projects" collapsed={f} tour="nav-projects" />
-        <div data-tour="nav-modules">
-          {f ? <NavItem to="/app/modules" icon={<LayoutGrid />} label="Modules" collapsed /> : (
-            <div className={cx("flex h-9 items-center rounded text-[13px] transition", loc.pathname === "/app/modules" ? "bg-primary text-white shadow-sm" : "text-chrome-fg/85 hover:bg-white/[.07] hover:text-white")}>
-              <Link to="/app/modules" className="flex h-full flex-1 items-center gap-3 px-2.5"><LayoutGrid className="h-4 w-4" />Modules</Link>
-              <button onClick={() => setModsOpen(!showMods)} className="mr-1 rounded p-1 hover:bg-white/10" aria-label={showMods ? "Hide modules" : "Show modules"} aria-expanded={showMods}>
-                {showMods ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}</button>
-            </div>)}
-          {showMods && !f && <div className="mt-0.5 space-y-0.5">
-            {modules.map(m => (
-              <NavItem key={m.code} to={`/app/modules/${m.code}`} indent icon={<Icon name={m.icon} />} label={m.name} collapsed={false}
-                right={!owned.has(m.code) ? <Lock className="h-3 w-3 text-chrome-muted" aria-label="Not in your plan" /> : undefined} />))}
-          </div>}
-        </div>
-      </Section>
-      <Section label="Account" collapsed={f}>
-        <NavItem to="/app/billing" icon={<CreditCard />} label="Billing & tokens" collapsed={f} />
-        <NavItem to="/app/team" icon={<Users />} label="Team" collapsed={f} />
-        <NavItem to="/app/settings" icon={<SettingsIcon />} label="Settings" collapsed={f} />
-        {me?.user?.is_superadmin && <NavItem to="/app/admin" icon={<Shield />} label="Admin console" collapsed={f} />}
-      </Section>
+    <nav className={cx("flex-1 overflow-y-auto pb-4", f ? "px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "px-2.5")}>
+      {navSections.map((sec, i) => (
+        <Section key={sec.label} label={sec.label} collapsed={f} first={i === 0}>
+          {sec.items.map(it => <NavItem key={it.label} item={it} collapsed={f} path={path} />)}
+        </Section>))}
     </nav>
     {!f && org?.on_trial && (
       <div className="mx-3 mb-3 flex items-center gap-2 rounded-md border border-white/[.08] bg-white/[.04] px-2.5 py-2">
@@ -252,7 +270,7 @@ export default function AppLayout() {
     <button onClick={() => (workspace && collapsed === false ? setPeek(!peek) : setCollapsed(!collapsed))}
       className="hidden h-10 items-center justify-center gap-2 border-t border-white/[.06] text-[12px] text-chrome-muted hover:text-white md:flex"
       aria-label={f ? "Expand sidebar" : "Collapse sidebar"}>
-      {f ? <ChevronsRight className="h-4 w-4" /> : <><ChevronsLeft className="h-4 w-4" /> Collapse</>}
+      {f ? <ChevronsRight className="h-5 w-5" /> : <><ChevronsLeft className="h-4 w-4" /> Collapse</>}
     </button>
   </>);
 
@@ -261,7 +279,7 @@ export default function AppLayout() {
       <Banners />
       <div className="flex min-h-0 flex-1">
         {/* ---------------- sidebar: fixed rail on desktop, drawer on phones */}
-        <aside className={cx("hidden shrink-0 flex-col bg-chrome text-chrome-fg transition-[width] duration-200 md:flex", folded ? "w-[60px]" : "w-[244px]")}>
+        <aside className={cx("hidden shrink-0 flex-col bg-chrome text-chrome-fg transition-[width] duration-200 md:flex", folded ? "w-[64px]" : "w-[244px]")}>
           {sidebar(folded)}
         </aside>
         {mobileOpen && <div className="fixed inset-0 z-50 flex md:hidden">
