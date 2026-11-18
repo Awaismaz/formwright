@@ -61,7 +61,8 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 
 ## Module status (2026-11-17, after the audit)
 All eight modules are Live: Design Studio, Drawing Studio, Image & Drawing to CAD, Assembly Studio, Manufacturing
-Advisor, Engineering Advisor, 3D Print Prep, Mesh Studio (Blender render studio). Downstream modules open on the
+Advisor, Engineering Advisor, 3D Print Prep, Mesh Studio (Blender render studio). AI Render Studio (MSH-013) is Live/Beta on the customer's own OpenAI
+key (BYO; key encrypted with `FW_SECRET_KEY`; `FW_AI_RENDER_FAKE=1` simulates OpenAI in development only). Downstream modules open on the
 current part from the Studio's **Make** tab (with status/lock); input modules (From Drawing) from the **Library** tab.
 
 **Platform differentiators:**

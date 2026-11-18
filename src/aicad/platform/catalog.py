@@ -87,6 +87,17 @@ MODULES: dict[str, dict[str, Any]] = {
                     "Turntable GIF / MP4 and transparent PNGs",
                     "Editable .blend plus GLB / OBJ / STL visualisation meshes"],
     },
+    "airender": {
+        "name": "AI Render Studio", "status": "live", "icon": "sparkles", "beta": True, "byo_key": True,
+        "tags": ["Beta", "Uses your OpenAI key"],
+        "summary": "Marketing visuals of your verified parts made with OpenAI image generation on your own OpenAI "
+                   "key. A render of the real model is always the reference, but the images are AI-generated and "
+                   "illustrative, not dimensionally exact.",
+        "bullets": ["Scenes from studio packshot to workshop bench, installed or in-hand",
+                    "Finish pre-filled from the part's material; lighting, camera, background and style",
+                    "Review and edit the prompt before anything is sent",
+                    "Variants, variations and PNG downloads, each captioned as AI-generated"],
+    },
 }
 
 TOKEN_COSTS = {

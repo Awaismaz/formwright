@@ -337,6 +337,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | MSH-009 | Mesh | Mesh vs B-rep labelling; defensible conversion only | P2 | Done | M5 | LT | Eng | — | UI label + conversion limits doc | 'Visualisation, not the exact model' in UI, PNG metadata, STL/OBJ/GLB, README |  |
 | MSH-010 | Mesh | Benchmark: scripted vs generative 3D models vs hybrid | P2 | Backlog | M5 | LT | Eng | MSH-002 | Report per VALIDATION §5 | — | |
 | MSH-011 | Mesh | Hybrid pipeline if benchmark favours it | P2 | Backlog | M5 | LT | Eng | MSH-010 | ADR | — | |
+| MSH-013 | Mesh | AI Render Studio: OpenAI image generation on the customer's own key (BYO), reference render keeps the geometry | P2 | Done (Beta) | M5 | LT | Eng | MSH-001 | Key encrypted at rest, consent, refine → review → generate, gallery; all external calls mocked in tests | `aicad/airender/*`, `routers/mod_airender.py`, `web/.../modules/airender/*`; tests/test_airender.py 11 pass (key round-trip + never in responses/DB/logs, 401/429/safety mapping, refiner template + mocked Claude path, job lifecycle with mocked OpenAI, real SDK request through a mock transport); vitest prompt helpers 4; browser walkthrough with the dev fake (docs/reports/ai-render.md) | Never called the real OpenAI API; PD-39, PD-40 |
 | MSH-012 | Mesh | GPU render path on local RTX 8000 vs cloud cost comparison | P2 | Done | M5 | LT | Eng | MSH-001 | Measured cost/latency | OptiX RTX 3070 vs Xeon CPU: final 1920×1440 38.5 s (256 spp) vs 334.6 s (96 spp); ~23× per sample | Cloud GPU not compared |
 
 ## E. Shared platform, security, UX, infra, docs
@@ -422,7 +423,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | A11 Revisions/undo/versioning | CAD-012, PLT-002, UX-006 |
 | B DFM/process/cost/report | MFG-001, MFG-010..020 |
 | C Engineering advisor | ENG-001..012 |
-| D Mesh Studio | MSH-001..012 |
+| D Mesh Studio | MSH-001..013 |
 | E Workspaces/versioning/permissions | PLT-001, PLT-002, PLT-004, PLT-010 |
 | E Viewer | UX-004, UX-005 |
 | E Orchestration/jobs/metering | AGT-004, PLT-003, PLT-005 |

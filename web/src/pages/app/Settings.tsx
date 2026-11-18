@@ -5,6 +5,7 @@ import { api, ApiError } from "@/lib/api";
 import { canManage, useSession } from "@/lib/session";
 import { Badge, Button, Card, Field, Input, PageHeader, Tab, TabList, TabPanel, Tabs, Toggle } from "@/components/ui";
 import { cx, PAGE } from "@/lib/format";
+import { ConsentCard, OpenAIKeyCard } from "./modules/airender/Connect";
 
 function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
@@ -79,6 +80,9 @@ export default function Settings() {
           </Section>
         </TabPanel>}
         <TabPanel value="api" className="space-y-6">
+          {org && <Section title="OpenAI" desc="For AI Render Studio (Beta): your workspace's own OpenAI API key, billed by OpenAI to your account.">
+            <OpenAIKeyCard /><div className="border-t border-border pt-4"><ConsentCard /></div>
+          </Section>}
           <Section title="API keys" desc="Automate designs from your own tools and scripts.">
             <div className="flex items-start gap-3 rounded-lg border border-dashed border-border p-4 text-sm"><Lock className="mt-0.5 h-4 w-4 text-muted" /><div><Badge tone="preview">Preview</Badge><p className="mt-2 text-muted">A REST API and CAD plugins (SOLIDWORKS, Creo) are planned. Join early access from the Help page.</p></div></div>
           </Section>

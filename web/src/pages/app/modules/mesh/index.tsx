@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Aperture, Box as BoxIcon, Boxes, Camera, ChevronDown, Cpu, Film, FolderOpen, Info } from "lucide-react";
+import { ArrowLeft, Aperture, Box as BoxIcon, Boxes, Camera, ChevronDown, Cpu, Film, FolderOpen, Info, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago } from "@/lib/format";
@@ -355,6 +355,7 @@ export default function MeshStudio({ projectId }: ModuleAppProps) {
         </div>}
         <div className="ml-auto flex items-center gap-3">
           <span className="hidden text-[12px] text-muted md:inline" data-renderer>{r.available ? `Renderer: ${r.engine} on ${r.device === "GPU" ? r.gpu ?? "GPU" : "CPU"}` : "Renderer unavailable"}</span>
+          {!aid && pid && <Link to={`/app/modules/airender?project=${pid}`} title="AI marketing visuals from this part on your own OpenAI key (Beta, illustrative)" data-action="ai-render"><Button size="sm" variant="ghost" icon={<Sparkles className="h-4 w-4" />}>AI render</Button></Link>}
           {!aid && pid && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change project</Button>}
         </div>
       </header>

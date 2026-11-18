@@ -39,6 +39,8 @@ export interface Product {
 
 export interface Module {
   code: string; name: string; status: "live" | "preview"; icon: string; summary: string; bullets: string[];
+  /** Live but still in beta, with honest tags such as "Uses your OpenAI key". */
+  beta?: boolean; tags?: string[];
 }
 
 export interface RunRange { typical: number; low: number; high: number }
