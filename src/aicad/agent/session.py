@@ -149,7 +149,7 @@ _SCRUB = [
     (_re.compile(r"`?\bmcp__cad__\w+`?"), "the build"),
     (_re.compile(r"`?\brefs/[\w.-]+`?"), "the reference image"),
     (_re.compile(r"\bbuild123d\b", _re.IGNORECASE), "the CAD kernel"),
-    (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual|thread)\b`?"),
+    (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual|thread|base_flange|edge_flange|hem|sheet)\b`?"),
      "the design tools"),
     (_re.compile(r"`?\bSUPPRESSED_FEATURES\b`?"), "the suppressed-features list"),
     (_re.compile(r"`?\bMANUAL_FEATURES\b`?"), "the manual features"),

@@ -44,7 +44,8 @@ def price_per_kg(shop: ShopProfile, mat: dict[str, Any]) -> float:
 
 
 def models(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], acc: F.Access, holes: list[F.Hole],
-           turn: F.Turning, sheet: F.Sheet, tolerance: str) -> dict[str, dict[str, Any]]:
+           turn: F.Turning, sheet: F.Sheet, tolerance: str,
+           sheet_model: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
     rho = float(mat["density_g_cm3"]) / 1000.0  # g/mm^3 -> kg via /1000 below
     price = price_per_kg(shop, mat)
     v_cm3 = g.volume / 1000.0
@@ -93,7 +94,20 @@ def models(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], acc: F.Access, h
             f"{ops} operations (both ends{', plus a secondary milling setup' if sec else ''})"],
             {"stock_mass_kg": m_bar, "removed_cm3": rem, "setups": ops})
 
-    if sheet.sheet_like and sheet.thickness and "sheet" in procs:
+    if sheet_model and sheet.thickness and "sheet" in procs:  # CAD-026: flat size and bends from the model
+        t = sheet.thickness
+        fx, fy = (float(v) for v in sheet_model["flat"]["size"])
+        cut_len = float(sheet_model["flat"]["perimeter_mm"])
+        bends = int(sheet_model.get("bend_count") or 0)
+        m_sheet = fx * fy * t * 1.1 * rho / 1000.0
+        run_s = cut_len / shop.sheet_cut_mm_min + bends * shop.sheet_minutes_per_bend + 1.0
+        fixed_s = (shop.setup_minutes + shop.programming_minutes / 2) / 60.0 * shop.mill_rate()
+        out["sheet_metal"] = _line("sheet_metal", m_sheet * price, run_s, shop.mill_rate(), fixed_s, [
+            f"{t:g} mm sheet, blank = flat pattern {fx:.1f} × {fy:.1f} mm × 1.1 nesting allowance (assumed)",
+            f"Cut length {cut_len:.0f} mm (flat outline) at {shop.sheet_cut_mm_min:g} mm/min; {bends} bend(s) from the model",
+            "Laser / punch and press-brake rates use the milling rate (assumed)"],
+            {"flat_mm": [fx, fy], "bends": bends})
+    elif sheet.sheet_like and sheet.thickness and "sheet" in procs:
         t = sheet.thickness
         strips = [f for f in g.faces if f.area <= 1.1 * t * sum(g.edges[e].length for e in f.edges)]
         cut_len = sum(f.area for f in strips) / t

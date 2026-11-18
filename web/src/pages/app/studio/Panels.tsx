@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, Layers, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, CheckResult, Impact, ManualFeature, Project, RepairItem } from "@/lib/types";
@@ -249,7 +249,7 @@ function RollbackBar({ busy, hidden, canUp, onUp, onDown, onEnd }: { busy: boole
 
 export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onMove, onDelete, busy, recognition, onRecognize, recognizing, onSketchPlane,
   selectedFeatures = [], onPickFeature, onSuppressDesign, onDeleteDesign, agentBusy = false, onSketchOn, onPreviewPlane, onRename, onRollback,
-  onEditParams, onAskRepair }: {
+  onEditParams, onAskRepair, flatOn = false, onFlat }: {
   status?: BuildStatus; topo: Topo | null; manual: ManualFeature[]; busy: boolean;
   onHover: (faces: number[]) => void; onEdit: (f: ManualFeature) => void;
   onToggle: (f: ManualFeature) => void; onMove: (f: ManualFeature, dir: -1 | 1) => void; onDelete: (f: ManualFeature) => void;
@@ -264,6 +264,8 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
   onSketchOn?: (f: ManualFeature) => void; onPreviewPlane?: (f: ManualFeature | null) => void;
   /** Manual features: rename (double-click) and move the rollback bar (null = roll forward to the end). */
   onRename?: (f: ManualFeature, name: string) => void; onRollback?: (beforeId: string | null) => void;
+  /** sheet metal (CAD-026): the Flat-Pattern node shows / hides the flat pattern in the viewer */
+  flatOn?: boolean; onFlat?: () => void;
 }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null); // right-click opens the row's menu
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
@@ -416,6 +418,20 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
             </div></li>}
           </Fragment>);
         })}</ul>}
+      {status?.sheet_metal?.flat && (() => { const sm = status.sheet_metal!; const fl = sm.flat!; return (
+        <div className="mt-1" data-tree-flat>
+          <button onClick={onFlat} disabled={!onFlat} className={cx("flex w-full items-center gap-1.5 rounded px-2 py-1 text-left hover:bg-primary-soft", flatOn && "bg-primary-soft ring-1 ring-primary/40")}
+            title={flatOn ? "Show the folded part" : "Show the flat pattern in the viewer"}>
+            <Layers className="h-3.5 w-3.5 shrink-0 text-primary/80" /><span className="flex-1 truncate">Flat-Pattern</span>
+            <span className="text-[10.5px] text-muted">{fl.size[0].toFixed(1)} × {fl.size[1].toFixed(1)} mm</span>
+            {flatOn ? <Eye className="h-3.5 w-3.5 text-primary" /> : <EyeOff className="h-3.5 w-3.5 text-muted" />}</button>
+          {flatOn && <div className="ml-6 mt-1 rounded-md border border-border bg-panel2/60 p-2 text-[11.5px]">
+            <div className="mb-1 text-muted">T {sm.thickness} mm · K {sm.k_factor} · BA = angle × (R + K × T)</div>
+            {(sm.bends ?? []).length === 0 ? <div className="text-muted">No bends yet.</div> : <table className="w-full tabular-nums"><thead><tr className="text-left text-muted"><th className="font-normal">#</th><th className="font-normal">Bend</th><th className="font-normal">Dir</th><th className="text-right font-normal">Angle</th><th className="text-right font-normal">R</th><th className="text-right font-normal">BA</th></tr></thead>
+              <tbody>{(sm.bends ?? []).map(b => <tr key={b.n}><td>{b.n}</td><td className="max-w-[90px] truncate">{b.name}</td><td>{b.direction}</td><td className="text-right">{+b.angle.toFixed(2)}°</td><td className="text-right">{+b.radius.toFixed(3)}</td><td className="text-right">{b.ba.toFixed(3)}</td></tr>)}</tbody></table>}
+            {(sm.notes ?? []).map(n => <div key={n} className="mt-1 text-warning">{n}</div>)}
+          </div>}
+        </div>); })()}
       {(status?.manual_features ?? 0) > 0 && status?.checks?.some(c => c.id === "CHK-05" && (c.detail as Record<string, unknown>)?.expected_mm3 !== undefined) && <p className="mt-3 rounded border border-border bg-panel2 p-2 text-[11px] text-muted">With features added by hand, the size and volume checks are for information only: the design's stated values don't include them.</p>}
     </div>
   );
@@ -480,7 +496,8 @@ export function FilesPanel({ project, status }: { project: Project; status?: Bui
         <FileDown className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">Formwright part (.fwpart)</div><div className="text-xs text-muted">Full parametric model for another Formwright workspace</div></div>
       </button>
       <PartExportDialog open={fwpart} onOpenChange={setFwpart} projectId={project.id} name={project.name} />
-      {[["part.step", "STEP (AP214)", "SOLIDWORKS, Creo, Fusion, Inventor, NX…"], ["part.stl", "STL", "Slicers and quick viewing"], ["part.3mf", "3MF", "Modern 3D-printing format with units"]].map(([f, l, h]) => (
+      {[["part.step", "STEP (AP214)", "SOLIDWORKS, Creo, Fusion, Inventor, NX…"], ["part.stl", "STL", "Slicers and quick viewing"], ["part.3mf", "3MF", "Modern 3D-printing format with units"],
+        ...(status.sheet_metal?.flat ? [["flat.dxf", "Flat pattern DXF", `True-size outline, bend lines and notes (${status.sheet_metal.flat.size.map(v => v.toFixed(1)).join(" × ")} mm, ${status.sheet_metal.bend_count} bends)`]] : [])].map(([f, l, h]) => (
         <a key={f} href={`${base}/${f}`} className="flex items-center gap-3 rounded-lg border border-border p-3 hover:border-primary/50">
           <Download className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">{l}</div><div className="text-xs text-muted">{h}</div></div>
         </a>))}

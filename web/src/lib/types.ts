@@ -68,10 +68,22 @@ export interface BuildStatus {
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
   features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean; error?: string }[];
   manual_features?: number; manual_errors?: RepairItem[];
+  /** sheet metal (CAD-026): parameters, flat pattern size and the bend table; null for other parts */
+  sheet_metal?: SheetMetalInfo | null;
+}
+
+export interface SheetBend {
+  n: number; name: string; kind: "flange" | "hem"; direction: "UP" | "DOWN"; angle: number; radius: number; k: number;
+  ba: number; span: number; straight: number; length: number; length_ref: "outer" | "tangent"; position: string; outer_length: number | null;
+}
+export interface SheetMetalInfo {
+  thickness: number; radius: number; k_factor: number; relief?: { type: "rect" | "obround" | "none"; ratio: number };
+  flat?: { size: [number, number]; bbox: number[]; area_mm2: number; perimeter_mm: number };
+  bend_count: number; bends?: SheetBend[]; notes?: string[]; flat_error?: string;
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft" | "thread"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft" | "thread" | "sm_base" | "sm_flange" | "sm_hem"; name: string; suppressed: boolean;
   /** below the rollback bar: kept in the tree, not built */
   rolled_back?: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
@@ -103,6 +115,11 @@ export interface ManualFeature {
   /** cosmetic thread (CAD-027) on a hole feature, or the thread of a Cosmetic Thread feature on a picked cylinder */
   thread?: { size: number; pitch: number; cls?: string; depth?: number | null; designation?: string; internal?: boolean };
   face?: { point: [number, number, number] };
+  /** sheet metal (CAD-026). Base flange: thickness `t`, default inside radius `r`, K-factor and relief. Edge flange /
+   * hem: the picked sheet edge, length (outer = from the outer virtual sharp), position, end offsets, hem gap */
+  k?: number; relief?: { type: "rect" | "obround" | "none"; ratio: number };
+  edge?: [number, number, number]; edge_ref?: { kind: "line" | "circle" | "other"; dir?: [number, number, number] };
+  length?: number; position?: "inside" | "outside" | "bend_outside"; length_ref?: "outer" | "tangent"; inset?: [number, number]; gap?: number | null;
 }
 
 /** A manual feature that no longer rebuilds (kept in the tree, flagged for repair). */

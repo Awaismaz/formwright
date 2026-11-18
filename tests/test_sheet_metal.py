@@ -276,3 +276,76 @@ def test_studio_base_flange_edge_flange_lifecycle(app_client: TestClient) -> Non
     assert c.get(f"/api/projects/{pid}/files/flat.dxf").status_code == 200
     # a base flange can only start a part
     assert c.post(f"/api/projects/{pid}/manual", json={"feature": base}).status_code == 422
+
+
+# ----------------------------------------------------------------------------- drawings, DFM, agent wording
+def test_flat_pattern_sheet_on_drawings_and_dfm_from_the_model(app_client: TestClient) -> None:  # noqa: F811
+    import ezdxf
+
+    c = app_client
+    signup(c, "sheetdrw@x.com")
+    pid, ws = _project_with_model(c, SCRIPT + 'EXPECTED = {"bbox": [W, D, L], "solids": 1}\n')
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"], st.get("error")
+    r = c.post(f"/api/m/drawings/projects/{pid}/generate", json={"sheet": "A3"})
+    assert r.status_code == 200, r.text
+    rec = r.json()["drawing"]
+    assert rec["check"]["passed"], rec["check"]  # the main sheet (views) of a bent part passes CHK-12 too
+    fp = rec["flat_pattern"]
+    assert fp["bends"] == 2 and fp["size"] == pytest.approx(st["sheet_metal"]["flat"]["size"], abs=1e-6)
+    assert [b["direction"] for b in fp["table"]] == ["UP", "UP"] and fp["table"][1]["angle"] == 180
+    svg = c.get(f"/api/m/drawings/projects/{pid}/files/flat.svg").text
+    assert "B1 UP 90° R2" in svg and "BEND TABLE" in svg and "FLAT PATTERN" in svg and "K = 0.44" in svg
+    pdf = c.get(f"/api/m/drawings/projects/{pid}/files/flat.pdf")
+    assert pdf.content.startswith(b"%PDF-") and "_flat_pattern.pdf" in pdf.headers["content-disposition"]
+    # DXF: the outline in model space at true size (same perimeter as the flat pattern)
+    doc = ezdxf.readfile(ws / "drawings" / "flat_sheet.dxf")
+    vis = [e for e in doc.modelspace() if e.dxf.layer == "VISIBLE" and e.dxftype() == "LINE"]
+    per = sum(math.dist(tuple(e.dxf.start)[:2], tuple(e.dxf.end)[:2]) for e in vis)
+    assert per == pytest.approx(st["sheet_metal"]["flat"]["perimeter_mm"], abs=1e-3)
+    assert len([e for e in doc.modelspace() if e.dxf.layer == "CENTER"]) == 2  # one centre line per bend
+    # Manufacturing Advisor: sheet metal from the model, flat size and bend count, advisory flags only
+    a = c.post(f"/api/m/manufacturing/projects/{pid}/analyse", json={"quantity": 10, "material": "steel_1018"}).json()
+    sig = a["signals"]["sheet"]
+    assert sig["model"] and sig["bend_count"] == 2 and sig["flat_size"] == st["sheet_metal"]["flat"]["size"]
+    flat3 = [f for f in a["findings"] if f["rule"] == "SHM-03"]
+    assert len(flat3) == 1 and flat3[0]["severity"] == "info" and "2 bends" in flat3[0]["title"]
+    assert not [f for f in a["findings"] if f["rule"] in ("SHM-04", "SHM-05")]  # 30 mm flange, R = T: no flags
+    assert "sheet_metal" in {r_["process"] for r_ in a["process"]["ranking"]}
+
+
+def json_dump(x: object) -> str:
+    import json
+
+    return json.dumps(x)
+
+
+def test_dfm_flags_short_flange_and_tight_radius() -> None:
+    from aicad.manufacturing.analyze import Inputs, analyse_shape
+    from aicad.manufacturing.shop import ShopProfile
+
+    t = 2.0
+    s, part = _plate(80, 50, t, 1.0, 0.44)  # R1 < T2
+    s, part = sm.flange(s, part, (0, 25, t), 6.0, 90)  # 6 mm outer < 4·T = 8 mm
+    fl = sm.flatten(s, part)
+    smd = sm.summary(s, fl)
+    a = analyse_shape(part, ShopProfile(), Inputs(quantity=10, material="steel_1018"), sheet_model=smd)  # type: ignore[arg-type]
+    by = {f["rule"]: f for f in a["findings"]}
+    assert by["SHM-04"]["severity"] == "warning" and by["SHM-04"]["value"] == pytest.approx(6.0)
+    assert "≥ 8 mm" in by["SHM-04"]["limit"]
+    assert by["SHM-05"]["severity"] == "warning" and by["SHM-05"]["value"] == pytest.approx(1.0)
+    assert a["cost"]  # the sheet line is costed from the flat blank
+    line = a["process"]["ranking"]
+    assert any(r["process"] == "sheet_metal" for r in line)
+    # advisory only: nothing claims the part is fit to make
+    text = json_dump(a["findings"]).lower()
+    assert "approved for manufacture" not in text and "manufacturable" not in text
+
+
+def test_agent_wording_hides_sheet_metal_helper_names() -> None:
+    from aicad.agent import prompt
+    from aicad.agent.session import scrub
+
+    out = scrub("I used fw.base_flange, then `fw.edge_flange` twice and fw.hem on the back edge.")
+    assert "fw." not in out and "base_flange" not in out and "edge_flange" not in out
+    assert "fw.edge_flange" in prompt.CAD_AGENT_INSTRUCTIONS and "fw.base_flange" in prompt.CAD_AGENT_INSTRUCTIONS

@@ -77,6 +77,7 @@ export default function ProjectStudio() {
   const [tab, setTab] = useState(() => (new URLSearchParams(location.search).get("panel") === "activity" ? "activity" : "tree"));
   const [branchDlg, setBranchDlg] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
+  const [flatView, setFlatView] = useState(false); // sheet metal (CAD-026): show the flat pattern instead of the part
   const [leftOpen, setLeftOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_left") !== "0"; } catch { return true; } });
   const [chatOpen, setChatOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_chat") !== "0"; } catch { return true; } });
   const setLeftOpen = (v: boolean) => { setLeftOpenS(v); try { localStorage.setItem("fw_studio_left", v ? "1" : "0"); } catch { /* */ } };
@@ -171,8 +172,9 @@ export default function ProjectStudio() {
     setSelection([]); setTool("orbit"); setSketch(null);
   };
   const openPm = (op: ManualFeature["op"], ed: ManualFeature | null = null, preset?: Record<string, unknown>) => {
+    setFlatView(false); // features are picked and previewed on the folded part
     if (op === "revolve" && !ed) { openPm("sketch", null, { feature: "revolve", ...(preset ?? {}) }); return; }
-    if (op === "sketch" || op === "revolve" || op === "rib" || op === "sketch2d") {
+    if (op === "sketch" || op === "revolve" || op === "rib" || op === "sketch2d" || op === "sm_base") {
       if (ed?.plane) {
         const pl = ed.plane; const n = pl.normal as V3;
         const faceId = topo?.faces.find(f => f.type === "plane" && f.normal && Math.abs(f.normal[0] * n[0] + f.normal[1] * n[1] + f.normal[2] * n[2] - 1) < 1e-6
@@ -305,6 +307,11 @@ export default function ProjectStudio() {
   if (!p) return <NotFoundPanel title="Project not found" body="It may have been deleted, or it belongs to a workspace you're not signed in to." action={<Link to="/app/projects"><Button>Back to projects</Button></Link>} />;
   const fp = st?.fingerprint;
   const mf = manual.data?.features ?? [];
+  const sheetInfo = st?.sheet_metal ?? null;
+  const hasSheet = !!sheetInfo && !sheetInfo.flat_error && !!sheetInfo.flat;
+  const flatOn = flatView && hasSheet && !!fp;
+  const toggleFlat = () => { if (!hasSheet) return; setPm(null); setSk(null); setSelection([]); setTool("orbit"); setFlatView(v => !v); };
+  const downloadDxf = () => { const a = document.createElement("a"); a.href = `/api/projects/${p.id}/files/flat.dxf`; a.download = ""; document.body.appendChild(a); a.click(); a.remove(); };
   const tabs: [string, React.ReactNode, string][] = [["tree", <ListTree className="h-3.5 w-3.5" />, "Tree"], ["checks", <Check className="h-3.5 w-3.5" />, "Checks"],
     ["params", <SlidersHorizontal className="h-3.5 w-3.5" />, "Params"], ["mass", <Scale className="h-3.5 w-3.5" />, "Mass"],
     ["revs", <History className="h-3.5 w-3.5" />, "Revisions"], ["files", <Download className="h-3.5 w-3.5" />, "Files"],
@@ -319,7 +326,7 @@ export default function ProjectStudio() {
             <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} manual={mf} onBusy={setManualBusy}
               repair={repairOf(pm.editing)}
               onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); setRedo([]); refresh(); setTool("orbit"); }}
-              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} usedIn={usedIn} />
+              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} usedIn={usedIn} sheet={sheetInfo} />
           ) : paramPm ? (
             <ParamEditPM key={paramPm.n} project={p} rows={paramPm.rows} summary={paramPm.summary} usedIn={usedIn}
               onDone={() => { setParamPm(null); setRedo([]); refresh(); }} onCancel={() => setParamPm(null)} />
@@ -329,7 +336,7 @@ export default function ProjectStudio() {
                 {tabs.map(([v, icon, label]) => <Tab key={v} compact value={v} title={label}>{icon}{tab === v && label}</Tab>)}
               </TabList>
               <div className="min-h-0 flex-1 overflow-y-auto">
-                <TabPanel value="tree"><TreePanel status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
+                <TabPanel value="tree"><TreePanel flatOn={flatOn} onFlat={hasSheet ? toggleFlat : undefined} status={st} topo={topo} manual={mf} busy={manualBusy} onHover={setHl}
                   recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)}
                   selectedFeatures={featureChips} agentBusy={!!p.agent?.busy} onDeleteDesign={setDelTarget}
                   onEditParams={n => { setParamFocus(n); setTab("params"); }}
@@ -364,6 +371,7 @@ export default function ProjectStudio() {
   return (
     <div className="flex h-full flex-col">
       <CommandManager touch={compact} onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} library={libraryModules} onMake={code => navigate(`/app/modules/${code}?project=${id}`)} canNormal={!!selFace}
+        sheet={{ has: hasSheet, flat: flatOn, onFlat: toggleFlat, onDxf: downloadDxf }}
         left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
           <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className={cx("rounded text-muted hover:bg-text/5", compact ? "p-2" : "p-1")} aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
           {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"
@@ -393,7 +401,7 @@ export default function ProjectStudio() {
           {sidePanel}
         </aside>}
         <div className="relative min-h-[320px] min-w-0 overflow-hidden" data-tour="viewer">
-          <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/topo.json` : null} version={fp ? st?.build_id : `keep`}
+          <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/${flatOn ? "flat.topo.json" : "topo.json"}` : null} version={fp ? (flatOn ? `${st?.build_id}-flat` : st?.build_id) : `keep`}
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
             highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
@@ -407,6 +415,16 @@ export default function ProjectStudio() {
                 <button onClick={() => setDialog("import")} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Import STEP</button>
               </div></div>} />
           <CollabBanner projectId={p.id} onBranch={() => setBranchDlg(true)} />
+          {hasSheet && !sk && (
+            <div className="absolute right-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border bg-panel/95 p-1 pr-2 text-[12px] shadow-card" data-sheet-chip>
+              <div className="inline-flex overflow-hidden rounded border border-border">
+                <button onClick={() => flatOn && toggleFlat()} className={cx("px-2 py-0.5", !flatOn ? "bg-primary text-white" : "text-muted hover:bg-text/5")} aria-pressed={!flatOn}>Folded</button>
+                <button onClick={() => !flatOn && toggleFlat()} className={cx("px-2 py-0.5", flatOn ? "bg-primary text-white" : "text-muted hover:bg-text/5")} aria-pressed={flatOn} data-flat-toggle>Flat pattern</button>
+              </div>
+              <Tip content={`Sheet ${num(sheetInfo!.thickness, 2)} mm · default R${num(sheetInfo!.radius, 2)} · K ${num(sheetInfo!.k_factor, 3)}. Bend allowance = angle × (R + K × T). Flat size is the outline's bounding box.`} side="bottom">
+                <span className="whitespace-nowrap text-muted" data-flat-size>{num(sheetInfo!.flat!.size[0], 1)} × {num(sheetInfo!.flat!.size[1], 1)} mm · {sheetInfo!.bend_count} bend{sheetInfo!.bend_count === 1 ? "" : "s"}</span>
+              </Tip>
+            </div>)}
           {sk?.phase === "pick" && (
             <div className="absolute left-1/2 top-14 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center gap-2 whitespace-nowrap rounded-lg border border-primary/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
               <PenLine className="h-4 w-4 text-primary" />{fp ? "Select a flat face, or a plane:" : "Choose a sketch plane:"}

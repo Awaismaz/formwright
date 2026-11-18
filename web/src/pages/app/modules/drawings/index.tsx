@@ -158,6 +158,8 @@ export function DrawingActions({ pid, rec, canEdit, verified, stale, busy, onReg
           <MenuContent>
             <MenuItem icon={<Download />} onSelect={() => { location.href = file("sheet.svg"); }}>SVG (issue copy)</MenuItem>
             <MenuItem icon={<Eye />} onSelect={() => { location.href = file("sheet.pdf", "review"); }}>Review copy PDF (tags and legend)</MenuItem>
+            {rec.flat_pattern && <MenuItem icon={<Download />} onSelect={() => { location.href = file("flat.pdf"); }}>Flat pattern sheet PDF</MenuItem>}
+            {rec.flat_pattern && <MenuItem icon={<Download />} onSelect={() => { location.href = file("flat.dxf"); }}>Flat pattern sheet DXF</MenuItem>}
             <MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/drawings/${pid}/export`, "drawing.fwdrw", "fwdrw"); }}>Formwright drawing (.fwdrw) with its model</MenuItem>
           </MenuContent>
         </Menu>
@@ -238,9 +240,11 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
     timer.current = window.setTimeout(() => void generate(next), 250);
   };
 
+  const [sheetNo, setSheetNo] = useState<"views" | "flat">("views"); // sheet metal: the flat-pattern sheet
+  const showFlat = sheetNo === "flat" && !!rec?.flat_pattern;
   const svgQ = useQuery({
-    queryKey: ["drw-svg", pid, rec?.build_id, nonce],
-    queryFn: () => fetchText(`${BASE}/projects/${pid}/files/sheet.svg`),
+    queryKey: ["drw-svg", pid, rec?.build_id, nonce, showFlat],
+    queryFn: () => fetchText(`${BASE}/projects/${pid}/files/${showFlat ? "flat.svg" : "sheet.svg"}`),
     enabled: !!rec,
     staleTime: Infinity,
   });
@@ -317,8 +321,8 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
         {/* sheet */}
         <div className="relative min-w-0 flex-1">
           {rec && svgQ.data ? <SheetViewer svg={svgQ.data} widthMm={rec.sheet.w} heightMm={rec.sheet.h} busy={busy} highlight={locate}
-              pickHint={pick ? `${pick.hint} · Esc to cancel` : undefined}
-              onPick={pick ? (x, y) => {
+              pickHint={pick && !showFlat ? `${pick.hint} · Esc to cancel` : undefined}
+              onPick={pick && !showFlat ? (x, y) => {
                 const p = sheetToView(rec, x, y);
                 if (!p) { toast.error("Click inside the front, top, right or section view."); return; }
                 const cb = pick.cb; setPick(null); cb(p);
@@ -327,6 +331,10 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
                 {busy || svgQ.isLoading ? <span className="inline-flex items-center gap-2"><RefreshCw className="h-4 w-4 animate-spin" />Generating views from the verified model…</span>
                   : st.project.verified ? "No drawing yet." : "Nothing to draw yet."}
               </div>}
+          {rec?.flat_pattern && <div className="absolute left-3 top-3 z-10 inline-flex overflow-hidden rounded border border-border bg-panel text-[12px] shadow-card" data-sheet-switch>
+            <button onClick={() => setSheetNo("views")} className={cx("px-2.5 py-1", !showFlat ? "bg-primary text-white" : "text-muted hover:bg-panel2")}>Sheet 1 · Views</button>
+            <button onClick={() => setSheetNo("flat")} className={cx("px-2.5 py-1", showFlat ? "bg-primary text-white" : "text-muted hover:bg-panel2")} data-flat-sheet>Sheet 2 · Flat pattern ({rec.flat_pattern.bends} bend{rec.flat_pattern.bends === 1 ? "" : "s"})</button>
+          </div>}
           {busy && rec && <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-border bg-panel px-3 py-1 text-[12px] text-muted shadow-card"><span className="inline-flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Regenerating…</span></div>}
         </div>
       </div>

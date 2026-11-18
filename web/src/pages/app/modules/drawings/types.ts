@@ -51,6 +51,9 @@ export interface CalloutRow { id: string; type?: "hole" | "radius" | "chamfer"; 
 export interface DrawingRecord {
   version: string; build_id: string; model_rev: string | null; sheet_rev?: string; issued?: boolean;
   options: DrawingOptions; edits?: DrawingEdits;
+  /** sheet metal (CAD-026): the flat-pattern sheet (outline, bend lines, bend table), null for other parts */
+  flat_pattern?: { scale: string; size: [number, number]; bends: number; thickness: number; k_factor: number; files: string[];
+    table: { n: number; name: string; direction: "UP" | "DOWN"; angle: number; radius: number; k: number; ba: number; span: number }[] } | null;
   sheet: { size: string; w: number; h: number; scale: string; iso_scale: number; projection: string; iso_dropped?: boolean;
     views?: Record<string, { rect: number[]; scale: number; origin: number[] }> };
   details?: { drawn: { letter: string; parent: string; scale: string; u: number; v: number; r: number }[]; skipped: string[] };

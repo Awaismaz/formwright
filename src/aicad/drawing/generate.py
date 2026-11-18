@@ -473,10 +473,21 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
         (dest / "sheet.svg").write_text(to_svg(issue_copy, doc_title), encoding="utf-8", newline="\n")
     to_pdf(issue_copy, dest / "sheet.pdf", doc_title)
     to_dxf(issue_copy, dest / "sheet.dxf")
+    # sheet metal (CAD-026): a second sheet with the flat pattern, its bend lines and the bend table
+    flat_rec = None
+    flat_p = out_dir / "flat.json"
+    if status.get("sheet_metal") and flat_p.is_file():
+        from aicad.drawing import flat as flat_mod
+
+        flat_rec = flat_mod.write(json.loads(flat_p.read_text(encoding="utf-8")), dest, sheet_meta, rev_rows,
+                                  opts["sheet"], opts["projection"] == "first")
+    else:
+        for n in ("flat_sheet.svg", "flat_sheet.pdf", "flat_sheet.dxf"):
+            (dest / n).unlink(missing_ok=True)
     timings = {"geometry_s": round(t_geo, 3), "layout_s": round(t_layout, 3),
                "total_s": round(time.perf_counter() - t0, 3)}
-    files = [n for n in ("sheet.svg", "sheet_issue.svg", "sheet.pdf", "sheet_review.pdf", "sheet.dxf")
-             if (dest / n).is_file()]
+    files = [n for n in ("sheet.svg", "sheet_issue.svg", "sheet.pdf", "sheet_review.pdf", "sheet.dxf",
+                         "flat_sheet.svg", "flat_sheet.pdf", "flat_sheet.dxf") if (dest / n).is_file()]
     part = an["part"]
     rec = {
         "version": VERSION, "build_id": row.get("build_id"), "build": stamp, "model_rev": row.get("rev"),
@@ -494,6 +505,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
                      "depth": h["thread"].get("depth"), "feature": h["thread"].get("name"), "dia": h["dia"]}
                     for h in cen["holes"] + cen["outer"] if h.get("thread")],
         "threads_unmatched": (an.get("threads") or {}).get("unmatched", 0),
+        "flat_pattern": flat_rec,
         "imported": {"inferred_only": True, "component": ((recog or {}).get("component") or {}).get("name"),
                      "unrecognised_faces": sum(int(v) for v in ((recog or {}).get("unrecognised") or {}).values())}
         if imported else None,
