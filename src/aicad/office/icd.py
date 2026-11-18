@@ -41,6 +41,8 @@ import math
 import re
 from typing import Any
 
+from aicad.toolbox import BEARING as _BEARING
+
 # ----------------------------------------------------------------------------- constants (documented, PD-xx)
 CLEARANCE = {3: 3.4, 4: 4.5, 5: 5.5, 6: 6.6, 8: 9.0, 10: 11.0, 12: 13.5, 16: 17.5}  # ISO 273 medium series
 WASHER_OD = {3: 7.0, 4: 9.0, 5: 10.0, 6: 12.0, 8: 16.0, 10: 20.0, 12: 24.0, 16: 30.0}  # ISO 7089
@@ -60,7 +62,6 @@ ROTATIONS = (0, 90, 180, 270)  # quarter turns of a part frame about +Z (Archie'
 
 # Deep-groove ball bearings (the Toolbox table, ISO 15): designation -> (bore d, OD D, width B). 62xx first: the
 # office prefers the heavier series for shafts it sizes itself.
-from aicad.toolbox import BEARING as _BEARING
 
 BEARINGS: dict[int, tuple[float, float, float]] = {k: (float(v[0]), float(v[1]), float(v[2])) for k, v in _BEARING.items()}
 HOUSING_FITS = ("H7", "J7", "K7")

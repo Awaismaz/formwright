@@ -413,6 +413,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     state = prog["assembly"]
     log: list[dict[str, str]] = []
     stats = {"stacks": 0, "asked": 0, "binned": 0}
+    seated: dict[str, int] = {}
 
     def say(text: str, tone: str = "ok") -> None:
         log.append({"agent": "Fitz", "text": text, "tone": tone})
@@ -447,7 +448,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         inst = aservice.add_instance(aroot, adoc, key, T=xform.to12(xform.translate(tuple(at))),
                                                      name=t["title"])
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
-                    stats["seated"] = stats.get("seated", 0) + len(seat["at"])
+                    what = "bearing" if seat["code"] == "bearing" else "dowel pin"
+                    seated[what] = seated.get(what, 0) + len(seat["at"])
                     extra = int(t.get("qty") or 1) - len(seat["at"])
                     say(f"Fitz seated {len(seat['at'])} × {seat['title']} in the {seat['what']} of {seat['interface']}"
                         + (f" ({extra} more than the ICD places: left out)" if extra > 0 else ""),
@@ -552,9 +554,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
         bits.append(f"fitted {stats['stacks']} fastener stack{'s' if stats['stacks'] != 1 else ''}")
     elif stats["stacks"]:
         bits.append(f"fitted {stats['stacks']} fastener stacks between sub-assemblies")
-    if stats.get("seated"):
-        bits.append(f"seated {stats['seated']} bearing{'s' if stats['seated'] != 1 else ''} / pin"
-                    f"{'s' if stats['seated'] != 1 else ''} per the ICD")
+    for what, n in seated.items():
+        bits.append(f"seated {n} {what}{'s' if n != 1 else ''} per the ICD")
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)

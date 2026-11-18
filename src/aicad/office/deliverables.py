@@ -111,22 +111,25 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     for r in asm_rows or []:
-        t = None
+        # every planned item whose instances are in this row (two bearing tickets can share one Toolbox bearing)
+        ts: list[dict[str, Any]] = []
         for iid in r.get("instances") or []:
             o = inst_items.get(iid) or {}
-            if o.get("item") in by_item:
-                t = by_item[o["item"]]
-                break
-        if t is None and r["kind"] in ("project", "placeholder"):
-            t = by_project.get(part_projects.get(r.get("part_key") or ""))
-        if t is None and r["kind"] == "toolbox":
+            if o.get("item") in by_item and by_item[o["item"]] not in ts:
+                ts.append(by_item[o["item"]])
+        if not ts and r["kind"] in ("project", "placeholder"):
+            t0 = by_project.get(part_projects.get(r.get("part_key") or ""))
+            ts = [t0] if t0 else []
+        if not ts and r["kind"] == "toolbox":
             code = str(r.get("code") or "")
             cands = [x for x in by_code.get(code, []) if x["id"] not in seen]
-            t = cands[0] if cands else None
+            ts = cands[:1]
+        ts = [x for x in ts if x["id"] not in seen]
+        t = ts[0] if ts else None
         qty = int(r["qty"])
-        if t is not None and t["id"] not in seen:
-            qty = max(qty, int(t.get("qty") or 1)) if r["kind"] != "toolbox" or any(
-                (inst_items.get(i) or {}).get("bin") for i in r.get("instances") or []) else qty
+        planned = sum(int(x.get("qty") or 1) for x in ts)
+        if ts and (r["kind"] != "toolbox" or any((inst_items.get(i) or {}).get("bin") for i in r.get("instances") or [])):
+            qty = max(qty, planned)
         each = r.get("mass_each_g")
         rows.append({
             "qty": qty, "part": r["part"], "make_buy": "buy" if r["kind"] == "toolbox" else "make",
@@ -137,10 +140,10 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
                              "Company part, reused" if t is not None and (t.get("reuse") or {}).get("source") == "project"
                              else "Designed in this program") if r["kind"] != "toolbox" else
                             ("From the plan" if t is not None else "Added by Fitz for the bolted joints")),
-            "ticket": t["id"] if t is not None else None, "key": t["key"] if t is not None else None,
+            "ticket": t["id"] if t is not None else None,
+            "key": ", ".join(x["key"] for x in ts) if ts else None,
             "part_key": r.get("part_key"), "instances": r.get("instances") or []})
-        if t is not None:
-            seen.add(t["id"])
+        seen.update(x["id"] for x in ts)
     for t in tickets:  # plan items not in the assembly (yet)
         if t["kind"] not in ("part", "standard") or t["id"] in seen:
             continue
@@ -202,7 +205,10 @@ def dfm_part(t: dict[str, Any], a: dict[str, Any] | None, error: str | None = No
     pick = primary if primary in procs else (best or {}).get("process")
     unit = (procs.get(pick or "") or {}).get("unit_cost")
     counts = a.get("summary") or (a.get("chk13") or {}).get("counts") or {}
-    top = [f for f in a.get("findings") or [] if f["severity"] in ("critical", "warning")]
+    flagged = [f for f in a.get("findings") or [] if f["severity"] in ("critical", "warning")]
+    # the findings for the process Smithy picked come first (a moulding draft note is not news for a milled part)
+    mine = [f for f in flagged if f.get("process") == pick or pick in (f.get("also") or [])]
+    top = (mine or flagged)
     top.sort(key=lambda f: (f["severity"] != "critical", f["rule"]))
     return {**base, "ok": True, "process": pick, "process_name": PROCESS_NAMES.get(pick or "", best and best.get("name")
                                                                                  or pick),

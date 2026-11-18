@@ -153,6 +153,18 @@ def test_program_bom_rows_and_dfm_summary() -> None:
     assert b["total_mass_g"] == 100 + 2 * 20 + 4 * 8 + 6 * 3.5 + 8 * 1  # 201.0
     csv = deliverables.bom_csv(b)
     assert csv.splitlines()[0].startswith("Item,Qty,Part,Make/Buy,Designation") and "TR-3" in csv
+    # two planned bearings (2 off each) seated as one Toolbox part: one line of 4, both tickets on it (found in the
+    # walkthrough: the second ticket was listed again)
+    tb = tickets[:2] + [{"id": f"t{n}", "key": f"TR-{n}", "kind": "standard", "item_id": f"bear{n}", "title": "Bearing",
+                         "qty": 2, "reuse": {"source": "toolbox", "code": "bearing", "title": "Ball bearing 6205"}}
+                        for n in (6, 7)]
+    rb = rows[:2] + [{"part": "Ball bearing 6205", "kind": "toolbox", "code": "bearing", "qty": 4, "part_key": "k6",
+                      "instances": ["e1", "e2", "e3", "e4"], "designation": "Ball bearing 6205", "standard": "ISO 15",
+                      "material": "Bearing steel", "mass_each_g": 120.0}]
+    ib = {**inst, "e1": {"item": "bear6"}, "e2": {"item": "bear6"}, "e3": {"item": "bear7"}, "e4": {"item": "bear7"}}
+    bb = deliverables.bom(tb, rb, ib, {"k1": "p1", "k2": "p2"}, {})
+    assert [(r["part"], r["qty"], r["key"]) for r in bb["rows"] if r["make_buy"] == "buy"] == [
+        ("Ball bearing 6205", 4, "TR-6, TR-7")]
     # before the program assembly: from the tickets
     b0 = deliverables.bom(tickets, None, project_info={"p1": {"name": "Base plate", "material": "Al", "mass_g": 50.0}})
     assert [(r["part"], r["qty"], r["make_buy"]) for r in b0["rows"]] == [

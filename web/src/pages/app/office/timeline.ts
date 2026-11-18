@@ -65,7 +65,7 @@ export function sparkline(points: { n: number; mape: number }[], w: number, h: n
 
 /** "4 → 3.4 min per unit" */
 export function rateLine(before: number, after: number): string {
-  const f = (x: number) => String(Math.round(x * 100) / 100);
+  const f = (x: number) => String(Math.round(x * 1000) / 1000);
   return before === after ? `${f(after)} min per unit` : `${f(before)} → ${f(after)} min per unit`;
 }
 

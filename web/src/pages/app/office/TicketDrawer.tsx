@@ -65,7 +65,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
   return (
     <Modal open onOpenChange={o => { if (!o) onClose(); }} wide
       title={<span className="flex items-center gap-2"><span className="font-mono text-[13px] text-muted">{t.key}</span>{t.title}{t.qty > 1 && <Badge>×{t.qty}</Badge>}</span>}
-      description={`${program.name} · ${t.kind === "integration" ? "assembly integration" : t.kind === "standard" ? "standard part" : `${program.families.find(f => f.code === t.family)?.label.toLowerCase()} part`}`}>
+      description={`${program.name} · ${t.kind === "integration" ? "assembly integration" : t.kind === "standard" ? "standard part" : t.kind === "deliverable" ? "program deliverable (after integration)" : `${program.families.find(f => f.code === t.family)?.label.toLowerCase()} part`}`}>
       <div className="grid gap-5 md:grid-cols-[1fr_220px]">
         <div className="min-w-0 space-y-4">
           <div className="flex items-center gap-3 rounded-lg border border-border p-3">
@@ -167,6 +167,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
             {(t.review_tokens ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted">Review tokens</span><b>{t.review_tokens}</b></div>}
             {(t.run?.review_round ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted">Sent back</span><b>{t.run?.review_round}×</b></div>}
           </div>
+          {deliverable ? <p className="text-[11.5px] text-muted">Progress follows the sheets (Ortho) or the parts (Smithy) done; the deliverables cost no tokens.</p> :
           <div>
             <div className="label mb-1">Milestones</div>
             <ul className="space-y-1">{program.constants.milestones.map(m => {
@@ -177,7 +178,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
                 <span className="flex-1">{m.label}</span><span className="tabular-nums text-muted">{m.weight} %</span></label></li>;
             })}</ul>
             <p className="mt-1.5 text-[11px] text-muted">Set from the agent's real work: the brief read, its first build, the gating checks on the linked part, its self-review, and Gage's approval.</p>
-          </div>
+          </div>}
         </div>
       </div>
     </Modal>
