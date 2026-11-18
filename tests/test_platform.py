@@ -227,7 +227,9 @@ def test_god_mode_scenarios_and_bypass(app_client: TestClient) -> None:
     c.patch("/api/god", json={"enabled": True, "bypass_paywall": True, "bypass_tokens": True})
     assert c.get(f"/api/projects/{pid}").json()["agent"]["allowed"] is True
     c.post("/api/god/scenario", json={"scenario": "all_modules"})
-    assert len(c.get("/api/auth/me").json()["org"]["modules"]) == 8
+    from aicad.platform.catalog import MODULES
+
+    assert len(c.get("/api/auth/me").json()["org"]["modules"]) == len(MODULES)
     c.post("/api/god/scenario", json={"scenario": "fresh_signup"})
     assert c.get("/api/auth/me").json()["next_step"] == "onboarding"  # unverified, inside the first-day grace
     c.post("/api/god/scenario", json={"scenario": "verify_overdue"})

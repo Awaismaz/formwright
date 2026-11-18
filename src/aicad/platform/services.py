@@ -119,6 +119,8 @@ def org_modules(db: Session, org: Organization) -> set[str]:
                                                                      if m["status"] == "live"}
     elif plan and org.plan_status in ("trialing", "active", "past_due"):
         mods |= set(plan.modules or [])
+        if "design" in mods:  # bring-your-own-key modules cost the platform nothing to run: every plan has them
+            mods |= {c for c, m in MODULES.items() if m.get("byo_key") and m["status"] == "live"}
     mods |= {e.module for e in db.scalars(select(Entitlement).where(Entitlement.org_id == org.id))}
     return mods
 

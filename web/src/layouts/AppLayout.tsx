@@ -213,7 +213,8 @@ export default function AppLayout() {
       label: m.name, icon: <Icon name={m.icon} />,
       active: m.code === "design" ? inStudio : undefined,
       right: m.status !== "live" ? <span className="rounded border border-white/15 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-chrome-muted">Preview</span>
-        : m.code !== "design" && !owned.has(m.code) ? <Lock className="h-3 w-3 text-chrome-muted" aria-label="Not in your plan" /> : undefined,
+        : m.code !== "design" && !owned.has(m.code) ? <Lock className="h-3 w-3 text-chrome-muted" aria-label="Not in your plan" />
+        : m.beta ? <span className="rounded border border-white/15 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-chrome-muted">Beta</span> : undefined,
     }));
   const navSections: NavSectionDef[] = [
     { label: "Workspace", items: [

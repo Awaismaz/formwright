@@ -4,6 +4,32 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
+
+### Done
+- New module `airender`: AI marketing visuals of a verified part via the OpenAI Images API (edit with the part's
+  reference render) on the workspace's own OpenAI key. Refine → Review → Generate; gallery with download, variation,
+  again, use prompt. Report: docs/reports/ai-render.md.
+- Key stored Fernet-encrypted (server secret `FW_SECRET_KEY`, dev secret in data/), masked hint only, admin-managed,
+  deletable; per-workspace consent to send the reference and prompt to OpenAI.
+- Prompt refinement: deterministic template + one-shot Claude polish (no tools), geometry clause and "Avoid" list
+  always enforced at send time. Entry points: Make tab, Mesh Studio header, Modules, sidebar, Settings card.
+
+### Verified
+- `pytest tests/test_airender.py` 11 pass (all OpenAI/Claude calls mocked), test_platform pass; vitest 4 new;
+  ruff, tsc, vite build clean. Browser walkthrough on port 8797 with a throwaway data dir and `FW_AI_RENDER_FAKE=1`:
+  0 console errors besides the deliberate rejected-key 400; screenshots reviewed and fixes made.
+
+### Not done / blocked
+- No real OpenAI call made (needs the founder's key). Punch-list id MSH-012 was already taken, so this is MSH-013.
+
+### Decisions parked
+- PD-43 (model/size/quality defaults, polish metering), PD-44 (BYO only, included with the Design Studio; platform
+  key later).
+
+### Next
+- Founder adds a key and runs one real render per scene to tune prompts and ETA figures.
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done
