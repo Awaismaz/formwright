@@ -49,14 +49,26 @@ def _inside(p: str, root: Path) -> bool:
     return rp == root or root in rp.parents
 
 
-def make_guard(root: Path) -> Any:
+DISCUSS_PREFIX = (
+    "[Discussion mode: the user wants to talk, not build. Do not create, edit or rebuild the model; those tools are "
+    "disabled in this mode. You may read the current design to answer. Answer engineering questions directly and "
+    "concisely, with numbers, standards and trade-offs where useful. If the user is planning a design, help shape it: "
+    "requirements, options with trade-offs, a recommended approach, key dimensions, and a numbered list under a "
+    "'Build plan' heading. Use clickable questions for open choices. The user can press 'Build this plan' to switch "
+    "to building.]\n\n"
+)
+
+
+def make_guard(root: Path, mode_of: Any = None) -> Any:
     root = root.resolve()
 
     async def guard(input_data: Any, tool_use_id: str | None, context: Any) -> dict[str, Any]:
         name = input_data.get("tool_name", "")
         ti = input_data.get("tool_input", {}) or {}
         reason = None
-        if name in ("Read", "Write", "Edit", "Glob", "Grep"):
+        if mode_of is not None and mode_of() == "discuss" and (name in ("Write", "Edit") or "build_model" in name):
+            reason = "Discussion mode: the design must not be changed. Describe the plan instead."
+        elif name in ("Read", "Write", "Edit", "Glob", "Grep"):
             for k in PATH_KEYS:
                 if ti.get(k) and not _inside(str(ti[k]), root):
                     reason = f"{k} outside the project workspace is not allowed"
@@ -209,6 +221,7 @@ class AgentSession:
         self.last_prompt: str | None = None  # the request behind the next revision (change notices)
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.busy = False
+        self.mode = "build"  # "build" | "discuss" (no model changes; enforced by the tool guard)
         self.session_id: str | None = None
         self.auth: str | None = None
         self.turn_meta: dict[str, Any] = {}
@@ -270,8 +283,8 @@ class AgentSession:
             mcp_servers={"cad": make_cad_server(self.workspace, self.out_dir, self.worker_key)},
             system_prompt={"type": "preset", "preset": "claude_code", "append": CAD_AGENT_INSTRUCTIONS},
             setting_sources=[],  # isolate from the developer's personal ~/.claude config
-            hooks={"PreToolUse": [HookMatcher(matcher="Read|Write|Edit|Glob|Grep|WebFetch",
-                                              hooks=[make_guard(self.workspace)])]},
+            hooks={"PreToolUse": [HookMatcher(matcher="Read|Write|Edit|Glob|Grep|WebFetch|mcp__cad__build_model",
+                                              hooks=[make_guard(self.workspace, lambda: self.mode)])]},
             max_turns=MAX_TURNS,
             max_buffer_size=AGENT_BUFFER_BYTES,
             model=self.model,
@@ -300,13 +313,16 @@ class AgentSession:
     def run_spent_usd(self) -> float:
         return sum(self._run_costs.values())
 
-    async def send(self, prompt: str, shown: str | None = None) -> None:
+    async def send(self, prompt: str, shown: str | None = None, mode: str = "build") -> None:
         """One agent turn. ``shown``: what the chat shows as the user's message when ``prompt`` is a structured
         brief a module wrote on the user's behalf (the brief itself is never published)."""
         if self.busy:
             raise RuntimeError("agent is busy")
         self.busy = True
-        self.publish({"type": "user", "text": shown or prompt})
+        self.mode = "discuss" if mode == "discuss" else "build"
+        if self.mode == "discuss":
+            shown, prompt = shown or prompt, DISCUSS_PREFIX + prompt
+        self.publish({"type": "user", "text": shown or prompt, "mode": self.mode})
         self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)",
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})

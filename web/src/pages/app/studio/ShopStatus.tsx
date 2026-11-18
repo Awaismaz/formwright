@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 /** What the agent is doing right now, used to pick the shop-floor vocabulary. */
-export type ShopPhase = "plan" | "read" | "build" | "inspect" | "finish";
+export type ShopPhase = "plan" | "read" | "build" | "inspect" | "finish" | "discuss";
 
 /** Status words by phase, like a machinist talking you through the job. Shuffled, never repeated back to back. */
 const WORDS: Record<ShopPhase, string[]> = {
@@ -15,6 +15,9 @@ const WORDS: Record<ShopPhase, string[]> = {
     "Knurling", "Profiling", "Taking a finish pass", "Clearing chips"],
   inspect: ["Gauging", "Mic-ing diameters", "Checking runout", "Go / no-go testing", "Verifying tolerances",
     "Inspecting the first article", "Checking for burrs", "Measuring on the surface plate"],
+  discuss: ["Thinking it through", "Weighing the options", "Leafing through Machinery's Handbook", "Running the numbers",
+    "Sketching on a napkin", "Checking the standards", "Comparing materials", "Asking the old machinist",
+    "Doing a quick hand calc", "Drawing a free-body diagram", "Considering the load path"],
   finish: ["Polishing", "Lapping", "Honing the finish", "Writing up the traveller", "Stamping the part number",
     "Bagging and tagging"],
 };

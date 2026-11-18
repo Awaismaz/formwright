@@ -86,6 +86,7 @@ class ChatIn(BaseModel):
     prompt: str
     attachments: list[Attachment] = []
     budget_tokens: int | None = None  # stop this run at N tokens (default: the workspace's run budget)
+    mode: str = "build"  # "build" or "discuss" (talk/plan only: the agent cannot change the model)
 
 
 ALLOWED_ATTACH = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
@@ -882,11 +883,13 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
         metering.reserve(org.id, run.id, budget)
     s.run_id = run.id  # type: ignore[attr-defined]
     s.run_budget_usd = budget * metering.USD_PER_TOKEN if budget is not None else None
-    s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files, "run_id": run.id, "budget_tokens": budget}
+    mode = "discuss" if body.mode == "discuss" else "build"
+    s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files, "run_id": run.id, "budget_tokens": budget,
+                   "mode": mode}
     shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief
     if shown and files:
         shown += "\n\n[Reference image attached]"
-    t = asyncio.create_task(s.send(text, shown=shown) if shown else s.send(text))
+    t = asyncio.create_task(s.send(text, shown=shown, mode=mode))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
     track(ctx.db, "prompt_sent", ctx.user, p.org_id, chars=len(text))

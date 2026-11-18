@@ -116,12 +116,12 @@ export interface AgentQuestion { id: string; question: string; options: string[]
 
 export type AgentEvent =
   | { type: "hello"; busy: boolean }
-  | { type: "user"; text: string; t: number }
+  | { type: "user"; text: string; t: number; mode?: "build" | "discuss" }
   | { type: "text"; text: string; t: number }
   | { type: "system"; model: string; auth: string }
   | { type: "tool"; id: string; name: string; brief: string }
   | { type: "tool_result"; id: string; is_error: boolean; brief: string; revision?: number }
-  | { type: "result"; subtype: string; turns: number | null; duration_s: number; cost_est_usd: number | null;
+  | { type: "result"; mode?: "build" | "discuss"; subtype: string; turns: number | null; duration_s: number; cost_est_usd: number | null;
       auth: string | null; tokens_charged?: number; token_balance?: number; budget_stopped?: boolean; budget_tokens?: number | null }
   | { type: "meter"; tokens: number; budget_tokens: number | null }
   | { type: "error"; text: string }

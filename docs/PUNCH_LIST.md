@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 
 | Status | Items |
 |---|---|
-| Done | 165 |
+| Done | 166 |
 | In Progress | 23 |
 | Backlog | 91 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **297** |
+| **Total** | **298** |
 
 Recomputed 2026-11-18 after reconciling rows the Design Studio work had already delivered.
 
@@ -238,6 +238,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DS-034 | Studio | **Typed commands without tokens** (Ctrl+K in the Studio): `fillet 3`, `hole M6 x4 10 from edges`, `view top`, `suppress <feature>` on the current selection | P2 | Done | M2 | LT | Eng | DS-031 | Commands parse and run deterministically | `web/src/pages/app/studio/commands.test.ts` | |
 | DS-035 | Studio | **Agent fills the PropertyManager** (audit IDEA 2): small edits open the real PM pre-filled for OK instead of writing code | P2 | Backlog | M3 | LT | Eng | DS-031 | Small edit in seconds, few tokens | | From the audit |
 | DS-036 | Studio | **Shop-floor status while the agent works**: meshing-gear animation (ratio-correct, reduced-motion aware) and Claude-style rotating status words in machinist terms by phase (planning, reading the print, machining, inspecting, writing up), elapsed time and the real step underneath | P1 | Done | M2 | MVP | Eng | DS-014 | Words change every ~2.6 s, never repeat back to back, match the phase | `web/src/pages/app/studio/ShopStatus.tsx`; browser check with a simulated agent stream (Tapping threads → Drilling → Knurling during a build) | Founder request 2026-11-18 |
+| DS-037 | Studio | **Discuss / Build mode in chat**: Discuss = general engineering Q&A and design planning; the agent cannot change or rebuild the model (enforced by the tool guard, not only the prompt); plan replies end with a numbered Build plan and a one-click 'Build this plan'; discussion bubbles tagged; shop status uses 'thinking' vocabulary | P1 | Done | M2 | MVP | Eng | DS-014 | Write/Edit/build denied in Discuss; reading allowed | `tests/test_agent.py`::test_discussion_mode_blocks_model_changes | Founder request 2026-11-18 |
 
 ### Design Office — Chief Designer and specialist agents (founder-requested 2026-11-18)
 

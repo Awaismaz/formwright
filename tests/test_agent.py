@@ -190,3 +190,25 @@ def test_stl_export_deviation_is_absolute(tmp_path: Path) -> None:
             if rho > r * 0.5:
                 worst = max(worst, r - rho)
     assert 0 < worst <= 0.0101, worst  # float32 STL coordinates
+
+
+def test_discussion_mode_blocks_model_changes(tmp_path) -> None:
+    import asyncio
+
+    from aicad.agent.session import make_guard
+
+    mode = {"v": "discuss"}
+    guard = make_guard(tmp_path, lambda: mode["v"])
+
+    def decide(name: str, ti: dict) -> str | None:
+        out = asyncio.run(guard({"tool_name": name, "tool_input": ti}, None, None))
+        return out.get("hookSpecificOutput", {}).get("permissionDecision")
+
+    inside = str(tmp_path / "model.py")
+    assert decide("Write", {"file_path": inside}) == "deny"
+    assert decide("Edit", {"file_path": inside}) == "deny"
+    assert decide("mcp__cad__build_model", {}) == "deny"
+    assert decide("Read", {"file_path": inside}) is None  # reading the design is fine while discussing
+    mode["v"] = "build"
+    assert decide("Write", {"file_path": inside}) is None
+    assert decide("mcp__cad__build_model", {}) is None
