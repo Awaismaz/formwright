@@ -424,7 +424,8 @@ class PlatformEnv(orchestrator.Env):
         ws = workspace_for(p)
         spec = {}
         if interfaces.has_icd(doc) and t["item_id"] in (doc.get("skeleton") or {}).get("items", {}):
-            spec = deliverables.icd_spec(doc["skeleton"], doc["icd"], t["item_id"])
+            spec = deliverables.icd_spec(doc["skeleton"], doc["icd"], t["item_id"],
+                                         (t.get("icd_check") or {}).get("frame"))
         d = ws / "drawings"
         d.mkdir(parents=True, exist_ok=True)
         (d / "spec.json").write_text(json.dumps(spec, indent=1, sort_keys=True), encoding="utf-8")

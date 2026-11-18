@@ -12,7 +12,7 @@ Pipeline (all deterministic, no AI):
 Only geometry.py and render.to_dxf import the CAD kernel; the rest is plain Python and unit-testable quickly.
 """
 
-VERSION = "1.1.3"  # 1.1.3: facets of curved profiles (gear flanks) are not chamfers; 1.1.2: model parameter names no longer printed in the sheet notes; 1.1.1: callouts on the side nearest the feature; 1.1: turned parts axis-horizontal, radius/chamfer callouts, MAKE-01 placement, edits, releases
+VERSION = "1.2.0"  # 1.2.0: cosmetic thread callouts + ISO 6410 marks, detail views, GD&T frames / datums (user + ICD), imported-STEP sheets all inferred; 1.1.3: facets of curved profiles (gear flanks) are not chamfers; 1.1.2: model parameter names no longer printed in the sheet notes; 1.1.1: callouts on the side nearest the feature; 1.1: turned parts axis-horizontal, radius/chamfer callouts, MAKE-01 placement, edits, releases
 
 
 class DrawingInputError(ValueError):

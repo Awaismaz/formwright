@@ -7,8 +7,10 @@ import { Tip } from "@/components/ui";
  * inlined so it stays crisp at any zoom and its dimension tooltips work. Wheel zooms about the cursor, drag pans,
  * double-click fits the sheet.
  */
-export default function SheetViewer({ svg, widthMm, heightMm, busy, highlight }: {
+export default function SheetViewer({ svg, widthMm, heightMm, busy, highlight, onPick, pickHint }: {
   svg: string; widthMm: number; heightMm: number; busy?: boolean;
+  /** pick mode: a click (not a drag) reports the sheet point in paper millimetres */
+  onPick?: (x: number, y: number) => void; pickHint?: string;
   /** A dimension / callout id to locate on the sheet: it is coloured and brought to the centre. */
   highlight?: { id: string; n: number } | null;
 }) {
@@ -16,6 +18,7 @@ export default function SheetViewer({ svg, widthMm, heightMm, busy, highlight }:
   const sheet = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ k: 1, x: 0, y: 0 }); // k: screen px per sheet mm; x, y: sheet offset
   const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const down = useRef<{ x: number; y: number } | null>(null);
   const { k } = view;
   const off = { x: view.x, y: view.y };
 
@@ -87,15 +90,24 @@ export default function SheetViewer({ svg, widthMm, heightMm, busy, highlight }:
 
   return (
     <div ref={box} data-testid="sheet-viewer"
-      className="relative h-full w-full cursor-grab select-none overflow-hidden bg-[#e9edf2] active:cursor-grabbing dark:bg-[#1b2027]"
-      onPointerDown={e => { if (e.button !== 0) return; (e.target as Element).setPointerCapture?.(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, ox: off.x, oy: off.y }; }}
+      className={`relative h-full w-full select-none overflow-hidden bg-[#e9edf2] dark:bg-[#1b2027] ${onPick ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing"}`}
+      data-pick={onPick ? "1" : undefined}
+      onPointerDown={e => { if (e.button !== 0) return; (e.target as Element).setPointerCapture?.(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, ox: off.x, oy: off.y }; down.current = { x: e.clientX, y: e.clientY }; }}
       onPointerMove={e => { const d = drag.current; if (d) setView(v => ({ ...v, x: d.ox + e.clientX - d.x, y: d.oy + e.clientY - d.y })); }}
-      onPointerUp={() => { drag.current = null; }}
+      onPointerUp={e => {
+        drag.current = null;
+        const d0 = down.current; down.current = null;
+        if (onPick && d0 && Math.hypot(e.clientX - d0.x, e.clientY - d0.y) < 4 && box.current) {
+          const r = box.current.getBoundingClientRect();
+          onPick((e.clientX - r.left - view.x) / view.k, (e.clientY - r.top - view.y) / view.k);
+        }
+      }}
       onDoubleClick={fit}>
       <style>{".drw-hl{fill:#d97706 !important;font-weight:700;paint-order:stroke;stroke:#fde68a;stroke-width:1.2px}"}</style>
       <div ref={sheet} className="absolute left-0 top-0 bg-white shadow-[0_2px_12px_rgba(16,24,40,.18)] [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
         style={{ width: widthMm * k, height: heightMm * k, transform: `translate(${off.x}px, ${off.y}px)` }}
         dangerouslySetInnerHTML={{ __html: svg }} />
+      {onPick && pickHint && <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-primary/40 bg-panel px-3 py-1 text-[12px] text-primary shadow-card" data-testid="pick-hint">{pickHint}</div>}
       {busy && <div className="pointer-events-none absolute inset-0 bg-white/30 backdrop-blur-[1px] dark:bg-black/20" />}
       <div className="absolute bottom-3 right-3 flex items-center gap-0.5 rounded-md border border-border bg-panel/95 p-0.5 shadow-card"
         onPointerDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()}>

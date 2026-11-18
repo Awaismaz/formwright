@@ -112,6 +112,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
         ns = dict(cached["ns"])
         fw._STATE["log"] = list(cached["log"])
         fw._STATE["last"] = cached.get("last")
+        fw._STATE["threads"] = list(cached.get("threads") or [])
     else:
         sys.path.insert(0, folder)
         try:
@@ -126,7 +127,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
                     del sys.modules[name]
         if "result" not in ns:
             raise ScriptRejected("script must assign the final build123d shape to a variable named `result`")
-        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last")}
+        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last"), "threads": fw.threads()}
         while len(_BASE_CACHE) > _CACHE_MAX:
             _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
     ns["__fw_base__"] = ns["result"]
@@ -136,6 +137,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
     ns["__fw_log__"] = fw.log()
     ns["__fw_manual__"] = fw.manual_count()
     ns["__fw_manual_errors__"] = fw.manual_errors()
+    ns["__fw_threads__"] = fw.threads()
     ns["__cache_hit__"] = cached is not None
     return ns
 
@@ -205,6 +207,27 @@ def normalize_step(path: Path) -> None:
         path.write_bytes(new)
 
 
+def stamp_threads(path: Path, threads: list[dict[str, Any]] | None) -> None:
+    """Cosmetic threads (CAD-027) in the STEP file: one ASCII line per thread in the ISO 10303-21 header's
+    FILE_DESCRIPTION list ("FW-THREAD 4X M6x1-6H INTERNAL DEPTH 12 DIR 0,0,-1 AT x,y,z;..."). OCP's STEP writer has
+    no clean API for AP242 semantic thread PMI, and the header is read (and ignored) by every STEP reader, so the
+    geometry and its round trip are untouched. The same data is written next to it as ``part.threads.json``."""
+    import re
+
+    from aicad import threads as th
+
+    if not threads:
+        return
+    data = path.read_bytes()
+    lines = [th.step_text(t).replace("\\", "/").replace("'", "") for t in threads]
+    m = re.search(rb"FILE_DESCRIPTION\(\((.*?)\),", data, re.DOTALL)
+    if not m:
+        return
+    extra = ",".join(f"'{ln}'" for ln in lines).encode("ascii", "replace")
+    new = data[:m.end(1)] + b"," + extra + data[m.end(1):]
+    path.write_bytes(new)
+
+
 def _export_atomic(fn: Any, shape: Any, out: Path, name: str, **kw: Any) -> Path:
     import os
 
@@ -234,13 +257,29 @@ def export_stl_abs(shape: Any, path: Any, tolerance: float = STL_DEFLECTION_MM, 
     return bool(writer.Write(shape.wrapped, str(path)))
 
 
-def _exports(shape: Any, out: Path) -> tuple[Any, Path]:
+def _thread_sidecar(out: Path, threads: list[dict[str, Any]] | None) -> None:
+    f = out / "part.threads.json"
+    if threads:
+        f.write_text(json.dumps({"format": "formwright-cosmetic-threads/1", "units": "mm", "threads": threads},
+                                indent=1, sort_keys=True), encoding="utf-8")
+    else:
+        f.unlink(missing_ok=True)
+
+
+def _exports(shape: Any, out: Path, threads: list[dict[str, Any]] | None = None) -> tuple[Any, Path]:
     """STEP (+ re-import for round-trip check), STL, GLB, 3MF. Returns (reimported shape, step path)."""
     import os
 
     from build123d import export_gltf, export_step, import_step
 
-    step = _export_atomic(export_step, shape, out, "part.step", timestamp=STEP_TIMESTAMP)
+    def step_with_threads(shp: Any, path: str, **kw: Any) -> bool:
+        ok = export_step(shp, path, **kw)
+        if ok:
+            stamp_threads(Path(path), threads)
+        return ok
+
+    step = _export_atomic(step_with_threads, shape, out, "part.step", timestamp=STEP_TIMESTAMP)
+    _thread_sidecar(out, threads)
     reimported = import_step(str(step))
     _export_atomic(export_stl_abs, reimported, out, "part.stl")
     _export_atomic(export_gltf, reimported, out, "model.glb", binary=True, linear_deflection=0.01,
@@ -359,6 +398,7 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
                        "suppressed": bool(e.get("suppressed")), **({"error": e["error"]} if e.get("error") else {})}
                       for e in ns.get("__fw_log__", [])],
             manual_errors=ns.get("__fw_manual_errors__") or [],
+            threads=ns.get("__fw_threads__") or [],
             bbox_minmax=_bbox_minmax(shape),
             fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
             env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp")},
@@ -370,10 +410,10 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
             results.append(checks.CheckResult(
                 "CHK-08", "deterministic regeneration (skipped for interactive edit)", False, gating=False,
                 detail={"note": "design structure verified at the last agent build"}))
-            _LAST[str(out)] = {"shape": shape}
+            _LAST[str(out)] = {"shape": shape, "threads": ns.get("__fw_threads__") or []}
             status.update(exports_pending=True, cache_hit=bool(ns.get("__cache_hit__")))
         else:
-            reimported, step = _exports(shape, out)
+            reimported, step = _exports(shape, out, ns.get("__fw_threads__") or [])
             results.append(checks.check_roundtrip(shape, reimported))
             if determinism:
                 ns2 = _exec(script)
@@ -381,6 +421,7 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
                 with tempfile.TemporaryDirectory() as td:
                     p2 = Path(td) / "p2.step"
                     export_step(ns2["result"], str(p2), timestamp=STEP_TIMESTAMP)
+                    stamp_threads(p2, ns2.get("__fw_threads__") or [])
                     normalize_step(p2)
                     same_step = p2.read_bytes() == step.read_bytes()
                 results.append(checks.CheckResult("CHK-08", "deterministic regeneration", same_fp and same_step,
@@ -419,7 +460,7 @@ def finalize(out: Path) -> int:
     if not status.get("exports_pending"):
         return 0
     t0 = time.perf_counter()
-    reimported, step = _exports(last["shape"], out)
+    reimported, step = _exports(last["shape"], out, last.get("threads") or [])
     rt = checks.as_dicts([checks.check_roundtrip(last["shape"], reimported)])[0]
     status["checks"] = [rt if c["id"] == "CHK-07" else c for c in status.get("checks", [])]
     status["ok"] = all(c["passed"] for c in status["checks"] if c["gating"])

@@ -51,6 +51,10 @@ LAYERS: dict[str, tuple[float, list[float] | None, str]] = {
     "dim_n": (0.25, None, "#222222"),
     "hatch_n": (0.25, None, "#333333"),
     "construction": (0.13, [1.0, 1.0], "#5b7db1"),
+    # ISO 6410-1 cosmetic thread (thin continuous), detail-view boundary circles and GD&T frames / datum symbols
+    "thread": (0.25, None, "#111111"),
+    "detail": (0.25, None, "#111111"),
+    "gdt": (0.25, None, "#111111"),
 }
 LEGEND = [("120", "regular", "spec", "SPEC: equals a declared model parameter"),
           ("120", "italic", "inferred", "INFERRED: measured from the model geometry"),
@@ -647,6 +651,145 @@ class ViewLayout:
                            kind="label")
             self.reserved.append(t["box"])
 
+    def thread_marks(self, callouts: list[dict[str, Any]], side: list[tuple[Any, ...]],
+                     ends: list[tuple[Any, ...]] | None = None) -> None:
+        """ISO 6410-1 cosmetic threads. End views: a thin 3/4 circle at the thread root (the major Ø of a tapped
+        hole, the minor Ø of an external thread). Side views of external threads: thin root lines over the thread
+        length and a thick thread-limit line when the thread stops short. ``side``: (orientation, across, t0, t1,
+        root radius, crest radius when the thread stops short / None) in view coordinates."""
+        for c in callouts:
+            th = c.get("thread")
+            if not th:
+                continue
+            r = (th["major"] if th.get("internal") else th["minor"]) / 2 * self.s
+            for u, v, *_ in c.get("holes") or []:
+                x, y = self.xy(u, v)
+                self.g.arc("thread", x, y, r, 100.0, 370.0)
+        for u, v, rr in ends or []:  # external thread seen end-on (a turned diameter): root circle
+            x, y = self.xy(u, v)
+            self.g.arc("thread", x, y, rr * self.s, 100.0, 370.0)
+        for orient, across, t0, t1, rr, crest in side:
+            for sgn in (1, -1):
+                if orient == "h":
+                    a, b = self.xy(t0, across + sgn * rr), self.xy(t1, across + sgn * rr)
+                else:
+                    a, b = self.xy(across + sgn * rr, t0), self.xy(across + sgn * rr, t1)
+                self.g.line("thread", a[0], a[1], b[0], b[1])
+            if crest is not None:  # the thread stops short of the end: thick thread-limit line across the crest
+                if orient == "h":
+                    a, b = self.xy(t1, across - crest), self.xy(t1, across + crest)
+                else:
+                    a, b = self.xy(across - crest, t1), self.xy(across + crest, t1)
+                self.g.line("visible", a[0], a[1], b[0], b[1])
+
+    def detail_circle(self, u: float, v: float, r: float, letter: str) -> None:
+        """The detail boundary on the parent view (thin circle) and its letter outside it, up and to the right."""
+        x, y = self.xy(u, v)
+        rp = r * self.s
+        self.g.circle("detail", x, y, rp)
+        # drawn after the dimensions and callouts: the letter takes the first diagonal clear of their texts
+        taken = [t["box"] for t in self.g.texts()] + list(self.reserved)
+        best = None
+        for ang in (45, 135, 315, 225, 90, 270, 0, 180):
+            ca, sa = math.cos(math.radians(ang)), math.sin(math.radians(ang))
+            lx, ly = x + (rp + 1.8) * ca, y - (rp + 1.8) * sa
+            anchor = "start" if ca > 0.3 else "end" if ca < -0.3 else "middle"
+            by = ly + (1.8 if sa > 0.3 else 3.6 if sa < -0.3 else 1.8) if abs(sa) > 0.3 else ly + 1.8
+            box = text_box(lx, by, 5.0, letter, anchor, 0, "bold")
+            if not any(boxes_overlap(box, q, 0.6) for q in taken):
+                best = (lx, by, anchor)
+                break
+        if best is None:
+            best = (x + rp * 0.7071 + 1.2, y - rp * 0.7071 - 1.2, "start")
+        t = self.g.text(best[0], best[1], 5.0, letter, anchor=best[2], font="bold", kind="label")
+        self.reserved.append([t["box"][0] - 0.6, t["box"][1] - 0.6, t["box"][2] + 0.6, t["box"][3] + 0.6])
+
+    def place_gdt(self, items: list[dict[str, Any]], size: float) -> list[dict[str, Any]]:
+        """Feature control frames and datum symbols next to their dimension / callout, or on a leader to a point of
+        the view, clear of every text already on the view and of the view's geometry. Returns the items it could
+        not attach (their dimension is hidden or not on this view)."""
+        from aicad.drawing import gdt
+
+        placed = [t["box"] for t in self.g.texts()] + list(self.reserved)
+        geom = [0.0, 0.0, self.w, self.h]
+        missing: list[dict[str, Any]] = []
+
+        def free(b: list[float]) -> bool:
+            return not any(boxes_overlap(b, q, 0.6) for q in placed) and not boxes_overlap(b, geom, 0.8)
+
+        for it in items:
+            rec, tgt = it["rec"], it["target"]
+            if it["type"] == "frame":
+                w, h, _ = gdt.frame_size(rec, size, text_width)
+            else:
+                w, h = gdt.datum_size(size)
+            chosen: tuple[float, float] | None = None
+            anchor: tuple[float, float]
+            if tgt["kind"] in ("dim", "callout"):
+                boxes = [t["box"] for t in self.g.texts() if t.get("ref") == tgt["id"] and t.get("kind") in ("dim", "callout")]
+                if not boxes:
+                    missing.append(it)
+                    continue
+                ab = [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
+                midy = (ab[1] + ab[3]) / 2
+                cands = [(ab[0], ab[3] + 1.0), (ab[0], ab[1] - 1.0 - h), (ab[2] + 1.5, midy - h / 2),
+                         (ab[0] - 1.5 - w, midy - h / 2)]
+                for k in range(1, 7):
+                    cands += [(ab[0], ab[3] + 1.0 + k * (h + 1.2)), (ab[0], ab[1] - 1.0 - h - k * (h + 1.2)),
+                              (ab[2] + 1.5 + k * 6.0, midy - h / 2)]
+                for x, y in cands:
+                    if free([x, y, x + w, y + h]):
+                        chosen = (x, y)
+                        break
+                if chosen is None:
+                    chosen = cands[0]
+                bx = [chosen[0], chosen[1], chosen[0] + w, chosen[1] + h]
+                # the anchor: the point of the text block nearest the symbol
+                anchor = (min(max((bx[0] + bx[2]) / 2, ab[0]), ab[2]), min(max((bx[1] + bx[3]) / 2, ab[1]), ab[3]))
+            else:
+                anchor = self.xy(tgt["u"], tgt["v"])
+                px, py = anchor
+                sides = sorted([("top", py), ("bottom", self.h - py), ("left", px), ("right", self.w - px)],
+                               key=lambda q: (q[1], q[0]))
+                for k in range(8):
+                    for side, _d in sides:
+                        off = self.side_extent(side) + 6.0 + k * (h + 2.0)
+                        for dx in (-w / 2, 4.0, -w - 4.0, 12.0, -w - 12.0):
+                            if side == "top":
+                                x, y = px + dx, -off - h
+                            elif side == "bottom":
+                                x, y = px + dx, self.h + off
+                            elif side == "left":
+                                x, y = -off - w, py + dx * h / max(w, 1e-6)
+                            else:
+                                x, y = self.w + off, py + dx * h / max(w, 1e-6)
+                            if free([x, y, x + w, y + h]):
+                                chosen = (x, y)
+                                break
+                        if chosen:
+                            break
+                    if chosen:
+                        break
+                if chosen is None:
+                    chosen = (px - w / 2, -self.side_extent("top") - 6.0 - h)
+                bx = [chosen[0], chosen[1], chosen[0] + w, chosen[1] + h]
+            ref = it.get("ref")
+            if it["type"] == "frame":
+                gdt.draw_frame(self.g, rec, chosen[0], chosen[1], size * 0.9, text_width, ref=ref)
+                if tgt["kind"] == "point" or not boxes_overlap(bx, [anchor[0], anchor[1], anchor[0], anchor[1]], 1.3):
+                    mids = [((bx[0] + bx[2]) / 2, bx[1]), ((bx[0] + bx[2]) / 2, bx[3]), (bx[0], (bx[1] + bx[3]) / 2),
+                            (bx[2], (bx[1] + bx[3]) / 2)]
+                    m = min(mids, key=lambda q: math.dist(q, anchor))
+                    if math.dist(m, anchor) > 0.5:
+                        self.g.line("dim", m[0], m[1], anchor[0], anchor[1])
+                        if tgt["kind"] == "point":
+                            self.g.arrow(anchor, m)
+            else:
+                gdt.draw_datum(self.g, rec["letter"], (chosen[0], chosen[1]), anchor, size * 0.9, ref=ref)
+            placed.append(bx)
+            self.reserved.append(bx)
+        return missing
+
     def caption(self, size: float) -> None:
         if not self.label:
             return
@@ -893,6 +1036,9 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
             else:
                 axes.append((orient, across, h["t0"], h["t1"]))
         vl.centre_lines(cos, sorted(axes))
+        tl = [t for t in an.get("thread_lines") or [] if t[0] == v]
+        vl.thread_marks(cos, [t[2:] for t in tl if t[1] == "side"], [t[2:] for t in tl if t[1] == "end"])
+    details = an.get("details") or []
     if sec_opt and sec_ref:
         cm = {"top": {"x": "u", "y": "v"}, "front": {"x": "u", "z": "v"}, "right": {"y": "u", "z": "v"}}[sec_ref]
         o = cm[sec_opt["axis"]]
@@ -905,10 +1051,16 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         du = look[ai[axis_vec["u"]]]
         dv = look[ai[axis_vec["v"]]]
         vls[sec_ref].cutting_plane("v" if o == "u" else "h", sec_opt["plane"], (int(du), int(-dv)))
+    gdt_items = an.get("gdt_items") or []
+    gdt_missing: list[dict[str, Any]] = []
     for v, vl in vls.items():
         sides = SIDES[proj][v]
         vl.place_dims([d for d in dims if d["view"] == v], sides, dim_size)
         vl.place_callouts([c for c in callouts if c["view"] == v], sides["h"], dim_size)
+        for dd in details:
+            if dd["parent"] == v:
+                vl.detail_circle(dd["u"], dd["v"], dd["r"], dd["letter"])
+        gdt_missing += vl.place_gdt([g for g in gdt_items if g["view"] == v], dim_size)
         if vl.label:
             vl.caption(3.5)
     extras: list[ViewLayout] = []
@@ -929,8 +1081,45 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         sv = ViewLayout("section", sec_opt, s, hidden=False, label="SECTION A-A")
         sv.hatch(sec_opt["loops"], 2.5 if size == "A3" else 2.0)
         sv.place_dims([d for d in dims if d["view"] == "section"], SECTION_SIDES, dim_size)
+        for dd in details:
+            if dd["parent"] == "section":
+                sv.detail_circle(dd["u"], dd["v"], dd["r"], dd["letter"])
+        gdt_missing += sv.place_gdt([g for g in gdt_items if g["view"] == "section"], dim_size)
         sv.caption(3.5)
         extras.insert(0, sv)
+    gdt_missing += [g for g in gdt_items if g["view"] not in vls and not (g["view"] == "section" and sec_opt
+                                                                          and not front_section)]
+    from aicad.drawing.detail import STANDARD, _seg_t, choose_scale
+
+    def build_detail(dd: dict[str, Any], dsc: tuple[int, int]) -> ViewLayout:
+        ds = dsc[0] / dsc[1]
+        dv = ViewLayout(f"detail-{dd['letter']}", dd["geom"], ds, hidden=opts.get("hidden", True),
+                        label=f"DETAIL {dd['letter']} ({scale_label(dsc)})")
+        dv.detail_scale = dsc  # type: ignore[attr-defined]
+        cx, cy = dv.xy(dd["u"], dd["v"])
+        if dd["geom"].get("loops"):  # detail of a section: the hatch, clipped to the detail circle
+            paper = [[list(dv.xy(q[0], q[1])) for q in lp] for lp in dd["geom"]["loops"]]
+            for ln in _hatch(paper, 2.5 if size == "A3" else 2.0):
+                t = _seg_t((ln[0], ln[1]), (ln[2], ln[3]), (cx, cy), dd["r"] * ds)
+                if t:
+                    dv.g.line("hatch", ln[0] + (ln[2] - ln[0]) * t[0], ln[1] + (ln[3] - ln[1]) * t[0],
+                              ln[0] + (ln[2] - ln[0]) * t[1], ln[1] + (ln[3] - ln[1]) * t[1])
+        dv.g.circle("detail", cx, cy, dd["r"] * ds)
+        dv.caption(3.5)
+        return dv
+
+    detail_info: list[dict[str, Any]] = []
+    alts: dict[int, list[ViewLayout]] = {}  # smaller enlargements to try when a detail does not fit
+    detail_of: dict[int, dict[str, Any]] = {}
+    for dd in details:
+        if dd["parent"] not in vls and not (dd["parent"] == "section" and sec_opt and not front_section):
+            continue
+        dsc = choose_scale(dd.get("scale"), s, dd["r"])
+        dv = build_detail(dd, dsc)
+        smaller = [q for q in STANDARD if s + 1e-9 < q[0] / q[1] < dsc[0] / dsc[1] - 1e-9]
+        alts[id(dv)] = [build_detail(dd, q) for q in smaller]
+        detail_of[id(dv)] = dd
+        extras.append(dv)
 
     info, info_box = _info_blocks(W, H, meta, scale_label(sc), proj == "first", revisions, size)
     notes_g, notes_box = _notes_block(W, H, notes, info_box[0])
@@ -982,7 +1171,7 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
     grid_box = [min(b[0] for b in occupied), min(b[1] for b in occupied),
                 max(b[2] for b in occupied), max(b[3] for b in occupied)] if occupied else [frame[0] + 6] * 2 + [frame[0] + 6] * 2
     fr, fc = cells["_free"]
-    for ex in extras:
+    def place_extra(ex: ViewLayout, last: bool) -> bool:
         b = ex.bounds()
         bw, bh = b[2] - b[0], b[3] - b[1]
         cands: list[tuple[float, float]] = []
@@ -1010,11 +1199,27 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
                 chosen = p
                 break
         if chosen is None:
-            if not force:
-                return None
+            if not force or not last:
+                return False
             chosen = (right - b[0], grid_box[1] - b[1])
         pos[id(ex)] = chosen
         occupied.append(abs_box(ex, chosen))
+        return True
+
+    for i0, ex0 in enumerate(list(extras)):
+        options = [ex0, *alts.get(id(ex0), [])]
+        for k, ex in enumerate(options):
+            if place_extra(ex, k == len(options) - 1):
+                if ex is not ex0:
+                    extras[i0] = ex
+                break
+        else:
+            return None
+        if id(ex0) in detail_of:
+            dd = detail_of[id(ex0)]
+            detail_info.append({"letter": dd["letter"], "parent": dd["parent"],
+                                "scale": scale_label(extras[i0].detail_scale),  # type: ignore[attr-defined]
+                                "u": dd["u"], "v": dd["v"], "r": dd["r"]})
 
     # centre the composition horizontally where the space allows
     content = [min(b[0] for b in occupied), min(b[1] for b in occupied),
@@ -1052,4 +1257,5 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
     prims += notes_g.placed(0, 0)
     return {"size": size, "w": W, "h": H, "scale": list(sc), "scale_txt": scale_label(sc), "iso_scale": iso_scale,
             "projection": proj, "frame": frame, "prims": prims, "views": view_info, "blocked": blocked,
-            "iso_dropped": False}
+            "iso_dropped": False, "details": detail_info,
+            "gdt_missing": [{"type": g["type"], "ref": g.get("ref")} for g in gdt_missing]}

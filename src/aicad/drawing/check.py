@@ -9,6 +9,9 @@ Sub-checks:
               direction, lies inside its own span; or outside it on a drawn leader (the dimension line extended
               under the text) and clear of the span of every other dimension on the same dimension line
   holes       hole callouts on the sheet match the exact hole census (count per diameter)
+  gdt         every datum symbol and feature control frame on the sheet traces to an input (the user's edits or the
+              interface spec), and every datum a drawn frame names is drawn too (DRW-013)
+  details     every detail view enlarges its parent (scale above the sheet scale) and carries its letter (DRW-011)
 
 Dimensions the user hid are reported (``hidden_by_user``), not failed: hiding is a deliberate edit.
 """
@@ -57,7 +60,7 @@ def placement_problems(texts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def chk12(sheet: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str, Any]],
           mapping: dict[str, Any], census: dict[str, Any], expected_extents: dict[str, list[float]],
-          hidden: list[str] | None = None) -> dict[str, Any]:
+          hidden: list[str] | None = None, gdt: dict[str, Any] | None = None) -> dict[str, Any]:
     problems: list[str] = []
     detail: dict[str, Any] = {}
     hidden = sorted(hidden or [])
@@ -157,6 +160,33 @@ def chk12(sheet: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict
                        "called_out": {str(k): v for k, v in sorted(called.items())}, "mismatch": mism}
     if mism:
         problems.append("hole callouts differ from the census")
+
+    # GD&T: drawn only from input, datums referenced by drawn frames are drawn
+    items = (gdt or {}).get("items") or []
+    missing_refs = {m.get("ref") for m in sheet.get("gdt_missing") or []}
+    drawn = [it for it in items if it.get("ref") not in missing_refs]
+    letters = {it["rec"]["letter"] for it in drawn if it["type"] == "datum"}
+    dangling = sorted({x for it in drawn if it["type"] == "frame" for x in it["rec"].get("datums") or []} - letters)
+    gtexts = [t for t in texts if t.get("kind") == "gdt"]
+    untraced = sorted({t.get("ref") for t in gtexts} - {it.get("ref") for it in drawn})
+    detail["gdt"] = {"frames": sum(1 for it in drawn if it["type"] == "frame"), "datums": sorted(letters),
+                     "not_attached": sorted(r for r in missing_refs if r), "dangling_datums": dangling,
+                     "untraced": [str(u) for u in untraced]}
+    if dangling:
+        problems.append("frame(s) refer to datum " + ", ".join(dangling) + " that is not on the sheet")
+    if untraced:
+        problems.append(f"{len(untraced)} GD&T symbol(s) with no input")
+    # detail views enlarge their parent and are lettered
+    s0 = sheet["scale"][0] / sheet["scale"][1]
+    bad_details = []
+    for d in sheet.get("details") or []:
+        a_, b_ = (int(x) for x in d["scale"].split(":"))
+        captioned = any(t.get("txt", "").startswith(f"DETAIL {d['letter']} (") for t in texts)
+        if a_ / b_ <= s0 + 1e-9 or not captioned:
+            bad_details.append(d["letter"])
+    detail["details"] = {"drawn": [d["letter"] for d in sheet.get("details") or []], "bad": bad_details}
+    if bad_details:
+        problems.append("detail view(s) " + ", ".join(bad_details) + " not enlarged or not labelled")
 
     return {"id": "CHK-12", "name": "drawing consistency", "passed": not problems, "gating": True,
             "problems": problems, "detail": detail}

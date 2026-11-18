@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from aicad import holes, materials, refplane
+from aicad import holes, materials, refplane, threads
 from aicad.agent import worker
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
@@ -110,7 +110,7 @@ def estimate(project_id: str, chars: int = 0, ctx: Ctx = Depends(verified_ctx)) 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
 OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
-       "sketch2d", "sweep", "loft"}
+       "sketch2d", "sweep", "loft", "thread"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -228,7 +228,7 @@ def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
     out["reverse"] = bool(f.get("reverse"))
 
 
-REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft"}  # picks stored with the body's box, to follow size changes
+REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread"}  # picks stored with the body's box, to follow size changes
 
 
 def _edge_ref(r: Any) -> dict[str, Any]:
@@ -286,6 +286,11 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
                 out.update(holes.resolve(f["spec"]))
             except holes.HoleError as e:
                 raise HTTPException(422, str(e)) from None
+        if f.get("thread"):  # cosmetic thread (CAD-027): from the ISO 261 table, checked against the drill
+            try:
+                out["thread"] = threads.resolve(f["thread"], internal=True, bore=out["d"], length=out["depth"])
+            except threads.ThreadError as e:
+                raise HTTPException(422, str(e)) from None
         if f.get("place"):
             out["place"] = _place(f["place"], out["normal"])
         elif f.get("count") and int(f["count"]) > 1:
@@ -306,6 +311,22 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         out["t"] = _num(f.get("t"), "thickness", 0.01, 1e4)
     elif op in ("fillet", "chamfer", "hole"):
         pass
+    elif op == "thread":  # cosmetic thread on a picked cylindrical face; size checked against it at build time
+        face = f.get("face") or {}
+        out["face"] = {"point": _pt(face.get("point"), "face point")}
+        th = f.get("thread") or {}
+        if not isinstance(th, dict):
+            raise HTTPException(422, "Choose a thread size")
+        try:  # table checks now (size, pitch); the class and the fit to the cylinder are checked when it builds
+            base = threads.parse(th["designation"]) if th.get("designation") else {
+                "size": th.get("size"), "pitch": th.get("pitch"), "cls": None}
+            threads.resolve({**base, "cls": None, "depth": th.get("depth")}, internal=True)
+        except (threads.ThreadError, KeyError, TypeError, ValueError) as e:
+            raise HTTPException(422, str(e) if isinstance(e, threads.ThreadError) else "Choose a thread size") from None
+        cls = str(th.get("cls") or base.get("cls") or "")[:3]
+        out["thread"] = {"size": float(base["size"]), "pitch": float(base["pitch"] or threads.COARSE[float(base["size"])]),
+                         "depth": _num(th["depth"], "thread depth", 0.01, 1e5) if th.get("depth") else None,
+                         **({"cls": cls} if cls else {})}
     elif op in ("sketch", "revolve"):
         out["plane"] = _sketch_plane(f.get("plane") or {})
         out["profiles"] = _profiles(f.get("profiles") or [])
@@ -813,8 +834,9 @@ _WARMING: set[Any] = set()
 
 @router.get("/holes/standards")
 def hole_standards() -> dict[str, Any]:
-    """Hole Wizard tables (ISO 273 clearance, tap drills, counterbores, countersinks, washers), with sources."""
-    return holes.tables()
+    """Hole Wizard tables (ISO 273 clearance, tap drills, counterbores, countersinks, washers), with sources, and the
+    ISO 261 thread table for cosmetic threads."""
+    return {**holes.tables(), "threads": threads.tables()}
 
 
 # ----------------------------------------------------------------------------- revisions: files & compare

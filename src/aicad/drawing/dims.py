@@ -14,6 +14,9 @@ Rules (deterministic, documented in docs/reports/drawings.md):
 - A count parameter (N_BOLTS) is shown by the quantity of a callout ("6X") and counts as mapped.
 - One segment of a chain is shown as an auxiliary (reference) dimension in parentheses so that a chain plus the
   overall size is not over-dimensioned.
+- Cosmetic threads (CAD-027) are called out from the model's thread metadata, never guessed from a diameter: a
+  tapped hole group reads "4X M6×1-6H ▽12" over its drill "Ø5 ▽15"; a threaded turned diameter prints its
+  designation in place of the Ø; other threaded cylinders get a leader callout.
 - Tolerances and GD&T are never generated here.
 """
 
@@ -136,8 +139,14 @@ def candidates(cen: dict[str, Any], enabled: set[str], section: dict[str, Any] |
                     seen.add(c["dia"])
                     r = c["dia"] / 2
                     o = COORD[view][along]
-                    dims.append(_dim(f"dia-{ax}-{len(seen)}", "diameter", view, "h" if o == "u" else "v",
-                                     c0 - r, c0 + r, prefix="Ø", family=f"dia-{ax}-{len(seen)}", order=1))
+                    dd = _dim(f"dia-{ax}-{len(seen)}", "diameter", view, "h" if o == "u" else "v",
+                              c0 - r, c0 + r, prefix="Ø", family=f"dia-{ax}-{len(seen)}", order=1)
+                    th = next((q["thread"] for q in cen["outer"] if q.get("thread") and q["axis"] == ax
+                               and abs(q["dia"] - c["dia"]) < TOL
+                               and all(abs(q["centre"][j] - centre[j]) < TOL for j in (0, 1))), None)
+                    if th:
+                        dd["thread"] = th
+                    dims.append(dd)
                 covered = set(others)
                 break
 
@@ -186,8 +195,10 @@ def candidates(cen: dict[str, Any], enabled: set[str], section: dict[str, Any] |
     # holes: callout in the view that looks along the axis, locations from the nearest edge
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for h in cen["holes"]:
-        groups.setdefault((h["axis"], h["dia"], h["thru"], 0.0 if h["thru"] else h["depth"]), []).append(h)
-    for gi, ((ax, dia, thru, depth), hs) in enumerate(sorted(groups.items(), key=lambda kv: (kv[0][0], -kv[0][1], kv[0][2], kv[0][3]))):
+        t = h.get("thread")
+        tkey = f"{t['designation']}|{t['depth']}" if t else ""
+        groups.setdefault((h["axis"], h["dia"], h["thru"], 0.0 if h["thru"] else h["depth"], tkey), []).append(h)
+    for gi, ((ax, dia, thru, depth, tkey), hs) in enumerate(sorted(groups.items(), key=lambda kv: (kv[0][0], -kv[0][1], kv[0][2], kv[0][3], kv[0][4]))):
         view = CIRCLE_VIEW[ax]
         if view not in enabled:
             notes.append(f"{len(hs)}× Ø{fmt(dia)} hole(s) along {ax.upper()} not called out: the {view} view is off.")
@@ -203,9 +214,21 @@ def candidates(cen: dict[str, Any], enabled: set[str], section: dict[str, Any] |
                    "holes": [[u, v, dia / 2] for u, v in pts],
                    "qty": len(hs), "dia": dia, "thru": thru, "depth": depth, "lines": [], "pcd": None}
         qty = f"{len(hs)}X " if len(hs) > 1 else ""
-        callout["lines"].append({"text": f"{qty}Ø{fmt(dia)} " + ("THRU" if thru else f"DEEP {fmt(depth)}"),
-                                 "kind": "hole", "value": dia, "depth": None if thru else depth,
-                                 "tag": "inferred", "param": None})
+        if tkey:  # cosmetic thread: the designation (declared in the hole feature) over its drill
+            from aicad import threads as _th
+
+            t = hs[0]["thread"]
+            callout["thread"] = t
+            full = None if t["depth"] is not None or thru else depth
+            callout["lines"].append({"text": _th.callout({**t, "thru": thru}, len(hs), full), "kind": "thread",
+                                     "value": t["major"], "tag": "spec", "param": None, "source": "thread"})
+            callout["lines"].append({"text": f"Ø{fmt(dia)} " + ("THRU" if thru else f"▽{fmt(depth)}"),
+                                     "kind": "hole", "value": dia, "depth": None if thru else depth,
+                                     "tag": "inferred", "param": None})
+        else:
+            callout["lines"].append({"text": f"{qty}Ø{fmt(dia)} " + ("THRU" if thru else f"DEEP {fmt(depth)}"),
+                                     "kind": "hole", "value": dia, "depth": None if thru else depth,
+                                     "tag": "inferred", "param": None})
         # circular pattern?
         pcd = None
         grid = len({round(p[0], 6) for p in pts}) <= 2 and len({round(p[1], 6) for p in pts}) <= 2
@@ -247,9 +270,72 @@ def candidates(cen: dict[str, Any], enabled: set[str], section: dict[str, Any] |
                                  ext_a=ea, ext_b=eb, family=f"pos-{gi}-{axis_name}", order=2))
     callouts += _radius_callouts(cen, enabled, coord)
     callouts += _chamfer_callouts(cen, enabled, coord)
+    callouts += _thread_callouts(cen, enabled, coord, {id(d.get("thread")) for d in dims if d.get("thread")})
     if cen.get("unsupported_holes"):
         notes.append(f"{cen['unsupported_holes']} hole(s) not on a principal axis or fully internal: not called out.")
     return _dedupe(dims), callouts, notes
+
+
+def _thread_callouts(cen: dict[str, Any], enabled: set[str], coord: dict[str, dict[str, str]], on_dims: set[int]
+                     ) -> list[dict[str, Any]]:
+    """External cosmetic threads not already printed on a turned diameter: a leader callout on the cylinder seen
+    end-on ("M10×1.5-6g")."""
+    from aicad import threads as _th
+
+    out = []
+    for n, c in enumerate(q for q in cen["outer"] if q.get("thread") and id(q["thread"]) not in on_dims):
+        view = CIRCLE_VIEW[c["axis"]]
+        if view not in enabled:
+            continue
+        i = AXIS_INDEX[c["axis"]]
+        others = [j for j in range(3) if j != i]
+        p3 = [0.0, 0.0, 0.0]
+        p3[others[0]], p3[others[1]] = c["centre"][0], c["centre"][1]
+        p3[i] = c["thread"]["start"]
+        u, v = _uv(view, p3, coord)
+        r = c["dia"] / 2
+        t = c["thread"]
+        out.append({"id": f"thd-{n}", "type": "thread", "view": view, "axis": c["axis"],
+                    "holes": [[u, v, r]], "tip": [u + r * 0.7071, v + r * 0.7071], "qty": 1, "dia": c["dia"],
+                    "thru": None, "depth": None, "pcd": None, "thread": t,
+                    "lines": [{"text": _th.callout(t), "kind": "thread", "value": t["major"], "depth": None,
+                               "tag": "spec", "param": None, "source": "thread"}]})
+    return out
+
+
+def thread_lines(cen: dict[str, Any], enabled: set[str], callouts: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """ISO 6410-1 marks for external threads in the principal views: ("view", "side", orient, across, t0, t1, root
+    radius, crest radius when the thread stops short) along the cylinder, and ("view", "end", u, v, root radius)
+    end-on where no thread callout already draws it."""
+    out: list[tuple[Any, ...]] = []
+    called = {id(c.get("thread")) for c in callouts if c.get("type") == "thread"}
+    for c in cen["outer"]:
+        t = c.get("thread")
+        if not t:
+            continue
+        ax = c["axis"]
+        i = AXIS_INDEX[ax]
+        others = [a for a in ("x", "y", "z") if a != ax]
+        start, sign = t["start"], t["sign"]
+        full = (c["t1"] - start) if sign > 0 else (start - c["t0"])
+        length = full if t.get("depth") is None else min(float(t["depth"]), full)
+        end = start + sign * length
+        crest = t["major"] / 2 if length < full - 1e-6 else None
+        for view in ("front", "top", "right"):
+            if view not in enabled or ax not in COORD[view]:
+                continue
+            o = COORD[view][ax]
+            b = next(a for a in COORD[view] if a != ax)
+            across = c["centre"][others.index(b)]
+            out.append((view, "side", "h" if o == "u" else "v", across, start, end, t["minor"] / 2, crest))
+        view = CIRCLE_VIEW[ax]
+        if view in enabled and id(t) not in called:
+            p3 = [0.0, 0.0, 0.0]
+            j = [k for k in range(3) if k != i]
+            p3[j[0]], p3[j[1]] = c["centre"][0], c["centre"][1]
+            u, v = _uv(view, p3, COORD)
+            out.append((view, "end", u, v, t["minor"] / 2))
+    return out
 
 
 def _dedup_levels(vals: list[float]) -> list[float]:

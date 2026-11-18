@@ -71,7 +71,7 @@ export interface BuildStatus {
 }
 
 export interface ManualFeature {
-  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft"; name: string; suppressed: boolean;
+  id: string; op: "fillet" | "chamfer" | "hole" | "extrude" | "shell" | "mirror" | "sketch" | "revolve" | "pattern" | "plane" | "draft" | "rib" | "sketch2d" | "sweep" | "loft" | "thread"; name: string; suppressed: boolean;
   /** below the rollback bar: kept in the tree, not built */
   rolled_back?: boolean;
   end?: "blind" | "mid" | "through"; reverse?: boolean;
@@ -100,6 +100,9 @@ export interface ManualFeature {
   spec?: { type: "clearance" | "tapped" | "cbore" | "csk"; size: number; fit?: string; pitch?: number; label?: string };
   cbore?: { d: number; depth: number }; csk?: { d: number; angle: number };
   place?: { mode: "corners" | "points"; face: { point: [number, number, number]; normal?: [number, number, number] }; x_dir?: [number, number, number]; dx?: number; dy?: number; pts?: [number, number][] };
+  /** cosmetic thread (CAD-027) on a hole feature, or the thread of a Cosmetic Thread feature on a picked cylinder */
+  thread?: { size: number; pitch: number; cls?: string; depth?: number | null; designation?: string; internal?: boolean };
+  face?: { point: [number, number, number] };
 }
 
 /** A manual feature that no longer rebuilds (kept in the tree, flagged for repair). */

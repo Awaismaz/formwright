@@ -37,6 +37,9 @@ Acceptance is deterministic checks, never renders (`src/aicad/checks.py`, `src/a
 - OCCT numbers assembly occurrences (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`) with a **process-wide counter**, so STEP
   bytes differ on a warm worker. `runner.normalize_step()` renumbers them after export. Keep that step whenever
   you touch Compound export.
+- Cosmetic threads (CAD-027) are written into the STEP header (`runner.stamp_threads`, FILE_DESCRIPTION lines). Any code
+  that exports a STEP to compare bytes with `part.step` (the CHK-08 rebuild) must stamp the same threads, or the bytes differ.
+  Threads are metadata (`fw._STATE["threads"]`, cached with the base script): never model a helix.
 - No dict-order, set-order, time or random dependence in geometry. Toolbox generators carry `VERSION`; bump it on any
   geometry change (see `toolbox-component`).
 

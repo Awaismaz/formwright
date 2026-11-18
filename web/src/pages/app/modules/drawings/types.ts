@@ -15,6 +15,22 @@ export interface DrawingEdits {
   dims: Record<string, { hidden?: boolean; tol?: string }>;
   title: Partial<Record<"title" | "drawing_no" | "company" | "checked_by", string>>;
   notes: string[];
+  /** DRW-011: circles on a view (view coordinates, mm) redrawn larger */
+  details?: DetailReq[];
+  /** DRW-013: datum symbols and feature control frames, only as entered */
+  gdt?: { datums: DatumIn[]; frames: FrameIn[] };
+}
+
+export interface DetailReq { view: string; u: number; v: number; r: number; scale: string | null }
+export type GdtTarget = { kind: "dim" | "callout"; id: string } | { kind: "point"; view: string; u: number; v: number };
+export interface DatumIn { letter: string; target: GdtTarget }
+export interface FrameIn { char: string; tol: number; dia?: boolean; mod?: "M" | "L" | null; datums: string[]; target: GdtTarget; id?: string }
+export interface GdtRecord {
+  datums: { letter: string; source: "user" | "icd"; ref?: string | null; label?: string | null; view: string }[];
+  frames: (FrameIn & { id: string; source: "user" | "icd"; ref?: string | null; label?: string | null; view: string; text: string })[];
+  unresolved: { type: string; letter?: string; char?: string; label?: string | null; ref?: string | null }[];
+  missing: { type: string; ref: string | null }[];
+  icd_version?: number | null; icd_interfaces: string[];
 }
 
 export interface CheckResult {
@@ -35,7 +51,13 @@ export interface CalloutRow { id: string; type?: "hole" | "radius" | "chamfer"; 
 export interface DrawingRecord {
   version: string; build_id: string; model_rev: string | null; sheet_rev?: string; issued?: boolean;
   options: DrawingOptions; edits?: DrawingEdits;
-  sheet: { size: string; w: number; h: number; scale: string; iso_scale: number; projection: string; iso_dropped?: boolean };
+  sheet: { size: string; w: number; h: number; scale: string; iso_scale: number; projection: string; iso_dropped?: boolean;
+    views?: Record<string, { rect: number[]; scale: number; origin: number[] }> };
+  details?: { drawn: { letter: string; parent: string; scale: string; u: number; v: number; r: number }[]; skipped: string[] };
+  gdt?: GdtRecord;
+  threads?: { designation: string; internal: boolean; depth: number | null; feature: string | null; dia: number }[];
+  threads_unmatched?: number;
+  imported?: { inferred_only: boolean; component: string | null; unrecognised_faces: number } | null;
   plan?: { turned: boolean; hollow: boolean; views: string[]; section: string | null; front_section: boolean; note: string | null };
   title: { title: string; drawing_no: string; material: string; drawn_by: string; date: string; rev: string; tolerance: string; company?: string; checked_by?: string };
   check: CheckResult;

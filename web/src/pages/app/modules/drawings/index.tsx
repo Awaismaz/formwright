@@ -11,9 +11,12 @@ import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
+import AnnotatePanel, { type ViewPoint } from "./AnnotatePanel";
 import { saveNative } from "@/components/NativeExport";
 import { ModuleHeader, PartCard } from "../ModuleHeader";
 import DraftEditor from "./draft/DraftEditor";
+import { createProject } from "@/components/NewProjectDialog";
+import { fileToB64 } from "@/components/StartBox";
 import { DraftStrip } from "./draft/DraftHome";
 import { DEFAULT_OPTIONS, EMPTY_EDITS, localStamp, type DrawingEdits, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
 
@@ -49,6 +52,7 @@ function ProjectPicker({ onPick, onDraft }: { onPick: (id: string) => void; onDr
       <DraftStrip onOpen={onDraft} />
       <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
       <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
+      <StepToDrawing onDone={onPick} existing={items.map(p => p.name)} />
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>Views are exact hidden-line projections of your model. Dimensions are tagged <b className="text-[#0b3d91]">spec</b> when they equal a declared model parameter and <i className="text-[#9a3412]">inferred</i> when measured from the geometry. Every sheet is consistency-checked and stamped <b>NOT APPROVED FOR MANUFACTURE</b>: an engineer must review it.</div>
@@ -63,6 +67,33 @@ function ProjectPicker({ onPick, onDraft }: { onPick: (id: string) => void; onDr
         </div>
       )}
     </div>
+    </div>
+  );
+}
+
+/** DRW-016: a STEP file straight to a drawing. The file becomes a part (exact import + feature recognition), then
+ *  its sheet opens; every dimension on it is inferred from the imported geometry and labelled so. */
+function StepToDrawing({ onDone, existing }: { onDone: (id: string) => void; existing: string[] }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (f: File) => {
+    if (f.size > 50 * 1024 * 1024) { toast.error("STEP files up to 50 MB are supported"); return; }
+    setBusy(true);
+    try {
+      let name = f.name.replace(/\.(step|stp)$/i, "").slice(0, 80) || "Imported part";
+      for (let n = 2; existing.includes(name); n++) name = `${f.name.replace(/\.(step|stp)$/i, "").slice(0, 70)} (${n})`;
+      const p = await createProject(name, null, `Imported from ${f.name} for a drawing`);
+      await api.post(`/api/projects/${p.id}/import-step`, { filename: f.name, data_b64: await fileToB64(f) });
+      onDone(p.id);
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "The STEP file could not be imported"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary-soft/30 p-3.5 text-[13px]" data-testid="step-to-drawing">
+      <FileDown className="h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-0 flex-1"><b>Drawing from a STEP file.</b> <span className="text-muted">Import a supplier or legacy part and get its sheet: views, hole callouts and sizes measured from the exact geometry, all marked <i>inferred</i> for you to verify.</span></div>
+      <input ref={ref} type="file" accept=".step,.stp" className="hidden" aria-label="STEP file" onChange={ev => { const f = ev.target.files?.[0]; ev.target.value = ""; if (f) void run(f); }} />
+      <Button size="sm" loading={busy} onClick={() => ref.current?.click()}>{busy ? "Importing…" : "Choose STEP file"}</Button>
     </div>
   );
 }
@@ -147,6 +178,13 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
   const [nonce, setNonce] = useState(0);
   const [customTol, setCustomTol] = useState("");
   const [locate, setLocate] = useState<{ id: string; n: number } | null>(null);
+  const [pick, setPick] = useState<{ hint: string; cb: (p: ViewPoint) => void } | null>(null);
+  useEffect(() => {
+    if (!pick) return;
+    const h = (ev: KeyboardEvent) => { if (ev.key === "Escape") setPick(null); };
+    addEventListener("keydown", h);
+    return () => removeEventListener("keydown", h);
+  }, [pick]);
   const inited = useRef(false);
   const autoRan = useRef(false);
   const timer = useRef<number | null>(null);
@@ -239,6 +277,12 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
           {st.can_edit && <button className="link ml-1 font-medium" onClick={() => void generate(opts, `Drawing updated to model rev ${st.current_rev ?? "—"}`)}>Update drawing</button>}
         </div>
       )}
+      {rec?.imported && (
+        <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px]" data-testid="inferred-banner">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
+          <span><b>Dimensions inferred from imported geometry — verify.</b> This part came from a STEP file, so no value on the sheet is a design intent{rec.imported.component ? ` (recognised as ${rec.imported.component})` : ""}{rec.imported.unrecognised_faces ? `; ${rec.imported.unrecognised_faces} face(s) were not recognised and are drawn but not dimensioned` : ""}.</span>
+        </div>
+      )}
       {st.release && !st.stale && (
         <div className={cx("flex items-center gap-2 border-b px-4 py-1.5 text-[12.5px]", st.release.current ? "border-success/25 bg-success/5" : "border-border bg-panel2 text-muted")}>
           {st.release.current ? <><ShieldCheck className="h-4 w-4 text-success" />Issued as Rev {st.release.rev} on {st.release.date}{st.release.by ? ` by ${st.release.by}` : ""}. Downloads are the issued revision.</>
@@ -257,12 +301,14 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
         {/* side panel */}
         <aside className="flex w-[320px] shrink-0 flex-col border-r border-border bg-panel">
           <Tabs defaultValue="sheet" className="flex min-h-0 flex-1 flex-col">
-            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="title" compact>Notes</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
+            <TabList className="px-2"><Tab value="sheet" compact>Sheet</Tab><Tab value="dims" compact>Dimensions</Tab><Tab value="annot" compact>Annotate</Tab><Tab value="title" compact>Notes</Tab><Tab value="check" compact>Check</Tab><Tab value="rev" compact>History</Tab></TabList>
             <TabPanel value="sheet" className="min-h-0 flex-1 overflow-y-auto">
               <OptionsPanel opts={opts} change={change} disabled={!canEdit} customTol={customTol} setCustomTol={setCustomTol} rec={rec} />
               <div className="px-4 py-3.5"><Legend counts={counts} /></div>
             </TabPanel>
             <TabPanel value="dims" className="min-h-0 flex-1 overflow-y-auto">{rec ? <DimsPanel rec={rec} edits={edits} disabled={!canEdit || busy} onSave={saveEdits} onLocate={id => setLocate(l => ({ id, n: (l?.n ?? 0) + 1 }))} /> : <Empty />}</TabPanel>
+            <TabPanel value="annot" className="min-h-0 flex-1 overflow-y-auto">{rec ? <AnnotatePanel rec={rec} edits={edits} disabled={!canEdit || busy} onSave={saveEdits}
+              requestPick={(hint, cb) => setPick({ hint, cb })} /> : <Empty />}</TabPanel>
             <TabPanel value="title" className="min-h-0 flex-1 overflow-y-auto">{rec ? <TitlePanel rec={rec} edits={edits} disabled={!canEdit || busy} onSave={saveEdits} /> : <Empty />}</TabPanel>
             <TabPanel value="check" className="min-h-0 flex-1 overflow-y-auto">{rec ? <CheckPanel rec={rec} /> : <Empty />}</TabPanel>
             <TabPanel value="rev" className="min-h-0 flex-1 overflow-y-auto">{rec ? <RevPanel rec={rec} /> : <Empty />}</TabPanel>
@@ -270,7 +316,13 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
         </aside>
         {/* sheet */}
         <div className="relative min-w-0 flex-1">
-          {rec && svgQ.data ? <SheetViewer svg={svgQ.data} widthMm={rec.sheet.w} heightMm={rec.sheet.h} busy={busy} highlight={locate} />
+          {rec && svgQ.data ? <SheetViewer svg={svgQ.data} widthMm={rec.sheet.w} heightMm={rec.sheet.h} busy={busy} highlight={locate}
+              pickHint={pick ? `${pick.hint} · Esc to cancel` : undefined}
+              onPick={pick ? (x, y) => {
+                const p = sheetToView(rec, x, y);
+                if (!p) { toast.error("Click inside the front, top, right or section view."); return; }
+                const cb = pick.cb; setPick(null); cb(p);
+              } : undefined} />
             : <div className="flex h-full items-center justify-center bg-[#e9edf2] text-sm text-muted dark:bg-[#1b2027]">
                 {busy || svgQ.isLoading ? <span className="inline-flex items-center gap-2"><RefreshCw className="h-4 w-4 animate-spin" />Generating views from the verified model…</span>
                   : st.project.verified ? "No drawing yet." : "Nothing to draw yet."}
@@ -280,6 +332,17 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
       </div>
     </div>
   );
+}
+
+/** A click on the sheet (paper mm) as a point of the view under it, in that view's model coordinates. */
+function sheetToView(rec: DrawingRecord, x: number, y: number): ViewPoint | null {
+  for (const [view, v] of Object.entries(rec.sheet.views ?? {})) {
+    const [x0, y0, x1, y1] = v.rect as [number, number, number, number];
+    const pad = 2;
+    if (x < x0 - pad || x > x1 + pad || y < y0 - pad || y > y1 + pad) continue;
+    return { view, u: +(v.origin[0]! + (x - x0) / v.scale).toFixed(3), v: +(v.origin[1]! - (y - y0) / v.scale).toFixed(3) };
+  }
+  return null;
 }
 
 function Empty() {

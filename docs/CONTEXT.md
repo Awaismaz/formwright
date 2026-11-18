@@ -129,6 +129,9 @@ with BOM/balloons, Smithy DFM summary, program BOM, "Release program" → tagged
 calibration (EMA per family, simulated runs in their own profile) + Timeline tab, bearing-seat/key/dowel interfaces,
 frame-tolerant Gage (24 axis rotations), shared assembly lock (in-memory, single server — PD-53). Report:
 docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3. Nothing is in flight on branches.
+**Drawing depth (branch `wip/drawing-depth`, 2026-11-18):** cosmetic threads (ISO 261 table `aicad/threads.py`, Hole Wizard toggle +
+Cosmetic Thread feature, STEP header + `part.threads.json`), detail views, GD&T only from input (user or ICD, CD-021), STEP → drawing
+(all inferred). Drawing Studio VERSION 1.2.0; defaults PD-56. GD&T and threads are never inferred from geometry: keep it that way.
 Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
 review gate, change notices after release).
 
