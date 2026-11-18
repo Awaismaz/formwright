@@ -149,3 +149,70 @@ Recommendation: build W1 for M1 because it exercises every layer with exact acce
 Transitive license audit (LEG-002) runs before any of these are locked. Environment: dedicated uv venv with Python 3.12, base conda env untouched (ADR-005).
 
 **Paid services needed for local PoC:** none for geometry, checks, render, drawings, tests. Only the live LLM generation/critique step costs money (API usage); CI and most dev runs use recorded responses.
+
+---
+
+## 6. Collaboration: permissions and branching (PLT-010, PLT-017, PLT-020…024, CAD-062; 2026-11-18)
+
+Code: `src/aicad/platform/collab/` (`tables`, `permissions`, `branches`, `merge`, `reconcile`) and
+`src/aicad/platform/routers/collab.py`. Data: eleven **new** tables only (`teams`, `team_members`, `project_access`,
+`project_grants`, `guest_invites`, `share_links`, `project_comments`, `project_branches`, `merge_requests`,
+`mr_reviews`, `project_tags`), created by `create_all` at start-up. No existing table or column changes, so a
+database from before this keeps working: a project without a `project_access` row is open to its workspace by role
+(as before) and has only a `main` branch.
+
+### Permissions (one module)
+Levels `none < read < comment < edit < admin`. Effective access to a project =
+max(workspace baseline, owning-team role, grants), then capped:
+
+| Who | Baseline | Cap |
+|---|---|---|
+| Workspace owner / admin | admin | — |
+| Project creator | admin | viewer cap applies |
+| Workspace engineer | the project's *general access* (default `edit`; team project default `read`; personal `none`) | — |
+| Workspace viewer | min(general, `read`) | `comment` (viewers never edit) |
+| Owning-team member | team admin → admin, editor → edit, viewer → read | viewer cap applies |
+| Grant (person or team) | read / comment / edit | viewer cap applies |
+| Guest (not in the workspace) | own person-grants only | `edit`; never the design agent |
+| Read-only share link | separate public API `/api/share/{token}` (GET only) | read; no downloads, no agent |
+
+Every project endpoint calls `projects._project(ctx, id, need)` → `permissions.require_project`. When `need` is
+omitted it follows the HTTP method (GET/HEAD → read, anything else → edit), so new endpoints are safe by default;
+overrides: compare/warm = read, comments = comment, share/delete/tags-delete = admin, agent chat = `agent` (edit by a
+workspace member), native `.fwpart` export = `export` (edit, no lock). A project you can't read is a 404. Members whose
+selected workspace differs from the project's are switched to the project's workspace for that request. Module
+routers' own `_project` helpers delegate (assembly parts need only read), and every project list (Projects, search,
+recent revisions, module pickers, export-all) is filtered with `permissions.visible` / `access_map`.
+
+### Branches
+- `main` = the project's existing workspace and linear revision history (nothing moves).
+- A branch = sibling workspace `<workspaces>/<org>/<project>.branches/<branch id>`, forked copy-on-write from a
+  revision of its source (inputs, settings and that revision's outputs; rebuilt only when the revision differs from
+  the copied outputs). Its own `model.py` head, `out/`, `revisions/`, agent conversation. `.fw/merge_base/model.py`
+  is the common ancestor.
+- Which branch a request works on: per person and project, cookie `fw_br_<project>` (set by checkout), read by the
+  pure-ASGI `RequestContextMiddleware` into a context variable. `projects.workspace_for(p)` resolves through it, so
+  every existing endpoint (agent, params, manual features, undo, restore, files, modules) works on the active branch
+  unchanged. Agent sessions and background-export tasks are keyed per branch (`branches.BranchKeyed`); agent events
+  are pinned to the branch the run started on.
+- Soft edit lock: a design-agent run in progress on a branch (session `busy`, `driver` = who started it) makes edit
+  requests by others on that branch 409 `edit_locked`; the UI offers "Work on my own branch". Protected main:
+  edit requests on main by non-admins are 409 `protected_main`.
+
+### Merge requests
+Branch → main. Fast-forward when main's model equals the merge base; otherwise `merge.merge_model`: parameters
+(top-level numeric assignments) merged per name, manual features (the app-managed `MANUAL_FEATURES` list) per
+feature id, the agent's source as a line-based merge3 with parameter values and the feature block masked out.
+Conflicts are resolved per id with ours / theirs / an accepted design-agent proposal (`reconcile.propose`, optional,
+token-metered; tests fake it). The merged script is written to main, inputs the branch added are carried over, main is
+rebuilt, and the merge is **refused** (main restored) unless the build has a fingerprint and passes its gating
+checks. Protected main needs `required_approvals` approvals from people other than the author and no outstanding
+"request changes". Source conflicts are shown in plain language (what changed on each side); the script lines are a
+superadmin-only support view.
+
+### Presence, comments, activity
+Presence is in memory per process: an SSE stream per open Studio (`/presence/stream`, joins on connect) plus a 45 s
+heartbeat endpoint; snapshots include who is on which branch and current locks. Comments live in
+`project_comments` (project, revision or merge request; replies; `@first name` / `@full name` mentions notify).
+The activity feed is derived: the audit log rows targeting the project (with the branch recorded automatically by
+`services.audit`) plus design-agent runs.

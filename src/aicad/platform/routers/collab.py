@@ -322,6 +322,10 @@ def get_access(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, A
                       "email": users[g.subject_id].email if g.subject_type == "user" and g.subject_id in users else None,
                       "color": teams[g.subject_id].color if g.subject_id in teams else None}
                      for g in grants]
+    if acc.guest:  # guests see who else has access, not their email addresses
+        out["owner"] = out["owner"] and {**out["owner"], "email": ""}
+        for g in out["grants"]:
+            g["email"] = None if g["subject_id"] != ctx.user.id else g["email"]
     if acc.member_role:
         mems = ctx.db.scalars(select(Membership).where(Membership.org_id == p.org_id)).all()
         mu = {u.id: u for u in ctx.db.scalars(select(User).where(User.id.in_({m.user_id for m in mems})))}
@@ -444,7 +448,7 @@ def remove_grant(project_id: str, gid: str, ctx: Ctx = Depends(verified_ctx)) ->
 @router.post("/projects/{project_id}/guests")
 def invite_guest(project_id: str, body: GuestIn, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     """Share with someone by email. A workspace member gets a grant; anyone else is invited as a guest with access
-    to this project only (no workspace seat; PD-47)."""
+    to this project only (no workspace seat; PD-50)."""
     p = _projects_mod()._project(ctx, project_id, "admin")
     if body.level not in GRANT_LEVELS:
         raise HTTPException(422, "Level must be read, comment or edit")

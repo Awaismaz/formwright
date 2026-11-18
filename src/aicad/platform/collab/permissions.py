@@ -13,7 +13,7 @@ Effective access = max(workspace baseline, owning-team role, explicit grants), t
 - the **owning team**: team admin -> admin, editor -> edit, viewer -> read;
 - **grants** to the person, or to a team they are in;
 - a **guest** (signed in, not in the workspace) has only their own grants, capped at ``edit``, and never runs the
-  design agent (tokens belong to the workspace; PD-47).
+  design agent (tokens belong to the workspace; PD-50).
 
 Routers call `require_project(ctx, project_id, need)`. When `need` is omitted it follows the HTTP method: reads
 (GET/HEAD) need ``read``, every other method needs ``edit``; endpoints override that where it differs (compare is a

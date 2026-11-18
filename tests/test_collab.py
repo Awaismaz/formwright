@@ -558,3 +558,17 @@ def test_conflicts_reconcile_and_protected_main(app_client: TestClient, monkeypa
     assert t["revision"] == m.json()["revision"]
     assert owner.get(f"/api/projects/{pid}/tags").json()["items"][0]["name"] == "v1.0"
     assert ada.delete(f"/api/projects/{pid}/tags/{t['id']}").status_code == 403
+
+
+def test_reconcile_proposal_parsing() -> None:
+    from aicad.platform.collab import reconcile
+
+    p = reconcile.parse('Sure. {"resolutions": {"param:T": {"value": 11}, "source:1": {"text": "x = 1"}, '
+                        '"feature:f": {"pick": "theirs"}}, "note": "Kept both intents in model.py"}')
+    assert "model.py" not in p["note"]  # no internals reach the UI
+    conf = {"param:T": {"kind": "param"}, "source:1": {"kind": "source"}, "feature:f": {"kind": "feature"}}
+    assert reconcile.to_resolution(conf["param:T"], p["resolutions"]["param:T"]) == {"value": 11}
+    assert reconcile.to_resolution(conf["source:1"], p["resolutions"]["source:1"]) == {"text": "x = 1"}
+    assert reconcile.to_resolution(conf["feature:f"], p["resolutions"]["feature:f"]) == "theirs"
+    assert reconcile.to_resolution(conf["param:T"], {"value": True}) is None  # not a number
+    assert reconcile.parse("no json here")["resolutions"] == {}

@@ -60,8 +60,10 @@ def parse(text: str) -> dict[str, Any]:
         data = json.loads(m.group(0))
     except ValueError:
         return {"resolutions": {}, "note": "The design agent's proposal could not be read."}
+    from aicad.agent.session import scrub
+
     res = data.get("resolutions") if isinstance(data.get("resolutions"), dict) else {}
-    return {"resolutions": res, "note": str(data.get("note") or "")[:600]}
+    return {"resolutions": res, "note": scrub(str(data.get("note") or ""))[:600]}  # no internals in the UI
 
 
 def to_resolution(conflict: dict[str, Any], proposal: Any) -> Any:
