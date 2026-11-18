@@ -138,8 +138,8 @@ docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.
 **Batch 23-25 merged + pushed (2026-11-18 night):** drawing depth (threads, detail views, GD&T only from explicit
 input / ICD, STEP→drawing; PD-58), engineering hygiene (IO matrix, SBOM, run record, repeatability; PD-56), studio
 intelligence (agent fills the PropertyManager, change-impact preview, datasheet pack; PD-57). Full suite 623 passed.
-**In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/sheet-metal`, `wip/office-phase6`,
-`wip/agent-platform`. Unmerged = unfinished. Parked decisions now PD-35…PD-58.
+**In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/sheet-metal`, `wip/office-phase6`.
+Unmerged = unfinished. Agent platform (WORKLIST 28: LLM provider layer, Export for SOLIDWORKS, Blender IO) merged; PD-59. Parked decisions now PD-35…PD-58.
 **`wip/agent-platform` finished (2026-11-18, not merged):** LLMProvider abstraction + stub / Messages API providers
 (AGT-001, AGT-013), "Export for SOLIDWORKS" STEP pathway with disclosure (CAD-070), Blender exports in the IO matrix
 (IO-008b). PD-59.
