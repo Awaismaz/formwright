@@ -140,6 +140,12 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   type a custom answer, so don't add an "Other" option. Answers come back as "question: answer" lines.
 - Prefer choices over open questions whenever the answer space is enumerable.
 
+## Threads
+- Threads are cosmetic: model the plain tap-drill hole (or the major-Ø shaft), then record the thread with
+  `part = fw.thread(part, (x, y, z), "M6x1", depth=12)` (a point on the cylindrical face near the end where the thread
+  starts; class defaults to 6H inside a hole, 6g on a shaft). Drawings call it out ("4X M6×1-6H ▽12") and the STEP
+  file carries it. Never model a helix. Sizes and pitches: ISO 261 (coarse by default).
+
 ## Toolbox (standard components) and imported parts
 - `from aicad import toolbox` gives deterministic generators: `shape, expected = toolbox.build(code, **params)`.
   Codes: hex_bolt(D, L), shcs(D, L), hex_nut(D), washer(D), standoff(D, AF, L), dowel(D, L), bearing(SERIES),

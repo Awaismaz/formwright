@@ -10,7 +10,7 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft"; preset?: Record<string, unknown> }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft" | "thread"; preset?: Record<string, unknown> }
   | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib" | "sketch"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
@@ -65,6 +65,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     ], [
       { id: "cut", label: "Extruded Cut", icon: <ArrowDownToLine className="h-5 w-5" />, tip: "Sketch, then cut: blind, mid plane or through all", cmd: { kind: "sketch", preset: { feature: "extrude", mode: "cut" } }, needsBody: true },
       { id: "hole", label: "Hole Wizard", icon: <Drill className="h-5 w-5" />, tip: "Clearance, tapped, counterbored or countersunk holes for ISO fasteners, placed by distance from the face edges", cmd: { kind: "feature", op: "hole" }, needsBody: true },
+      { id: "thread", label: "Cosmetic Thread", icon: <Spline className="h-5 w-5 rotate-90" />, tip: "ISO metric thread on a hole or shaft: called out on drawings and written to the STEP file (the geometry stays plain)", cmd: { kind: "feature", op: "thread" }, needsBody: true },
       { id: "revcut", label: "Revolved Cut", icon: <RefreshCcwDot className="h-5 w-5" />, tip: "Sketch a profile and a centerline, then revolve it to remove material (grooves)", cmd: { kind: "sketch", preset: { feature: "revolve", mode: "cut" } }, needsBody: true },
       { id: "sweepcut", label: "Swept Cut", icon: <Route className="h-5 w-5" />, tip: "Remove material by sweeping a profile along a path", cmd: { kind: "feature", op: "sweep", preset: { mode: "cut" } }, needsBody: true },
       { id: "loftcut", label: "Lofted Cut", icon: <Pyramid className="h-5 w-5" />, tip: "Remove material lofted between profile sketches", cmd: { kind: "feature", op: "loft", preset: { mode: "cut" } }, needsBody: true },

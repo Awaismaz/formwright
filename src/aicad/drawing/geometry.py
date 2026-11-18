@@ -524,14 +524,57 @@ def plan(cen: dict[str, Any], info: dict[str, Any], opts: dict[str, Any]) -> dic
     return out
 
 
+def to_drawing(rows: list[list[float]] | None, p: Any) -> list[float]:
+    """A model point or direction in drawing orientation (``orient`` rows: drawing X, Y, Z in model coordinates)."""
+    if not rows:
+        return [float(p[0]), float(p[1]), float(p[2])]
+    return [rows[i][0] * p[0] + rows[i][1] * p[1] + rows[i][2] * p[2] for i in range(3)]
+
+
+def attach_threads(cen: dict[str, Any], rows: list[list[float]] | None, threads: list[dict[str, Any]]
+                   ) -> dict[str, Any]:
+    """Cosmetic threads (CAD-027) on the census: a tapped hole carries ``thread`` when a recorded instance lies on
+    its axis and its Ø is a tap drill for it; a threaded cylinder when its Ø is the major Ø. Returns counts."""
+    matched = unmatched = 0
+    for t in threads or []:
+        lite = {k: t.get(k) for k in ("designation", "size", "pitch", "cls", "internal", "depth", "major", "minor",
+                                      "feature", "name")}
+        for inst in t.get("instances") or []:
+            p = to_drawing(rows, inst["p"])
+            d = to_drawing(rows, inst["dir"])
+            ax = _principal((d[0], d[1], d[2]))
+            if ax is None:
+                unmatched += 1
+                continue
+            i = AXIS_INDEX[ax]
+            perp = [p[j] for j in range(3) if j != i]
+            pool = cen["holes"] if t.get("internal") else cen["outer"]
+            hit = None
+            for h in pool:
+                if h["axis"] != ax or any(abs(h["centre"][k] - perp[k]) > 1e-3 for k in (0, 1)):
+                    continue
+                ok = (t["minor"] - 0.6 <= h["dia"] < t["major"]) if t.get("internal") else \
+                    abs(h["dia"] - t["major"]) <= max(0.3, 0.02 * t["major"])
+                if ok and h["t0"] - 1e-3 <= p[i] <= h["t1"] + 1e-3:
+                    hit = h
+                    break
+            if hit is None:
+                unmatched += 1
+                continue
+            hit["thread"] = {**lite, "start": r6(p[i]), "sign": 1.0 if d[i] > 0 else -1.0}
+            matched += 1
+    return {"matched": matched, "unmatched": unmatched}
+
+
 def analyse(step_path: str, opts: dict[str, Any]) -> dict[str, Any]:
     """Everything the layout needs from the kernel, as plain data (in drawing orientation)."""
     shape = load_solid(step_path)
     cen0 = census(shape)
     shape, info = orient(shape, cen0)
     cen = census(shape) if info["rows"] else cen0
+    thr = attach_threads(cen, info["rows"], opts.get("threads") or [])
     pl = plan(cen, info, opts)
-    out: dict[str, Any] = {"census": cen, "views": {}, "part": info, "plan": pl}
+    out: dict[str, Any] = {"census": cen, "views": {}, "part": info, "plan": pl, "threads": thr}
     for v in pl["views"]:
         if v == "front" and pl["front_section"]:
             continue

@@ -5,7 +5,8 @@ Routes (all org-scoped; the module must be unlocked: plan / add-on ``addon_drawi
   GET  /api/m/drawings/projects/{id}                latest drawing record (or null) and whether it is stale
   POST /api/m/drawings/projects/{id}/generate       generate / regenerate from the latest build (not viewers)
   GET  /api/m/drawings/projects/{id}/edits          the user's edits (hidden dimensions, tolerances, title, notes)
-  PUT  /api/m/drawings/projects/{id}/edits          (or POST) save edits and regenerate the sheet with them (not viewers)
+  PUT  /api/m/drawings/projects/{id}/edits          (or POST) save edits (dims, title, notes, detail views, GD&T) and
+                                                    regenerate the sheet with them (not viewers)
   GET  /api/m/drawings/projects/{id}/files/{name}   sheet.svg | sheet.pdf | sheet.dxf (?download=1 to save,
                                                     ?copy=issue|review; downloads default to the issue copy)
 
@@ -69,6 +70,8 @@ class EditsIn(BaseModel):
     dims: dict[str, dict[str, Any]] = {}
     title: dict[str, str] = {}
     notes: list[str] = []
+    details: list[dict[str, Any]] = []  # DRW-011 detail views: {view, u, v, r, scale}
+    gdt: dict[str, Any] = {}  # DRW-013 datums / feature control frames, only as entered
     local_date: str | None = None
     tz: str | None = None
     regenerate: bool = True  # False: save only (e.g. a note added from another module while the sheet is out of date)
@@ -263,6 +266,14 @@ async def put_edits(project_id: str, body: EditsIn, ctx: Ctx = Depends(verified_
         raise HTTPException(422, str(e)) from None
     ws = workspace_for(p)
     d = ws / "drawings"
+    # a frame may only name a datum on the drawing: the user's own, or one the interface spec states (CD-021)
+    spec_gdt = ((_meta(p, ws, "", "").get("spec") or {}).get("gdt") or {})
+    known = {x["letter"] for x in (ed.get("gdt") or {}).get("datums") or []} |         {x["letter"] for x in spec_gdt.get("datums") or []}
+    for f in (ed.get("gdt") or {}).get("frames") or []:
+        missing = [x for x in f["datums"] if x not in known]
+        if missing:
+            raise HTTPException(422, f"That frame refers to datum {', '.join(missing)}, which is not on the drawing. "
+                                     "Add the datum first.")
     d.mkdir(parents=True, exist_ok=True)
     (d / "edits.json").write_text(json.dumps(ed, indent=1, sort_keys=True), encoding="utf-8")
     rec = _record(ws)

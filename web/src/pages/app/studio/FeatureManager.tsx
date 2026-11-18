@@ -8,11 +8,12 @@ import { Button, Field, Input, Tip } from "@/components/ui";
 import { describe, edgeMid, edgeRef } from "@/viewer/measure";
 import HoleWizard, { type HoleApi, type HolePreset } from "./HoleWizard";
 import ImpactPanel from "./ImpactPanel";
+import ThreadFields, { sizeFor, toSpec, useThreadTables, type ThreadValue } from "./ThreadFields";
 import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
 export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib" | "sketch2d">;
-const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole Wizard", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base" };
+const TITLE: Record<FeatureOp, string> = { fillet: "Fillet", chamfer: "Chamfer", hole: "Hole Wizard", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base", thread: "Cosmetic Thread" };
 const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole", "sweep", "loft"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
@@ -162,6 +163,16 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [checking, setChecking] = useState(false);
   const [impact, setImpact] = useState<{ data: Impact; key: string } | null>(null);
   const hole = useRef<HoleApi | null>(null);
+  // cosmetic thread on a picked cylinder (hole or shaft)
+  const threadT = useThreadTables();
+  const cyl = selection.find(p => p.kind === "face" && topo?.faces[p.id]?.type === "cylinder") as Extract<Pick, { kind: "face" }> | undefined;
+  const [thrVal, setThrVal] = useState<ThreadValue>({ size: e?.thread?.size ?? 10, pitch: e?.thread?.pitch ?? 1.5, cls: e?.thread?.cls ?? "", depth: e?.thread?.depth ? String(e.thread.depth) : "" });
+  useEffect(() => {
+    if (op !== "thread" || !cyl || !topo || !threadT) return;
+    const r = topo.faces[cyl.id]?.radius; if (!r) return;
+    const s = sizeFor(2 * r, null, threadT);
+    setThrVal(v => ({ ...v, size: s, pitch: (threadT.pitches[String(s)] ?? [v.pitch])[0]! }));
+  }, [cyl?.id, threadT]); // eslint-disable-line react-hooks/exhaustive-deps
   const [holeReady, setHoleReady] = useState(false);
 
   const edges = selection.filter(p => p.kind === "edge") as Extract<Pick, { kind: "edge" }>[];
@@ -242,6 +253,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "loft" ? loftSecs.length >= 2
     : op === "draft" ? !!neutral && (draftFaces.length > 0 || !!e?.faces?.length) && num(draftAngle) > 0
     : op === "hole" ? holeReady
+    : op === "thread" ? !!cyl || !!e?.face
     : !!plane;
 
   // features are replayed in tree order, whatever order they were ticked in
@@ -265,6 +277,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         f.name = `${sp ? `M${sp.size} ${{ clearance: "Clearance", tapped: "Tapped", cbore: "Counterbored", csk: "Countersunk" }[sp.type] ?? ""}` : `Ø${f.d}`} Hole${n > 1 ? ` (${n}×)` : ""}`;
       }
       if (!f.place && pattern !== "none" && num(count) > 1) f = { ...f, count: num(count), ...(pattern === "circular" ? { pattern: "circular", center: center.map(num) } : { step: step.map(num) }) };
+    } else if (op === "thread") {
+      f = { ...f, face: { point: cyl ? cyl.point : e!.face!.point }, thread: toSpec(thrVal) };
     } else if (op === "shell") {
       const faces = planarFaces.length && topo ? planarFaces.map(p => ({ point: p.point, normal: topo.faces[p.id]!.normal! })) : e?.faces;
       f = { ...f, faces, t: num(size) };
@@ -417,6 +431,15 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
               : plane ? "Using the original plane. Click a planar face to change it." : "Click a planar face in the viewer."}</p>
           </div>
           <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+        </> : op === "thread" ? <>
+          <div className="rounded-lg border border-border bg-panel2 p-2.5">
+            <div className="label mb-1">Cylindrical face</div>
+            <p className="text-[12px]">{cyl && topo ? describe(cyl, topo) : e?.face ? <span className="text-muted">Using the original face. Click a hole or shaft to change it.</span>
+              : <span className="text-muted">Click a hole or a shaft near the end where the thread starts.</span>}</p>
+          </div>
+          <ThreadFields value={thrVal} onChange={setThrVal} internal={null} />
+          <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+          <p className="flex gap-1 text-[11px] text-muted"><Info className="mt-0.5 h-3 w-3 shrink-0" />A hole gets an internal thread (6H), a shaft an external one (6g). The size must fit: a tap drill for a hole, the major Ø for a shaft.</p>
         </> : op === "pattern" ? <>
           {featurePicker("Features to pattern", "patterned")}
           <div>{seg<"linear" | "circular">([["linear", "Linear"], ["circular", "Circular"]], patKind, k => { setPatKind(k); if (!e) setName(nextName(k === "circular" ? "CirPattern" : "LPattern", manual)); })}</div>

@@ -99,6 +99,49 @@ Branch `wip/studio-intel` (worktree `fw-wt/studio-intel`). Report: docs/reports/
 ### Next
 - Founder try-out on a real assembly; extend impact to tree actions and typed commands; one live agent run to confirm
   the model prefers fw-edit for small requests (PD-09 subscription, a few hundred tokens).
+## 2026-11-18 (x) — Drawing depth: cosmetic threads, detail views, GD&T, ICD datums, STEP → drawing (CAD-027, DRW-011, DRW-013, DRW-016, CD-021)
+
+Branch `wip/drawing-depth` (worktree `fw-wt/drawing-depth`). Drawing Studio VERSION 1.1.3 → 1.2.0. PD-58 (may be renumbered at merge).
+
+### Done
+- CAD-027 cosmetic threads: `aicad/threads.py` (ISO 261/262 table, ISO 724 sizes, ISO 965 classes, callout text); hole features carry
+  `thread` (Hole Wizard "Cosmetic thread" toggle; on by default for Tapped; also on Simple holes); new Studio feature **Cosmetic Thread**
+  (Features ribbon) on any picked cylinder, internal / external from the face; agent helper `fw.thread(...)` (prompt + scrub). Threads
+  follow hole patterns, feature patterns and mirrors. `status.json.threads`, feature-tree params, STEP header lines + `part.threads.json`
+  (deterministic, CHK-07/08 untouched).
+- Drawings: thread callouts "2X M8×1.25-6H ▽12" / "Ø6.8 THRU", designation in place of a turned Ø, ISO 6410-1 marks (3/4 root circles,
+  root + limit lines), thread note.
+- DRW-011 detail views (Annotate tab: radius, scale, pick the centre on the sheet).
+- DRW-013 GD&T (Annotate tab: datums and frames attached to a dimension / callout or a picked point); only as entered; ISO 1101 rules;
+  line-work symbols in SVG/PDF/DXF; CHK-12 sub-checks `gdt` and `details`; edits API validates datum references (422).
+- CD-021 Ortho part sheets get ICD datums / frames (`deliverables.icd_gdt`, part frame from Gage), labelled from the interface spec.
+- DRW-016: Drawing Studio "Drawing from a STEP file"; imported sheets are all inferred with a note and an app banner.
+
+### Verified
+- `tests/test_drawing_depth.py` (16 tests, hand values: ISO 261 pitches, ISO 724 minor Ø, callout strings, drill volumes, thread
+  instance positions incl. circular pattern, STEP header line + byte determinism, 3/4 arcs at r = 3·s, external root gap 2·d3·s and
+  thread length 25·s, detail clip chord 8 and 120° arc, scale rules, nothing GD&T by default, ISO 1101 refusals, ICD bracket rules +
+  quarter-turn transform, imported sheet all inferred, API 422 / round trip, Studio API thread → status + STEP).
+- Targeted suites green (drawings, drawings_2d, studio, studio_fixes, library, office*, handoff, release, agent); ruff; tsc; vitest
+  117; vite build.
+- Browser walkthrough (studio-e2e, port 8812, scratch data, puppeteer-core 25.18.1): Hole Wizard thread toggle, Cosmetic Thread PM,
+  thread callout on the demo plate sheet, detail view by pick, datum A by pick + position frame on the tapped callout (CHK-12 passed),
+  STEP file → drawing with the inferred banner (CHK-12 passed). Screenshots: docs/reports/drawing-depth/01…08. 0 console errors.
+  Found and fixed in the walkthrough: a 5:1 detail that did not fit pushed the sheet to 1:100 (now a smaller enlargement is tried
+  first); the detail letter blocked a callout leader (letters are now placed after callouts, on a free diagonal).
+
+### Not done / limitations
+- No dimensions inside detail views; thread marks are not repeated inside details.
+- GD&T: no composite frames, datum targets or all-around; ICD frames only for bolted-joint holes (position) and mounting faces
+  (flatness); keyways / dowels / gear meshes add none.
+- Threads: metric ISO only (no UNC/UNF, pipe threads); internal side views keep plain hidden lines; threads on non-principal axes are
+  listed as not drawn.
+- DRW-016 acceptance needs a pilot rating (status In Progress).
+
+### Next
+- Per-dimension ± tolerances (DRW-012) so GD&T and size tolerances sit together; dimensions inside detail views.
+
+---
 
 ## 2026-11-18 (u) — Design Office Phase 5: deliverables, release, calibration, timeline (CD-014, CD-015, DRW-014, CD-018…020)
 

@@ -13,8 +13,15 @@ tags with colours and a legend; the issue copy (``sheet.pdf``, ``sheet_issue.svg
 default) is monochrome with no legend. Both come from one layout, so they share scale and positions.
 
 User edits (MAKE-06, ``edits``): hidden dimensions or callouts, per-dimension tolerance or fit text (printed after
-the value and marked user-entered in the record), title-block fields and free notes. Edits are keyed by stable
-dimension ids and re-applied on every regeneration; CHK-12 runs on the edited sheet.
+the value and marked user-entered in the record), title-block fields and free notes, detail views (DRW-011: a circle
+on a view, redrawn at a larger standard scale) and GD&T (DRW-013: datum symbols and feature control frames, only as
+entered). Edits are keyed by stable dimension ids / view coordinates and re-applied on every regeneration; CHK-12
+runs on the edited sheet.
+
+Also drawn from the model, never invented: cosmetic threads (CAD-027, ``status["threads"]``) as ISO 6410-1 marks and
+callouts; datums and frames a Design Office interface spec states (CD-021, ``meta["spec"]["gdt"]``), labelled as
+such. An imported STEP (DRW-016, ``status["imported"]``) has no design parameters: every value is tagged inferred and
+the sheet says so.
 """
 
 from __future__ import annotations
@@ -27,8 +34,10 @@ from typing import Any
 
 from aicad import deliverables
 from aicad.drawing import VERSION, DrawingInputError
+from aicad.drawing import detail as detail_mod
+from aicad.drawing import gdt as gdt_mod
 from aicad.drawing.check import chk12
-from aicad.drawing.dims import candidates, fmt, tag
+from aicad.drawing.dims import candidates, fmt, tag, thread_lines
 from aicad.drawing.layout import SHEETS, compose
 from aicad.drawing.render import issue_sheet, to_dxf, to_pdf, to_svg
 
@@ -88,7 +97,14 @@ def normalize_edits(e: dict[str, Any] | None) -> dict[str, Any]:
     title = {f: " ".join(str((e.get("title") or {}).get(f) or "").split())[:60] for f in TITLE_FIELDS}
     title = {k: v for k, v in title.items() if v}
     notes = [" ".join(str(n).split())[:160] for n in (e.get("notes") or [])][:12]
-    return {"dims": dims, "title": title, "notes": [n for n in notes if n]}
+    out: dict[str, Any] = {"dims": dims, "title": title, "notes": [n for n in notes if n]}
+    details = detail_mod.normalize(e.get("details"))
+    g = gdt_mod.normalize(e.get("gdt"))
+    if details:  # only when used, so edits without them keep their old shape
+        out["details"] = details
+    if g["datums"] or g["frames"]:
+        out["gdt"] = g
+    return out
 
 
 def spec_params(status: dict[str, Any], spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
@@ -119,6 +135,11 @@ def spec_params(status: dict[str, Any], spec: dict[str, Any]) -> tuple[dict[str,
     return params, pmeta, fits
 
 
+def _main_line(c: dict[str, Any]) -> dict[str, Any]:
+    """The callout line that carries the feature's own size (the drill Ø under a thread designation)."""
+    return next((ln for ln in c["lines"] if ln.get("kind") in ("hole", "radius", "chamfer")), c["lines"][0])
+
+
 def tolerance_text(t: dict[str, Any]) -> str:
     if t["mode"] == "iso2768":
         return f"ISO 2768-{t['class']} ({ISO2768[t['class']]})"
@@ -127,17 +148,141 @@ def tolerance_text(t: dict[str, Any]) -> str:
     return "Not specified"
 
 
-def _analysis(step: Path, opts: dict[str, Any]) -> dict[str, Any]:
+def _analysis(step: Path, opts: dict[str, Any], threads: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     from aicad.drawing import geometry
 
     st = step.stat()
     key = (str(step.resolve()), st.st_mtime_ns, st.st_size, tuple(opts["views"] or ()), opts["views"] is None,
-           opts["section"], VERSION)
+           opts["section"], VERSION, json.dumps(threads or [], sort_keys=True))
     if key not in _cache:
         if len(_cache) > 24:
             _cache.clear()
-        _cache[key] = geometry.analyse(str(step), {"views": opts["views"], "section": opts["section"]})
+        _cache[key] = geometry.analyse(str(step), {"views": opts["views"], "section": opts["section"],
+                                                   "threads": threads or []})
     return _cache[key]
+
+
+def _recognition(ws: Path) -> dict[str, Any] | None:
+    """The feature recognition of an imported STEP (the file the model script names in ``RECOGNITION``)."""
+    try:
+        src = (ws / "model.py").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = re.search(r"^RECOGNITION = '([^'\n]+)'", src, re.MULTILINE)
+    if not m or ".." in m.group(1):
+        return None
+    f = ws / m.group(1)
+    try:
+        return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _details(an: dict[str, Any], reqs: list[dict[str, Any]], hidden: bool, datums: set[str] | None = None
+             ) -> tuple[list[dict[str, Any]], list[str]]:
+    """Detail views with their letters (after the section's A, never a datum's letter) and clipped geometry;
+    requests on a view that is not drawn are reported, not drawn."""
+    taken = ({"A"} if an.get("section") else set()) | set(datums or ())
+    letters = detail_mod.letters(len(reqs), taken)
+    out, skipped = [], []
+    for d, letter in zip(reqs, letters, strict=False):
+        parent = an["section"] if d["view"] == "section" and an.get("section") else an["views"].get(d["view"])
+        if parent is None or (d["view"] == "front" and parent.get("is_section")):
+            skipped.append(f"Detail {letter}: the {d['view']} view is not on the sheet.")
+            continue
+        out.append({**d, "letter": letter, "parent": d["view"], "geom": detail_mod.geometry(parent, d, hidden)})
+    return out, skipped
+
+
+def _gdt_items(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str, Any]],
+               user: dict[str, Any], spec: dict[str, Any], hidden: list[str]
+               ) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    """Datum symbols and feature control frames to draw, from the interface spec (first) and the user's edits, with
+    their record. Nothing is added that was not given; references to a datum that is not on the sheet are refused."""
+    by_id = {d["id"]: d for d in dims} | {c["id"]: c for c in callouts}
+    items: list[dict[str, Any]] = []
+    rec_d: list[dict[str, Any]] = []
+    rec_f: list[dict[str, Any]] = []
+    notes: list[str] = []
+    unresolved: list[dict[str, Any]] = []
+    letters: dict[str, str] = {}
+    sg = (spec or {}).get("gdt") or {}
+    icd_refs: set[str] = set()
+    drawn_at: dict[str, str] = {}
+    alias: dict[str, str] = {}
+    for d in sg.get("datums") or []:
+        hit = gdt_mod.resolve_model_target(d["target"], an, dims, callouts)
+        if hit is None:
+            unresolved.append({"type": "datum", "letter": d["letter"], "label": d.get("label"), "ref": d.get("ref")})
+            continue
+        tgt, view = hit
+        tkey = json.dumps(tgt, sort_keys=True)
+        if tkey in drawn_at:  # two ICD features on one drawn feature (coaxial seats): one datum, the letter aliased
+            alias[d["letter"]] = drawn_at[tkey]
+            continue
+        drawn_at[tkey] = d["letter"]
+        letters[d["letter"]] = "icd"
+        icd_refs.add(str(d.get("ref") or ""))
+        items.append({"type": "datum", "rec": {"letter": d["letter"]}, "target": tgt, "view": view,
+                      "ref": f"datum-{d['letter']}"})
+        rec_d.append({"letter": d["letter"], "source": "icd", "ref": d.get("ref"), "label": d.get("label"),
+                      "target": tgt, "view": view})
+    seen_frames: set[str] = set()
+    for n, f in enumerate(sg.get("frames") or []):
+        f = {**f, "datums": list(dict.fromkeys(alias.get(x, x) for x in f.get("datums") or []))}
+        if any(x not in letters for x in f.get("datums") or []):
+            unresolved.append({"type": "frame", "char": f["char"], "label": f.get("label"), "ref": f.get("ref")})
+            continue
+        hit = gdt_mod.resolve_model_target(f["target"], an, dims, callouts)
+        if hit is None:
+            unresolved.append({"type": "frame", "char": f["char"], "label": f.get("label"), "ref": f.get("ref")})
+            continue
+        tgt, view = hit
+        fr = {"id": f"icd-{n + 1}", "char": f["char"], "tol": float(f["tol"]), "dia": bool(f.get("dia")),
+              "mod": f.get("mod"), "datums": list(f.get("datums") or [])}
+        key = json.dumps([tgt, fr["char"], fr["tol"], fr["dia"], fr["datums"]], sort_keys=True)
+        if key in seen_frames:  # the holes of one pattern share one callout: one frame for the group
+            continue
+        seen_frames.add(key)
+        icd_refs.add(str(f.get("ref") or ""))
+        items.append({"type": "frame", "rec": fr, "target": tgt, "view": view, "ref": fr["id"]})
+        rec_f.append({**fr, "source": "icd", "ref": f.get("ref"), "label": f.get("label"), "target": tgt, "view": view,
+                      "text": gdt_mod.describe(fr)})
+    conflicts = []
+    for d in user.get("datums") or []:
+        if d["letter"] in letters:
+            conflicts.append(d["letter"])
+            continue
+        letters[d["letter"]] = "user"
+    for d in user.get("datums") or []:
+        if d["letter"] in conflicts:
+            continue
+        tgt = d["target"]
+        view = by_id[tgt["id"]]["view"] if tgt["kind"] in ("dim", "callout") and tgt["id"] in by_id else tgt.get("view")
+        if tgt["kind"] in ("dim", "callout") and (tgt["id"] not in by_id or tgt["id"] in hidden):
+            unresolved.append({"type": "datum", "letter": d["letter"], "label": "dimension not on the sheet"})
+            continue
+        items.append({"type": "datum", "rec": {"letter": d["letter"]}, "target": tgt, "view": view,
+                      "ref": f"datum-{d['letter']}"})
+        rec_d.append({"letter": d["letter"], "source": "user", "target": tgt, "view": view})
+    for f in user.get("frames") or []:
+        missing = [x for x in f["datums"] if x not in letters]
+        if missing:
+            raise DrawingInputError(f"The {gdt_mod.CHARS[f['char']][0].lower()} frame refers to datum "
+                                    f"{', '.join(missing)}, which is not on the drawing. Add the datum first.")
+        tgt = f["target"]
+        if tgt["kind"] in ("dim", "callout") and (tgt["id"] not in by_id or tgt["id"] in hidden):
+            unresolved.append({"type": "frame", "char": f["char"], "label": "dimension not on the sheet"})
+            continue
+        view = by_id[tgt["id"]]["view"] if tgt["kind"] in ("dim", "callout") else tgt["view"]
+        items.append({"type": "frame", "rec": f, "target": tgt, "view": view, "ref": f["id"]})
+        rec_f.append({**f, "source": "user", "view": view, "text": gdt_mod.describe(f)})
+    if conflicts:
+        notes.append(f"Datum {', '.join(conflicts)} is already defined by the interface spec; your datum with that "
+                     "letter is not drawn.")
+    rec = {"datums": rec_d, "frames": rec_f, "unresolved": unresolved, "aliases": alias,
+           "icd_version": sg.get("version"), "icd_interfaces": sorted(r for r in icd_refs if r)}
+    return items, rec, notes
 
 
 def _history(path: Path, status: dict[str, Any], meta: dict[str, Any], write: bool = True) -> list[dict[str, Any]]:
@@ -198,7 +343,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     ed = normalize_edits(edits)
     issue = meta.get("issue")
     dest.mkdir(parents=True, exist_ok=True)
-    an = _analysis(step, opts)
+    an = _analysis(step, opts, status.get("threads") or [])
     t_geo = time.perf_counter() - t0
     cen = an["census"]
     pl = an["plan"]
@@ -210,13 +355,32 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     dims, callouts, notes_extra = candidates(cen, enabled, {"axis": sec["axis"], "at": sec["plane"]} if cross else None)
     params, pmeta, fits = spec_params(status, meta.get("spec") or {})
     mapping = tag(dims, callouts, params, pmeta)
+    imported = bool(status.get("imported"))
+    if imported:  # DRW-016: an imported STEP's "parameters" were measured from it: nothing on the sheet is spec
+        for d in dims:
+            d["tag"], d["param"] = "inferred", None
+        for c in callouts:
+            c.pop("count_param", None)
+            for ln in c["lines"]:
+                if ln.get("source") != "thread":
+                    ln["tag"], ln["param"] = "inferred", None
+                    ln.pop("params", None)
+        mapping = {"mapped": {}, "unmapped": sorted(k for k, v in params.items()
+                                                    if isinstance(v, int | float) and not isinstance(v, bool)),
+                   "kinds": mapping.get("kinds", {})}
+        fits = {}
+    # external cosmetic threads on a turned diameter: the designation replaces the Ø (ISO 6410-1)
+    for d in dims:
+        if d.get("thread"):
+            d["text"] = d["thread"]["designation"]
+            d["tag"] = "spec"
     # interface fits (Design Office ICD) printed after the value they belong to, unless the user wrote a tolerance
     for d in dims:
         if d.get("tag") == "spec" and d.get("param") in fits and not ed["dims"].get(d["id"], {}).get("tol"):
             d["text"] = f"{d['text']} {fits[d['param']]}"
             d["icd_fit"] = fits[d["param"]]
     for c in callouts:
-        ln = c["lines"][0]
+        ln = _main_line(c)
         if ln.get("tag") == "spec" and ln.get("param") in fits and not ed["dims"].get(c["id"], {}).get("tol"):
             ln["text"] += f" {fits[ln['param']]}"
             c["icd_fit"] = fits[ln["param"]]
@@ -230,7 +394,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     for c in callouts:
         tol = ed["dims"].get(c["id"], {}).get("tol")
         if tol:
-            c["lines"][0]["text"] += f" {tol}"
+            _main_line(c)["text"] += f" {tol}"
             c["tol"] = tol
     shown_dims = [d for d in dims if d["id"] not in hidden]
     shown_callouts = [c for c in callouts if c["id"] not in hidden]
@@ -263,11 +427,41 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     # Parameters with no unambiguous match (mapping["unmapped"]) are listed in the Drawing Studio panel, never on the
     # sheet: model parameter names are not manufacturing information (and a reader takes them for missing sizes).
     notes += [n.upper() for n in notes_extra]
+    recog = _recognition(out_dir.parent) if imported else None
+    if imported:
+        notes.append("DIMENSIONS INFERRED FROM IMPORTED GEOMETRY — VERIFY BEFORE USE.")
+        comp = (recog or {}).get("component") or {}
+        if comp.get("name"):
+            notes.append(f"RECOGNISED AS: {str(comp['name']).upper()} (INFERRED).")
+        unrec = sum(int(v) for v in ((recog or {}).get("unrecognised") or {}).values())
+        if unrec:
+            notes.append(f"{unrec} FACE(S) NOT RECOGNISED: SHOWN IN THE VIEWS, NOT DIMENSIONED.")
+    if cen_threads := [h for h in cen["holes"] + cen["outer"] if h.get("thread")]:
+        notes.append("THREADS ARE COSMETIC (ISO 6410-1); TAP DRILL SIZES ARE COMMON PRACTICE — VERIFY FOR YOUR TAP."
+                     if any(h["thread"].get("internal") for h in cen_threads) else
+                     "THREADS ARE COSMETIC (ISO 6410-1).")
+    for d in dims:
+        th = d.get("thread")
+        if th and th.get("depth") is not None and d["id"] not in hidden:
+            notes.append(f"THREAD {th['designation']}: {fmt(th['depth'])} LONG FROM THE END SHOWN BY THE THREAD LIMIT.")
+    used = {d["letter"] for d in (ed.get("gdt") or {}).get("datums") or []} |         {d["letter"] for d in ((meta.get("spec") or {}).get("gdt") or {}).get("datums") or []}
+    details, skipped_details = _details(an, ed.get("details") or [], opts.get("hidden", True), used)
+    gdt_items, gdt_rec, gdt_notes = _gdt_items(an, shown_dims, shown_callouts, ed.get("gdt") or {},
+                                               meta.get("spec") or {}, hidden)
+    gdt_rec["notes"] = gdt_notes  # for the panel (a datum letter the interface spec already uses)
+    if gdt_rec["icd_interfaces"]:
+        notes.append(f"DATUMS AND GEOMETRIC TOLERANCES FROM THE INTERFACE SPEC (ICD v{gdt_rec['icd_version'] or '—'}: "
+                     f"{', '.join(gdt_rec['icd_interfaces'])}). VERIFY.")
+    if any(f["source"] == "user" for f in gdt_rec["frames"]):
+        notes.append("GEOMETRIC TOLERANCES SHOWN WITHOUT AN ICD REFERENCE ARE ENTERED BY THE USER.")
     notes += [str(n) for n in (meta.get("spec") or {}).get("notes") or []][:6]
     notes += ed["notes"]
-    sheet = compose(an, shown_dims, shown_callouts, notes, opts, sheet_meta, rev_rows)
+    an_sheet = {**an, "details": details, "gdt_items": gdt_items,
+                "thread_lines": thread_lines(cen, enabled, shown_callouts)}
+    sheet = compose(an_sheet, shown_dims, shown_callouts, notes, opts, sheet_meta, rev_rows)
     expected = {v: bbox_extents(cen["bbox"], v) for v in ("front", "top", "right") if v in an["views"]}
-    check = chk12(sheet, dims, callouts, mapping, cen, expected, hidden=hidden)
+    check = chk12(sheet, dims, callouts, mapping, cen, expected, hidden=hidden,
+                  gdt={"items": gdt_items, "record": gdt_rec})
     t_layout = time.perf_counter() - t0 - t_geo
     doc_title = f"{sheet_meta['title']} — drawing {sheet_meta['drawing_no']} rev {rev}"
     issue_copy = issue_sheet(sheet)
@@ -289,7 +483,20 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
         "sheet_rev": rev, "issued": issue is not None, "options": opts, "edits": ed,
         "sheet": {"size": sheet["size"], "w": sheet["w"], "h": sheet["h"], "scale": sheet["scale_txt"],
                   "iso_scale": sheet["iso_scale"], "projection": sheet["projection"],
-                  "iso_dropped": sheet.get("iso_dropped", False)},
+                  "iso_dropped": sheet.get("iso_dropped", False),
+                  # where each view sits on the sheet, so the app can turn a click into view coordinates
+                  "views": {k: {"rect": [round(x, 4) for x in v["rect"]], "scale": v["scale"],
+                                "origin": [round(x, 6) for x in v["origin"]]}
+                            for k, v in sheet["views"].items() if k in ("front", "top", "right", "section")}},
+        "details": {"drawn": sheet.get("details") or [], "skipped": skipped_details},
+        "gdt": {**gdt_rec, "missing": sheet.get("gdt_missing") or []},
+        "threads": [{"designation": h["thread"]["designation"], "internal": bool(h["thread"].get("internal")),
+                     "depth": h["thread"].get("depth"), "feature": h["thread"].get("name"), "dia": h["dia"]}
+                    for h in cen["holes"] + cen["outer"] if h.get("thread")],
+        "threads_unmatched": (an.get("threads") or {}).get("unmatched", 0),
+        "imported": {"inferred_only": True, "component": ((recog or {}).get("component") or {}).get("name"),
+                     "unrecognised_faces": sum(int(v) for v in ((recog or {}).get("unrecognised") or {}).values())}
+        if imported else None,
         "plan": {"turned": bool(part.get("turned")), "hollow": bool(part.get("hollow")),
                  "views": [v for v in pl["views"] if v in an["views"]],
                  "section": pl.get("kind") or pl["section"], "front_section": bool(pl.get("front_section")),

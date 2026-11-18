@@ -132,6 +132,10 @@ docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.
 
 **In flight (worktrees under `C:/Users/Awais/Desktop/fw-wt/`, WORKLIST 23-25):** `wip/drawing-depth` (threads, detail
 views, GD&T from explicit input, STEP→drawing), `wip/studio-intel` (agent fills the PropertyManager, change-impact preview). Unmerged = unfinished.
+docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3. Nothing is in flight on branches.
+**Drawing depth (branch `wip/drawing-depth`, 2026-11-18):** cosmetic threads (ISO 261 table `aicad/threads.py`, Hole Wizard toggle +
+Cosmetic Thread feature, STEP header + `part.threads.json`), detail views, GD&T only from input (user or ICD, CD-021), STEP → drawing
+(all inferred). Drawing Studio VERSION 1.2.0; defaults PD-58. GD&T and threads are never inferred from geometry: keep it that way.
 Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
 review gate, change notices after release).
 

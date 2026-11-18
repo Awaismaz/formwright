@@ -22,9 +22,37 @@ from xml.sax.saxutils import escape
 from aicad.drawing.layout import LAYERS, TEXT_COLORS
 
 # Layer classes are prefixed (drw-*) so an inline SVG cannot clash with page CSS (e.g. a "hidden" utility).
-FILLS = {"dim": "#222222", "dim_n": "#222222", "bannerfill": "#fdecec", "visible": "#111111", "cutthick": "#111111"}
-ORDER = ["bannerfill", "construction", "hatch", "hatch_n", "hidden", "center", "center_n", "visible", "cut",
-         "cutthick", "dim", "dim_n", "frame", "tb", "tbthin", "banner", "text"]
+FILLS = {"dim": "#222222", "dim_n": "#222222", "bannerfill": "#fdecec", "visible": "#111111", "cutthick": "#111111",
+         "gdt": "#111111"}
+ORDER = ["bannerfill", "construction", "hatch", "hatch_n", "hidden", "center", "center_n", "thread", "visible", "cut",
+         "cutthick", "detail", "dim", "dim_n", "gdt", "frame", "tb", "tbthin", "banner", "text"]
+DEPTH = "▽"  # depth symbol in hole / thread callouts: drawn as a triangle in PDF and DXF (no font has it there)
+
+
+def depth_pieces(txt: str, size: float, font: str = "regular") -> list[tuple[str, float]]:
+    """A callout text split around depth symbols: [(text, x offset from the text start)], with "" marking a
+    symbol at that offset. Widths use the layout's metrics, so the pieces land where the layout measured them."""
+    from aicad.drawing.layout import text_width
+
+    out: list[tuple[str, float]] = []
+    x = 0.0
+    for i, part in enumerate(txt.split(DEPTH)):
+        if i:
+            out.append(("", x))
+            x += text_width(DEPTH, size, font)
+        if part:
+            out.append((part, x))
+            x += text_width(part, size, font)
+    return out
+
+
+def depth_triangle(x: float, y: float, size: float) -> list[tuple[float, float]]:
+    """The ▽ symbol at text start x, baseline y (paper mm, y down): a downward triangle of cap height."""
+    from aicad.drawing.layout import text_width
+
+    w = text_width(DEPTH, size)
+    top = y - 0.70 * size
+    return [(x + 0.1 * w, top), (x + 0.9 * w, top), (x + 0.5 * w, y)]
 SVG_FONT = "Helvetica, Arial, 'Liberation Sans', sans-serif"
 
 
@@ -175,6 +203,25 @@ def to_pdf(sheet: dict[str, Any], path: Path, title: str = "") -> None:
                 pa.lineTo(X(x), Y(y))
             pa.close()
             c.drawPath(pa, stroke=0, fill=1)
+        elif t == "text" and DEPTH in p["txt"] and not p["rot"]:
+            col = HexColor(TEXT_COLORS.get(p.get("color") or "normal", "#111111"))
+            c.setFillColor(col)
+            c.setFont(FONTS[p["font"]], p["s"] * mm)
+            x0 = p["box"][0]
+            for piece, off in depth_pieces(p["txt"], p["s"], p["font"]):
+                if piece:
+                    c.drawString(X(x0 + off), Y(p["y"]), piece)
+                else:
+                    tri = depth_triangle(x0 + off, p["y"], p["s"])
+                    c.setStrokeColor(col)
+                    c.setLineWidth(0.09 * p["s"] * mm)
+                    c.setDash([])
+                    pa = c.beginPath()
+                    pa.moveTo(X(tri[0][0]), Y(tri[0][1]))
+                    for qx, qy in tri[1:]:
+                        pa.lineTo(X(qx), Y(qy))
+                    pa.close()
+                    c.drawPath(pa, stroke=1, fill=0)
         elif t == "text":
             c.setFillColor(HexColor(TEXT_COLORS.get(p.get("color") or "normal", "#111111")))
             c.setFont(FONTS[p["font"]], p["s"] * mm)
@@ -191,11 +238,13 @@ def to_pdf(sheet: dict[str, Any], path: Path, title: str = "") -> None:
 
 # ----------------------------------------------------------------------------- DXF
 GEOMETRY_LAYERS = {"visible": "VISIBLE", "hidden": "HIDDEN", "center": "CENTER", "hatch": "HATCH"}
-PAPER_LAYERS = {"dim": "DIM", "cut": "CUT", "cutthick": "CUT", "text": "TEXT"}
+PAPER_LAYERS = {"dim": "DIM", "cut": "CUT", "cutthick": "CUT", "text": "TEXT", "thread": "THREAD", "detail": "DETAIL",
+                "gdt": "GDT"}
 #: name: (ACI colour, linetype, lineweight in 1/100 mm)
 DXF_LAYER_STYLE = {"VISIBLE": (7, "Continuous", 50), "HIDDEN": (3, "HIDDEN", 25), "CENTER": (1, "CENTER", 18),
                    "HATCH": (8, "Continuous", 18), "DIM": (4, "Continuous", 18), "TEXT": (7, "Continuous", 18),
-                   "SHEET": (7, "Continuous", 35), "CUT": (1, "CENTER", 25), "VIEWPORT": (8, "Continuous", 13)}
+                   "SHEET": (7, "Continuous", 35), "CUT": (1, "CENTER", 25), "VIEWPORT": (8, "Continuous", 13),
+                   "THREAD": (3, "Continuous", 25), "DETAIL": (6, "Continuous", 25), "GDT": (7, "Continuous", 25)}
 
 
 def dxf_text(txt: str) -> str:
@@ -235,9 +284,10 @@ def to_dxf(sheet: dict[str, Any], path: Path) -> None:
         t, layer = pr["t"], pr["l"]
         if t == "text":
             continue
-        geom = pr.get("view") is not None and layer in GEOMETRY_LAYERS
+        # a detail view has its own scale: its geometry goes to paper space, as drawn (DRW-011)
+        geom = pr.get("view") is not None and layer in GEOMETRY_LAYERS and not str(pr["view"]).startswith("detail-")
         space, T, f = (msp, M, k) if geom else (psp, P, 1.0)
-        lname = GEOMETRY_LAYERS[layer] if geom else PAPER_LAYERS.get(layer, "SHEET")
+        lname = GEOMETRY_LAYERS[layer] if geom else PAPER_LAYERS.get(layer) or GEOMETRY_LAYERS.get(layer, "SHEET")
         attrs = {"layer": lname}
         if t == "line":
             a = pr["p"]
@@ -262,6 +312,17 @@ def to_dxf(sheet: dict[str, Any], path: Path) -> None:
              "end": TextEntityAlignment.RIGHT}
     for pr in sheet["prims"]:
         if pr["t"] != "text":
+            continue
+        if DEPTH in pr["txt"] and not pr["rot"]:  # text pieces and a drawn depth symbol, left-aligned at the box
+            x0 = pr["box"][0]
+            for piece, off in depth_pieces(pr["txt"], pr["s"], pr["font"]):
+                if piece:
+                    e = psp.add_text(dxf_text(piece), dxfattribs={"height": pr["s"] * 0.72, "layer": "TEXT",
+                                                                  "style": "FW"})
+                    e.set_placement(P(x0 + off, pr["y"]), align=TextEntityAlignment.LEFT)
+                else:
+                    psp.add_lwpolyline([P(qx, qy) for qx, qy in depth_triangle(x0 + off, pr["y"], pr["s"])], close=True,
+                                       dxfattribs={"layer": "TEXT"})
             continue
         e = psp.add_text(dxf_text(pr["txt"]), dxfattribs={"height": pr["s"] * 0.72, "layer": "TEXT", "style": "FW",
                                                          "rotation": 90 if pr["rot"] else 0})

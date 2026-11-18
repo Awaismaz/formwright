@@ -3,6 +3,7 @@
 - feature(name, part)      record a named design feature (feature tree + face provenance)
 - edges_near / faces_near  select topology by location (stable across rebuilds, unlike indices)
 - apply_manual(part, ops)  apply user-authored manual features (fillet, chamfer, hole, sketch extrude/cut)
+- thread(part, point, ...) cosmetic thread on a hole or cylinder (metadata only; the geometry is unchanged)
 
 State is per build: the runner calls reset() before executing a script.
 """
@@ -43,7 +44,7 @@ from build123d import (
 
 from aicad import refplane as _refplane
 
-_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None, "manual_errors": []}
+_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None, "manual_errors": [], "threads": []}
 
 
 def reset() -> None:
@@ -52,6 +53,7 @@ def reset() -> None:
     _STATE["last"] = None
     _STATE["suppressed"] = set()
     _STATE["manual_errors"] = []
+    _STATE["threads"] = []
 
 
 def set_base(folder: Any) -> None:
@@ -752,11 +754,21 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
     if part is None and op not in BASE_OPS:
         raise ValueError("this feature needs an existing solid; start the part with a boss or revolve")
     if op in TOOL_OPS:
-        return _apply_tool(part, _tool({**f, "_part": part} if op == "hole" else f, diag), _is_cut(f))
+        axes = _hole_axes(part, f) if op == "hole" and f.get("thread") else None
+        part = _apply_tool(part, _tool({**f, "_part": part} if op == "hole" else f, diag), _is_cut(f))
+        if axes:
+            _record_thread(f, f["thread"], axes)
+        return part
+    if op == "thread":
+        return _cosmetic_thread(part, f)
     if op == "pattern":
         for src in _sources(f, done, "patterned"):
+            axes = _hole_axes(part, src) if src["op"] == "hole" and src.get("thread") else None
             for inst in pattern_instances(_tool({**src, "_part": part} if src["op"] == "hole" else src, diag), f):
                 part = _apply_tool(part, inst, _is_cut(src))
+            if axes:
+                _record_thread(f, src["thread"],
+                               [a for k in range(1, int(f["count"])) for a in _pattern_axes(axes, f, k)])
         return part
     if op == "fillet":
         edges = _resolve_edges(part, f)
@@ -788,7 +800,11 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
         pl = Plane(origin=_v(f["plane"]["origin"]), z_dir=_v(f["plane"]["normal"]))
         if f.get("source"):  # mirror features: each source's tool body, reflected, added or cut like the original
             for src in _sources(f, done, "mirrored"):
-                part = _apply_tool(part, _moved(_tool(src, diag), lambda t: t.mirror(pl)), _is_cut(src))
+                axes = _hole_axes(part, src) if src["op"] == "hole" and src.get("thread") else None
+                part = _apply_tool(part, _moved(_tool({**src, "_part": part} if src["op"] == "hole" else src, diag),
+                                                lambda t: t.mirror(pl)), _is_cut(src))
+                if axes:
+                    _record_thread(f, src["thread"], [_mirror_axis(a, pl) for a in axes])
             return part
         return part + mirror(part, about=pl)
     raise ValueError(f"unknown manual operation {op!r}")
@@ -868,12 +884,133 @@ def apply_manual(part: Any, features: list[dict[str, Any]]) -> Any:
                                   "params": {"op": f["op"], "id": str(f.get("id", ""))}})
             continue
         done[str(f.get("id", ""))] = f
-        feature(name, part, kind="manual", op=f["op"], id=str(f.get("id", "")))
+        th = f.get("thread") if isinstance(f.get("thread"), dict) else {}
+        extra = {"thread": str(th["designation"])} if th.get("designation") else {}
+        feature(name, part, kind="manual", op=f["op"], id=str(f.get("id", "")), **extra)
         _STATE["manual"] += 1
     if part is None and _STATE["manual_errors"]:  # nothing could be built: report why
         first = _STATE["manual_errors"][0]
         raise ValueError(f"manual feature '{first['name']}' failed: {first['error']}")
     return part
+
+
+# ----------------------------------------------------------------------------- cosmetic threads (CAD-027)
+def _rotate(p: Vector, origin: Vector, axis: Vector, deg: float) -> Vector:
+    """Rodrigues rotation of a point about an axis through ``origin``."""
+    k = axis.normalized()
+    v = p - origin
+    a = math.radians(deg)
+    c, s = math.cos(a), math.sin(a)
+    return origin + v * c + k.cross(v) * s + k * (k.dot(v) * (1 - c))
+
+
+def _hole_axes(part: Any, f: dict[str, Any]) -> list[tuple[Vector, Vector]]:
+    """(opening centre, drill direction into the material) of every hole a hole feature drills (before the cut)."""
+    n = _v(f["normal"]).normalized()
+    if f.get("place"):
+        return [(c, -n) for c in hole_centres(part, f)]
+    point = _v(f["point"])
+    if f.get("ref_bbox") and part is not None and not faces_near(part, point, normal=n):
+        for q in _remaps(point, f["ref_bbox"], _bbox6(part)):
+            if faces_near(part, q, normal=n):
+                point = q
+                break
+    count = int(f.get("count", 1))
+    if count > 1 and f.get("pattern") == "circular":
+        c0 = _v(f["center"])
+        return [(_rotate(point, c0, n, 360.0 * i / count), -n) for i in range(count)]
+    if count > 1:
+        step = _v(f.get("step", (0, 0, 0)))
+        return [(point + step * i, -n) for i in range(count)]
+    return [(point, -n)]
+
+
+def _pattern_axes(axes: list[tuple[Vector, Vector]], f: dict[str, Any], k: int) -> list[tuple[Vector, Vector]]:
+    """Copy ``k`` of a feature pattern applied to hole axes (the same transforms as ``pattern_instances``)."""
+    count = int(f["count"])
+    if f.get("kind") == "circular":
+        o, d = _v(f["axis"]["origin"]), _v(f["axis"]["dir"])
+        total = float(f.get("angle", 360))
+        a = (total / count if abs(total - 360) < 1e-9 else total / max(count - 1, 1)) * k
+        return [(_rotate(p, o, d, a), _rotate(p + n, o, d, a) - _rotate(p, o, d, a)) for p, n in axes]
+    step = _v(f["step"])
+    return [(p + step * k, n) for p, n in axes]
+
+
+def _mirror_axis(a: tuple[Vector, Vector], pl: Plane) -> tuple[Vector, Vector]:
+    p, n = a
+    z = pl.z_dir.normalized()
+
+    def refl(v: Vector) -> Vector:
+        return v - z * (2 * (v - pl.origin).dot(z))
+
+    return refl(p), refl(p + n) - refl(p)
+
+
+def _r6(x: float) -> float:
+    v = round(float(x), 6)
+    return 0.0 if v == 0 else v
+
+
+def _record_thread(f: dict[str, Any], t: dict[str, Any], axes: list[tuple[Vector, Vector]]) -> None:
+    """One thread record per feature: the designation and every instance (opening point + direction into it)."""
+    if not axes:
+        return
+    _STATE["threads"].append({
+        "feature": str(f.get("id", "")), "name": str(f.get("name") or f["op"]),
+        **{k: t[k] for k in ("size", "pitch", "cls", "internal", "depth", "designation", "series", "major", "minor")
+           if k in t},
+        "instances": [{"p": [_r6(p.X), _r6(p.Y), _r6(p.Z)], "dir": [_r6(n.X), _r6(n.Y), _r6(n.Z)]} for p, n in axes]})
+
+
+def _cosmetic_thread(part: Any, f: dict[str, Any]) -> Any:
+    """Cosmetic thread on a picked cylindrical face (a hole: internal; a shaft or boss: external). It starts at the
+    end of the face nearest the pick and runs ``depth`` (default: the whole face). The solid is unchanged."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.BRepTools import BRepTools
+    from OCP.GeomAbs import GeomAbs_Cylinder
+
+    from aicad import threads as _threads
+
+    pick = _v(f["face"]["point"])
+    cyl = None
+    for fc in _resolve_face(part, {"point": f["face"]["point"]}, f.get("ref_bbox"), "the cylindrical face"):
+        ad = BRepAdaptor_Surface(fc.wrapped)
+        if ad.GetType() == GeomAbs_Cylinder:
+            cyl = (fc, ad)
+            break
+    if cyl is None:
+        raise ValueError("a cosmetic thread goes on a cylindrical face (a hole or a shaft)")
+    fc, ad = cyl
+    c = ad.Cylinder()
+    loc, d = c.Axis().Location(), c.Axis().Direction()
+    o, dv = Vector(loc.X(), loc.Y(), loc.Z()), Vector(d.X(), d.Y(), d.Z())
+    _u0, _u1, v0, v1 = BRepTools.UVBounds_s(fc.wrapped)
+    a, b = o + dv * v0, o + dv * v1
+    start, end = (b, a) if abs((pick - b).dot(dv)) < abs((pick - a).dot(dv)) else (a, b)
+    radius = c.Radius()
+    # internal when the material lies outside the cylinder: a point just beyond the radius is inside the solid
+    x = dv.cross(Vector(1, 0, 0)) if abs(dv.X) < 0.9 else dv.cross(Vector(0, 1, 0))
+    probe = (start + end) * 0.5 + x.normalized() * (radius + min(0.05, radius * 0.1))
+    internal = bool(part.is_inside(probe))
+    t = _threads.resolve(f["thread"], internal=internal, bore=round(2 * radius, 6),
+                         length=round((end - start).length, 6))
+    _record_thread(f, t, [(start, (end - start).normalized())])
+    return part
+
+
+def thread(part: Any, point: Any, designation: str, depth: float | None = None, cls: str | None = None,
+           name: str = "Cosmetic thread") -> Any:
+    """Model-script helper: a cosmetic thread on the cylindrical face at ``point`` (hole or shaft). Returns ``part``
+    unchanged; the thread is metadata for drawings and the STEP export."""
+    _cosmetic_thread(part, {"op": "thread", "id": name, "name": name, "face": {"point": list(_v(point))},
+                            "thread": {"designation": designation, "depth": depth, "cls": cls}})
+    return part
+
+
+def threads() -> list[dict[str, Any]]:
+    """Cosmetic threads recorded in the last build, in feature order."""
+    return [dict(t) for t in _STATE.get("threads") or []]
 
 
 def manual_errors() -> list[dict[str, Any]]:

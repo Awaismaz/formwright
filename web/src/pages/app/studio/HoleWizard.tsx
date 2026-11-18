@@ -6,6 +6,7 @@ import type { ManualFeature } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Field, Input } from "@/components/ui";
 import type { SketchPreview, Topo, V3 } from "@/viewer/types";
+import ThreadFields, { toSpec, type ThreadValue } from "./ThreadFields";
 
 /** Hole Wizard (STU-08 / IDEA 3): ISO fastener holes placed by distance from the face's edges, with the edge-distance
  *  and washer checks shown before OK. Sizes come from the server tables (ISO 273, DIN 974-1, ISO 10642, ISO 7089). */
@@ -71,9 +72,17 @@ export default function HoleWizard({ editing, face, topo, onSketch, onApi, prese
   const [mode, setMode] = useState<Mode>(e ? (e.place ? e.place.mode : "picked") : pr.mode ?? "corners");
   const [dx, setDx] = useState(String(e?.place?.dx ?? pr.dx ?? 10));
   const [dy, setDy] = useState(String(e?.place?.dy ?? pr.dy ?? 10));
+  // cosmetic thread (CAD-027): on by default for a new tapped hole; also allowed on a simple hole
+  const [threadOn, setThreadOn] = useState<boolean>(e ? !!e.thread : (pr.type ?? "clearance") === "tapped");
+  const [thr, setThr] = useState<ThreadValue>({ size: e?.thread?.size ?? (e?.spec?.size ?? pr.size ?? 6), pitch: e?.thread?.pitch ?? e?.spec?.pitch ?? 1,
+    cls: e?.thread?.cls ?? "6H", depth: e?.thread?.depth ? String(e.thread.depth) : "" });
   const [pts, setPts] = useState<[string, string][]>(e?.place?.pts?.map(([u, v]) => [String(u), String(v)] as [string, string]) ?? [["10", "10"]]);
 
   const sz = Number(size);
+  const threadable = type === "tapped" || type === "simple";
+  // a tapped hole's thread is its own size; keep the pitch valid when the size changes
+  useEffect(() => { if (type === "tapped" && T && thr.size !== sz) setThr(t => ({ ...t, size: sz, pitch: T.pitch[sz] ?? t.pitch })); }, [type, sz, T]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!e && type === "tapped") setThreadOn(true); }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
   const drill = type === "simple" ? n2(dia) : !T ? NaN : type === "tapped" ? T.tap_drill[sz]! : T.clearance[sz]?.[fit] ?? NaN;
   const cb = type === "cbore" && T ? { d: T.cbore_d[sz]!, depth: T.cbore_depth[sz]! } : null;
   const csk = type === "csk" && T ? T.csk_d[sz] ?? null : null;
@@ -117,6 +126,7 @@ export default function HoleWizard({ editing, face, topo, onSketch, onApi, prese
       payload: () => {
         const f: Record<string, unknown> = { point: pl!.point, normal: pl!.normal, d: Number.isFinite(drill) ? drill : 1, depth: blind ? n2(depth) : null };
         if (type !== "simple") f.spec = { type, size: sz, fit };
+        if (threadable && threadOn) f.thread = toSpec(thr);
         if (mode !== "picked") f.place = { mode, face: { point: pl!.point }, x_dir: xDir(pl!.normal), ...(mode === "corners" ? { dx: n2(dx), dy: n2(dy) } : { pts: pts.map(([u, v]) => [n2(u), n2(v)]) }) };
         return f;
       },
@@ -149,6 +159,10 @@ export default function HoleWizard({ editing, face, topo, onSketch, onApi, prese
         </div>)}
       <div><div className="label mb-1">End condition</div>{seg<"t" | "b">([["t", "Through all"], ["b", "Blind"]], blind ? "b" : "t", k => setBlind(k === "b"), "End condition")}</div>
       {blind && numIn("Depth", depth, setDepth, type === "tapped" ? "Drill depth; the thread is cosmetic" : undefined)}
+      {threadable && <div className="rounded-md border border-border p-2" data-testid="thread-toggle">
+        <label className="flex items-center gap-2 text-[12.5px] font-medium"><input type="checkbox" checked={threadOn} onChange={ev => setThreadOn(ev.target.checked)} aria-label="Cosmetic thread" />Cosmetic thread</label>
+        {threadOn && <div className="mt-2"><ThreadFields value={thr} onChange={setThr} internal lockSize={type === "tapped"} depthHint={blind ? "Empty = the full drill depth" : "Empty = through"} /></div>}
+      </div>}
       <div>
         <div className="label mb-1">Position on the face</div>
         {seg<Mode>([["corners", "4 corners"], ["points", "By X / Y"], ["picked", "At picked point"]], mode, setMode, "Position")}

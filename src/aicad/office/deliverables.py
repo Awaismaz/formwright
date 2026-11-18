@@ -3,6 +3,7 @@
 Pure Python (the kernel work happens in the drawing worker, the manufacturing analyser and the assembly worker):
   ``make_parts``    the parts the program makes (designed parts and reused company parts with a Studio project)
   ``icd_spec``      ICD numbers a part's drawing should show as spec dimensions (fits, hole patterns, seats)
+  ``icd_gdt``       datums and frames the ICD states for a part (mounting face = datum, bolt holes located to it)
   ``bom``           the program BOM: quantity, make / buy, material, mass, Toolbox designations, the ticket
   ``bom_csv``       the BOM as CSV
   ``dfm_part``      Smithy's line for one part: best process, flags, top findings, unit cost
@@ -40,7 +41,73 @@ def make_parts(doc: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 # ----------------------------------------------------------------------------- ICD numbers on the drawings
-def icd_spec(skel: dict[str, Any], doc_icd: dict[str, Any], item: str) -> dict[str, Any]:
+def icd_gdt(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: dict[str, Any] | None = None
+            ) -> dict[str, Any]:
+    """Datums and feature control frames a part drawing may show because the ICD states the relationship (CD-021),
+    in the part's model coordinates (``frame``: the part-to-ICD frame Gage found, ``x_icd = R x + t``).
+
+    Rules (nothing beyond what the interface states):
+      * the mounting / seating face of a bolted joint or a seating interface is a datum (A, B, ... in feature order)
+        with the ICD flatness;
+      * the holes of that bolted joint get position Ø(2 × ICD position tolerance) relative to that face (Gage
+        measures the radial offset of each hole against the same tolerance, so the zone is the same);
+      * a fitted bore, seat or journal (shaft / bore, bearing seat) is a datum feature (its axis); it gets a position
+        frame only when the same interface also names a datum face on this part.
+    Keyways, dowels and gear meshes add nothing here (their ICD numbers already print as sizes and notes)."""
+    from aicad.office import frames as fr
+
+    if not skel or item not in (skel.get("items") or {}):
+        return {"datums": [], "frames": [], "version": doc_icd.get("version")}
+    R = frame["R"] if frame and not frame.get("identity") else None
+    tvec = frame["t"] if R is not None else [0.0, 0.0, 0.0]
+    Rt = fr.transpose(R) if R is not None else None
+
+    def pt(x: list[float]) -> list[float]:
+        q = [float(x[i]) - float(tvec[i]) for i in range(3)]
+        return fr.apply(Rt, q) if Rt is not None else q
+
+    def vec(x: list[float]) -> list[float]:
+        return fr.apply(Rt, x) if Rt is not None else [float(c) for c in x]
+
+    kinds = {f["id"]: f["kind"] for f in doc_icd["interfaces"]}
+    data = {f["id"]: f["data"] for f in doc_icd["interfaces"]}
+    feats = icd.item_features(skel, doc_icd["interfaces"], item)
+    letters = iter("ABCDEFGHJKLMNPRSTUVWXYZ")
+    datums: list[dict[str, Any]] = []
+    frames_out: list[dict[str, Any]] = []
+    face_of: dict[str, str] = {}
+    for f in feats:
+        if f["type"] != "face":
+            continue
+        ifs = [i for i in [f["if"], *f.get("also", [])] if kinds.get(i) in ("hole_pattern", "face")]
+        if not ifs:
+            continue
+        letter = next(letters)
+        target = {"kind": "plane", "point": pt([0.0, 0.0, f["z"]]), "normal": vec([0.0, 0.0, float(f["n"])])}
+        datums.append({"letter": letter, "target": target, "ref": ifs[0], "label": f["label"]})
+        for i in ifs:
+            face_of.setdefault(i, letter)
+        flat = data[ifs[0]].get("flatness")
+        if flat:
+            frames_out.append({"char": "flatness", "tol": float(flat), "dia": False, "mod": None, "datums": [],
+                               "target": target, "ref": ifs[0], "label": f"{f['label']}: flatness"})
+    for f in feats:
+        if f["type"] not in ("hole", "boss", "seat"):
+            continue
+        ifs = [f["if"], *f.get("also", [])]
+        z = (f["z0"] + f["z1"]) / 2 if f.get("z0") is not None else 0.0
+        target = {"kind": "axis", "point": pt([f["c"][0], f["c"][1], z]), "dir": vec([0.0, 0.0, 1.0]), "d": f["d"]}
+        if f.get("fit") and kinds.get(f["if"]) in ("shaft_bore", "bearing_seat"):
+            datums.append({"letter": next(letters), "target": target, "ref": f["if"], "label": f["label"]})
+        refs = [face_of[i] for i in ifs if i in face_of]
+        if refs and f.get("tol"):
+            frames_out.append({"char": "position", "tol": round(2 * float(f["tol"]), 4), "dia": True, "mod": None,
+                               "datums": refs[:1], "target": target, "ref": f["if"], "label": f"{f['label']}: position"})
+    return {"datums": datums, "frames": frames_out, "version": doc_icd.get("version")}
+
+
+def icd_spec(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: dict[str, Any] | None = None
+             ) -> dict[str, Any]:
     """Spec values a part's drawing can tag (``spec_params`` / ``spec_meta``, merged with the model's own parameters
     by Drawing Studio) and the fits to print next to them (``spec_fits``): bore and journal Ø with their ISO 286
     class, clearance and dowel hole Ø, bearing seat Ø, the PCD of a bolt circle. Names start with ``ICD_`` so a
@@ -78,7 +145,8 @@ def icd_spec(skel: dict[str, Any], doc_icd: dict[str, Any], item: str) -> dict[s
     if params:
         notes.append(f"VALUES TAGGED SPEC INCLUDE INTERFACE NUMBERS FROM ICD v{doc_icd['version']} (VERIFY FITS "
                      "AGAINST ISO 286).")
-    return {"params": params, "meta": meta, "fits": fits, "notes": notes}
+    return {"params": params, "meta": meta, "fits": fits, "notes": notes,
+            "gdt": icd_gdt(skel, doc_icd, item, frame)}
 
 
 # ----------------------------------------------------------------------------- the program BOM
