@@ -115,8 +115,9 @@ def prepare(dest: Path, step: str | None = None, toolbox_spec: dict[str, Any] | 
         rec = recognize(shape)
         holes = rec.get("holes", [])
         patterns = rec.get("patterns", [])
+        component = rec.get("component")
     except Exception:  # noqa: BLE001 - recognition is a convenience; the part stays usable without it
-        holes, patterns = [], []
+        holes, patterns, component = [], [], None
     refs = exact_refs(shape)
     _write_json(dest / "refs.json", refs)
     out_holes = []
@@ -136,6 +137,8 @@ def prepare(dest: Path, step: str | None = None, toolbox_spec: dict[str, Any] | 
             "center": [(bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2, (bb.min.Z + bb.max.Z) / 2],
             "holes": out_holes,
             "patterns": [{"kind": p["kind"], "d": p["d"], "count": p["count"], "holes": p["holes"]} for p in patterns]}
+    if component:  # a recognised gear: teeth, module, axis (ICD conformance, CD-010)
+        info["component"] = {k: component.get(k) for k in ("kind", "params", "axis", "origin")}
     _write_json(dest / "info.json", info)
     return info
 
@@ -729,35 +732,46 @@ def export(dest: Path, name: str, nodes: list[dict[str, Any]]) -> dict[str, Any]
     from aicad.agent.runner import STEP_TIMESTAMP, normalize_step
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    top: list[tuple[str, Any]] = []
-    groups: dict[str, list[dict[str, Any]]] = {}
-    glabel: dict[str, str] = {}
     leaf_of: dict[str, Any] = {}
+    order: list[dict[str, Any]] = []
+
+    def level(ns: list[dict[str, Any]], nested: bool) -> list[Any]:
+        """Children of one tree level, in first-seen order: plain leaves, one compound per fastener stack, and (top
+        level only) one compound per sub-assembly holding its own leaves and stacks."""
+        top: list[tuple[str, Any]] = []
+        buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        labels: dict[tuple[str, str], str] = {}
+        for n in ns:
+            k = ("sub", n["sub"]) if nested and n.get("sub") else ("grp", n["group"]) if n.get("group") else None
+            if k is None:
+                top.append(("s", n))
+                continue
+            if k not in buckets:
+                buckets[k] = []
+                top.append(("g", k))
+            buckets[k].append(n)
+            labels[k] = n.get("sub_label" if k[0] == "sub" else "group_label") or k[1]
+        out: list[Any] = []
+        for kind, v in top:
+            if kind == "s":
+                out.append(leaf_of[v["id"]])
+                order.append(v)
+                continue
+            if v[0] == "sub":
+                kids = level(buckets[v], False)
+            else:
+                order.extend(buckets[v])
+                kids = [leaf_of[n["id"]] for n in buckets[v]]
+            comp = Compound(children=kids)
+            comp.label = labels[v]
+            out.append(comp)
+        return out
+
     for n in nodes:
         leaf = load(n["step"]).moved(_loc(xform.from12(n["T"])))
         leaf.label = n["part_label"]
         leaf_of[n["id"]] = leaf
-        g = n.get("group")
-        if g:
-            if g not in groups:
-                groups[g] = []
-                top.append(("g", g))
-            groups[g].append(n)
-            glabel[g] = n.get("group_label") or g
-        else:
-            top.append(("s", n))
-    children: list[Any] = []
-    order: list[dict[str, Any]] = []
-    for kind, v in top:
-        if kind == "s":
-            children.append(leaf_of[v["id"]])
-            order.append(v)
-        else:
-            sub = Compound(children=[leaf_of[n["id"]] for n in groups[v]])
-            sub.label = glabel[v]
-            children.append(sub)
-            order += groups[v]
-    root = Compound(children=children)
+    root = Compound(children=level(nodes, True))
     root.label = name
     tmp = dest.with_name(dest.stem + ".tmp.step")
     export_step(root, str(tmp), timestamp=STEP_TIMESTAMP)
@@ -795,8 +809,9 @@ def verify_export(path: Path, order: list[dict[str, Any]]) -> dict[str, Any]:
             for a, b in zip(local, got, strict=True):
                 e = xform.pt(T, (a.X, a.Y, a.Z))
                 max_dev = max(max_dev, float(np.linalg.norm(e - np.array([b.X, b.Y, b.Z]))))
-            if bool(n.get("group")) != (len(path_) >= 2):
+            if len(path_) != 1 + bool(n.get("sub")) + bool(n.get("group")):
                 ok = False
     return {"instances": len(order), "reimported": len(leaves),
             "groups": len({n["group"] for n in order if n.get("group")}),
+            "subassemblies": len({n["sub"] for n in order if n.get("sub")}),
             "placement_dev_mm": round(max_dev, 9), "ok": bool(ok and max_dev < 1e-6)}

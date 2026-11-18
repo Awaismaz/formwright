@@ -7,6 +7,7 @@ import { cx, num } from "@/lib/format";
 import { Progress, Tip } from "@/components/ui";
 import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
+import { CrCard } from "./Interfaces";
 import { boardLanes, canDrop, COLUMN_STATE, fmtEta, fmtMinutes, progressAfterMove, runChip, type Handoff } from "./model";
 import type { Column, Program, Ticket } from "./types";
 
@@ -35,7 +36,7 @@ export function useMoveTicket(program: Program) {
   };
 }
 
-const ACTIVE = new Set(["searching", "designing", "reviewing", "integrating"]);
+const ACTIVE = new Set(["searching", "designing", "reviewing", "integrating", "fitting"]);
 const CHIP_TONE: Record<string, string> = {
   neutral: "border-border text-muted", primary: "border-primary/30 bg-primary-soft text-primary",
   warning: "border-warning/40 bg-warning/10 text-warning", danger: "border-danger/40 bg-danger/10 text-danger",
@@ -75,11 +76,15 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1 text-[10.5px] text-muted">
-            <span className="font-mono">{t.key}</span>
+            <span className="whitespace-nowrap font-mono">{t.key}</span>
             {t.kind === "standard" && <Tip content="Standard part: Hex picks it from the Toolbox"><Library className="h-3 w-3" /></Tip>}
             {t.kind === "integration" && <Tip content="Assembly integration"><Puzzle className="h-3 w-3" /></Tip>}
             {t.qty > 1 && <span>×{t.qty}</span>}
             {t.priority === "high" && <Tip content="High priority"><ArrowUp className="h-3 w-3 text-danger" /></Tip>}
+            {t.fitted ? <Tip content={`Interfaces conform to ICD v${t.icd_check?.version ?? ""}; swapped into the program assembly in place of its placeholder`}>
+              <span className="rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success">fitted</span></Tip>
+              : t.icd_check && !t.icd_check.ok && <Tip content={`Measured against ICD v${t.icd_check.version}: an interface feature is off`}>
+                <span className="rounded bg-danger/10 px-1 font-mono text-[9.5px] font-semibold text-danger">ICD</span></Tip>}
             <span className="ml-auto flex items-center gap-1">
               {t.checks && (t.checks.ok ? <Tip content="Latest Studio build passes the gating checks"><CheckCircle2 className="h-3.5 w-3.5 text-success" /></Tip>
                 : <Tip content="Latest Studio build fails a gating check"><XCircle className="h-3.5 w-3.5 text-danger" /></Tip>)}
@@ -114,7 +119,15 @@ export default function Board({ program, onOpen, handoffs }: { program: Program;
   const byId = useMemo(() => new Map(program.tickets.map(t => [t.id, t])), [program.tickets]);
   const items = useMemo(() => new Map(program.items.map(i => [i.id, i])), [program.items]);
 
+  const crs = program.change_requests ?? [];
   return (
+    <>
+    {crs.length > 0 && <section className="mb-3 rounded-lg border border-border bg-panel2/40 p-2" aria-label="Change requests" data-cr-lane>
+      <div className="mb-1.5 flex items-center gap-2 px-1 text-[11.5px] font-semibold uppercase tracking-wider text-muted">Change requests
+        <span className="rounded-full bg-text/[.06] px-1.5 text-[10.5px] tabular-nums">{crs.length}</span>
+        <span className="font-normal normal-case tracking-normal">· interfaces change only here; Archie decides</span></div>
+      <div className="flex gap-2 overflow-x-auto pb-1">{[...crs].reverse().map(c => <div key={c.id} className="w-[280px] shrink-0"><CrCard c={c} compact /></div>)}</div>
+    </section>}
     <div className="snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-pl-2 rounded-lg border border-border bg-panel2/40" data-board-scroll>
       <div className="min-w-[1180px] max-sm:min-w-[calc(7*78vw)]">
         <div className="sticky top-0 z-10 grid grid-cols-7 gap-2 border-b border-border bg-panel px-2 py-2">
@@ -162,5 +175,6 @@ export default function Board({ program, onOpen, handoffs }: { program: Program;
         })}
       </div>
     </div>
+    </>
   );
 }

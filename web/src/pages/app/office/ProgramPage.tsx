@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Circle, Coins, FlaskConical, Lock, MoreHorizontal, Pause, PartyPopper, Play, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Coins, FlaskConical, Lock, MoreHorizontal, Pause, PartyPopper, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
@@ -9,7 +9,9 @@ import { useTitle } from "@/lib/title";
 import { Badge, Button, Card, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, Modal, PageLoader, Progress, Stat, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { STATUS_LABEL } from "./Home";
 import { BASE, useProgram, useProgramEvents } from "./api";
+import AssemblyView from "./AssemblyView";
 import Board from "./Board";
+import Interfaces from "./Interfaces";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import Tree from "./Tree";
@@ -26,7 +28,8 @@ function Gates({ p }: { p: Program }) {
             className={cx("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px]",
               g.status === "approved" ? "border-success/30 bg-success/10 text-success" : g.status === "pending" ? "border-warning/30 bg-warning/10 text-warning" : "border-border text-muted")}>
             {g.status === "approved" ? <CheckCircle2 className="h-3.5 w-3.5" /> : g.status === "pending" ? <Circle className="h-3.5 w-3.5" /> : <Lock className="h-3 w-3" />}
-            {g.name}{g.status === "later" && <span className="text-[10.5px]">· later</span>}
+            {g.name}{g.status === "later" && <span className="text-[10.5px]">· not on this program</span>}
+            {g.code === "icd" && p.icd && g.status !== "locked" && <span className="text-[10.5px]">· ICD v{p.icd.version}</span>}
           </span>
         </span>))}
     </div>
@@ -86,7 +89,7 @@ function RunBar({ p }: { p: Program }) {
   };
   return (
     <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
-      {canEdit && p.status !== "complete" && (running
+      {canEdit && p.status !== "complete" && p.icd?.status !== "draft" && (running
         ? <Button variant="secondary" loading={busy} icon={<Pause className="h-4 w-4" />} onClick={() => act("pause")}>Pause</Button>
         : <Button loading={busy} icon={<Play className="h-4 w-4" />} onClick={() => act("run")}>{o?.state && o.state !== "idle" ? "Resume" : "Run"}</Button>)}
       <span className={cx("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium", TONE_CLS[st.tone])} aria-live="polite">
@@ -98,7 +101,8 @@ function RunBar({ p }: { p: Program }) {
           ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved; <b>Fitz</b> assembles each level. Comment, pause, reassign or take over any ticket.</>
           : o?.state === "stopped"
             ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
-            : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. You can still move tickets and open parts by hand.</>}
+            : p.icd?.status === "draft" ? <>Approve the interfaces (ICD) first: part work starts at that gate, against the numbers you approved.</>
+              : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. Each part is built to its interfaces and swapped into the program assembly when Gage approves it. You can still move tickets and open parts by hand.</>}
       </p>
     </Card>
   );
@@ -144,7 +148,8 @@ export default function ProgramPage() {
   const handoffs = recentHandoffs(recent, now);
   const p = q.data;
   useTitle(p?.name ?? "Design Office");
-  const tab = params.get("tab") ?? "board";
+  const icdPending = p?.icd?.status === "draft" && p.gates.some(g => g.code === "icd" && g.status === "pending");
+  const tab = params.get("tab") ?? (icdPending ? "interfaces" : "board");
   useEffect(() => {  // deep link from the reviews inbox: ?ticket=<id>
     const tid = params.get("ticket");
     if (tid && p) { const t = p.tickets.find(x => x.id === tid); if (t) setOpen(t); params.delete("ticket"); setParams(params, { replace: true }); }
@@ -152,6 +157,8 @@ export default function ProgramPage() {
   useEffect(() => {
     const m = recent[0];
     if (m?.type === "program.milestone" || m?.type === "program.done") toast.success(m.text, { icon: <PartyPopper className="h-4 w-4" /> });
+    else if (m?.type === "cr.accepted") toast.info(m.text);
+    else if (m?.type === "cr.rejected") toast.warning(m.text);
     else if (m?.type === "budget.warn") toast.warning(m.text);
     else if (m?.type === "budget.stop") toast.error(m.text);
   }, [recent]);
@@ -200,10 +207,17 @@ export default function ProgramPage() {
             <span className={cx(bt.tone === "warning" && "text-warning", bt.tone === "danger" && "text-danger")}>of {num(p.budget.tokens)} budget · {Math.round(bt.pct)} %</span>
             {p.budget.tokens > 0 && <Progress className="mt-1" value={Math.min(100, bt.pct)} tone={bt.tone} />}</div>} />
         </div>
+        {icdPending && tab !== "interfaces" && <Card className="mb-4 flex flex-wrap items-center gap-3 border-warning/40 bg-warning/5 p-3" data-icd-banner>
+          <ShieldCheck className="h-5 w-5 text-warning" />
+          <div className="min-w-[240px] flex-1 text-[13px]"><b>Review the interfaces before part work starts.</b> Archie named {p.icd!.interfaces.length} interfaces between the parts. Approve them on the Interfaces tab: the office can't run until then.</div>
+          <Button variant="secondary" onClick={() => { params.set("tab", "interfaces"); setParams(params, { replace: true }); }}>Review interfaces</Button>
+        </Card>}
         <RunBar p={p} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
-          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
+          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
           <TabPanel value="board"><Board program={p} onOpen={setOpen} handoffs={handoffs} /></TabPanel>
+          <TabPanel value="interfaces"><Interfaces program={p} /></TabPanel>
+          <TabPanel value="assembly"><AssemblyView program={p} recent={recent} /></TabPanel>
           <TabPanel value="tree"><Tree program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="activity"><Activity program={p} /></TabPanel>
           <TabPanel value="brief">

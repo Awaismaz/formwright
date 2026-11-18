@@ -245,3 +245,147 @@ each part from its own brief.
 4. Nested assemblies (sub-assembly documents inside the final assembly) instead of flattening.
 5. Estimate calibration (CD-015) can read real durations: tickets carry `run.started_at` and events carry the
    milestone times.
+
+---
+
+# Design Office — Phase 4 report (CD-010…CD-013 + nested sub-assemblies)
+
+Branch `wip/office-phase4`, 2026-11-18. Interfaces first: after the brief gate Archie lays the program out (skeleton)
+and names every interface between two parts with numbers (ICD). The engineer reviews the ICD at the "Architecture and
+interfaces" gate; at approval the envelopes freeze, part tickets are released and Fitz assembles the program from
+**placeholders** at once. Each part is built against its ICD excerpt, Gage **measures** its interface features on
+the exact B-rep, and Fitz **swaps** it in for its placeholder (same instance, mates re-attached by interface name,
+interference re-run). Interfaces change only through **change requests** that Archie decides.
+
+## What happens now
+1. **Brief gate** (unchanged): items and tickets open, and `interfaces.create` runs the layout engine
+   (`office/icd.py`): the skeleton and a draft ICD. Gate "Architecture and interfaces" goes *pending*; Run is refused
+   (409) and nothing is claimable until it is approved. Reviews inbox: "Review the interfaces (ICD v1) for …".
+2. **Skeleton** (deterministic, `icd.build`): program frame = datums A (top face of the program base, Z = 0, +Z up),
+   B (Y = 0), C (X = 0). Roles: *block* (machined / sheet / plastic: box L × W × H), *shaft* (turned with a shaft-like
+   name: cylinder along Z through a block, bottom flush with it), *hub* (turned ring / cap / pulley: on a shaft of its
+   sub-assembly, else bolted on a bolt circle), *gear* (pitch cylinder m·z × b, on a shaft). Blocks carry a row of
+   stations on their top face (+X), grown to fit; neighbouring shafts whose gears mesh are spaced at exactly
+   m(z1 + z2)/2. Sizes: Archie's `envelope` hint, else sizes written in the part description, else an assumption
+   (marked "assumed" on the ICD page). Part frame = envelope centre, axes parallel to the program axes; copies (qty)
+   are translations (up to 8 laid out).
+3. **ICD**: `hole_pattern` (bolted joint: mounting face Z, flatness, position tolerance, n × Ø ISO 273 medium
+   clearance at stated (X, Y), grid or PCD, fastener from a bolt in the same sub-assembly else by size),
+   `shaft_bore` (Ø, ISO 286 fit H7/h6 or H7/k6 with limits, engagement, axis, flush end), `face` (seating plane),
+   `gear_mesh` (module, teeth both sides, centre distance, face width, 20°). Every interface names its two items, its
+   datums (A|B|C) and, per side, the local features in the part frame. Validity rules (`icd.problems`): ≥ 1 mm wall,
+   ≥ 1 mm between holes, a rim on bores, gear bore inside the root, and **the ISO 7089 washers of neighbouring bolts
+   must not overlap** (found in testing: Ø9 holes 13.6 mm apart take M8 bolts whose Ø16 washers clash).
+4. **ICD page** (`Interfaces` tab): gate banner + Approve; skeleton card (csys, datums, axes, envelope, assumed
+   envelopes); table (id, kind, key numbers, both sides' measured status, CRs); detail (all numbers, fit limits, each
+   side's features and Gage's measured-vs-specified rows); edit at the gate (only the editable numbers per kind,
+   validated, rebuilt deterministically); "Raise a change request" after approval; history (every version and field
+   change) and all CRs.
+5. **ICD approval**: the envelopes and the bolt patterns' edge distance, count and fastener freeze (overrides), then
+   `platform_env.build_program_assembly` runs in the background: one placeholder per designed part
+   (`assembly/placeholder.py` through the assembly worker op `placeholder`: the envelope solid with its interface
+   holes / bores, cached as `h_<program>_<item>_<spec hash>`), one assembly document per sub-assembly, and the final
+   assembly inserting them as **nested sub-assemblies**. Mates by interface name (`program_assembly.icd_mates`):
+   bolted joint = coincident mounting faces + concentric on the two farthest holes; shaft in bore = concentric + flush
+   ends; seating face = coincident; gear mesh = no mate (the skeleton spaces the shafts; Gage measures the teeth).
+   Mates carry `icd` and `icd_role`. Then the exact interference check.
+6. **Part agents** get `icd.excerpt` (plain lines + a `fw-icd` block) after the brief; the Studio chat still shows only
+   the plain request. They may raise a CR with a `fw-change-request` block instead of changing an interface.
+7. **Gage** (`gage.deterministic(sizes=False)` + `conformance.measure`): with an ICD, the lexical "the number appears
+   somewhere" check is replaced by measurement on the part snapshot Fitz uses (`info.json`: holes / gear recognised by
+   `recognize.py`; `refs.json`: exact planes and cylinders): hole Ø ±0.05 (or the ISO 286 zone for a fitted bore;
+   nominal conforms) and position within tolerance, through; shaft Ø in its zone; face Z; gear teeth and module;
+   bounding box inside the envelope. Findings read "IF-01 …: hole 1 specified Ø6.6 ±0.05 at (-16.80, -6.80), measured
+   Ø6.000 at (-16.30, -6.80), 0.50 mm off position (±0.1)". Programs without an ICD keep the Phase 3 check.
+8. **Fitz swap-in** (new orchestrator stage `fit`, status "fitting", holds a slot): after Gage approves, the real part
+   replaces the placeholder in its sub-assembly document (same instance id, skeleton placement, ICD mates deleted and
+   re-made by name, stacks through the old part removed); the final assembly re-syncs that sub-assembly, re-attaches
+   the mates between sub-assemblies, solves and re-runs interference. Clashes involving the part → Changes requested
+   on *that* ticket with the clash list as the agent's next message (2 rounds, then the engineer). Integrations wait
+   while a child is still being fitted.
+9. **Integration** with an ICD (`program_assembly.integrate`): the level's document already holds its real parts; Fitz
+   fits the level's fasteners into its own bolted joints (ISO auto-fit through both parts, targets from the ICD
+   positions) and puts other standard parts in a parts bin beside the program (no ICD interface for them yet); the
+   final assembly fits the joints between sub-assemblies, re-syncs every sub-assembly and re-checks. A part reopened
+   during an integration sends the integration back to the backlog.
+10. **Change requests** (`interfaces.py`): raised by a part agent (parsed from its turn) or by the engineer (API / ICD
+    page). Archie's deterministic rule rebuilds with the values and rejects if not buildable, if any envelope would
+    change, if any item other than the two sides moves, if a gear mesh would break, or if a side is integrated.
+    Archie-planned programs then get a one-shot AI note (`planner.run_cr_review`, metered, ≤ 60 tokens; simulated in
+    dev) that may still reject, never accept. Accept → ICD v+1 with field-level history; tickets whose features
+    changed reopen with the delta (a busy agent gets it after its step; Gage / Fitz hand a part back if the delta lands
+    mid-review or mid-fit); integrations already done reopen; placeholders are regenerated (real parts of affected
+    items go back to placeholders until re-approved). Reject → the requester gets the reason. Events `cr.raised`,
+    `cr.accepted`, `cr.rejected`; CR cards in a lane above the board and on the ICD page.
+11. **Live assembly view** (`Assembly` tab, `GET /programs/{pid}/assembly`): the final assembly in the shared
+    `AssemblyViewer`: placeholders translucent orange, real parts solid, a part just swapped in drops into place with a
+    green glow (static under reduced motion), clash volumes in red, exploded slider, hover tooltip with the item's
+    ticket, column, progress, specialist and live line; links to each sub-assembly and the final assembly in Assembly
+    Studio; "Rebuild" when the build failed or the add-on was missing.
+
+## Nested sub-assemblies (approach)
+Assembly Studio now holds assemblies inside assemblies by **copy with a link**: `assembly.service.insert_subassembly`
+copies another document's instances, mates and fastener stacks into a group listed in `doc["subassemblies"]`
+(`{id, name, assembly_id, rev, T}`), tagging instances (`sub`, `src`) and mates (`sub`). `sync_subassembly` re-copies
+and keeps the parent's instance ids (so mates between sub-assemblies survive); the tree shows "Updated" when the
+source revision differs. Chosen over live references because the solver, interference, BOM and viewer keep working on
+flat instance lists, and a copy can't recurse. One level is kept (a sub-assembly of a sub-assembly is copied flat).
+The STEP export writes sub-assembly → fastener stack → part (re-import verified, `subassemblies` count). API:
+`POST /api/m/assembly/assemblies/{id}/subassemblies`, `…/{gid}/refresh`, `DELETE …/{gid}`; Insert dialog tab
+"Sub-assembly"; tree sections with their stack count. Placeholders show an orange marker and render translucent in
+Assembly Studio too; the BOM lists them as "Placeholder" with no mass.
+
+## Files
+New: `src/aicad/office/{icd,conformance,interfaces,program_assembly}.py`, `src/aicad/assembly/placeholder.py`,
+`tests/test_office_icd.py`, `web/src/pages/app/office/{Interfaces,AssemblyView}.tsx`,
+`web/src/pages/app/office/icd.test.ts`. Changed: `office/{service,orchestrator,platform_env,specialists,gage,planner,
+fake_agents}.py`, `platform/routers/{office,mod_assembly}.py`, `assembly/{service,geometry,worker}.py`; web office
+`types.ts`, `model.ts`, `ProgramPage.tsx`, `Board.tsx`, `Home.tsx`, `TicketDrawer.tsx`; assembly `viewer.ts`
+(placeholder tone, `animateFit`, `instanceAt`), `Viewport.tsx`, `Tree.tsx`, `InsertDialog.tsx`, `Workspace.tsx`,
+`types.ts`; `tests/test_office_orchestrator.py` (the helper approves the ICD; the Gage test uses ICD defects).
+
+## Verification
+- `tests/test_office_icd.py` (18 tests, simulated agents only; Archie, the real Gage note and the real CR note fail the
+  test if reached): hand-checked layout (bracket at (-16, 0, 4), holes at (-32.8 | 0.8, ±6.8), M6 Ø6.6, edge distance
+  13.2; spacer ring M3 Ø3.4 on PCD 13 → (40.6, 4.6) …); all 7 templates valid, gear reducer mesh m2 18/54 → a = 72 =
+  the shafts' spacing; ISO 286 limits (H7 20.000/20.021, h6 19.987/20.000, k6 20.002/20.015, g6 19.980/19.993, p6 at
+  Ø50 50.026/50.042); edits (frozen patterns keep positions; Ø9 → washer rule; Ø16 → overlapping holes);
+  **conformance on fixture parts** (good bracket: 5 features pass, face Z -4.000; hole 1 at (-16.3, -6.8) Ø6.0 → the
+  measured sentence above; 2 mm oversize → outside in X; shaft Ø20 / 19.99 pass, 20.05 fails h6; gear 18 teeth pass,
+  19 fail); placeholders carry their holes at the ICD positions (bbox ±30 / ±20 / ±4); assembly from placeholders: 6
+  mates tagged by interface, all satisfied, 0 interference, 2 nested sub-assemblies, STEP export with 2 sub-assembly
+  nodes re-imported ok; Assembly Studio insert / refresh (same ids) / remove sub-assembly, self-insert 409;
+  **swap-in keeps every mate** (same instance ids, same (interface, role) set, all real, 0 clashes, 4 M6 stacks in the
+  joint), Gage sent the 0.5 mm-off bracket back once with the measured position; CR accepted (Ø6.6 → 7: v2, history,
+  both sides reopened and re-measured at Ø7.000, placeholders regenerated, delta in the prompts); CR rejections (not
+  buildable, washer overlap, Archie's note) and acceptance without the note; the rule as a unit (an integrated side
+  refuses; a no-op change); tenant isolation of every new route and of the assembly documents.
+- Phase 2/3 suites updated and passing (`test_office.py`, `test_office_orchestrator.py`).
+- Vitest `office/icd.test.ts` (6): summaries, side / interface status, changed values, CR text and tone, swapped-in
+  detection, live counts.
+- Browser walkthrough: see SESSION_LOG (screenshots in `docs/reports/design-office/phase4/`).
+
+## Limitations (honest)
+- The skeleton is a conceptual layout (a row of stations on the program base, shafts vertical), not a product
+  architecture. Archie's AI path can give envelopes, `mounts_on`, module and teeth; it can't yet place parts freely or
+  rotate them (part frames are translations only).
+- Interface kinds: bolted joints, shaft/bore fits, seating faces and gear meshes. No bearing seats, keys, slots,
+  dowel pairs or sheet-metal flanges yet; standard parts other than bolts go to a parts bin.
+- Conformance measures features along Z in the stated part frame; a correct part modelled in another frame fails
+  (the ICD states the frame). Fits accept nominal models (CAD convention); tolerances are not otherwise modelled.
+- Interface numbers are planning values for review, never a manufacturing claim; ISO 286 values come from the
+  standard tables and are marked "verify".
+- The office edits the program assembly documents without Assembly Studio's per-document lock; an engineer editing
+  the same document by hand at that moment can lose an edit (the office re-attaches its own mates on the next swap).
+- No live AI run of the ICD path (PD-48 still applies); the CR AI note is simulated in dev.
+
+## What Phase 5 needs
+1. **Drawings and release (CD-014)**: the ICD numbers (fits with limits, hole patterns with positions, datums A|B|C)
+   are ready to become GD&T callouts for Ortho; `icd.side_features` gives each part's toleranced features.
+2. **Better layouts**: let Archie propose station order and orientation (rotations in the part frame), multi-row
+   packing, and interface kinds for bearings (seat Ø + shoulder), keys and dowels; Fitz's bearing seating can then
+   follow the ICD.
+3. **Calibration (CD-015)**: CR counts, Gage rounds per interface kind and clash rounds are timestamped events.
+4. **Locking**: share Assembly Studio's per-document lock with the office and show "the office is updating this
+   assembly" in Assembly Studio.
+5. A live run (PD-48) to check that real part agents follow the `fw-icd` excerpt and raise sensible CRs.

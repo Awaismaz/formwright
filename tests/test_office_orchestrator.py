@@ -204,7 +204,10 @@ def _program(c: Any, email: str, plan: dict[str, Any] | None = None, **kw: Any) 
     pid = r.json()["id"]
     r = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": plan or PLAN})
     assert r.status_code == 200, r.text
-    return r.json()
+    assert c.post(f"/api/office/programs/{pid}/run").status_code == 409  # parts wait for the ICD gate
+    r = c.post(f"/api/office/programs/{pid}/gates/icd/approve")
+    assert r.status_code == 200, r.text
+    return _wait(c, pid, lambda v: (v.get("assembly") or {}).get("status") not in (None, "building"))
 
 
 def _wait(c: Any, pid: str, pred: Any, timeout: float = 90) -> dict[str, Any]:
@@ -306,7 +309,8 @@ def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
             {"name": "Good shaft", "family": "turned", "complexity": 1, "qty": 1, "description": "Shaft Ø25 x 90 mm."},
             {"name": "Bad shaft", "family": "turned", "complexity": 1, "qty": 1,
              "description": "Shaft Ø32 x 125 mm."}]}]}
-    fake_agents.SCRIPT += [(r"Good shaft", {"omit_turns": 1}), (r"Bad shaft", {"never_dims": True})]
+    fake_agents.SCRIPT += [(r"Good shaft", {"icd_grow": 2.0, "omit_turns": 1}),
+                           (r"Bad shaft", {"icd_grow": 3.0, "omit_turns": 99})]
     v = _program(c, "gage@x.com", plan)
     pid = v["id"]
     c.post(f"/api/office/programs/{pid}/run")
@@ -314,13 +318,15 @@ def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
               and (_tk(v, "Bad shaft").get("run") or {}).get("status") == "blocked")
     good, bad = _tk(v, "Good shaft"), _tk(v, "Bad shaft")
     g_good = [cm["text"] for cm in good["comments"] if cm["by"].get("code") == "gage"]
-    assert len(g_good) == 2 and g_good[0].startswith("Changes requested") and "Ø25" in g_good[0]
+    # ICD conformance: the first build is 2 mm too big; Gage gives the measured size against the envelope
+    assert len(g_good) == 2 and g_good[0].startswith("Changes requested") and "leaves its envelope" in g_good[0]
+    assert "27.00 × 27.00" in g_good[0] and "inside 25 × 25" in g_good[0], g_good[0]
     assert g_good[1].startswith("Approved") and good["run"]["review_round"] == 1
     g_bad = [cm["text"] for cm in bad["comments"] if cm["by"].get("code") == "gage"]
     assert len(g_bad) == gage.MAX_SENDBACKS + 1 and bad["column"] == "changes_requested"
     assert bad["agent_state"] == "blocked" and "sent Bad shaft back 3 times" in bad["line"]
     # the findings went back to the part agent as its next message
-    assert any("Gage) sent this part back" in p and "Ø32" in p for p in fake_agents.STATS["prompts"])
+    assert any("This part was sent back" in p and "inside 32 × 32" in p for p in fake_agents.STATS["prompts"])
     inbox = c.get("/api/office/home").json()["inbox"]
     assert any(i["kind"] == "blocked" and i["ticket_id"] == bad["id"] for i in inbox)
     # no self-approval: Gage can't be made the designer

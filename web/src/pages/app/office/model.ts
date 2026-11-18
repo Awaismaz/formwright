@@ -1,6 +1,6 @@
 /** Pure Design Office helpers: formatting, board lanes, and the plan-review estimate preview.
  * The preview mirrors src/aicad/office/estimates.py exactly (same constants, sent by the server). */
-import type { AgentState, Column, Constants, Family, Item, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
+import type { AgentState, ChangeRequest, Column, Constants, Family, Interface, Item, LiveInstance, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
 
 export const COLUMN_STATE: Record<Column, AgentState> = {
   backlog: "idle", ready: "idle", in_design: "working", in_review: "review", changes_requested: "blocked",
@@ -158,4 +158,81 @@ export function recentHandoffs(events: OfficeEvent[], now: number, windowMs = 40
 /** Which specialists a ticket may be given (Gage never designs: no self-approval; Fitz only assembles). */
 export function assignable(kind: Ticket["kind"]): string[] {
   return kind === "integration" ? ["fitz"] : ["mill", "chuck", "axel", "benny", "molly", "hex"];
+}
+
+
+// ------------------------------------------------------------------ Phase 4: interfaces and the live assembly
+const n = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000)) : String(v ?? "—"));
+
+/** The interface's key numbers in one line, as an engineer reads them. */
+export function ifaceSummary(f: Pick<Interface, "kind" | "data">): string {
+  const d = f.data as Record<string, number & string & number[]>;
+  switch (f.kind) {
+    case "hole_pattern":
+      return `${d.count} × Ø${n(d.d)} (${d.fastener})` + (d.pattern === "circular" ? ` on PCD ${n(d.pcd)}` : "") + ` · face Z ${n(d.plane_z)}`;
+    case "shaft_bore": return `Ø${n(d.d)} ${d.fit} · ${n(d.length)} long`;
+    case "face": return `plane Z ${n(d.plane_z)} · flatness ${n(d.flatness)}`;
+    case "gear_mesh": return `m${n(d.module)} · ${d.teeth_a} / ${d.teeth_b} teeth · a = ${n(d.centre_distance)}`;
+    default: return "";
+  }
+}
+
+export type SideStatus = "pass" | "fail" | "pending";
+/** One side of an interface: measured on the real part (pass / fail) or not built yet (pending). */
+export function sideStatus(check: { ok: boolean } | null | undefined): SideStatus {
+  return !check ? "pending" : check.ok ? "pass" : "fail";
+}
+
+/** An interface is conforming when both sides were measured and passed. */
+export function ifaceStatus(f: Pick<Interface, "sides">): SideStatus {
+  const a = sideStatus(f.sides.a.check), b = sideStatus(f.sides.b.check);
+  if (a === "fail" || b === "fail") return "fail";
+  return a === "pass" && b === "pass" ? "pass" : "pending";
+}
+
+/** Human labels for the editable numbers of an interface. */
+export const FIELD_LABEL: Record<string, string> = {
+  fastener: "Fastener", d: "Diameter Ø (mm)", count: "Holes", inset: "Edge distance (mm)", flatness: "Flatness (mm)",
+  position_tol: "Position tolerance ± (mm)", fit: "Fit (ISO 286)", module: "Module", teeth_a: "Teeth (first gear)",
+  teeth_b: "Teeth (second gear)",
+};
+
+/** The current value of an editable field (the fastener is stored as "M6"). */
+export function fieldValue(f: Pick<Interface, "data">, k: string): string {
+  const v = (f.data as Record<string, unknown>)[k];
+  return v === undefined || v === null ? "" : String(v);
+}
+
+/** Values the user changed (only fields whose text differs; numbers parsed, fastener / fit kept as text). */
+export function changedValues(f: Pick<Interface, "data" | "editable">, form: Record<string, string>): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  for (const k of f.editable) {
+    const v = (form[k] ?? "").trim();
+    if (v === "" || v === fieldValue(f, k)) continue;
+    out[k] = k === "fit" || k === "fastener" ? v : Number(v);
+  }
+  return out;
+}
+
+export function crTone(s: ChangeRequest["status"]): Tone {
+  return s === "accepted" ? "success" : s === "rejected" ? "danger" : "warning";
+}
+
+/** "Ø 6.6 → 7" lines of a change request. */
+export function crDelta(c: Pick<ChangeRequest, "values" | "before">): string {
+  return Object.entries(c.values).map(([k, v]) => `${FIELD_LABEL[k]?.replace(/ \(.*\)$/, "") ?? k} ${n(c.before[k])} → ${n(v)}`).join(", ");
+}
+
+/** Instances that just turned from a placeholder into the real part (for the "fitted" animation). */
+export function swappedIn(prev: Map<string, LiveInstance["kind"]>, next: LiveInstance[]): string[] {
+  return next.filter(i => prev.get(i.id) === "placeholder" && i.kind === "real").map(i => i.id);
+}
+
+/** Counts for the live assembly legend. */
+export function liveCounts(insts: LiveInstance[]): { placeholders: number; real: number; standard: number } {
+  let placeholders = 0, real = 0, standard = 0;
+  for (const i of insts) {
+    if (i.bin || i.fastener || i.kind === "toolbox") standard += 1; else if (i.kind === "placeholder") placeholders += 1; else real += 1;
+  }
+  return { placeholders, real, standard };
 }

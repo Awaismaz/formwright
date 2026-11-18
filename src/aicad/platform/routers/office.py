@@ -11,7 +11,13 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   PATCH  /api/office/programs/{pid}                         rename, concurrency, budget
   DELETE /api/office/programs/{pid}
   POST   /api/office/programs/{pid}/replan                  plan again (optionally with review notes)
-  POST   /api/office/programs/{pid}/gates/brief/approve     approve the (edited) plan: items and tickets open
+  POST   /api/office/programs/{pid}/gates/brief/approve     approve the (edited) plan: items and tickets open,
+                                                            Archie drafts the skeleton and the ICD
+  PATCH  /api/office/programs/{pid}/icd/interfaces/{iid}    edit an interface's numbers (ICD draft, at the gate)
+  POST   /api/office/programs/{pid}/gates/icd/approve       approve the ICD: tickets released, placeholder assembly
+  POST   /api/office/programs/{pid}/change-requests         raise an interface change request (Archie decides)
+  GET    /api/office/programs/{pid}/assembly                the live program assembly (placeholders / real parts)
+  POST   /api/office/programs/{pid}/assembly/rebuild        rebuild it from the skeleton (keeps approved parts)
   POST   /api/office/programs/{pid}/tickets/{tid}/move      board column
   PATCH  /api/office/programs/{pid}/tickets/{tid}           title, specialist, complexity
   POST   /api/office/programs/{pid}/tickets/{tid}/milestones
@@ -36,7 +42,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from aicad.office import OfficeInputError, orchestrator, planner, service, store
+from aicad.office import (
+    OfficeInputError,
+    interfaces,
+    orchestrator,
+    planner,
+    program_assembly,
+    service,
+    store,
+)
 from aicad.platform import metering
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
@@ -71,6 +85,16 @@ class ReplanIn(BaseModel):
 
 class ApproveIn(BaseModel):
     plan: dict[str, Any] | None = None
+
+
+class IcdEditIn(BaseModel):
+    values: dict[str, Any]
+
+
+class CrIn(BaseModel):
+    interface: str
+    values: dict[str, Any]
+    reason: str = ""
 
 
 class MoveIn(BaseModel):
@@ -345,6 +369,89 @@ def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -
     track(ctx.db, "office_brief_approved", ctx.user, doc["org_id"], tickets=len(doc["tickets"]),
           edited=bool(doc["plan"].get("edited")))
     ctx.db.commit()
+    return _view(doc)
+
+
+# ----------------------------------------------------------------------------- routes: interfaces (CD-010..013)
+def _spawn_task(coro: Any) -> None:
+    t = asyncio.create_task(coro)
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)
+
+
+@router.patch("/programs/{pid}/icd/interfaces/{iid}")
+def edit_interface(pid: str, iid: str, body: IcdEditIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    return _view(_mutate(ctx, pid, lambda root, d: interfaces.edit(root, d, iid, body.values, _actor(ctx))))
+
+
+@router.post("/programs/{pid}/gates/icd/approve")
+async def approve_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.office import platform_env
+
+    doc = _mutate(ctx, pid, lambda root, d: interfaces.approve(root, d, _actor(ctx)))
+    _spawn_task(platform_env.build_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
+                                                    ctx.god_on("bypass_paywall")))
+    audit(ctx.db, "office.icd_approved", ctx.user, doc["org_id"], target=pid, version=doc["icd"]["version"])
+    track(ctx.db, "office_icd_approved", ctx.user, doc["org_id"], interfaces=len(doc["icd"]["interfaces"]))
+    ctx.db.commit()
+    orchestrator.poke(pid)
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/change-requests")
+async def change_request(pid: str, body: CrIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer raises an interface change request; Archie decides at once (rule + optional AI note)."""
+    from aicad.office import platform_env
+
+    cid: list[str] = []
+
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        cid.append(interfaces.raise_cr(root, d, body.interface, body.values, body.reason, _actor(ctx))["id"])
+    doc = _mutate(ctx, pid, fn)
+    env = orchestrator.make_env(_root(ctx), {**doc, "orchestrator": {**(doc.get("orchestrator") or {}),
+                                                                      "user_id": ctx.user.id,
+                                                                      "god_tokens": ctx.god_on("bypass_tokens")}})
+    res = await platform_env.decide_cr(_root(ctx), pid, cid[0], env if isinstance(env, platform_env.PlatformEnv)
+                                       else None)
+    audit(ctx.db, "office.change_request", ctx.user, doc["org_id"], target=pid, cr=cid[0], status=res.get("status"))
+    ctx.db.commit()
+    return {**_view(_load(ctx, pid)), "cr": res}
+
+
+@router.get("/programs/{pid}/assembly")
+def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.assembly import store as astore
+
+    doc = _load(ctx, pid)
+    state = doc.get("assembly") or {}
+    v = program_assembly.view(astore.org_root(get_settings().data_dir, ctx.require_org().id), doc) \
+        if state.get("status") == "ready" else None
+    items = {}
+    for t in doc["tickets"]:
+        if t["kind"] == "integration":
+            continue
+        p = (state.get("parts") or {}).get(t["item_id"]) or {}
+        items[t["item_id"]] = {"ticket_id": t["id"], "key": t["key"], "title": t["title"], "column": t["column"],
+                               "specialist": t["specialist"], "line": (t.get("run") or {}).get("line"),
+                               "state": p.get("kind") or ("toolbox" if t["kind"] == "standard" else None),
+                               "progress": t["progress"]}
+    return {"status": state.get("status"), "summary": state.get("summary"), "clashes": state.get("clashes") or [],
+            "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer"}
+
+
+@router.post("/programs/{pid}/assembly/rebuild")
+async def rebuild_assembly(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.office import platform_env
+
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        if not interfaces.has_icd(d) or not interfaces.gate_open(d):
+            raise OfficeInputError("Approve the interfaces (ICD) first: the program assembly is built from them.")
+        d["assembly"] = {**(d.get("assembly") or {}), "status": "building"}
+        service.emit(root, d, "assembly.rebuild", f"{ctx.user.name or 'Someone'} asked Fitz to rebuild the program "
+                     "assembly.", _actor(ctx))
+    doc = _mutate(ctx, pid, fn)
+    _spawn_task(platform_env.build_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
+                                                    ctx.god_on("bypass_paywall")))
     return _view(doc)
 
 

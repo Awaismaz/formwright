@@ -70,7 +70,8 @@ export function Viewport(props: ViewportProps) {
   }, [view.parts]);
 
   useEffect(() => {
-    eng.current?.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: i.T, visible: i.visible, fastener: !!i.group })));
+    eng.current?.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: i.T, visible: i.visible, fastener: !!i.group,
+      tone: i.source.kind === "placeholder" ? "placeholder" as const : undefined })));
     eng.current?.setExplode(view.explode, explode);
   }, [view.instances, view.explode, loaded, explode]);
   useEffect(() => { eng.current?.setPicking(picking); }, [picking]);

@@ -80,6 +80,14 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           </div>
           {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
             <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
+          {t.icd_check && <div className={cx("rounded-md border p-2.5 text-[12.5px]", t.icd_check.ok ? "border-success/30 bg-success/5" : "border-danger/30 bg-danger/5")} data-icd-check>
+            <div className="font-medium">{t.icd_check.ok ? `Interfaces conform to ICD v${t.icd_check.version}` : `Interfaces off ICD v${t.icd_check.version}`}{t.fitted ? " · swapped into the program assembly" : ""}</div>
+            <ul className="mt-1 space-y-0.5 text-[11.5px]">
+              {!t.icd_check.envelope.ok && <li className="text-danger">Envelope: {t.icd_check.envelope.measured}</li>}
+              {t.icd_check.interfaces.map(r => <li key={r.interface} className={r.ok ? "text-muted" : "text-danger"}>
+                {r.ok ? "✓" : "✗"} <span className="font-mono">{r.interface}</span> {r.name.split(": ")[1] ?? r.name}: {r.rows.filter(x => x.ok).length} of {r.rows.length} features
+                {!r.ok && r.rows.filter(x => !x.ok).slice(0, 2).map((x, k) => <div key={k} className="pl-4">{x.feature}: specified {x.spec}, measured {x.measured}</div>)}</li>)}
+            </ul></div>}
           {t.integration?.summary && <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]">
             <Puzzle className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span>{t.integration.summary}</span></div>}
           {canEdit && <div className="flex flex-wrap gap-1.5">

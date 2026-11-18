@@ -32,12 +32,26 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from aicad.office import OfficeInputError, estimates, gage, roster, service, specialists, store
+from aicad.office import (
+    OfficeInputError,
+    conformance,
+    estimates,
+    gage,
+    interfaces,
+    roster,
+    service,
+    specialists,
+    store,
+)
 
 log = logging.getLogger("aicad.office.orchestrator")
 
-ACTIVE = {"searching", "designing", "reviewing", "integrating"}
-STAGE_OF = {"searching": "hex", "designing": "design", "reviewing": "review", "integrating": "integrate"}
+ACTIVE = {"searching", "designing", "reviewing", "integrating", "fitting"}
+STAGE_OF = {"searching": "hex", "designing": "design", "reviewing": "review", "integrating": "integrate",
+            "fitting": "fit"}
+STATUS_OF = {"hex": "searching", "design": "designing", "review": "reviewing", "integrate": "integrating",
+             "fit": "fitting"}
+MAX_CLASH_ROUNDS = 2       # times Fitz sends a part back for clashes before it waits for the engineer
 PRIORITY = {"high": 1, "normal": 0, "low": -1}
 MAX_ATTEMPTS = 2           # failed design runs retried before the ticket waits for the engineer
 RETRY_BASE_S, RETRY_CAP_S = 20.0, 300.0
@@ -100,8 +114,10 @@ def priority(doc: dict[str, Any]) -> dict[str, dict[str, float]]:
 
 
 def deps_done(doc: dict[str, Any], t: dict[str, Any]) -> bool:
+    """Every dependency is Approved / Integrated and none is still being fitted into the program assembly."""
     by = {x["id"]: x for x in doc["tickets"]}
-    return all(by[d]["column"] in service.DONE_COLUMNS for d in t.get("depends_on") or [] if d in by)
+    return all(by[d]["column"] in service.DONE_COLUMNS and run_of(by[d]).get("status") not in ACTIVE
+               and run_of(by[d]).get("next") != "fit" for d in t.get("depends_on") or [] if d in by)
 
 
 def first_stage(t: dict[str, Any]) -> str:
@@ -110,9 +126,11 @@ def first_stage(t: dict[str, Any]) -> str:
 
 def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
     """The stage a ticket would start at if claimed now, or None."""
-    if t["column"] in service.DONE_COLUMNS or t.get("paused") or t.get("taken_over"):
-        return None
     r = run_of(t)
+    if not interfaces.gate_open(doc):
+        return None  # part work starts at the "Architecture and interfaces" gate
+    if (t["column"] in service.DONE_COLUMNS and r.get("next") != "fit") or t.get("paused") or t.get("taken_over"):
+        return None
     st = r.get("status")
     if st in ACTIVE or st in ("blocked", "done", "manual"):
         return None
@@ -168,6 +186,9 @@ def start(root: Path, doc: dict[str, Any], actor: dict[str, Any], *, user_id: st
     o = orch(doc)
     if o.get("state") == "running":
         return  # idempotent
+    if not interfaces.gate_open(doc):
+        raise OfficeInputError("Approve the architecture and interfaces (ICD) first: part tickets are released at "
+                               "that gate.")
     b = budget_state({**doc, "orchestrator": {"god_tokens": god_tokens}})
     if b["level"] == "stop" and not god_tokens:
         raise OfficeInputError("The program has used its token budget. Raise the budget to run more work.")
@@ -332,6 +353,21 @@ class Env:
     async def integrate(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    # ---- Phase 4: interfaces, placeholders and the program assembly
+    async def conformance(self, doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any] | None:
+        """ICD conformance of the ticket's latest build (``conformance.measure``), or None when not measurable."""
+        return None
+
+    async def swap_in(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
+        """Put the approved part into the program assembly in place of its placeholder. {last, problems, mates}."""
+        return {"skipped": "No program assembly to fit into."}
+
+    async def decide_cr(self, root: Path, pid: str, cid: str) -> dict[str, Any]:
+        """Archie decides a change request (rule + optional AI note) and regenerates placeholders on accept."""
+        from aicad.office import platform_env
+
+        return await platform_env.decide_cr(root, pid, cid, None)
+
 
 EnvFactory = Callable[[Path, dict[str, Any]], Env]
 _env_factory: EnvFactory | None = None
@@ -459,10 +495,9 @@ class Runner:
                     break
                 if t["id"] in self.tasks:
                     continue
-                code = {"hex": "hex", "integrate": "fitz", "review": "gage"}.get(stage, t["specialist"])
+                code = {"hex": "hex", "integrate": "fitz", "review": "gage", "fit": "fitz"}.get(stage, t["specialist"])
                 lbl = self.label(t["id"], code)
-                _set_run(t, status={"hex": "searching", "design": "designing", "review": "reviewing",
-                                    "integrate": "integrating"}[stage], next=stage, agent=code, agent_label=lbl,
+                _set_run(t, status=STATUS_OF[stage], next=stage, agent=code, agent_label=lbl,
                          started_at=store.now(), line=f"{lbl} picked up {t['title']}")
                 service.emit(self.root, doc, "ticket.claimed", f"{lbl} picked up {service._label(t)}.",
                              service.agent_actor(code), t["id"], stage=stage, agent=code)
@@ -587,9 +622,16 @@ class Runner:
             tt["inbox"] = []
             fb = r.get("feedback") or None
             resume = bool(r.get("resume"))
-            text = specialists.prompt(code, tt, feedback=fb, comments=pending,
-                                      full=resume or not r.get("turns"), resume=resume)
-            shown = specialists.shown(tt, lbl, feedback=bool(fb), comments=bool(pending) and not fb)
+            notes = list(tt.pop("icd_delta", None) or []) + list(tt.pop("cr_notes", None) or [])
+            excerpt = None
+            if interfaces.has_icd(d) and tt["item_id"] in d["skeleton"]["items"]:
+                from aicad.office import icd as icd_mod
+
+                excerpt = icd_mod.excerpt(d["skeleton"], d["icd"], tt["item_id"])
+            text = specialists.prompt(code, tt, feedback=fb, comments=pending, full=resume or not r.get("turns"),
+                                      resume=resume, icd=excerpt, icd_notes=notes)
+            shown = specialists.shown(tt, lbl, feedback=bool(fb), comments=bool(pending) and not fb,
+                                      icd=bool(notes) and not fb)
             _set_run(tt, status="designing", next="design", feedback=None, resume=False,
                      turns=int(r.get("turns") or 0) + 1, stage_seen=[])
             if pending:
@@ -601,8 +643,11 @@ class Runner:
 
         text, shown = self.edit(prep)
         seen: set[str] = set()
+        said: list[str] = []
 
         def on_event(ev: dict[str, Any]) -> None:
+            if ev.get("type") == "text":
+                said.append(str(ev.get("text") or ""))
             try:
                 self.edit(lambda d: self._progress(d, tid, code, lbl, ev, seen))
             except Stop:
@@ -610,6 +655,7 @@ class Runner:
 
         res = await self.env.design(project_id, text, shown, budget, on_event)
         state = await self.env.part_state(project_id)
+        await self._change_request(tid, "\n".join(said))
 
         def after(d: dict[str, Any]) -> str | None:
             tt = service.ticket(d, tid)
@@ -622,8 +668,8 @@ class Runner:
                 for m in ("brief_read", "first_build", "gates_pass", "self_review"):
                     if m not in tt["milestones"]:
                         service.set_milestone(self.root, d, tid, m, True, service.agent_actor(code))
-                if tt.get("inbox"):
-                    return "design"  # comments arrived during the turn: the agent reads them next
+                if tt.get("inbox") or tt.get("icd_delta") or tt.get("cr_notes"):
+                    return "design"  # comments / an ICD change arrived during the turn: the agent reads them next
                 service.move(self.root, d, tid, "in_review", service.agent_actor(code))
                 _set_run(tt, status="reviewing", next="review", attempt=0)
                 self.handoff(d, tt, code, "gage", f"{lbl} → Gage: {tt['title']} for inspection.")
@@ -697,7 +743,13 @@ class Runner:
             self.edit(lambda d: self._fail(d, tid, "There is no Design Studio part to inspect."))
             return None
         state = await self.env.part_state(t["project_id"])
-        findings = gage.deterministic(t, state)
+        use_icd = interfaces.has_icd(doc) and t["item_id"] in doc["skeleton"]["items"]
+        findings = gage.deterministic(t, state, sizes=not use_icd)
+        icd_res: dict[str, Any] | None = None
+        if use_icd and state.get("builds") and state.get("ok") is True:
+            icd_res = await self.env.conformance(doc, t)
+            if icd_res is not None:
+                findings += conformance.findings(icd_res)
         ai: dict[str, Any] | None = None
         if not findings:
             b = budget_state(doc)
@@ -709,15 +761,23 @@ class Runner:
             tt = service.ticket(d, tid)
             g = service.agent_actor("gage")
             tt["review_tokens"] = int(tt.get("review_tokens") or 0) + int((ai or {}).get("tokens") or 0)
+            if icd_res is not None:
+                tt["icd_check"] = {**icd_res, "at": store.now()}
             r = run_of(tt)
             spec = tt["specialist"]
             sname = roster.agent(spec)["name"]
             parent = next((x for x in d["tickets"] if tid in (x.get("depends_on") or [])), None)
-            if tt.get("inbox") and not findings:
-                _set_run(tt, status="designing", next="design")
+            if tt.get("icd_delta") or (tt.get("inbox") and not findings):
+                _set_run(tt, status="designing", next="design")  # the ICD changed (or comments came) meanwhile
                 return "design"
             if not findings:
                 note = "Approved: the latest build passes every gating check and carries the sizes the brief gives."
+                if icd_res is not None:
+                    n = sum(len(x["rows"]) for x in icd_res["interfaces"])
+                    note = (f"Approved: the latest build passes every gating check, and {n} interface feature"
+                            f"{'s' if n != 1 else ''} measured on the part match ICD v{icd_res['version']} "
+                            f"({len(icd_res['interfaces'])} interface{'s' if len(icd_res['interfaces']) != 1 else ''}"
+                            ", inside the envelope).")
                 if ai and ai.get("note"):
                     note += f" Review note: {ai['note']}"
                 elif ai is None:
@@ -728,6 +788,11 @@ class Runner:
                 _set_run(tt, status="done", line=f"Gage approved {tt['title']}", agent="gage", feedback=None)
                 if parent:
                     self.handoff(d, tt, "gage", "fitz", f"Gage → Fitz: {tt['title']} approved for assembly.")
+                if (d.get("assembly") or {}).get("status") in ("ready", "building") and \
+                        tt["item_id"] in (d.get("skeleton") or {}).get("items", {}):
+                    _set_run(tt, status="fitting", next="fit", agent="fitz", agent_label="Fitz",
+                             line=f"Fitz is swapping {tt['title']} in for its placeholder")
+                    return "fit"
                 return None
             n = int(r.get("review_round") or 0) + 1
             service.comment(self.root, d, tid, "Changes requested:\n" + "\n".join(f"- {f}" for f in findings), g)
@@ -742,6 +807,82 @@ class Runner:
                      line=f"Gage sent {tt['title']} back: {findings[0]}")
             self.handoff(d, tt, "gage", spec, f"Gage → {sname}: {tt['title']} sent back. {findings[0]}")
             return "design"
+        return self.edit(fn)
+
+    # ------------------------------------------------------------------ change requests from a part agent
+    async def _change_request(self, tid: str, text: str) -> None:
+        from aicad.office import icd as icd_mod
+
+        req = icd_mod.parse_change_request(text)
+        if req is None:
+            return
+
+        def raise_(d: dict[str, Any]) -> str | None:
+            tt = service.ticket(d, tid)
+            code = tt["specialist"]
+            actor = {**service.agent_actor(code), "name": self.label(tid, code)}
+            try:
+                c = interfaces.raise_cr(self.root, d, req["interface"], req["values"], req["reason"] or
+                                        "The part can't meet the interface as written.", actor, ticket_id=tid)
+            except OfficeInputError as e:
+                tt.setdefault("cr_notes", []).append(f"Your change request could not be raised: {e} Design to the "
+                                                     "ICD as it stands.")
+                return None
+            self.status(d, tt, code, f"{actor['name']} raised {c['id']} on {req['interface']}: waiting for Archie")
+            return str(c["id"])
+
+        cid = self.edit(raise_)
+        if cid:
+            await self.env.decide_cr(self.root, self.pid, cid)
+
+    # ------------------------------------------------------------------ stage: Fitz swaps the real part in
+    async def _fit(self, tid: str) -> str | None:
+        self.edit(lambda d: self.status(d, service.ticket(d, tid), "fitz", "Fitz is swapping "
+                                        f"{service.ticket(d, tid)['title']} in for its placeholder", status="fitting"))
+        res = await self.env.swap_in(self.root, self.pid, tid)
+
+        def fn(d: dict[str, Any]) -> str | None:
+            tt = service.ticket(d, tid)
+            f = service.agent_actor("fitz")
+            if tt.get("icd_delta"):  # a change request changed this part while it was being fitted
+                service.move(self.root, d, tid, "in_design", f)
+                _set_run(tt, status="designing", next="design", line="The interfaces changed: back to the designer")
+                return "design"
+            if res.get("skipped"):
+                _set_run(tt, status="done", next=None, line=res["skipped"], agent="fitz")
+                return None
+            clashes = (res.get("last") or {}).get("clashes") or []
+            if clashes:
+                n = int(run_of(tt).get("clash_round") or 0) + 1
+                desc = [f"Clash: {c['a_name']} ↔ {c['b_name']}, {float(c['volume_mm3']):.1f} mm³ of overlap"
+                        for c in clashes[:6]]
+                service.comment(self.root, d, tid, "Fitz found clashes when the part went into the program "
+                                "assembly:\n" + "\n".join(f"- {x}" for x in desc), f)
+                tt["comments"][-1]["delivery"] = "stored"
+                tt["fitted"] = False
+                if n > MAX_CLASH_ROUNDS:
+                    _set_run(tt, clash_round=n, next=None)
+                    self._fail(d, tid, f"{tt['title']} still clashes in the program assembly after {n - 1} rounds: "
+                                       + desc[0])
+                    return None
+                service.move(self.root, d, tid, "changes_requested", f)
+                _set_run(tt, status="designing", next="design", clash_round=n, feedback=desc,
+                         line=f"Fitz sent {tt['title']} back: {desc[0]}")
+                self.handoff(d, tt, "fitz", tt["specialist"], f"Fitz → {roster.agent(tt['specialist'])['name']}: "
+                             f"{tt['title']} clashes in the assembly. {desc[0]}")
+                return "design"
+            tt["fitted"] = True
+            _set_run(tt, status="done", next=None, agent="fitz",
+                     line=f"Fitz swapped {tt['title']} in: interface mates re-attached, 0 clashes")
+            service.emit(self.root, d, "ticket.fitted", f"Fitz swapped the real {tt['title']} in for its placeholder: "
+                         "every interface mate re-attached by name, 0 clashes"
+                         + (f" ({res['mates']} mates in the program assembly)." if res.get("mates") else "."), f, tid,
+                         item=tt["item_id"])
+            if res.get("problems"):
+                service.comment(self.root, d, tid, "Fitz could not re-attach:\n" + "\n".join(
+                    f"- {p}" for p in res["problems"][:6]), f)
+                tt["comments"][-1]["delivery"] = "stored"
+            return None
         return self.edit(fn)
 
     # ------------------------------------------------------------------ stage: Fitz
@@ -777,6 +918,13 @@ class Runner:
                                  f"{float(c.get('volume_mm3') or 0):.1f} mm³" for c in clashes[:5])
                 self._fail(d, tid, f"Fitz found {len(clashes)} clash{'es' if len(clashes) != 1 else ''}: {desc}. "
                                    "Fix the parts (reopen them) or adjust the assembly by hand.")
+                return
+            changed = [service.ticket(d, k)["title"] for k in res.get("children") or []
+                       if service.ticket(d, k)["column"] not in service.DONE_COLUMNS]
+            if changed:  # a change request reopened a part while Fitz was integrating: integrate again later
+                service.move(self.root, d, tid, "backlog", f)
+                _set_run(tt, status="queued", next="integrate", line=f"{changed[0]} changed during integration: "
+                         "Fitz integrates again when it is approved")
                 return
             for k in res.get("children") or []:
                 kt = service.ticket(d, k)

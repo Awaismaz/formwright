@@ -102,8 +102,8 @@ def new_program(name: str, brief: str, org_id: str, user_id: str, concurrency: i
             "planner": planner_kind, "planning": None, "plan": None, "plan_history": [],
             "gates": [
                 {"code": "brief", "name": "Brief approval", "mandatory": True, "status": "pending"},
-                {"code": "icd", "name": "Architecture and interfaces", "mandatory": True, "status": "later",
-                 "note": "Interfaces (ICD) arrive in a later release."},
+                {"code": "icd", "name": "Architecture and interfaces", "mandatory": True, "status": "locked",
+                 "note": "Opens when the brief is approved: Archie lays out the skeleton and names the interfaces."},
                 {"code": "release", "name": "Release", "mandatory": True, "status": "locked"},
             ],
             "items": [], "tickets": [],
@@ -208,6 +208,9 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
     edited = " (edited)" if doc["plan"].get("edited") else ""
     emit(root, doc, "gate.approved", f"{actor.get('name', 'Someone')} approved the brief and plan{edited}. "
          f"{len(tickets)} tickets opened.", actor, gate="brief")
+    from aicad.office import interfaces
+
+    interfaces.create(root, doc, actor)
 
 
 def _plan_shape(plan: dict[str, Any]) -> Any:
@@ -423,6 +426,12 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
 
     out["tickets"] = [ticket_view(t) for t in tickets]
     out["counts"] = {c: sum(1 for t in tickets if t["column"] == c) for c in COLUMN_CODES}
+    from aicad.office import interfaces
+
+    out.pop("skeleton", None)
+    out["icd"] = interfaces.view(doc)
+    out["change_requests"] = doc.get("change_requests") or []
+    out["assembly"] = doc.get("assembly")
     b = orchestrator.budget_state(doc)
     out["budget"] = {**doc["budget"], "spent": b["spent"], "pct": b["pct"], "level": b["level"]}
     o = doc.get("orchestrator") or {}
@@ -443,6 +452,7 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
 
 def summary(doc: dict[str, Any]) -> dict[str, Any]:
     v = view(doc)
+    v.pop("icd", None)
     return {k: v.get(k) for k in ("id", "name", "key", "status", "planner", "created_at", "updated_at", "rollup",
                                   "eta", "counts", "budget", "gates", "concurrency", "orchestrator")} | {
         "tickets": len(doc["tickets"]), "brief": doc["brief"][:300]}
@@ -503,6 +513,9 @@ def inbox(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             out.append({"kind": "brief", "program_id": d["id"], "program": d["name"], "at": d["updated_at"],
                         "title": f"Approve the brief and plan for {d['name']}",
                         "source": (d.get("plan") or {}).get("source")})
+        if d.get("icd") and next((g for g in d["gates"] if g["code"] == "icd"), {}).get("status") == "pending":
+            out.append({"kind": "icd", "program_id": d["id"], "program": d["name"], "at": d["updated_at"],
+                        "title": f"Review the interfaces (ICD v{d['icd']['version']}) for {d['name']}"})
         for t in d["tickets"]:
             if (t.get("run") or {}).get("status") == "blocked":
                 out.append({"kind": "blocked", "program_id": d["id"], "program": d["name"], "at": t["updated_at"],

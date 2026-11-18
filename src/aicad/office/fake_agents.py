@@ -9,6 +9,13 @@ report, then a self-review block. ``fake_review`` replaces Gage's AI note.
 Behaviour can be scripted per ticket (``SCRIPT``: regex on the brief -> what to do) so tests and the walkthrough can
 show a send-back, a failed build, a rate limit, or a run that waits on an event.
 
+With an ICD (Phase 4) the prompt carries a ``fw-icd`` block: the fake then builds the part to it (the envelope with
+every interface feature at its stated position; a gear from the Toolbox generator), so Gage's conformance
+measurement passes and Fitz's swap-in mates by name. Scripted ICD behaviour: ``icd_shift`` (mm: the first hole is
+built that far off in X on the first ``omit_turns`` turns, so Gage sends it back with the measured position),
+``icd_grow`` (mm: the body is built that much larger: out of its envelope, a shaft off its Ø) and
+``cr`` (a change request block on the first turn: {"interface", "values", "reason"}).
+
 Enable for a dev server with ``FW_OFFICE_FAKE_AGENTS=1`` (optionally ``FW_OFFICE_FAKE_DELAY`` seconds per step and
 ``FW_OFFICE_FAKE_DEFECTS`` = a regex: matching tickets omit a brief size on their first build).
 """
@@ -62,6 +69,67 @@ def reset() -> None:
     STATS.update(active=0, max_active=0, prompts=[])
 
 
+def _icd_spec(prompt: str) -> dict[str, Any] | None:
+    m = list(re.finditer(r"```fw-icd\s*\n(.*?)\n?```", prompt or "", re.DOTALL))
+    if not m:
+        return None
+    try:
+        d = json.loads(m[-1].group(1))
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) and d.get("size") else None
+
+
+def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.0, grow: float = 0.0) -> dict[str, Any]:
+    """A part built to its ICD excerpt, in the part frame: block / ring / shaft / gear with the interface holes.
+    ``shift`` moves the first hole in X, ``grow`` makes the body that much larger (scripted defects)."""
+    from build123d import Axis, Box, Cylinder, Pos, export_step, fillet
+
+    L, W, H = (float(x) for x in spec["size"])
+    L, W = L + grow, W + grow
+    holes = [f for f in spec.get("features") or [] if f["type"] == "hole"]
+    if spec.get("bore") and not any(abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6 for h in holes):
+        holes.append({"c": [0.0, 0.0], "d": spec["bore"]})
+    g = spec.get("gear")
+    if g:
+        from aicad import toolbox
+
+        bore = next((h["d"] for h in holes if abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6), None)
+        shape, _e = toolbox.build("spur_gear", M=g["module"], Z=g["teeth"], B=g["face_width"],
+                                  BORE=bore or max(4.0, 0.15 * g["module"] * g["teeth"]))
+        body = Pos(0, 0, -g["face_width"] / 2) * shape
+        holes = [h for h in holes if not (abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6)]
+    elif spec["shape"] == "box":
+        body = Box(L, W, H)
+        r = min(3.0, 0.1 * min(L, W))
+        try:  # a machined look: vertical edges broken (faces and holes unchanged)
+            body = fillet(body.edges().filter_by(Axis.Z), r)
+        except Exception:  # noqa: BLE001
+            body = Box(L, W, H)
+    else:
+        body = Cylinder(L / 2, H)
+    for k, h in enumerate(holes):
+        dx = shift if k == 0 else 0.0
+        body = body - Pos(float(h["c"][0]) + dx, float(h["c"][1]), 0) * Cylinder(float(h["d"]) / 2, H + 2)
+    out = ws / "out"
+    out.mkdir(parents=True, exist_ok=True)
+    export_step(body, str(out / "part.step"))
+    bb = body.bounding_box()
+    size = [round(bb.size.X, 4), round(bb.size.Y, 4), round(bb.size.Z, 4)]
+    params = {"LENGTH": L, "WIDTH": W, "HEIGHT": H, **{f"HOLE_{k + 1}_D": float(h["d"]) for k, h in enumerate(holes)}}
+    src = "\n".join([f'NAME = "{name}"', 'MATERIAL = "Aluminium 6061-T6"'] + [f"{k} = {v:g}" for k, v in params.items()])
+    src += f"\nPARAMS = dict({', '.join(f'{k}={k}' for k in params)})\n\nfrom build123d import *\n# built to ICD v{spec.get('version')}\n"
+    (ws / "model.py").write_text(src, encoding="utf-8")
+    checks = [{"id": c, "name": n, "passed": True, "gating": True} for c, n in (
+        ("CHK-02", "valid B-rep, solid count"), ("CHK-03", "closed manifold (no free edges)"),
+        ("CHK-04", "bounding box"), ("CHK-07", "STEP export -> reimport"))]
+    st = {"ok": True, "part": name, "material": "Aluminium 6061-T6", "build_id": uuid.uuid4().hex[:12],
+          "params": params, "checks": checks, "fingerprint": {"bbox": size, "volume": float(body.volume), "solids": 1},
+          "expected": {"bbox": size}}
+    (out / "status.json").write_text(json.dumps(st), encoding="utf-8")
+    return st
+
+
 def _write_part(ws: Path, name: str, dims: list[float], extra: list[float]) -> dict[str, Any]:
     from build123d import Box, export_step
 
@@ -93,6 +161,7 @@ class FakeClient:
         self.turns = 0
         self.cost = 0.0
         self.brief = ""
+        self.icd: dict[str, Any] | None = None
         self._prompt = ""
         self._stop = False
 
@@ -110,6 +179,9 @@ class FakeClient:
         m = re.search(r"Ticket [A-Z0-9]+-\d+: (.*)", prompt, re.DOTALL)
         if m:
             self.brief = m.group(1)
+        spec = _icd_spec(prompt)
+        if spec is not None:
+            self.icd = spec
         STATS["prompts"].append(prompt)
 
     async def receive_response(self) -> AsyncIterator[Any]:
@@ -165,6 +237,12 @@ class FakeClient:
                 (self.workspace / "out").mkdir(parents=True, exist_ok=True)
                 (self.workspace / "out" / "status.json").write_text(json.dumps(st), encoding="utf-8")
                 report = "BUILD FAILED: fillet failed"
+            elif self.icd is not None:
+                bad = self.turns <= int(b.get("omit_turns", 1))
+                await asyncio.to_thread(_write_icd_part, self.workspace, name, self.icd,
+                                        float(b.get("icd_shift") or 0.0) if bad else 0.0,
+                                        float(b.get("icd_grow") or 0.0) if bad else 0.0)
+                report = "Build OK. All gating checks pass."
             else:
                 await asyncio.to_thread(_write_part, self.workspace, name, box, extra)
                 report = "Build OK. All gating checks pass."
@@ -173,6 +251,10 @@ class FakeClient:
             await asyncio.sleep(step)
             review = {"observed": [{"text": "Envelope matches the brief sizes", "basis": "CHK-04"}], "uncertain": []}
             text = "Done." if fail else "Built and checked.\n```fw-review\n" + json.dumps(review) + "\n```"
+            cr = b.get("cr")
+            if cr and self.turns == 1 and not fail:
+                text += ("\nOne interface does not work for this part:\n```fw-change-request\n"
+                         + json.dumps(cr) + "\n```")
             yield AssistantMessage(content=[TextBlock(text=text)], model="fake", usage=usage,
                                    message_id=f"m{self.turns}b")
             self.cost += COST_USD
@@ -180,6 +262,15 @@ class FakeClient:
                                 is_error=False, num_turns=2, session_id="fake", total_cost_usd=self.cost)
         finally:
             STATS["active"] -= 1
+
+
+async def fake_cr_review(folder: Path, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+    """Archie's change-request note in simulated mode: accepts (scripted ``cr_reject`` rejects)."""
+    for rx, b in SCRIPT:
+        if b.get("cr_reject") and re.search(rx, prompt, re.IGNORECASE | re.DOTALL):
+            return ('Not justified.\n```fw-cr-decision\n{"decision": "reject", "reason": "The brief does not need '
+                    'a bigger joint here."}\n```'), 0.05
+    return 'Justified.\n```fw-cr-decision\n{"decision": "accept", "reason": "Fits the brief."}\n```', 0.05
 
 
 async def fake_review(folder: Path, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:

@@ -31,7 +31,9 @@ PRACTICE: dict[str, str] = {
 
 CLOSING = ("This is a Design Office ticket: the brief below is already approved, so build it now without asking for "
            "approval. Keep every size the brief gives exactly, put the driving dimensions in PARAMS, and finish "
-           "with your self-review. An independent checker will measure the part against the brief afterwards.")
+           "with your self-review. When the ticket lists interfaces (ICD), model in the stated part frame and put "
+           "every interface feature exactly where the ICD says: an independent checker measures them on the built "
+           "part, and the program assembly mates them by name.")
 
 # Present-tense status lines per trade: (reading, first build, rebuild, fixing, checks pass, self-review)
 _LINES: dict[str, tuple[str, str, str, str, str, str]] = {
@@ -69,13 +71,21 @@ def line(code: str, stage: str, part: str, agent_label: str | None = None) -> st
 
 
 def prompt(code: str, ticket: dict[str, Any], *, feedback: list[str] | None = None,
-           comments: list[dict[str, Any]] | None = None, full: bool = True, resume: bool = False) -> str:
-    """The message to the part agent. ``full``: its practice note and the brief (first turn, or a fresh session);
-    later turns carry only the checker's findings or the engineer's comments."""
+           comments: list[dict[str, Any]] | None = None, full: bool = True, resume: bool = False,
+           icd: str | None = None, icd_notes: list[str] | None = None) -> str:
+    """The message to the part agent. ``full``: its practice note, the brief and the ICD excerpt for this part
+    (first turn, or a fresh session); later turns carry the checker's findings, the engineer's comments, and any
+    interface change (with the updated excerpt)."""
     parts: list[str] = []
     if feedback:
-        parts.append("The independent checker (Gage) sent this part back. Fix every finding, rebuild, and finish "
-                     "with your self-review:\n" + "\n".join(f"- {f}" for f in feedback))
+        parts.append("This part was sent back (the independent checker's inspection, or a clash in the program "
+                     "assembly). Fix every finding, rebuild, and finish with your self-review:\n"
+                     + "\n".join(f"- {f}" for f in feedback))
+    if icd_notes:
+        parts.append("The interfaces of this part changed, or your change request was decided. Update the model, "
+                     "rebuild and finish with your self-review:\n" + "\n".join(f"- {n}" for n in icd_notes))
+        if icd and not full:
+            parts.append(icd)
     if comments:
         parts.append("Comments from the engineering manager on this ticket. Act on them, rebuild if the model "
                      "changes, and finish with your self-review:\n"
@@ -85,11 +95,16 @@ def prompt(code: str, ticket: dict[str, Any], *, feedback: list[str] | None = No
     head = [PRACTICE.get(code, PRACTICE["mill"]), CLOSING]
     if resume:
         head.append("The previous session was interrupted. Continue from the current model if there is one.")
-    return "\n\n".join(head + [f"Ticket {ticket['key']}: {ticket['brief']}"] + parts)
+    body = [f"Ticket {ticket['key']}: {ticket['brief']}"] + ([icd] if icd else [])
+    return "\n\n".join(head + body + parts)
 
 
-def shown(ticket: dict[str, Any], agent_label: str, *, feedback: bool = False, comments: bool = False) -> str:
+def shown(ticket: dict[str, Any], agent_label: str, *, feedback: bool = False, comments: bool = False,
+          icd: bool = False) -> str:
     """What the Studio chat shows as the request (the practice note is not shown)."""
+    if icd:
+        return (f"Design Office: the interfaces of {ticket['key']} {ticket['title']} changed; {agent_label} updates "
+                "the part.")
     if feedback:
         return f"Design Office: Gage sent {ticket['key']} {ticket['title']} back to {agent_label} with findings."
     if comments:

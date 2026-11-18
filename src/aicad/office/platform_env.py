@@ -15,7 +15,18 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from aicad.office import fake_agents, gage, orchestrator, roster, service, store
+from aicad.office import (
+    conformance,
+    fake_agents,
+    gage,
+    interfaces,
+    orchestrator,
+    planner,
+    program_assembly,
+    roster,
+    service,
+    store,
+)
 
 log = logging.getLogger("aicad.office.env")
 RATE_LIMIT = re.compile(r"\b(rate[ -]?limit|usage limit|too many requests|overloaded|429)\b", re.IGNORECASE)
@@ -268,6 +279,109 @@ class PlatformEnv(orchestrator.Env):
             return {"verdict": None, "findings": [], "note": None, "tokens": 0 if self.god_tokens else tokens}
         return {**r, "tokens": 0 if self.god_tokens else tokens}
 
+    # ------------------------------------------------------------------ Phase 4: ICD, placeholders, swap-in
+    async def real_part(self, project_id: str) -> str:
+        """The project's verified build as a part snapshot (the same one Fitz assembles)."""
+        from aicad.assembly import AssemblyInputError
+        from aicad.assembly import service as aservice
+        from aicad.platform.models import Project
+        from aicad.platform.routers.mod_assembly import _model_rev, _status
+        from aicad.platform.routers.projects import wait_finalized, workspace_for
+
+        db = self._db()
+        try:
+            pr = db.get(Project, project_id)
+            if pr is None or pr.org_id != self.org_id:
+                raise AssemblyInputError("A part of this program is no longer in the workspace.")
+            ws, pname = workspace_for(pr), pr.name
+        finally:
+            db.close()
+        await wait_finalized(project_id)
+        st = _status(ws)
+        return await aservice.ensure_project_part(_aroot(self.org_id), self.org_id, project_id, pname, ws, st,
+                                                  _model_rev(ws, st.get("build_id")))
+
+    async def conformance(self, doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any] | None:
+        from aicad.assembly import AssemblyInputError
+        from aicad.assembly import store as astore
+        from aicad.assembly.service import WorkerError
+
+        if not t.get("project_id"):
+            return None
+        try:
+            key = await self.real_part(t["project_id"])
+        except (AssemblyInputError, WorkerError) as e:
+            return {"version": doc["icd"]["version"], "ok": False, "interfaces": [],
+                    "envelope": {"feature": "envelope", "spec": "a verified build", "measured": str(e), "ok": False}}
+        aroot = _aroot(self.org_id)
+        info = (astore.part(aroot, key) or {}).get("info") or {}
+        return {**conformance.measure(doc["skeleton"], doc["icd"], t["item_id"], info, astore.refs(aroot, key)),
+                "part_key": key}
+
+    async def swap_in(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
+        doc = store.load(root, pid)
+        if doc is None:
+            raise orchestrator.Stop("program deleted")
+        t = service.ticket(doc, tid)
+        if not t.get("project_id"):
+            return {"skipped": "Nothing to swap in: the part has no Design Studio build."}
+        key = (t.get("icd_check") or {}).get("part_key") or await self.real_part(t["project_id"])
+        async with program_assembly.lock(pid):
+            doc = store.load(root, pid)
+            if doc is None:
+                raise orchestrator.Stop("program deleted")
+            if (doc.get("assembly") or {}).get("status") != "ready":
+                return {"skipped": "Fitz will place this part when the program assembly is built."}
+            try:
+                state = await program_assembly.swap(_aroot(self.org_id), self.org_id, doc, {t["item_id"]: key})
+            except Exception as e:
+                log.exception("swap-in failed")
+                return {"skipped": f"Fitz couldn't swap the part in: {e}"}
+            save_assembly(root, pid, state, f"Fitz swapped {t['title']} into the program assembly.", event=False)
+        last = state.get("last") or {}
+        return {"last": last, "problems": last.get("problems") or [], "mates": state.get("mates")}
+
+    async def decide_cr(self, root: Path, pid: str, cid: str) -> dict[str, Any]:
+        return await decide_cr(root, pid, cid, self)
+
+    async def cr_review(self, doc: dict[str, Any], c: dict[str, Any], why: str) -> dict[str, Any] | None:
+        """Archie's AI note on a change request (Archie-planned programs only). Metered like Gage's note."""
+        from aicad.platform import metering
+        from aicad.platform.models import Organization, User
+        from aicad.platform.services import debit, track
+
+        if doc.get("planner") != "archie":
+            return None
+        db = self._db()
+        try:
+            org = db.get(Organization, self.org_id)
+            cap = planner.CR_MAX_TOKENS
+            if not self.god_tokens:
+                cap = min(cap, max(0, (org.token_balance if org else 0) - metering.reserved(self.org_id)))
+                if cap < 1:
+                    return None
+        finally:
+            db.close()
+        fn = fake_agents.fake_cr_review if self.simulated else planner.run_cr_review
+        try:
+            text, usd = await fn(store.program_dir(store.org_root(_data_dir(), self.org_id), doc["id"]) / "archie",
+                                 planner.cr_prompt(doc, c, why), None if self.god_tokens else cap * metering.USD_PER_TOKEN)
+        except Exception:
+            log.exception("Archie change-request review failed")
+            return None
+        r = planner.parse_cr_decision(text)
+        tokens = min(cap, metering.tokens_for_usd(usd)) if usd else 0
+        db = self._db()
+        try:
+            org, user = db.get(Organization, self.org_id), db.get(User, self.user_id)
+            if usd and org is not None and not self.god_tokens:
+                debit(db, org, tokens, "usage", f"Design Office · Archie on {c['id']}", user, ref=doc["id"])
+            track(db, "office_cr_review", user, self.org_id, tokens=tokens, decision=(r or {}).get("decision"))
+            db.commit()
+        finally:
+            db.close()
+        return None if r is None else {**r, "tokens": 0 if self.god_tokens else tokens}
+
     # ------------------------------------------------------------------ Fitz
     async def integrate(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
         from aicad.assembly import AssemblyInputError, fitz
@@ -290,6 +404,8 @@ class PlatformEnv(orchestrator.Env):
                                    "the add-on, then retry."}
         finally:
             db.close()
+        if (doc.get("assembly") or {}).get("status") == "ready":
+            return await self._integrate_program(root, pid, tid)
         kids = children(doc, t)
         aroot = astore.org_root(_data_dir(), self.org_id)
         item = next((i for i in doc["items"] if i["id"] == t["item_id"]), {"name": t["title"]})
@@ -341,6 +457,39 @@ class PlatformEnv(orchestrator.Env):
         except (AssemblyInputError, aservice.WorkerError) as e:
             return {"blocked": f"Fitz couldn't assemble this: {e}", "assembly_id": adoc["id"]}
         return {**res, "assembly_id": adoc["id"], "children": [k["id"] for k in kids]}
+
+    async def _integrate_program(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
+        """Integration with an ICD: the level's assembly already holds its parts (placeholders swapped for the real
+        parts); Fitz fits the level's fasteners into its bolted joints and re-checks. Nested: the final assembly
+        holds the sub-assemblies."""
+        from aicad.assembly import AssemblyInputError
+        from aicad.assembly.service import WorkerError
+
+        async with program_assembly.lock(pid):
+            doc = store.load(root, pid)
+            if doc is None:
+                raise orchestrator.Stop("program deleted")
+            t = service.ticket(doc, tid)
+            kids = children(doc, t) if t["item_id"] != "root" else [
+                k for k in doc["tickets"] if k["id"] in (t.get("depends_on") or [])]
+            ph = [k["title"] for k in kids if k["kind"] == "part" and
+                  ((doc["assembly"].get("parts") or {}).get(k["item_id"]) or {}).get("kind") == "placeholder"]
+            if ph and t["item_id"] != "root":
+                return {"blocked": f"Fitz is still waiting for the real {ph[0]}: it has not been swapped in for its "
+                                   "placeholder. Retry once it is approved."}
+            std = [k for k in kids if k["kind"] == "standard"]
+            try:
+                res = await program_assembly.integrate(_aroot(self.org_id), self.org_id, doc, t["item_id"], std)
+            except (AssemblyInputError, WorkerError) as e:
+                return {"blocked": f"Fitz couldn't integrate this: {e}"}
+            if res.get("blocked"):
+                return res
+            state = {**doc["assembly"], "at": store.now(), "summary": res.get("program_summary")
+                     or doc["assembly"].get("summary")}
+            if t["item_id"] == "root":
+                state["clashes"] = res["clashes"]
+            save_assembly(root, pid, state, None, event=False)
+        return {**res, "children": [k["id"] for k in kids]}
 
 
 # ---------------------------------------------------------------------------- shared helpers
@@ -416,3 +565,99 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
         return {"source": "project", "project_id": h["id"], "title": h["name"], "confidence": "high",
                 "found": f"Hex found {h['name']} in your parts"}
     return None
+
+
+# ---------------------------------------------------------------------------- program assembly (shared helpers)
+def _aroot(org_id: str) -> Path:
+    from aicad.assembly import store as astore
+
+    return astore.org_root(_data_dir(), org_id)
+
+
+def save_assembly(root: Path, pid: str, state: dict[str, Any], text: str | None, event: bool = True,
+                  **data: Any) -> None:
+    with store.lock(pid):
+        doc = store.load(root, pid)
+        if doc is None:
+            return
+        doc["assembly"] = state
+        for t in doc["tickets"]:  # integration tickets open the level's document
+            if t["kind"] == "integration":
+                aid = state.get("final") if t["item_id"] == "root" else (state.get("subs") or {}).get(t["item_id"])
+                if aid:
+                    t["assembly_id"] = aid
+        if event and text:
+            service.emit(root, doc, "assembly.updated", text, service.agent_actor("fitz"), **data)
+        store.save(root, doc)
+
+
+def assembly_allowed(org_id: str, god_paywall: bool) -> bool:
+    from aicad.platform.db import session_factory
+    from aicad.platform.models import Organization
+    from aicad.platform.services import org_modules
+
+    db = session_factory()()
+    try:
+        org = db.get(Organization, org_id)
+        return org is not None and ("assembly" in org_modules(db, org) or god_paywall)
+    finally:
+        db.close()
+
+
+async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False) -> None:
+    """At ICD approval: Fitz assembles the program from placeholders (mates by interface name)."""
+    if not assembly_allowed(org_id, god_paywall):
+        save_assembly(root, pid, {"status": "unavailable", "summary": "Assembly Studio isn't included in your plan, "
+                                  "so the live program assembly can't be built. Unlock the add-on, then rebuild it."},
+                      "The live program assembly needs Assembly Studio (not in your plan).")
+        return
+    async with program_assembly.lock(pid):
+        doc = store.load(root, pid)
+        if doc is None or not interfaces.has_icd(doc):
+            return
+        keys = {}
+        for t in doc["tickets"]:  # a rebuild keeps real parts already swapped in
+            p = ((doc.get("assembly") or {}).get("parts") or {}).get(t["item_id"]) or {}
+            if p.get("kind") == "real" and t["column"] in service.DONE_COLUMNS:
+                keys[t["item_id"]] = p["key"]
+        try:
+            state = await program_assembly.build(_aroot(org_id), org_id, user_id, doc, keys)
+        except Exception as e:
+            log.exception("program assembly build failed")
+            save_assembly(root, pid, {**(doc.get("assembly") or {}), "status": "failed",
+                                      "summary": f"Fitz couldn't build the program assembly: {e}"},
+                          "Fitz couldn't build the program assembly from placeholders.")
+            return
+        save_assembly(root, pid, state, state["summary"], clashes=len(state["clashes"]))
+
+
+async def decide_cr(root: Path, pid: str, cid: str, env: PlatformEnv | None) -> dict[str, Any]:
+    """Archie decides a change request: the deterministic rule, then (Archie-planned programs) an AI note that may
+    still reject. On accept the affected placeholders are regenerated in the program assembly."""
+    doc = store.load(root, pid)
+    if doc is None:
+        return {}
+    c = interfaces.cr(doc, cid)
+    ev = interfaces.evaluate(doc, c)
+    ai = None
+    if ev["ok"] and env is not None:
+        ai = await env.cr_review(doc, c, ev["reason"])
+    with store.lock(pid):
+        doc = store.load(root, pid)
+        if doc is None:
+            return {}
+        out = interfaces.decide(root, doc, cid, service.agent_actor("archie"), ai)
+        store.save(root, doc)
+    orchestrator.poke(pid)
+    if out["accepted"] and (doc.get("assembly") or {}).get("status") == "ready":
+        async with program_assembly.lock(pid):
+            doc = store.load(root, pid)
+            if doc is not None:
+                try:
+                    state = await program_assembly.regenerate(_aroot(doc["org_id"]), doc["org_id"], doc, out["items"])
+                    save_assembly(root, pid, state, f"Fitz regenerated {len(out['items'])} placeholder"
+                                  f"{'s' if len(out['items']) != 1 else ''} for ICD v{doc['icd']['version']} "
+                                  f"({cid}): mates re-attached by interface name, {len(state['clashes'])} clashes.")
+                except Exception:
+                    log.exception("placeholder regeneration failed")
+    return {"id": cid, "status": out["cr"]["status"], "accepted": out["accepted"]}

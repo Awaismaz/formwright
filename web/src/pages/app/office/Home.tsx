@@ -97,6 +97,14 @@ function InboxRow({ i, canEdit }: { i: InboxItem; canEdit: boolean }) {
       <ArrowRight className="h-4 w-4 shrink-0 text-muted" />
     </Link>
   );
+  if (i.kind === "icd") return (
+    <button onClick={() => nav(`/app/office/programs/${i.program_id}?tab=interfaces`)} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
+      <AgentAvatar code="archie" state="review" size={30} />
+      <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium">{i.title}</div>
+        <div className="text-[11.5px] text-muted">Architecture and interfaces gate · part work waits for it · {ago(i.at)}</div></div>
+      <ArrowRight className="h-4 w-4 text-muted" />
+    </button>
+  );
   if (i.kind === "brief") return (
     <button onClick={() => nav(`/app/office/programs/${i.program_id}`)} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
       <AgentAvatar code="archie" state="review" size={30} />

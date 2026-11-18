@@ -19,6 +19,9 @@ Viewers can open assemblies, the BOM and the last exported STEP; changes need th
   PATCH  /api/m/assembly/assemblies/{id}/mates/{mid}         value / flip / suppress
   DELETE /api/m/assembly/assemblies/{id}/mates/{mid}
   DELETE /api/m/assembly/assemblies/{id}/groups/{gid}        remove a fastener stack
+  POST   /api/m/assembly/assemblies/{id}/subassemblies       insert another assembly as a nested sub-assembly
+  POST   /api/m/assembly/assemblies/{id}/subassemblies/{gid}/refresh   re-copy it from its source assembly
+  DELETE /api/m/assembly/assemblies/{id}/subassemblies/{gid}
   POST   /api/m/assembly/assemblies/{id}/analyse             interference + clearance (exact)
   GET    /api/m/assembly/assemblies/{id}/bom[?format=csv]
   POST   /api/m/assembly/assemblies/{id}/export              assembly STEP (re-import verified)
@@ -207,10 +210,16 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
         exp["stale"] = exp.get("signature") != sig
         exp["url"] = f"/api/m/assembly/assemblies/{doc['id']}/files/assembly.step"
     home = projects.get(doc.get("project_id") or "")
+    subs = []
+    for g in doc.get("subassemblies") or []:
+        src = store.load(root, g["assembly_id"]) if g.get("assembly_id") else None
+        subs.append({**g, "source_missing": src is None, "stale": src is not None and src.get("rev") != g.get("rev"),
+                     "source_name": src["name"] if src else None})
     return {
         "assembly": {k: doc.get(k) for k in ("id", "name", "project_id", "rev", "created_at", "updated_at")},
         "home_project": {"id": home.id, "name": home.name} if home else None,
-        "instances": instances, "parts": pview, "mates": mates, "groups": doc["groups"], "solve": solve or None,
+        "instances": instances, "parts": pview, "mates": mates, "groups": doc["groups"], "subassemblies": subs,
+        "office": doc.get("office"), "solve": solve or None,
         "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
         "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
         "can_edit": ctx.role != "viewer",
@@ -293,6 +302,11 @@ class RenameIn(BaseModel):
 class ToolboxIn(BaseModel):
     code: str
     params: dict[str, float] = Field(default_factory=dict)
+
+
+class SubIn(BaseModel):
+    assembly_id: str
+    name: str | None = Field(None, max_length=120)
 
 
 class InsertIn(BaseModel):
@@ -666,6 +680,29 @@ async def delete_mate(aid: str, mid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[s
 @router.delete("/assemblies/{aid}/groups/{gid}")
 async def delete_group(aid: str, gid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     return await _mutate(ctx, aid, lambda doc, root: service.remove_group(doc, gid))
+
+
+@router.post("/assemblies/{aid}/subassemblies")
+async def insert_sub(aid: str, body: SubIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Nested assemblies: another assembly goes in as a sub-assembly (a copy kept in sync by Refresh)."""
+    src = _doc(ctx, body.assembly_id)
+    return await _mutate(ctx, aid, lambda doc, root: service.insert_subassembly(root, doc, src, name=body.name))
+
+
+@router.post("/assemblies/{aid}/subassemblies/{gid}/refresh")
+async def refresh_sub(aid: str, gid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        g = service.subassembly(doc, gid)
+        src = store.load(root, g["assembly_id"]) if g.get("assembly_id") else None
+        if src is None or src.get("org_id") != ctx.require_org().id:
+            raise AssemblyInputError("The source assembly of this sub-assembly was deleted.")
+        return {"_extra": service.sync_subassembly(root, doc, gid, src)}
+    return await _mutate(ctx, aid, fn)
+
+
+@router.delete("/assemblies/{aid}/subassemblies/{gid}")
+async def delete_sub(aid: str, gid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    return await _mutate(ctx, aid, lambda doc, root: service.remove_subassembly(doc, gid))
 
 
 @router.post("/assemblies/{aid}/analyse")

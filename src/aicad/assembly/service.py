@@ -73,6 +73,20 @@ async def ensure_toolbox_part(root: Path, org_id: str, code: str, params: dict[s
     return key
 
 
+async def ensure_placeholder_part(root: Path, org_id: str, key: str, spec: dict[str, Any], name: str,
+                                  origin: dict[str, Any]) -> str:
+    """A placeholder body (CD-011) in the part cache: the envelope with its interface features. ``origin`` says
+    where it comes from (program, item, ICD version); the key must start with ``h_``."""
+    if not key.startswith("h_"):
+        raise AssemblyInputError("bad placeholder key")
+    if not store.part_ready(root, key):
+        d = store.part_dir(root, key)
+        await _call(org_id, {"op": "placeholder", "dest": str(d), "spec": spec})
+        store.write_json(d / "meta.json", {"key": key, "kind": "placeholder", "name": name, "material": None,
+                                           "standard": None, **origin, "created_at": store.now()})
+    return key
+
+
 def _parts(root: Path, doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for i in doc["instances"]:
@@ -139,6 +153,9 @@ def add_instance(root: Path, doc: dict[str, Any], key: str, T: list[float] | Non
 def _source(p: dict[str, Any]) -> dict[str, Any]:
     if p["kind"] == "project":
         return {"kind": "project", "project_id": p["project_id"], "build_id": p["build_id"], "rev": p.get("rev")}
+    if p["kind"] == "placeholder":
+        return {"kind": "placeholder", "program_id": p.get("program_id"), "item_id": p.get("item_id"),
+                "icd_version": p.get("icd_version")}
     return {"kind": "toolbox", "code": p["code"], "params": p["params"], "version": p["version"]}
 
 
@@ -148,6 +165,8 @@ def remove_instance(doc: dict[str, Any], iid: str) -> None:
     doc["mates"] = [m for m in doc["mates"] if iid not in (m["a"]["inst"], m["b"]["inst"])]
     used = {i.get("group") for i in doc["instances"]}
     doc["groups"] = [g for g in doc["groups"] if g["id"] in used]
+    subs = {i.get("sub") for i in doc["instances"]}
+    doc["subassemblies"] = [g for g in doc.get("subassemblies") or [] if g["id"] in subs]
     if doc["instances"] and not any(i["fixed"] for i in doc["instances"]):
         doc["instances"][0]["fixed"] = True
 
@@ -537,7 +556,7 @@ def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = 
 
     def sort_key(key: str) -> tuple[Any, ...]:
         p = parts[key]
-        if p["kind"] == "project":
+        if p["kind"] in ("project", "placeholder"):
             return (0, doc["instances"].index(groups[key][0]))
         order = list(toolbox.COMPONENTS)
         return (1, order.index(p["code"]) if p["code"] in order else 99, p["params"].get("D", 0), p["params"].get("L", 0))
@@ -560,7 +579,9 @@ def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = 
         rows.append({
             "item": n, "qty": qty, "part": name, "kind": p["kind"],
             "description": (f"Project part, revision {p['rev']}" if p["kind"] == "project" and p.get("rev")
-                            else "Project part" if p["kind"] == "project" else toolbox.spec(p["code"]).name),
+                            else "Project part" if p["kind"] == "project"
+                            else "Placeholder (envelope with its interfaces; the part is still in design)"
+                            if p["kind"] == "placeholder" else toolbox.spec(p["code"]).name),
             "standard": p.get("standard") if p["kind"] == "toolbox" else None,
             "designation": p["name"] if p["kind"] == "toolbox" else None,
             "material": p.get("material"), "density_g_cm3": rho,
@@ -570,7 +591,7 @@ def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = 
     return {"rows": rows, "total_qty": sum(r["qty"] for r in rows), "total_mass_g": round(total, 2),
             "mass_unknown_qty": unknown,
             "note": "Masses use nominal densities for the stated materials (verify with your supplier). Toolbox "
-                    "fasteners are modelled with cosmetic threads."}
+                    "fasteners are modelled with cosmetic threads. Placeholders have no mass."}
 
 
 def bom_csv(b: dict[str, Any]) -> str:
@@ -659,9 +680,12 @@ async def export_step(root: Path, org_id: str, doc: dict[str, Any]) -> dict[str,
     parts = _parts(root, doc)
     names = display_names(doc)
     glabel = {g["id"]: g["name"] for g in doc["groups"]}
+    slabel = {g["id"]: g["name"] for g in doc.get("subassemblies") or []}
     nodes = [{"id": i["id"], "part_label": parts[i["part"]]["name"], "instance": names[i["id"]],
               "step": str(store.part_dir(root, i["part"]) / "part.step"), "T": i["T"], "group": i.get("group"),
-              "group_label": glabel.get(i.get("group") or "", None)} for i in doc["instances"]]
+              "group_label": glabel.get(i.get("group") or "", None),
+              "sub": i.get("sub") if i.get("sub") in slabel else None, "sub_label": slabel.get(i.get("sub") or "")}
+             for i in doc["instances"]]
     dest = store.doc_dir(root, doc["id"]) / "assembly.step"
     res = await _call(org_id, {"op": "export", "dest": str(dest), "name": doc["name"], "nodes": nodes}, timeout=300)
     res["signature"] = geometry_signature(doc)
@@ -922,3 +946,114 @@ def _insert_stack(root: Path, doc: dict[str, Any], h: dict[str, Any], keys: dict
             if role.startswith("washer"):
                 top = _tb_ref(root, keys[role], "plane", z=wh, nz=1.0)
                 prev = {"inst": placed[role], "kind": "face", "id": top["id"]} if top else None
+
+
+# ----------------------------------------------------------------------------- sub-assemblies (nested assemblies)
+# An assembly can contain other assemblies. The parent keeps a *copy* of the sub-assembly's instances, mates and
+# fastener stacks, tagged with the sub-assembly group (inst["sub"], mate["sub"]) and the source instance id
+# (inst["src"]); doc["subassemblies"] lists the groups with their source document, the source revision copied
+# and a rigid transform T (sub-assembly frame -> parent frame). Refresh re-copies from the source and keeps the
+# parent's instance ids, so mates between sub-assemblies survive. One level is kept: a sub-assembly that itself
+# contains sub-assemblies is copied flat (its parts and stacks stay, its own grouping does not). The STEP export
+# writes each group as a sub-assembly node (its parts and fastener stacks inside it).
+
+
+def subassembly(doc: dict[str, Any], gid: str) -> dict[str, Any]:
+    g = next((x for x in doc.get("subassemblies") or [] if x["id"] == gid), None)
+    if g is None:
+        raise AssemblyInputError("Sub-assembly not found")
+    return g
+
+
+def insert_subassembly(root: Path, doc: dict[str, Any], src: dict[str, Any], T: list[float] | None = None,
+                       name: str | None = None) -> dict[str, Any]:
+    if src["id"] == doc["id"]:
+        raise AssemblyInputError("An assembly can't contain itself.")
+    if not src["instances"]:
+        raise AssemblyInputError(f"{src['name']} is empty: add parts to it first.")
+    if len(doc["instances"]) + len(src["instances"]) > MAX_INSTANCES:
+        raise AssemblyInputError(f"An assembly can hold up to {MAX_INSTANCES} instances.")
+    if T is None and doc["instances"]:  # beside what is there, like a part
+        parts = _parts(root, doc)
+        lo, hi = world_box(doc, parts)  # type: ignore[misc]
+        sparts = _parts(root, src)
+        slo, shi = world_box(src, sparts)  # type: ignore[misc]
+        gap = max(10.0, 0.15 * float(np.linalg.norm(hi - lo)))
+        T = xform.to12(xform.translate((hi[0] + gap - slo[0], (lo[1] + hi[1]) / 2 - (slo[1] + shi[1]) / 2,
+                                        lo[2] - slo[2])))
+    gid = store.next_id(doc, "s")
+    g = {"id": gid, "kind": "subassembly", "name": (name or src["name"])[:120], "assembly_id": src["id"],
+         "rev": None, "T": T or xform.to12(xform.ident())}
+    doc.setdefault("subassemblies", []).append(g)
+    sync_subassembly(root, doc, gid, src)
+    if not any(i["fixed"] for i in doc["instances"]):
+        first = next(i for i in doc["instances"] if i.get("sub") == gid)
+        first["fixed"] = True
+    return g
+
+
+def sync_subassembly(root: Path, doc: dict[str, Any], gid: str, src: dict[str, Any]) -> dict[str, int]:
+    """Copy (or re-copy) the source assembly into group ``gid``: the same parent ids for the same source
+    instances, new ones added, vanished ones removed; internal mates and stacks re-copied. Returns counts."""
+    g = subassembly(doc, gid)
+    G = xform.from12(g["T"])
+    mine = {i["src"]: i for i in doc["instances"] if i.get("sub") == gid and i.get("src")}
+    src_ids = {i["id"] for i in src["instances"]}
+    gone = [i["id"] for i in doc["instances"] if i.get("sub") == gid and i.get("src") not in src_ids]
+    for iid in gone:
+        doc["instances"] = [i for i in doc["instances"] if i["id"] != iid]
+        doc["mates"] = [m for m in doc["mates"] if iid not in (m["a"]["inst"], m["b"]["inst"])]
+    gmap: dict[str, str] = {}
+    old_groups = {x.get("src"): x for x in doc["groups"] if x.get("sub") == gid}
+    keep: list[str] = []
+    for sg in src.get("groups") or []:
+        pg = old_groups.get(sg["id"])
+        if pg is None:
+            pg = {**sg, "id": store.next_id(doc, "g"), "sub": gid, "src": sg["id"]}
+            doc["groups"].append(pg)
+        else:
+            pg.update({k: v for k, v in sg.items() if k != "id"})
+            pg["sub"], pg["src"] = gid, sg["id"]
+        gmap[sg["id"]] = pg["id"]
+        keep.append(pg["id"])
+    added = updated = 0
+    imap: dict[str, str] = {}
+    for si in src["instances"]:
+        T = xform.to12(G @ xform.from12(si["T"]))
+        pi = mine.get(si["id"])
+        if pi is None:
+            pi = {"id": store.next_id(doc, "i"), "fixed": False, "visible": True}
+            doc["instances"].append(pi)
+            added += 1
+        elif pi["part"] != si["part"] or pi["T"] != T:
+            updated += 1
+        pi.update(name=si["name"], part=si["part"], source=si["source"], T=T, group=gmap.get(si.get("group") or ""),
+                  sub=gid, src=si["id"])
+        if si.get("office"):
+            pi["office"] = si["office"]
+        imap[si["id"]] = pi["id"]
+    doc["groups"] = [x for x in doc["groups"] if x.get("sub") != gid or x["id"] in keep]
+    for x in doc["groups"]:  # a stack's hole reference follows the copy
+        if x.get("sub") == gid and x.get("hole") and x["hole"].get("inst") in imap:
+            x["hole"] = {**x["hole"], "inst": imap[x["hole"]["inst"]]}
+    doc["mates"] = [m for m in doc["mates"] if m.get("sub") != gid]
+    for sm in src["mates"]:
+        if sm["a"]["inst"] not in imap or sm["b"]["inst"] not in imap:
+            continue
+        doc["mates"].append({**sm, "id": store.next_id(doc, "m"), "sub": gid, "src": sm["id"],
+                             "a": {**sm["a"], "inst": imap[sm["a"]["inst"]]},
+                             "b": {**sm["b"], "inst": imap[sm["b"]["inst"]]},
+                             "group": gmap.get(sm.get("group") or "")})
+    g["rev"] = src.get("rev")
+    return {"added": added, "updated": updated, "removed": len(gone)}
+
+
+def remove_subassembly(doc: dict[str, Any], gid: str) -> None:
+    subassembly(doc, gid)
+    ids = {i["id"] for i in doc["instances"] if i.get("sub") == gid}
+    doc["instances"] = [i for i in doc["instances"] if i["id"] not in ids]
+    doc["mates"] = [m for m in doc["mates"] if m["a"]["inst"] not in ids and m["b"]["inst"] not in ids]
+    doc["groups"] = [g for g in doc["groups"] if g.get("sub") != gid]
+    doc["subassemblies"] = [g for g in doc.get("subassemblies") or [] if g["id"] != gid]
+    if doc["instances"] and not any(i["fixed"] for i in doc["instances"]):
+        doc["instances"][0]["fixed"] = True
