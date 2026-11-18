@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Modal, PageHeader, PageLoader, Progress } from "@/components/ui";
-import { NativeImportButton } from "@/components/NativeImport";
+import { FileButtons } from "@/components/NativeExport";
 import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE, useHome } from "./api";
 import { fmtEta } from "./model";
@@ -145,7 +145,7 @@ export default function OfficeHome() {
     <div className={PAGE}>
       <PageHeader eyebrow={<Badge tone="preview">Preview</Badge>} title="Design Office"
         subtitle="Run a product like a design company: Archie plans the program, named specialists own the parts, you approve at the gates."
-        actions={d.can_edit && <><NativeImportButton accept=".fwprog">Import .fwprog</NativeImportButton>
+        actions={d.can_edit && <><FileButtons ext="fwprog" openOnly size="md" />
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => nav("/app/office/new")}>New program</Button></>} />
       <AutoRunNote className="mb-6" />
       <div className="grid gap-6 lg:grid-cols-3">

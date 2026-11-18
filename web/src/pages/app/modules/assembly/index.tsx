@@ -11,7 +11,7 @@ import type { ModuleAppProps } from "../registry";
 import type { AsmSummary, AsmView } from "./types";
 import { SolveChip } from "./bits";
 import Workspace from "./Workspace";
-import { NativeImportButton } from "@/components/NativeImport";
+import { FileButtons } from "@/components/NativeExport";
 
 export const BASE = "/api/m/assembly";
 
@@ -117,7 +117,7 @@ function AssemblyList({ onOpen }: { onOpen: (id: string) => void }) {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <NativeImportButton accept=".fwasm">Import .fwasm</NativeImportButton>
+          <FileButtons ext="fwasm" openOnly size="md" />
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>New assembly</Button>
         </div>
       </div>

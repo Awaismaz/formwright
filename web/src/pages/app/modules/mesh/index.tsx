@@ -12,6 +12,8 @@ import { IsoThumb } from "@/components/ProjectCard";
 import type { ModuleAppProps } from "../registry";
 import type { AssemblyPart, Job, Presets, ProjectInfo, Settings } from "./types";
 import { LookPanel, Section, Seg, Swatch } from "./LookPanel";
+import { FileButtons } from "@/components/NativeExport";
+import { moduleExportUrl } from "@/lib/native";
 import { CHECKER, deviceLine, Exports, Gallery, MeshPanel } from "./Gallery";
 
 const ACTIVE = (j?: Job | null) => !!j && (j.state === "queued" || j.state === "running");
@@ -354,6 +356,7 @@ export default function MeshStudio({ projectId }: ModuleAppProps) {
           <BoxIcon className="h-3.5 w-3.5 text-muted" /><span className="max-w-[260px] truncate font-medium">{name ?? "…"}</span><span className="text-muted">verified model</span>
         </div>}
         <div className="ml-auto flex items-center gap-3">
+          {!aid && <FileButtons ext="fwrender" saveUrl={pid ? moduleExportUrl("mesh", pid) : null} saveName={`${name ?? "renders"}.fwrender`} />}
           <span className="hidden text-[12px] text-muted md:inline" data-renderer>{r.available ? `Renderer: ${r.engine} on ${r.device === "GPU" ? r.gpu ?? "GPU" : "CPU"}` : "Renderer unavailable"}</span>
           {!aid && pid && <Link to={`/app/modules/airender?project=${pid}`} title="AI marketing visuals from this part on your own OpenAI key (Beta, illustrative)" data-action="ai-render"><Button size="sm" variant="ghost" icon={<Sparkles className="h-4 w-4" />}>AI render</Button></Link>}
           {!aid && pid && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change project</Button>}

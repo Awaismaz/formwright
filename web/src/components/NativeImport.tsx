@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Boxes, CheckCircle2, FileBox, FileUp, FolderKanban, Loader2, PenTool, ShieldAlert, ShieldCheck } from "lucide-react";
-import { ApiError, track } from "@/lib/api";
+import {
+  AlertTriangle, Boxes, Calculator, Camera, CheckCircle2, Factory, FileBox, FolderKanban, FolderOpen, Loader2, PenTool, Printer,
+  ScanLine, ShieldAlert, ShieldCheck, Sparkles,
+} from "lucide-react";
+import { ApiError } from "@/lib/api";
 import {
   describe, FORMAT_LABEL, fileSize, importNative, inspectNative, NATIVE_EVENT, openNativeImport, resultLink, STATE_TONE,
   type ImportResult, type Inspection, type NativeKind, type Verification,
@@ -13,15 +16,24 @@ import { Badge, Button, Modal } from "./ui";
 type Step = { s: "inspecting" } | { s: "review"; info: Inspection } | { s: "importing"; info: Inspection }
   | { s: "done"; info: Inspection; res: ImportResult } | { s: "error"; message: string };
 
-const KIND_ICON: Record<NativeKind, typeof FileBox> = { part: FileBox, assembly: Boxes, drawing: PenTool, program: FolderKanban, projects: FolderKanban };
-const OPEN_LABEL: Record<NativeKind, string> = { part: "Open the part", assembly: "Open the assembly", drawing: "Open the drawing", program: "Open the program", projects: "Open projects" };
+const KIND_ICON: Record<NativeKind, typeof FileBox> = {
+  part: FileBox, assembly: Boxes, drawing: PenTool, draft: PenTool, program: FolderKanban, projects: FolderKanban, mfg: Factory,
+  calc: Calculator, print: Printer, upload: Printer, mesh: Camera, ai: Sparkles, read: ScanLine,
+};
+const OPEN_LABEL: Record<NativeKind, string> = {
+  part: "Open the part", assembly: "Open the assembly", drawing: "Open the drawing", draft: "Open the drawing",
+  program: "Open the program", projects: "Open projects", mfg: "Open the report", calc: "Open the calculations",
+  print: "Open the print setup", upload: "Open the print setup", mesh: "Open the renders", ai: "Open the renders",
+  read: "Open the drawing read",
+};
 
 /** A module's "Import .fwasm" (etc.) button: picks a file and hands it to the import dialog. */
 export function NativeImportButton({ accept, children, size = "md" }: { accept: string; children: React.ReactNode; size?: "sm" | "md" }) {
   const ref = useRef<HTMLInputElement>(null);
   return (<>
     <input ref={ref} type="file" accept={accept} hidden onChange={e => { const f = e.target.files?.[0]; if (f) openNativeImport(f); e.target.value = ""; }} />
-    <Button variant="secondary" size={size} icon={<FileUp className="h-4 w-4" />} onClick={() => ref.current?.click()}>{children}</Button>
+    <Button variant="secondary" size={size} icon={<FolderOpen className="h-4 w-4" />} onClick={() => ref.current?.click()}
+      title={`Open a Formwright file (${accept}) shared from any workspace`} data-action="open-file">{children}</Button>
   </>);
 }
 
@@ -64,7 +76,6 @@ export default function NativeImportHost() {
     setStep({ s: "importing", info });
     try {
       const res = await importNative(file, info.needs_confirm);
-      track("native_import", { format: info.format, trust: info.trust });
       await qc.invalidateQueries({ queryKey: ["projects"] });
       setStep({ s: "done", info, res });
     } catch (e) { setStep({ s: "error", message: e instanceof ApiError ? e.message : "The import failed. Nothing was changed." }); }
@@ -72,7 +83,7 @@ export default function NativeImportHost() {
 
   const info = "info" in step ? step.info : null;
   const Icon = info ? KIND_ICON[info.kind] : FileBox;
-  const title = step.s === "done" ? "Imported" : step.s === "error" ? "Couldn't import this file" : `Import ${info ? FORMAT_LABEL[info.format].toLowerCase() : "a Formwright file"}`;
+  const title = step.s === "done" ? "Imported" : step.s === "error" ? "Couldn't import this file" : `Open ${info ? FORMAT_LABEL[info.format] : "a Formwright file"}`;
   const footer = step.s === "review" ? <>
       <Button variant="secondary" onClick={close}>Cancel</Button>
       <Button onClick={() => void run(step.info)}>{step.info.needs_confirm ? "I trust this file: import and rebuild" : "Import"}</Button></>
@@ -114,12 +125,17 @@ function ImportDone({ res }: { res: ImportResult }) {
     <div className="space-y-3" data-testid="native-result">
       {res.verification && <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
         <VerifyBadge v={res.verification} className="self-start text-[13px]" />
-        {res.kind === "part" || res.kind === "drawing" ? <VerifyDetail v={res.verification} />
+        {res.kind !== "assembly" && res.kind !== "program" && res.kind !== "projects" ? <VerifyDetail v={res.verification} />
           : <p className="text-[13px] text-muted">{res.verification.state === "identical" ? "Every part was rebuilt from its model (or matched an identical part already here) and compared with the exported geometry." : "Some parts differ from the exported geometry; see below."}</p>}
       </div>}
       {res.kind === "part" && res.project && <p className="text-[13px]">Created <b>{res.project.name}</b>. Parameters, the feature tree and manual features are editable now.</p>}
       {res.kind === "assembly" && res.assembly && <p className="text-[13px]">Created the assembly <b>{res.assembly.name}</b> with {res.mates} mate{res.mates === 1 ? "" : "s"}{res.mates_dropped ? ` (${res.mates_dropped} could not be matched and were left out)` : ""}.</p>}
       {res.kind === "program" && res.program && <p className="text-[13px]">Created the program <b>{res.program.name}</b>.</p>}
+      {res.kind === "draft" && res.draft && <p className="text-[13px]">Created the 2D drawing <b>{res.draft.name}</b> with {res.revisions} revision{res.revisions === 1 ? "" : "s"}.</p>}
+      {res.kind === "read" && res.upload && <p className="text-[13px]">Added the drawing read <b>{res.upload.name}</b> with the values that were confirmed.</p>}
+      {res.kind === "upload" && res.upload && <p className="text-[13px]">Added the mesh <b>{res.upload.name}</b> to 3D Print Prep.</p>}
+      {res.project && !["part", "drawing"].includes(res.kind) && <p className="text-[13px]">Created the part <b>{res.project.name}</b> with this work attached.</p>}
+      {res.notes?.map(n => <p key={n} className="text-[13px] text-warning">{n}</p>)}
       {res.drawing_note && <p className="text-[13px] text-warning">{res.drawing_note}</p>}
       {parts.length > 0 && <ul className="divide-y divide-border rounded-lg border border-border text-[13px]">
         {parts.map(p => <li key={p.project.id + p.action} className="flex items-center gap-2 px-3 py-2">
@@ -130,4 +146,16 @@ function ImportDone({ res }: { res: ImportResult }) {
       </ul>}
     </div>
   );
+}
+
+interface LaunchParams { files: { getFile: () => Promise<File> }[] }
+type LaunchWindow = Window & { launchQueue?: { setConsumer: (fn: (p: LaunchParams) => void) => void } };
+
+/** /app/open-file: the installed app's file handler (PWA `file_handlers`). Each launched file goes to the import dialog. */
+export function OpenFileRoute() {
+  useEffect(() => {
+    const q = (window as LaunchWindow).launchQueue;
+    q?.setConsumer(async p => { for (const h of p.files.slice(0, 1)) openNativeImport(await h.getFile()); });
+  }, []);
+  return <div className="p-10 text-center text-sm text-muted">Opening the Formwright file… If nothing happens, drop the file on the Home page.</div>;
 }

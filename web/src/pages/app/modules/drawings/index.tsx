@@ -11,7 +11,6 @@ import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, MenuTrigger, PageLoader, Tab, TabList, TabPanel, Tabs, Tip, Toggle } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
-import { NativeImportButton } from "@/components/NativeImport";
 import { saveNative } from "@/components/NativeExport";
 import { ModuleHeader, PartCard } from "../ModuleHeader";
 import DraftEditor from "./draft/DraftEditor";
@@ -48,11 +47,8 @@ function ProjectPicker({ onPick, onDraft }: { onPick: (id: string) => void; onDr
     <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null} />
     <div className="mx-auto max-w-7xl px-6 py-6">
       <DraftStrip onOpen={onDraft} />
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div><h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
-          <p className="mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p></div>
-        <NativeImportButton accept=".fwdrw" size="sm">Open .fwdrw</NativeImportButton>
-      </div>
+      <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
+      <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <div>Views are exact hidden-line projections of your model. Dimensions are tagged <b className="text-[#0b3d91]">spec</b> when they equal a declared model parameter and <i className="text-[#9a3412]">inferred</i> when measured from the geometry. Every sheet is consistency-checked and stamped <b>NOT APPROVED FOR MANUFACTURE</b>: an engineer must review it.</div>

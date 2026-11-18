@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describe as summarize, dispositionName, fileSize, formatOf, isNativeFile, overallState, resultLink, type ImportResult, type Verification } from "./native";
+import { describe as summarize, dispositionName, fileSize, formatOf, isNativeFile, KIND_EXT, moduleExportUrl, NATIVE_ACCEPT, NATIVE_EXTS, overallState, resultLink, type ImportResult, type Verification } from "./native";
 
 const v = (state: Verification["state"]): { verification: Verification } => ({ verification: { state, label: state, diffs: [] } });
 
@@ -43,5 +43,18 @@ describe("native file helpers", () => {
     expect(fileSize(512)).toBe("512 B");
     expect(fileSize(2048)).toBe("2 KB");
     expect(fileSize(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+
+  it("covers every module's file", () => {
+    expect(NATIVE_EXTS.length).toBe(9);
+    for (const e of NATIVE_EXTS) { expect(isNativeFile(`x.${e}`)).toBe(true); expect(NATIVE_ACCEPT).toContain(`.${e}`); }
+    expect(Object.values(KIND_EXT).every(e => e && (NATIVE_EXTS as readonly string[]).includes(e))).toBe(true);
+    const base = { trust: "foreign", format: "fwmfg" as const, warnings: [] as string[] };
+    expect(resultLink({ ...base, kind: "mfg", project: { id: "p", name: "x" } } as ImportResult)).toBe("/app/modules/manufacturing?project=p");
+    expect(resultLink({ ...base, kind: "ai", project: { id: "p", name: "x" } } as ImportResult)).toBe("/app/modules/airender?project=p");
+    expect(resultLink({ ...base, kind: "draft", draft: { id: "d", name: "x" } } as ImportResult)).toBe("/app/modules/drawings?draft=d");
+    expect(resultLink({ ...base, kind: "read", upload: { id: "u", name: "x" } } as ImportResult)).toBe("/app/modules/image2cad?upload=u");
+    expect(resultLink({ ...base, kind: "upload", upload: { id: "u", name: "x" } } as ImportResult)).toBe("/app/modules/print?upload=u");
+    expect(moduleExportUrl("calc", "p1")).toBe("/api/native/modules/calc/p1/export");
   });
 });

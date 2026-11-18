@@ -1,17 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, ShieldCheck } from "lucide-react";
+import { Download, FileDown, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import { api, ApiError, track } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { downloadNative, type Verification } from "@/lib/native";
 import { Button, Modal, Toggle } from "./ui";
-import { VerifyBadge } from "./NativeImport";
+import { NativeImportButton, VerifyBadge } from "./NativeImport";
 
 /** Download a native file and say so (or why not). */
-export async function saveNative(url: string, fallback: string, format: string): Promise<boolean> {
+export async function saveNative(url: string, fallback: string, _format: string): Promise<boolean> {
   try {
     const name = await downloadNative(url, fallback);
-    track("native_export", { format });
     toast.success(`Downloaded ${name}`);
     return true;
   } catch (e) {
@@ -65,5 +64,20 @@ export function ImportProvenance({ projectId }: { projectId: string }) {
       <div className="flex flex-wrap items-center gap-2"><VerifyBadge v={p.verification} /><span className="text-[12px] text-muted">{p.trust === "workspace" ? "from your workspace" : "from another workspace"}</span></div>
       <div className="mt-1 truncate text-[12px] text-muted">Imported from {p.file}{p.imported_by ? ` by ${p.imported_by}` : ""}</div>
     </div>
+  );
+}
+
+/** A module's file buttons, same everywhere: "Save .fwxxx" (download this work) and "Open .fwxxx" (import one). */
+export function FileButtons({ ext, saveUrl, saveName, size = "sm", openOnly }: {
+  ext: string; saveUrl?: string | null; saveName?: string; size?: "sm" | "md"; openOnly?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-1.5" data-native-files={ext}>
+      {!openOnly && saveUrl && <Button size={size} variant="secondary" icon={<FileDown className="h-4 w-4" />} loading={busy} data-action="save-file"
+        title={`Save this work as a Formwright file (.${ext}) to hand to anyone with Formwright`}
+        onClick={async () => { setBusy(true); await saveNative(saveUrl, saveName ?? `formwright.${ext}`, ext); setBusy(false); }}>Save .{ext}</Button>}
+      <NativeImportButton accept={`.${ext}`} size={size}>Open .{ext}</NativeImportButton>
+    </span>
   );
 }

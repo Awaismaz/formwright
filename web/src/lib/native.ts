@@ -2,17 +2,21 @@
  *  Uploads go as raw bytes (no base64), downloads as blobs so the workspace header and error messages work. */
 import { ApiError, apiHeaders, errorFrom } from "./api";
 
-export type NativeFormat = "fwpart" | "fwasm" | "fwdrw" | "fwprog" | "zip";
-export type NativeKind = "part" | "assembly" | "drawing" | "program" | "projects";
+export type NativeFormat = "fwpart" | "fwasm" | "fwdrw" | "fwprog" | "fwrender" | "fwmfg" | "fwcalc" | "fwprint" | "fwread" | "zip";
+export type NativeKind = "part" | "assembly" | "drawing" | "draft" | "program" | "projects" | "mfg" | "calc" | "print"
+  | "upload" | "mesh" | "ai" | "read";
 export type VerifyState = "identical" | "mismatch" | "fallback";
 
-export const NATIVE_EXT = /\.(fwpart|fwasm|fwdrw|fwprog)$/i;
-export const NATIVE_ACCEPT = ".fwpart,.fwasm,.fwdrw,.fwprog";
+/** Every Formwright extension (the PWA registers the same list as file handlers). */
+export const NATIVE_EXTS = ["fwpart", "fwasm", "fwdrw", "fwprog", "fwrender", "fwmfg", "fwcalc", "fwprint", "fwread"] as const;
+export const NATIVE_EXT = /\.(fwpart|fwasm|fwdrw|fwprog|fwrender|fwmfg|fwcalc|fwprint|fwread)$/i;
+export const NATIVE_ACCEPT = NATIVE_EXTS.map(e => `.${e}`).join(",");
 export const MAX_NATIVE_BYTES = 200 * 1024 * 1024;
 
 export const FORMAT_LABEL: Record<NativeFormat, string> = {
   fwpart: "Formwright part", fwasm: "Formwright assembly", fwdrw: "Formwright drawing", fwprog: "Formwright program",
-  zip: "Formwright projects archive",
+  fwrender: "Formwright render", fwmfg: "Formwright manufacturing report", fwcalc: "Formwright calculations",
+  fwprint: "Formwright print setup", fwread: "Formwright drawing read", zip: "Formwright projects archive",
 };
 
 export interface Verification {
@@ -23,6 +27,7 @@ export interface NativeSummary {
   kind: NativeKind; title: string; description?: string; material?: string; parameters?: number; features?: number;
   revisions?: number; refs?: number; chat?: boolean; imported?: boolean; created_at?: string; app_version?: string;
   instances?: number; mates?: number; tickets?: number; sheet?: string; scale?: string; model?: boolean; part?: string;
+  module?: string; files?: number; values?: number; units?: string;
   parts?: (string | { ref: string; kind: string; name: string })[]; assemblies?: string[];
 }
 export interface Inspection {
@@ -36,7 +41,23 @@ export interface ImportResult {
   project?: { id: string; name: string }; verification?: Verification; action?: string;
   assembly?: { id: string; name: string }; program?: { id: string; name: string };
   parts?: PartResult[]; mates?: number; mates_dropped?: number; drawing_note?: string | null;
+  draft?: { id: string; name: string }; upload?: { id: string; name: string }; notes?: string[]; revisions?: number;
 }
+
+/** Module that owns each part-linked kind (its page opens with ?project=). */
+export const KIND_MODULE: Partial<Record<NativeKind, string>> = {
+  mfg: "manufacturing", calc: "engineering", print: "print", mesh: "mesh", ai: "airender",
+};
+
+/** Save-as-file of one module's work: the export URL for a kind and id. */
+export function moduleExportUrl(kind: NativeKind, id: string): string {
+  return `/api/native/modules/${kind}/${id}/export`;
+}
+
+export const KIND_EXT: Partial<Record<NativeKind, NativeFormat>> = {
+  part: "fwpart", assembly: "fwasm", drawing: "fwdrw", draft: "fwdrw", program: "fwprog", mfg: "fwmfg", calc: "fwcalc",
+  print: "fwprint", upload: "fwprint", mesh: "fwrender", ai: "fwrender", read: "fwread",
+};
 
 /** True for a file the native import handles: a Formwright extension, or a .zip that may be a projects archive. */
 export function isNativeFile(name: string): boolean {
@@ -44,12 +65,17 @@ export function isNativeFile(name: string): boolean {
 }
 
 export function formatOf(name: string): NativeFormat | null {
-  const m = /\.(fwpart|fwasm|fwdrw|fwprog|zip)$/i.exec(name);
+  const m = /\.(fwpart|fwasm|fwdrw|fwprog|fwrender|fwmfg|fwcalc|fwprint|fwread|zip)$/i.exec(name);
   return m ? (m[1]!.toLowerCase() as NativeFormat) : null;
 }
 
 /** Where to open the result of an import. */
 export function resultLink(r: ImportResult): string {
+  const mod = KIND_MODULE[r.kind];
+  if (mod && r.project) return `/app/modules/${mod}?project=${r.project.id}`;
+  if (r.kind === "draft" && r.draft) return `/app/modules/drawings?draft=${r.draft.id}`;
+  if (r.kind === "read" && r.upload) return `/app/modules/image2cad?upload=${r.upload.id}`;
+  if (r.kind === "upload" && r.upload) return `/app/modules/print?upload=${r.upload.id}`;
   if (r.kind === "assembly" && r.assembly) return `/app/modules/assembly?assembly=${r.assembly.id}`;
   if (r.kind === "drawing" && r.project) return `/app/modules/drawings?project=${r.project.id}`;
   if (r.kind === "program" && r.program) return `/app/office/programs/${r.program.id}`;
@@ -86,7 +112,16 @@ export function describe(s: NativeSummary): string {
   } else if (s.kind === "program") {
     bits.push(`${s.tickets ?? 0} ticket${s.tickets === 1 ? "" : "s"}`, `${s.parts?.length ?? 0} part${s.parts?.length === 1 ? "" : "s"}`,
       `${s.assemblies?.length ?? 0} assembl${s.assemblies?.length === 1 ? "y" : "ies"}`);
-  } else bits.push(`${s.parts?.length ?? 0} part${s.parts?.length === 1 ? "" : "s"}`);
+  } else if (s.kind === "draft") {
+    bits.push("2D drawing");
+    if (s.sheet) bits.push(s.sheet);
+    if (s.revisions) bits.push(`${s.revisions} revision${s.revisions === 1 ? "" : "s"}`);
+  } else if (s.module) {
+    bits.push(s.module);
+    if (s.part) bits.push(`on ${s.part}`);
+  } else if (s.kind === "read") bits.push("drawing read with the values you confirmed");
+  else if (s.kind === "upload") bits.push(`mesh for 3D printing (${s.units ?? "mm"})`);
+  else bits.push(`${s.parts?.length ?? 0} part${s.parts?.length === 1 ? "" : "s"}`);
   return bits.join(" · ");
 }
 

@@ -165,11 +165,6 @@ def parse_assembly(pkg: c.Package, *, strict: bool, depth: int = 0) -> dict[str,
 
 
 # ---------------------------------------------------------------------------------------------------- drawing
-DRAWING_2D_HANDLERS: dict[str, Any] = {}
-"""Slot for 2D-only drawings: ``{"schema name": handler}``. A 2D drafting module registers a handler that validates
-``drawing/document.json`` and creates its document; until one is registered, 2D-only drawings are refused politely."""
-
-
 def drawing_files(record: dict[str, Any], edits: dict[str, Any], part_bytes: bytes | None, sheets: dict[str, bytes],
                   title: str) -> tuple[dict[str, bytes], dict[str, Any]]:
     files: dict[str, bytes] = {}
@@ -182,7 +177,7 @@ def drawing_files(record: dict[str, Any], edits: dict[str, Any], part_bytes: byt
         files["part.fwpart"] = part_bytes
     manifest = _base_manifest(title)
     sheet = record.get("sheet") or {}
-    manifest["drawing"] = {"kind": "model" if part_bytes is not None else "2d", "sheet": sheet.get("size"),
+    manifest["drawing"] = {"kind": "model", "sheet": sheet.get("size"),
                            "scale": sheet.get("scale"), "sheets": sorted(sheets)}
     return files, manifest
 
@@ -190,20 +185,17 @@ def drawing_files(record: dict[str, Any], edits: dict[str, Any], part_bytes: byt
 def parse_drawing(pkg: c.Package, *, strict: bool) -> dict[str, Any]:
     if pkg.ext != "fwdrw":
         raise NativeFormatError("Expected a Formwright drawing (.fwdrw).", 415)
-    allowed = re.compile(r"^(drawing/(drawing|edits|document)\.json|drawing/sheet[A-Za-z_]*\.(pdf|svg|dxf)|part\.fwpart)$")
+    if pkg.manifest.get("kind") == "draft":
+        from aicad.native.modules import parse_draft
+
+        return {"kind": "draft", **parse_draft(pkg)}
+    allowed = re.compile(r"^(drawing/(drawing|edits)\.json|drawing/sheet[A-Za-z_]*\.(pdf|svg|dxf)|part\.fwpart)$")
     for name, data in pkg.files.items():
         if not allowed.fullmatch(name):
             raise NativeFormatError(f"The drawing contains an entry Formwright does not accept ({name[:60]}).")
         c.check_content(name, data)
-    kind = (pkg.manifest.get("drawing") or {}).get("kind")
-    if kind == "2d" or "part.fwpart" not in pkg.files:
-        doc = _doc(pkg, "drawing/document.json") if "drawing/document.json" in pkg.files else None
-        schema = doc.get("schema") if isinstance(doc, dict) else None
-        if schema not in DRAWING_2D_HANDLERS:
-            raise NativeFormatError("This is a 2D-only drawing. It can be opened once 2D drafting is available in "
-                                    "your workspace.", 422)
-        return {"kind": "2d", "document": doc, "schema": schema,
-                "summary": {"kind": "drawing", "title": _str(pkg.manifest.get("title"), 120) or "Drawing", "model": False}}
+    if "part.fwpart" not in pkg.files:
+        raise NativeFormatError("The drawing is incomplete: its part is missing.")
     record, edits = _doc(pkg, "drawing/drawing.json"), _doc(pkg, "drawing/edits.json")
     if not isinstance(record, dict) or not isinstance(edits, dict):
         raise NativeFormatError("The drawing is damaged.")

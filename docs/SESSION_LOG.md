@@ -4,6 +4,36 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (r) — Native Formwright files for every module (IO-020…IO-025), branch wip/native-formats
+
+**Done.** One shared container (`src/aicad/native/`): deterministic signed zip, `manifest.json` with `kind`, sha256 of
+every entry, per-workspace HMAC signature, format versions + migration hook. Formats: `.fwpart` (full parametric
+model), `.fwasm` (parts embedded once, linked by fingerprint on import), `.fwdrw` (model drawing or 2D draft),
+`.fwprog`, `.fwrender` (Mesh Studio / AI Render), `.fwmfg`, `.fwcalc`, `.fwprint` (part setup or uploaded mesh),
+`.fwread` (Image-to-CAD), plus "Download all" (zip of .fwpart). API `/api/native/*` (`mod_native.py`,
+`native_modules.py`). Import: untrusted-input validation, tripwire + strict allow-list for foreign scripts, rebuild in
+the workspace's build worker, fingerprint comparison → "Verified identical" / differences / exact read-only fallback.
+UI: import dialog for every Formwright file (Home drop zone, Projects page Import + drag-drop, New project dialog,
+every module's "Open .ext"), "Save .ext" in every module header (shared `ModuleHeader`), Studio Files panel .fwpart
+with options + import provenance, `/app/open-file` route for the PWA file handler. Spec: `docs/FORMATS.md`.
+
+**Verified.** `tests/test_native_formats.py` (9 tests: container/zip-bomb/path attacks, determinism + signature,
+migration hook, script gate, part/assembly/drawing/program/archive round trips into a second workspace, tamper and
+malicious re-packs, fallback, all 8 module kinds); vitest `web/src/lib/native.test.ts` (6). Browser walkthrough
+(puppeteer-core 25.18.1, port 8802, throwaway data): workspace A saved Demo Mounting Plate .fwpart, an assembly
+(plate + L bracket, coincident mate) as .fwasm and a Manufacturing Advisor report as .fwmfg; a second account opened
+each: part "Verified identical" (volume 89,663.758238 mm³, 23 faces, 56 edges both sides), parameter Length 120 → 130
+rebuilt and verified (97,653.758 mm³); assembly both parts verified, same placement, mate ok; DFM report current.
+Screenshots reviewed (dialog title casing fixed; client event tracking removed: the server records exports/imports).
+
+**Not done / limits.** Mesh exports (GLB/OBJ/STL) and `.blend` scenes are never packed; uploaded-mesh repair state
+not carried; draft Save exports the last saved revision; assembly mates whose faces don't match the rebuilt part are
+dropped (counted); the PWA manifest `file_handlers` entries are listed in FORMATS.md for the PWA branch to add.
+
+**Decision parked.** PD-47 native file defaults (number may shift at merge).
+
+---
+
 ## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
 
 ### Done

@@ -30,6 +30,7 @@ from sqlalchemy import select
 
 from aicad.native import NativeFormatError, bundles
 from aicad.native import container as c
+from aicad.native import modules as nm
 from aicad.native import part as fpart
 from aicad.platform.config import get_settings
 from aicad.platform.db import utcnow
@@ -39,7 +40,6 @@ from aicad.platform.routers import projects as prj
 from aicad.platform.services import audit, track
 
 router = APIRouter(prefix="/api/native", tags=["native"])
-KIND = {"fwpart": "part", "fwasm": "assembly", "fwdrw": "drawing", "fwprog": "program", "zip": "projects"}
 STATES = {"identical": "Verified identical", "mismatch": "Rebuilt with differences",
           "fallback": "Exact geometry kept (read-only)"}
 
@@ -246,7 +246,8 @@ def _open(ctx: Ctx, data: bytes, filename: str) -> dict[str, Any]:
     org = ctx.require_org()
     ext = _ext(filename, data)
     if ext is None:
-        raise HTTPException(415, "Drop a Formwright file: .fwpart, .fwasm, .fwdrw, .fwprog, or a projects archive.")
+        raise HTTPException(415, "Drop a Formwright file (" + ", ".join(f".{x}" for x in nm.EXTENSIONS)
+                            + ") or a projects archive.")
     try:
         pkg = c.read_package(data, ext)
         trust, note = c.trust_for(pkg.manifest, _dd(), org.id)
@@ -259,8 +260,14 @@ def _open(ctx: Ctx, data: bytes, filename: str) -> dict[str, Any]:
             parsed = bundles.parse_drawing(pkg, strict=strict)
         elif pkg.ext == "fwprog":
             parsed = bundles.parse_program(pkg, strict=strict)
-        else:
+        elif pkg.ext == "zip":
             parsed = bundles.parse_projects(pkg, strict=strict)
+        elif pkg.ext == "fwread":
+            parsed = nm.parse_read(pkg)
+        elif pkg.ext == "fwprint" and pkg.manifest.get("kind") == "upload":
+            parsed = nm.parse_upload(pkg)
+        else:
+            parsed = nm.parse_folder(pkg, strict=strict)
     except NativeFormatError as e:
         raise _err(e) from None
     return {"pkg": pkg, "parsed": parsed, "trust": trust, "note": note}
@@ -268,7 +275,7 @@ def _open(ctx: Ctx, data: bytes, filename: str) -> dict[str, Any]:
 
 def _inspect_view(o: dict[str, Any], filename: str) -> dict[str, Any]:
     pkg = o["pkg"]
-    return {"kind": KIND[pkg.ext], "format": pkg.ext, "filename": filename[:200], "size": pkg.size,
+    return {"kind": o["parsed"]["summary"]["kind"], "format": pkg.ext, "filename": filename[:200], "size": pkg.size,
             "trust": o["trust"], "trust_note": o["note"], "needs_confirm": o["trust"] != "workspace",
             "summary": o["parsed"]["summary"], "warnings": pkg.warnings, "format_version": pkg.manifest["format_version"],
             "migrated_from": pkg.migrated_from}
@@ -290,20 +297,30 @@ async def import_file(request: Request, filename: str = "", confirm: str | None 
     if o["trust"] != "workspace" and not _flag(confirm, False):
         raise HTTPException(409, {"message": "This file comes from another workspace. Review it and confirm before "
                                              "Formwright rebuilds it.", "needs_confirm": True})
+    from aicad.platform.routers import native_modules as nmr
+
     pkg, parsed, trust = o["pkg"], o["parsed"], o["trust"]
     fname = filename[:120] or f"file.{pkg.ext}"
     if pkg.ext == "fwpart":
         res: dict[str, Any] = await _import_part(ctx, pkg, parsed["summary"], fname, trust, link=False)
     elif pkg.ext == "fwasm":
         res = await _import_assembly(ctx, parsed, fname, trust)
+    elif pkg.ext == "fwdrw" and parsed["kind"] == "draft":
+        res = nmr.import_draft(ctx, parsed)
     elif pkg.ext == "fwdrw":
         res = await _import_drawing(ctx, parsed, fname, trust)
     elif pkg.ext == "fwprog":
         res = await _import_program(ctx, parsed, fname, trust)
-    else:
+    elif pkg.ext == "zip":
         items = [await _import_part(ctx, p["pkg"], p["summary"], fname, trust, link=True)
                  for p in parsed["parts"].values()]
         res = {"kind": "projects", "parts": items}
+    elif pkg.ext == "fwread":
+        res = nmr.import_read(ctx, parsed)
+    elif parsed["summary"]["kind"] == "upload":
+        res = nmr.import_upload(ctx, parsed)
+    else:
+        res = await nmr.import_folder(ctx, parsed, fname, trust)
     audit(ctx.db, "native.imported", ctx.user, ctx.require_org().id, format=pkg.ext, trust=trust, bytes=pkg.size)
     track(ctx.db, "native_import", ctx.user, ctx.require_org().id, format=pkg.ext, trust=trust)
     ctx.db.commit()
@@ -555,3 +572,6 @@ async def _import_program(ctx: Ctx, parsed: dict[str, Any], filename: str, trust
     ctx.db.commit()
     return {"kind": "program", "program": {"id": doc["id"], "name": name}, "parts": results,
             "verification": _overall([r["verification"] for r in results])}
+
+
+from aicad.platform.routers import native_modules as _routes  # noqa: F401  (registers the module routes)

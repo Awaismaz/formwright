@@ -9,7 +9,7 @@ import { Button, Field, Input, Modal } from "./ui";
 import { Icon } from "./icons";
 import { cx } from "@/lib/format";
 import { startFromFile, uniqueName } from "./StartBox";
-import { isNativeFile, openNativeImport } from "@/lib/native";
+import { isNativeFile, NATIVE_ACCEPT, openNativeImport } from "@/lib/native";
 
 export function useTemplates() {
   return useQuery({ queryKey: ["templates"], queryFn: () => api.get<{ items: Template[] }>("/api/templates"), staleTime: Infinity });
@@ -73,7 +73,7 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
       footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={submit} loading={busy === "create"} disabled={!name.trim() || !!busy}>Create project</Button></>}>
       <div className="grid gap-5">
         <div className="grid gap-2 sm:grid-cols-2">
-          <input ref={stepRef} type="file" accept=".step,.stp,.fwpart,.fwasm,.fwdrw,.fwprog" hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={stepRef} type="file" accept={`.step,.stp,${NATIVE_ACCEPT}`} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <input ref={drawRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <button type="button" disabled={!!busy} onClick={() => stepRef.current?.click()} className={tile(false)}>
             <FileUp className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Import a STEP or Formwright file</div><div className="text-xs text-muted">STEP: exact solid, features recognised. .fwpart: the full parametric model</div></div>

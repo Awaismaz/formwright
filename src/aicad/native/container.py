@@ -40,9 +40,16 @@ FORMATS: dict[str, tuple[str, str, str]] = {
     "fwasm": ("formwright.assembly", "application/vnd.formwright.assembly+zip", "Formwright assembly"),
     "fwdrw": ("formwright.drawing", "application/vnd.formwright.drawing+zip", "Formwright drawing"),
     "fwprog": ("formwright.program", "application/vnd.formwright.program+zip", "Formwright program"),
+    "fwrender": ("formwright.render", "application/vnd.formwright.render+zip", "Formwright render"),
+    "fwmfg": ("formwright.manufacturing", "application/vnd.formwright.manufacturing+zip", "Formwright manufacturing report"),
+    "fwcalc": ("formwright.calculation", "application/vnd.formwright.calculation+zip", "Formwright calculations"),
+    "fwprint": ("formwright.print", "application/vnd.formwright.print+zip", "Formwright print setup"),
+    "fwread": ("formwright.read", "application/vnd.formwright.read+zip", "Formwright drawing read"),
     "zip": ("formwright.projects", "application/zip", "Formwright projects archive"),
 }
 FORMAT_EXT = {v[0]: k for k, v in FORMATS.items()}
+#: the manifest's ``kind`` when the writer does not set one (formats with several kinds always set it)
+DEFAULT_KIND = {"fwpart": "part", "fwasm": "assembly", "fwdrw": "model", "fwprog": "program", "zip": "projects"}
 
 # ---------------------------------------------------------------------------------------------------- limits
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024        # the file as uploaded
@@ -58,7 +65,7 @@ _CHUNK = 1 << 16
 
 _SEGMENT = re.compile(r"^[A-Za-z0-9_\-][A-Za-z0-9_.\-]{0,99}$")
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(10)), *(f"LPT{i}" for i in range(10))}
-_STORED_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".fwpart", ".fwasm", ".pdf")
+_STORED_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".fwpart", ".fwasm", ".pdf", ".3mf")
 
 
 def app_version() -> str:
@@ -150,6 +157,7 @@ def trust_for(manifest: dict[str, Any], data_dir: Path, org_id: str) -> tuple[st
 def write_package(ext: str, files: dict[str, bytes], manifest: dict[str, Any], data_dir: Path, org_id: str) -> bytes:
     """Deterministic zip: mimetype, manifest.json, then entries sorted by name; fixed timestamps and permissions."""
     fmt, mime, _ = FORMATS[ext]
+    manifest = {"kind": DEFAULT_KIND.get(ext, ext), **manifest}
     for name in files:
         check_name(name)
     manifest = {**manifest, "format": fmt, "format_version": FORMAT_VERSION,

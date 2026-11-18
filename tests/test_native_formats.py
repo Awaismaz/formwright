@@ -14,9 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from test_platform import _project_with_model, app_client, signup  # noqa: F401  (fixture re-export)
 
-from aicad.native import NativeFormatError
+from aicad.native import NativeFormatError, gate
 from aicad.native import container as c
-from aicad.native import gate
 
 DEMO = Path(__file__).resolve().parents[1] / "src" / "aicad" / "demo"
 
@@ -362,3 +361,101 @@ def test_export_all_and_import_archive(app_client: TestClient) -> None:  # noqa:
     v = _post_file(cl, "inspect", b"PK\x03\x04garbage", "x.fwpart")
     assert v.status_code == 415
     assert _post_file(cl, "inspect", b"hello", "notes.txt").status_code == 415
+
+
+# ------------------------------------------------------------------------------------------------ every module (IO-025)
+def _png() -> bytes:
+    import struct
+    import zlib
+
+    def chunk(t: bytes, d: bytes) -> bytes:
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(b"\0" + b"\xff" * 6 + b"\0" + b"\xff" * 6)) + chunk(b"IEND", b""))
+
+
+def test_every_module_saves_and_opens(app_client: TestClient, tmp_path: Path) -> None:  # noqa: F811
+    from aicad.platform.config import get_settings
+
+    cl = app_client
+    me = signup(cl, "mods1@x.com", workspace="Mods One")
+    org = me["org"]["id"]
+    data_dir = get_settings().data_dir
+    pid, ws = _project_with_model(cl, (DEMO / "mounting_plate.py").read_text(encoding="utf-8"))
+    # Manufacturing Advisor: a real analysis
+    assert cl.post(f"/api/m/manufacturing/projects/{pid}/analyse", json={"quantity": 50}).status_code == 200
+    # Engineering, print, Mesh Studio and AI Render folders (module outputs written as the modules store them)
+    (ws / "engineering").mkdir(exist_ok=True)
+    (ws / "engineering" / "calc_sets.json").write_text(json.dumps([{"id": "cs_1", "name": "Bolts", "items": [],
+        "signoff": {"by": "Ada", "user_id": me["user"]["id"]}, "project_id": pid}]), encoding="utf-8")
+    (ws / "engineering" / "geometry.json").write_text("{}", encoding="utf-8")       # a cache: never exported
+    (ws / "print").mkdir(exist_ok=True)
+    (ws / "print" / "setup.json").write_text(json.dumps({"preset": "fdm", "path": "C:/Users/ada/x.3mf"}), encoding="utf-8")
+    jid = "0123456789abcdef"
+    (ws / "mesh" / "renders" / jid).mkdir(parents=True)
+    (ws / "mesh" / "look.json").write_text(json.dumps({"preset": "studio"}), encoding="utf-8")
+    (ws / "mesh" / "renders" / jid / "job.json").write_text(json.dumps({"id": jid, "state": "done", "outputs": ["render.png"]}), encoding="utf-8")
+    (ws / "mesh" / "renders" / jid / "render.png").write_bytes(_png())
+    (ws / "mesh" / "renders" / jid / "scene.blend").write_bytes(b"BLENDER-v300")    # never exported (can hold scripts)
+    (ws / "airender" / jid).mkdir(parents=True)
+    (ws / "airender" / jid / "job.json").write_text(json.dumps({"id": jid, "state": "done", "outputs": ["out_1.png"],
+                                                                "prompt": "studio shot"}), encoding="utf-8")
+    (ws / "airender" / jid / "out_1.png").write_bytes(_png())
+    # 2D draft, Image-to-CAD read, 3D Print Prep mesh upload
+    did = cl.post("/api/m/drawings/drafts", json={"name": "Gasket G1", "sheet": {"size": "A4"}, "template": "gasket",
+                                                  "params": {"od": 150, "id": 60, "holes": 6, "hole_d": 14, "pcd": 120}}).json()["id"]
+    from aicad.image2cad import store as istore
+
+    d, meta = istore.create(data_dir, org, "u", "bracket.png", _png())
+    istore.write_json(d, "read.json", {"values": [{"label": "Width", "value": 40}]})
+    istore.update_meta(d, status="read")
+    from aicad.printprep import service as psvc
+
+    stl = b"solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 10 0 0\nvertex 0 10 0\nendloop\nendfacet\nendsolid t\n"
+    up = psvc.create_upload(data_dir, org, "u", "tri.stl", stl, "mm")
+    files: dict[str, tuple[bytes, str]] = {}
+    for kind, ident, ext in (("mfg", pid, "fwmfg"), ("calc", pid, "fwcalc"), ("print", pid, "fwprint"),
+                             ("mesh", pid, "fwrender"), ("ai", pid, "fwrender"), ("draft", did, "fwdrw"),
+                             ("read", meta["id"], "fwread"), ("upload", up["id"], "fwprint")):
+        r = cl.get(f"/api/native/modules/{kind}/{ident}/export")
+        assert r.status_code == 200, (kind, r.text)
+        assert r.headers["content-type"] == f"application/vnd.formwright.{c.FORMATS[ext][0].split('.')[1]}+zip"
+        pkg = c.read_package(r.content)
+        assert pkg.ext == ext and pkg.manifest["kind"] == kind
+        assert org not in r.content.decode("latin-1") and me["user"]["id"] not in json.dumps(pkg.manifest)
+        files[kind] = (r.content, ext)
+    mesh = c.read_package(files["mesh"][0])
+    assert f"doc/renders/{jid}/render.png" in mesh.files and not any(n.endswith(".blend") for n in mesh.files)
+    calc = c.read_package(files["calc"][0])
+    assert "doc/geometry.json" not in calc.files and me["user"]["id"].encode() not in calc.files["doc/calc_sets.json"]
+    assert b"C:/Users" not in c.read_package(files["print"][0]).files["doc/setup.json"]
+    assert cl.get(f"/api/native/modules/mfg/{cl.post('/api/projects', json={'name': 'E'}).json()['id']}/export").status_code == 409
+    # a blend file smuggled into a render package is refused
+    evil = _repack(files["mesh"][0], {f"doc/renders/{jid}/scene.blend": b"BLENDER"}, tmp_path)
+    _switch(cl, "mods2@x.com", "Mods Two")
+    r = _post_file(cl, "import", evil, "x.fwrender", confirm=1)
+    assert r.status_code == 422 and "does not accept" in r.json()["detail"]
+    results = {}
+    for kind, (data, ext) in files.items():
+        v = _post_file(cl, "inspect", data, f"x.{ext}").json()
+        assert v["kind"] == kind and v["needs_confirm"], v
+        r = _post_file(cl, "import", data, f"x.{ext}", confirm=1)
+        assert r.status_code == 200, (kind, r.text)
+        results[kind] = r.json()
+    for kind in ("mfg", "calc", "print", "mesh", "ai"):
+        assert results[kind]["verification"]["state"] == "identical", kind
+    org2 = cl.get("/api/auth/me").json()["org"]["id"]
+    ws2 = _ws(results["calc"]["project"]["id"])
+    sets = json.loads((ws2 / "engineering" / "calc_sets.json").read_text(encoding="utf-8"))
+    assert sets[0]["signoff"] is None and sets[0]["project_id"] == results["calc"]["project"]["id"]
+    assert results["calc"]["notes"]
+    mfg = cl.get(f"/api/m/manufacturing/projects/{results['mfg']['project']['id']}/analysis")
+    assert mfg.status_code == 200 and mfg.json()["freshness"]["state"] == "current"   # identical STEP: still current
+    assert (_ws(results["mesh"]["project"]["id"]) / "mesh" / "renders" / jid / "render.png").is_file()
+    assert (_ws(results["ai"]["project"]["id"]) / "airender" / jid / "out_1.png").is_file()
+    dr = cl.get(f"/api/m/drawings/drafts/{results['draft']['draft']['id']}").json()
+    assert dr["name"] == "Gasket G1" and sorted(x["text"] for x in dr["dimensions"]) == sorted(["Ø150", "Ø60", "Ø120", "6X Ø14"])
+    rd = cl.get(f"/api/m/image2cad/uploads/{results['read']['upload']['id']}")
+    assert rd.status_code == 200, rd.text
+    assert (data_dir / "image2cad" / org2 / results["read"]["upload"]["id"] / "read.json").is_file()
+    assert any(u["id"] == results["upload"]["upload"]["id"] for u in cl.get("/api/m/print/uploads").json()["items"])
