@@ -245,3 +245,46 @@ def test_print_prep_writers_keep_mm_and_frame(built: Path, tmp_path: Path) -> No
     # an upload declared in inches is scaled to mm on the way in (the user picks the unit for STL)
     inch = parse_mesh((tmp_path / "pp.stl").read_bytes(), "pp.stl", units="in")
     assert bbox_minmax(inch.v[inch.f])[3] == pytest.approx(BMAX[0] * 25.4, rel=1e-6)
+
+
+# ------------------------------------------------------------------ Mesh Studio (Blender) exports (IO-008b)
+def _blender() -> Path | None:
+    from aicad.meshstudio import runner as mrunner
+
+    return mrunner.find_blender()
+
+
+@pytest.mark.skipif(_blender() is None, reason="Blender is not installed (set FW_BLENDER to run the IO-008b rows)")
+def test_mesh_studio_blender_exports_keep_units_axes_and_frame(built: Path, tmp_path: Path) -> None:
+    """Mesh Studio's GLB / OBJ / STL are written by Blender (a separate GPL process), not by our exporters. Run the
+    real export job on FX-IO-1 and read each file back with the spec readers: GLB metres +Y up, OBJ and STL
+    millimetres +Z up, all in the model's own frame (no recentring, no mirror)."""
+    import shutil
+
+    from io_helpers import read_obj
+
+    from aicad.meshstudio import service
+
+    ws = tmp_path / "ws"
+    (ws / "out").mkdir(parents=True)
+    shutil.copy2(built / "out" / "part.step", ws / "out" / "part.step")
+    d = service.mesh_root(ws) / "exports" / "io008b"
+    d.mkdir(parents=True)
+    job: dict[str, Any] = {"id": "io008b", "kind": "export"}
+    service._execute_export(ws, d, job, "IO fixture", "anodised", "blue")
+    assert job["state"] == "done", job
+    tol = 1e-3  # float32 metres in the mesh hand-off and GLB; OBJ text keeps 6 decimals
+    # GLB: glTF convention, metres and +Y up
+    tris_gl, js = read_glb(d / "part.glb")
+    assert js["asset"]["version"] == "2.0"
+    assert float(tris_gl[..., 1].max()) == pytest.approx(BMAX[2] / 1000, abs=1e-6)  # tallest point is +Y
+    assert float(tris_gl[..., 2].max()) == pytest.approx(-BMIN[1] / 1000, abs=1e-6)  # CAD -Y side is glTF +Z
+    _assert_mesh(gltf_to_cad_mm(tris_gl), "Mesh Studio GLB", tol=tol)
+    # OBJ: millimetres, Z up (global_scale 1000, forward Y, up Z); the header says so
+    obj = d / "part.obj"
+    assert "Units: millimetres. Z up." in obj.read_text(encoding="utf-8")[:400]
+    _assert_mesh(read_obj(obj), "Mesh Studio OBJ", tol=tol)
+    # STL: millimetres, Z up, labelled as a visualisation mesh
+    stl = d / "part.stl"
+    assert stl.read_bytes()[:22] == b"Formwright Mesh Studio"
+    _assert_mesh(read_stl(stl), "Mesh Studio STL", tol=tol)

@@ -17,6 +17,7 @@ import { MatchRow, SimilarPartsDialog, type Match } from "@/components/SimilarPa
 import { can, LEVEL_TEXT } from "@/lib/collab";
 import ShareDialog from "@/components/collab/ShareDialog";
 import { PartExportDialog, saveNative } from "@/components/NativeExport";
+import { SolidworksExportDialog } from "@/components/SolidworksExport";
 import { START_ACCEPT, startFromFile } from "@/components/StartBox";
 
 type Sort = "updated" | "name" | "size" | "created";
@@ -51,6 +52,7 @@ export default function Projects() {
   const [renaming, setRenaming] = useState<{ p: Project; name: string } | null>(null);
   const [similar, setSimilar] = useState<string | null>(null);
   const [exporting, setExporting] = useState<Project | null>(null);
+  const [swExport, setSwExport] = useState<Project | null>(null);
   const [drag, setDrag] = useState(false);
   const [allBusy, setAllBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -115,6 +117,7 @@ export default function Projects() {
         {!viewer && !p.access?.guest && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
         <MenuItem icon={<Share2 />} onSelect={() => setSharing(p.id)}>{can(p.access, "share") ? "Share…" : "Who has access"}</MenuItem>
         {p.builds > 0 && <MenuItem icon={<FileDown />} onSelect={() => setExporting(p)}>Download as .fwpart…</MenuItem>}
+        {p.builds > 0 && <MenuItem icon={<Download />} onSelect={() => setSwExport(p)}>Export for SOLIDWORKS…</MenuItem>}
         {p.builds > 0 && !p.access?.guest && <MenuItem icon={<ScanSearch />} onSelect={() => setSimilar(p.id)}>Find similar parts</MenuItem>}
         {!viewer && can(p.access, "edit") && <><MenuSeparator />
           {archived ? <MenuItem icon={<ArchiveRestore />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: false }), "Project restored")}>Restore</MenuItem>
@@ -220,6 +223,7 @@ export default function Projects() {
       </Modal>
       {similar && <SimilarPartsDialog projectId={similar} open onClose={() => setSimilar(null)} />}
       {exporting && <PartExportDialog open projectId={exporting.id} name={exporting.name} onOpenChange={o => { if (!o) setExporting(null); }} />}
+      {swExport && <SolidworksExportDialog open projectId={swExport.id} name={swExport.name} onOpenChange={o => { if (!o) setSwExport(null); }} />}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 import ChangeNotice from "./ChangeNotice";
 import HandoffCard from "./HandoffCard";
 import { ImportProvenance, PartExportDialog } from "@/components/NativeExport";
+import { SolidworksExportDialog } from "@/components/SolidworksExport";
 import VariantsBar from "./Variants";
 import ImpactPanel from "./ImpactPanel";
 
@@ -470,6 +471,7 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
 /* ------------------------------------------------------------------ files & source */
 export function FilesPanel({ project, status }: { project: Project; status?: BuildStatus }) {
   const [fwpart, setFwpart] = useState(false);
+  const [sw, setSw] = useState(false);
   if (!status?.fingerprint) return <p className="p-4 text-sm text-muted">Exports appear after the first successful build.</p>;
   const base = `/api/projects/${project.id}/files`;
   return (
@@ -480,6 +482,10 @@ export function FilesPanel({ project, status }: { project: Project; status?: Bui
         <FileDown className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">Formwright part (.fwpart)</div><div className="text-xs text-muted">Full parametric model for another Formwright workspace</div></div>
       </button>
       <PartExportDialog open={fwpart} onOpenChange={setFwpart} projectId={project.id} name={project.name} />
+      <button onClick={() => setSw(true)} disabled={!status.ok} className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50" data-testid="export-solidworks">
+        <FileDown className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">Export for SOLIDWORKS</div><div className="text-xs text-muted">{status.ok ? "STEP (mm, named body, colour) + parameter sheet. Imports as a solid without feature history" : "Available once the model passes its checks"}</div></div>
+      </button>
+      <SolidworksExportDialog open={sw} onOpenChange={setSw} projectId={project.id} name={project.name} />
       {[["part.step", "STEP (AP214)", "SOLIDWORKS, Creo, Fusion, Inventor, NX…"], ["part.stl", "STL", "Slicers and quick viewing"], ["part.3mf", "3MF", "Modern 3D-printing format with units"]].map(([f, l, h]) => (
         <a key={f} href={`${base}/${f}`} className="flex items-center gap-3 rounded-lg border border-border p-3 hover:border-primary/50">
           <Download className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">{l}</div><div className="text-xs text-muted">{h}</div></div>

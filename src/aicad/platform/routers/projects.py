@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -528,6 +528,26 @@ async def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_c
         track(ctx.db, "download", ctx.user, p.org_id, file=name)
         ctx.db.commit()
     return FileResponse(f, media_type=FILES[name], headers=headers)
+
+
+@router.get("/projects/{project_id}/export/solidworks")
+async def export_solidworks(project_id: str, schema: str = "ap214", ctx: Ctx = Depends(verified_ctx)) -> Response:
+    """CAD-070: a zip with a SOLIDWORKS-friendly STEP (AP214 or AP242, mm, named body, material colour), the
+    parameter sheet (CSV) and a README that discloses the import is a dumb solid without feature history."""
+    from aicad.native import solidworks
+
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    await wait_finalized(p.id)
+    try:
+        data, _facts = await asyncio.to_thread(solidworks.build_package, ws / "out", p.name, schema)
+    except solidworks.ExportRefused as e:
+        raise HTTPException(409, str(e)) from e
+    track(ctx.db, "download", ctx.user, p.org_id, file=f"solidworks.zip ({schema.lower()})")
+    ctx.db.commit()
+    fname = f"{solidworks.safe_name(p.name)}_SOLIDWORKS.zip"
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "no-store"})
 
 
 @router.get("/projects/{project_id}/source", response_class=PlainTextResponse)

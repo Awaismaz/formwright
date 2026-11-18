@@ -323,12 +323,15 @@ def system(ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
     import platform
     from importlib.metadata import version
 
+    from aicad import llm
+
     s = get_settings()
     return {"env": s.env, "payments": s.stripe_mode, "god_mode_enabled": s.god_mode_enabled,
             "smtp": bool(s.smtp_host), "database": s.db_url.split("://")[0],
             "agent_auth": "API key" if os.environ.get("ANTHROPIC_API_KEY") else "local Claude Code login (dev only)",
             "python": platform.python_version(), "build123d": version("build123d"),
-            "claude_agent_sdk": version("claude-agent-sdk"), "superadmins": list(s.superadmin_emails)}
+            "claude_agent_sdk": version("claude-agent-sdk"), "superadmins": list(s.superadmin_emails),
+            "llm": llm.describe()}  # AGT-001 provider routing + recent call metering (super-admin only)
 
 
 # ------------------------------------------------------------------ AGT-009 agent run records (super-admin only)

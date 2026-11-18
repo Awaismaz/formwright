@@ -1,7 +1,8 @@
 """One long-lived Claude Agent SDK session bound to a project workspace.
 
-Auth (development): the SDK runs the Claude Code binary, which uses this PC's Claude Code login
-when no ANTHROPIC_API_KEY is present. Production must switch to API-key auth (RISKS R-LIC-05).
+The model client comes from the LLM provider configured for the ``design_agent`` role (AGT-001, ``aicad.llm``):
+by default the Claude Agent SDK. Auth (development): the SDK runs the Claude Code binary, which uses this PC's
+Claude Code login when no ANTHROPIC_API_KEY is present. Production must switch to API-key auth (RISKS R-LIC-05).
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ from aicad.agent.blocks import extract_brief, extract_review
 from aicad.agent.edits import extract_edit
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
-from aicad.agent.replay import make_client
 from aicad.agent.runrecord import RunRecorder
 from aicad.agent.tools import make_cad_server
 
@@ -222,6 +222,15 @@ def scrub(text: str) -> str:
     return text
 
 
+def provider_client(options: ClaudeAgentOptions) -> Any:
+    """Default client factory: the ``design_agent`` role's provider (AGT-001). For the default Claude Agent SDK
+    provider this is the SDK client, or the replay/record client when ``FW_AGENT_REPLAY`` / ``FW_AGENT_RECORD`` is
+    set in development (unchanged)."""
+    from aicad import llm
+
+    return llm.get_provider("design_agent").agent_client(options)
+
+
 class AgentSession:
     def __init__(self, workspace: Path, model: str | None = None,
                  on_event: Callable[[dict[str, Any]], None] | None = None, worker_key: str | None = None) -> None:
@@ -237,7 +246,7 @@ class AgentSession:
         self.busy = False
         self.mode = "build"  # "build" | "discuss" | "brief" (the last two: no model changes, enforced by the guard)
         self.brief_approved = False  # CAD-028: the user approved a brief in this conversation
-        self.client_factory: Callable[[ClaudeAgentOptions], Any] = make_client  # replay/record in dev (AGT-002)
+        self.client_factory: Callable[[ClaudeAgentOptions], Any] = provider_client  # AGT-001 (replay: AGT-002)
         self.session_id: str | None = None
         self.auth: str | None = None
         self.turn_meta: dict[str, Any] = {}
@@ -330,6 +339,25 @@ class AgentSession:
             self._cost_base = 0.0  # a new agent process reports cost from zero
         return self.client
 
+    def _provider_name(self) -> str:
+        """The provider behind this session's client, for the run record (``custom`` for injected factories)."""
+        if self.client_factory is not provider_client:
+            return "custom"
+        try:
+            import os
+
+            from aicad import llm
+            from aicad.agent.replay import RECORD_ENV, REPLAY_ENV
+
+            name = llm.get_provider("design_agent").name
+            if name == "claude-sdk" and os.environ.get(REPLAY_ENV):
+                return "claude-sdk:replay"
+            if name == "claude-sdk" and os.environ.get(RECORD_ENV):
+                return "claude-sdk:recording"
+            return name
+        except Exception:  # noqa: BLE001 - telemetry only
+            return "unknown"
+
     @property
     def run_spent_usd(self) -> float:
         return sum(self._run_costs.values())
@@ -353,7 +381,8 @@ class AgentSession:
         build_before = (self._status() or {}).get("build_id")
         try:
             self._rec = RunRecorder(self.workspace, prompt=prompt, mode=self.mode, requested_model=self.model,
-                                    run_id=str(self.turn_meta.get("run_id") or "") or None)
+                                    run_id=str(self.turn_meta.get("run_id") or "") or None,
+                                    provider=self._provider_name())
         except Exception:  # noqa: BLE001 - telemetry never blocks a run
             self._rec = None
         try:

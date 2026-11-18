@@ -34,6 +34,8 @@ class Settings:
     smtp_user: str = field(default_factory=lambda: os.environ.get("FW_SMTP_USER", ""))
     smtp_password: str = field(default_factory=lambda: os.environ.get("FW_SMTP_PASSWORD", ""))
     smtp_from: str = field(default_factory=lambda: os.environ.get("FW_SMTP_FROM", "Formwright <no-reply@formwright.dev>"))
+    # AGT-001: which model provider serves which role ("default=claude-sdk,vision=anthropic-api"; aicad.llm)
+    llm_providers: str = field(default_factory=lambda: os.environ.get("FW_LLM_PROVIDERS", ""))
     session_days: int = 14
     trial_tokens: int = field(default_factory=lambda: int(os.environ.get("FW_TRIAL_TOKENS", "1000")))
     trial_days: int = 14

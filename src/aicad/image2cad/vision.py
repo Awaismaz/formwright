@@ -62,33 +62,13 @@ _BLOCK = re.compile(r"```(?:fw-read|json)?\s*\n(.*?)\n?```", re.DOTALL)
 
 async def run_agent(folder: Path, image: str, budget_usd: float | None = None) -> tuple[str, float | None]:
     """One read-only vision turn. Returns (assistant text, estimated cost in USD). ``budget_usd``: hard cap for
-    the turn (the SDK stops it there), so a read can never spend more than the workspace holds."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        HookMatcher,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    the turn where the provider supports one, so a read can never spend more than the workspace holds."""
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES, make_guard
-
-    opts = ClaudeAgentOptions(
-        cwd=str(folder), tools=["Read"], allowed_tools=["Read"], permission_mode="dontAsk",
-        system_prompt={"type": "preset", "preset": "claude_code", "append": VISION_INSTRUCTIONS},
-        setting_sources=[], max_turns=4, max_buffer_size=AGENT_BUFFER_BYTES,
-        hooks={"PreToolUse": [HookMatcher(matcher="Read", hooks=[make_guard(folder)])]})
-    if budget_usd is not None:
-        opts.max_budget_usd = max(0.01, budget_usd)
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=VISION_PROMPT.format(image=image), options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="vision", system=VISION_INSTRUCTIONS,
+                                             prompt=VISION_PROMPT.format(image=image), images=(folder / image,),
+                                             max_turns=4, budget_usd=budget_usd, cwd=folder))
+    return res.text, res.metering.cost_usd
 
 
 def parse_block(text: str) -> dict[str, Any] | None:

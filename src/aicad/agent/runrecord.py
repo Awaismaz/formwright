@@ -117,14 +117,15 @@ class RunRecorder:
     """Collects one agent turn as the SDK messages stream past, then writes run.json."""
 
     def __init__(self, workspace: Path, *, prompt: str, mode: str, requested_model: str | None,
-                 run_id: str | None = None, clock: Any = time.perf_counter) -> None:
+                 run_id: str | None = None, clock: Any = time.perf_counter, provider: str | None = None) -> None:
         self.workspace = Path(workspace)
         self.run_id = run_id if run_id and _RUN_ID.match(run_id) else uuid.uuid4().hex
         self.clock = clock
         self.t0 = clock()
         self.rec: dict[str, Any] = {
             "schema": SCHEMA, "run_id": self.run_id, "started_at": _now(), "finished_at": None, "mode": mode,
-            "prompt": prompt_entry(prompt), "model": {"requested": requested_model, "used": []},
+            "prompt": prompt_entry(prompt), "provider": provider,
+            "model": {"requested": requested_model, "used": []},
             "versions": versions(), "agent": {}, "tokens": {}, "cost_usd": {}, "timings_s": {},
             "tools": {"calls": 0, "by_name": {}, "errors": 0, "builds": 0}, "builds": [], "checks": None,
             "outcome": {}}
