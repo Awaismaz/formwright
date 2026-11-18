@@ -10,10 +10,12 @@ import { useSession } from "@/lib/session";
 import { useTitle } from "@/lib/title";
 import type { Catalog } from "@/lib/types";
 import { num } from "@/lib/format";
-import { Badge, Button, StatusBadge } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import HeroVisual from "@/components/HeroVisual";
-import Showcase, { LiveBadge } from "@/components/landing/Showcase";
+import OfficeHero from "@/components/landing/hero/OfficeHero";
+import CadTools from "@/components/landing/CadTools";
+import AppDevices from "@/components/landing/AppDevices";
+import Showcase from "@/components/landing/Showcase";
 import { Reveal, useReducedMotion } from "@/components/landing/motion";
 
 /** Subtle parallax for decorative layers: moves `ref` at `rate` × scroll, off under reduced motion. */
@@ -76,11 +78,10 @@ export default function Landing() {
   const glow = useParallax(0.25);
   const grid = useParallax(0.12);
   const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
-  const live = list(mods.filter(m => m.status === "live").map(m => m.name));
-  const preview = list(mods.filter(m => m.status !== "live").map(m => m.name));
-  const faq = [...FAQ.slice(0, 2), tokensFaq, ["Which modules are available today?", mods.length
-    ? `Live today: ${live}. ${preview ? `${preview} ${preview.includes(" and ") ? "are" : "is"} on the roadmap and marked Preview in the app.` : ""}`
-    : "See the module list above: each is marked Live or Preview."], ...FAQ.slice(2)];
+  const names = list(mods.map(m => m.name));
+  const faq = [...FAQ.slice(0, 2), tokensFaq, ["Which modules are included?", mods.length
+    ? `${names}. The trial includes every module; afterwards, add the ones your team needs.`
+    : "Every module in the list above. The trial includes all of them."], ...FAQ.slice(2)];
   return (
     <main>
       {/* hero */}
@@ -89,21 +90,23 @@ export default function Landing() {
         <div ref={grid} className="pointer-events-none absolute inset-0 opacity-[.35] [background-image:linear-gradient(rgb(var(--border))_1px,transparent_1px),linear-gradient(90deg,rgb(var(--border))_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(to_bottom,black,transparent_75%)]" />
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-12 sm:px-6 lg:pt-16">
           <div className="mx-auto max-w-3xl text-center">
-            <div className="mb-5 flex flex-wrap justify-center gap-2"><Badge tone="accent" className="animate-fade-in"><Sparkles className="h-3 w-3" /> AI design engineer for mechanical teams</Badge><LiveBadge label="Design Studio is live" /></div>
+            <div className="mb-5 flex flex-wrap justify-center gap-2"><Badge tone="accent" className="animate-fade-in"><Sparkles className="h-3 w-3" /> An AI design office for mechanical teams</Badge></div>
             <h1 className="text-[40px] font-semibold leading-[1.08] tracking-tight sm:text-[56px]">
               From idea to <span className="bg-gradient-to-r from-primary to-[#5C93E6] bg-clip-text text-transparent">verified</span>, editable CAD.
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-[17px] leading-relaxed text-muted">
-              Describe a part in plain language. Formwright's agent writes parametric CAD, builds it, checks it numerically and shows it live — so your engineers start from a correct model, not a blank sketch.
+              Brief a part or a whole machine in plain language. Formwright's Chief Designer plans it, a team of specialist agents models every part in parallel, checks each one numerically and assembles it — so your engineers start from a correct model, not a blank sketch.
             </p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               {signedIn ? <Link to="/app"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button></Link>
                 : <Link to="/signup"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free · {num(trial)} tokens</Button></Link>}
+              <Link to="/why"><Button size="lg" variant="accent">Why should I buy this</Button></Link>
               <a href="#tour"><Button size="lg" variant="secondary">See it work</Button></a>
             </div>
             <p className="mt-3 text-xs text-muted">No credit card · 14-day trial with every module · STEP & STL export included</p>
           </div>
-          <div className="mx-auto mt-10 max-w-5xl"><HeroVisual /></div>
+          <div className="mx-auto mt-10 max-w-6xl"><OfficeHero /></div>
+          <p className="mx-auto mt-4 max-w-3xl text-center text-[12px] text-muted">Every part on screen is real Formwright geometry: Toolbox gears, bearings and screws plus parts modelled in build123d, exported from the exact models.</p>
         </div>
       </section>
 
@@ -154,7 +157,11 @@ export default function Landing() {
         </div>
       </section>
 
+      <CadTools />
+
       <Showcase />
+
+      <AppDevices />
 
       {/* modules */}
       <section id="modules" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
@@ -169,10 +176,7 @@ export default function Landing() {
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {(catalog.data?.modules ?? []).map(m => (
             <div key={m.code} className="card flex flex-col p-5 transition hover:-translate-y-0.5 hover:shadow-pop">
-              <div className="flex items-center justify-between">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><Icon name={m.icon} className="h-[18px] w-[18px]" /></div>
-                {m.status === "live" ? <LiveBadge /> : <StatusBadge status={m.status} />}
-              </div>
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><Icon name={m.icon} className="h-[18px] w-[18px]" /></div>
               <h3 className="mt-4 font-semibold">{m.name}</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{m.summary}</p>
             </div>

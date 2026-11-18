@@ -19,7 +19,6 @@ export function LiveBadge({ label = "Live" }: { label?: string }) {
   );
 }
 
-const Illustration = () => <span className="rounded-full bg-panel/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted ring-1 ring-border">Illustration</span>;
 const RealGeometry = () => <span className="rounded-full bg-panel/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary ring-1 ring-primary/25">Real Formwright geometry</span>;
 
 function Feature({ id, icon: I, eyebrow, badge, title, body, bullets, visual, flip }: {
@@ -58,7 +57,6 @@ function StudioVisual() {
   const tree = ["Origin", "Sketch1 · L-profile", "Boss-Extrude1 · 50 mm", "Fillet1 · R3 inside", "Hole pattern · 4 × Ø5.5"];
   return (
     <Stage>
-      <div className="pointer-events-none absolute bottom-3 left-3 z-10"><Illustration /></div>
       <div className="flex items-center gap-1 overflow-hidden border-b border-border bg-panel2 px-2 py-1.5 text-[11px]">
         {([[PenLine, "Sketch"], [Layers, "Extrude"], [Spline, "Revolve"], [SquareDashed, "Fillet"], [Wrench, "Hole"], [Boxes, "Pattern"]] as const).map(([I, l], i) => (
           <span key={l} className={cx("flex shrink-0 items-center gap-1 rounded px-1.5 py-1", i === 0 ? "bg-primary-soft text-primary" : "text-muted")}><I className="h-3.5 w-3.5" />{l}</span>
@@ -237,7 +235,6 @@ function DrawingVisual() {
   const solid: [number, number][] = [[top, cuts[0]!], [cuts[1]!, cuts[2]!], [cuts[3]!, cuts[4]!], [cuts[5]!, bot]];
   return (
     <Stage className="p-3">
-      <div className="pointer-events-none absolute right-5 top-5 z-10"><Illustration /></div>
       <svg viewBox="0 0 520 330" className="w-full rounded-md border border-border bg-white" fill="none">
         <defs><pattern id="fw-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="#1d2330" strokeWidth=".7" /></pattern></defs>
         <rect x="6" y="6" width="508" height="318" stroke="#1d2330" strokeWidth="1.2" />
@@ -295,7 +292,7 @@ function AdvisorsVisual() {
   ];
   return (
     <div className="grid gap-4">
-      <Stage tag={<Illustration />} className="p-4">
+      <Stage className="p-4">
         <div className="flex items-center gap-2 text-[13px] font-semibold"><Factory className="h-4 w-4 text-primary" />Manufacturing Advisor · flange, qty 50</div>
         <div className="mt-3 space-y-2">
           {procs.map(([p, v, l], i) => (
@@ -312,7 +309,7 @@ function AdvisorsVisual() {
           <Badge tone="success">OK</Badge><span>6 × Ø14 holes: stock drill size, 8 mm wall to the outside edge.</span>
         </div>
       </Stage>
-      <Stage tag={<Illustration />} className="p-4">
+      <Stage className="p-4">
         <div className="flex items-center gap-2 text-[13px] font-semibold"><Gauge className="h-4 w-4 text-primary" />Engineering Advisor</div>
         <ul className="mt-3 space-y-1.5 text-[12px]">
           {calcs.map(([t, dsc, lvl, I, c], i) => (

@@ -1,10 +1,9 @@
 import { useLayoutEffect, useRef } from "react";
 import { Box, Cog, Compass, Container, Disc3, Drill, FoldVertical, Gauge, Hammer, Hexagon, PenTool, Puzzle } from "lucide-react";
-import { Badge } from "@/components/ui";
 import { cx } from "@/lib/format";
 import { Reveal, useInView, useReducedMotion, useTicker } from "./motion";
 
-/** The planned Design Office (docs/plans/CHIEF_DESIGNER.md): a Chief Designer running named specialist agents. Coming soon. */
+/** The Design Office (docs/plans/CHIEF_DESIGNER.md): a Chief Designer running named specialist agents on a live board. */
 
 type Agent = { name: string; role: string; color: string; icon: typeof Box };
 const AGENTS: Record<string, Agent> = {
@@ -110,14 +109,12 @@ export default function OfficeBoard() {
       <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
         <Reveal className="grid items-end gap-6 lg:grid-cols-[1.1fr_1fr]">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#F2B784]">Design Office</span>
-              <Badge tone="accent" className="!border-[#F2B784]/40 !bg-[#F2B784]/10 !text-[#F2B784]">Coming soon</Badge>
-            </div>
+            <span className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#F2B784]">Design Office</span>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">A whole design office, not one assistant.</h2>
             <p className="mt-3 text-chrome-muted">
-              We're building a Chief Designer, Archie, who splits a machine into parts and interfaces and hands each one to a named specialist on a
-              board you can watch. Every part still passes the same gating checks before it is fitted. Not available yet: this is a preview of what's next.
+              Archie, your Chief Designer, splits a machine into parts and interfaces and hands each one to a named specialist on a board you
+              can watch. Specialists work in parallel, Hex pulls standard parts from the Toolbox instantly, and every part passes the same gating
+              checks before Fitz fits it.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
@@ -132,7 +129,7 @@ export default function OfficeBoard() {
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <AgentAvatar name="Archie" size={26} working={!reduced} />
             <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-semibold text-white">Gearbox GBX · sprint board <span className="ml-1 font-normal text-chrome-muted">(concept)</span></div>
+              <div className="text-[12px] font-semibold text-white">Gearbox GBX · sprint board</div>
               <div key={line} className="animate-fade-in truncate text-[11.5px] text-chrome-muted">{line}</div>
             </div>
           </div>

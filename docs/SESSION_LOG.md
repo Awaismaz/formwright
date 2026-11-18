@@ -4,6 +4,60 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (q) — Landing hero: Design Office gearbox story (UX-020), branch wip/landing-hero
+
+### Done
+- **Hero rebuilt** (`web/src/components/landing/hero/`): one scripted ~52 s loop telling the Design Office story for a
+  planetary gearbox PG-5 (ring fixed, sun in, carrier out; m1.5, sun 18T, 3 × planet 27T, internal ring 72T, face 12;
+  i = 1 + 72/18 = 5, (18 + 72)/3 = 30, a = 33.75): (a) a detailed brief types itself; (b) Archie's product tree,
+  gear-set checks, frozen interfaces, estimate, "Plan approved"; (c) a mini board where Axel, Chuck, Mill and Hex work
+  in parallel with avatars, progress rings/bars and status lines ("Axel is shaping 72 internal teeth…": internal gears
+  are shaped, not hobbed), Gage reviews, Hex's Toolbox parts land at 0 tokens; (d) build flash: 16 unique parts on a
+  table, each stock blank machined into the real part by a sweeping cut plane, ✓ labels; (e) Fitz flies them to an
+  axial exploded view and seats them bottom-up, "0 interferences", "a = 33.75 ✓"; (f) the gearbox runs: sun spins,
+  planets spin and orbit inside the fixed ring, carrier/output at 1/5, output side turns to glass; readouts (5.00 : 1,
+  600 → 120 rpm, 12 Nm out / 2.4 Nm in, design point) and an "All gating checks pass · STEP · BOM · Drawings · Shop
+  pack" chip row. Play/pause, replay, six click-to-jump chapter chips with progress. Holds at the build chapter until
+  the geometry is loaded (the 3D loads during the brief).
+- `kinematics.ts`: ratio, carrier speed, Willis planet spin, planet phase φk = θk(1 − Zr/Zp) mod pitch (all 0 for PG-5),
+  mesh residuals, spin-up; `kinematics.test.ts` (9 tests, hand-computed, incl. a 13/25/63 × 4 set with half-pitch phases).
+- **Real geometry** (`scripts/landing_assets.py`): Toolbox spur gears (sun, planet), bearings 6204/6001/6000, SHCS M5×35,
+  dowels; build123d internal ring 72T (disc minus the external-involute outline with swapped tip/root, 0.08 mm
+  backlash), carrier plates with posts, planet pins, input shaft (Ø6.35 socket), output shaft (keyway), input/output
+  covers (6204 seats, 140 square flange), NEMA 23 motor flange. Manifest `hero/gearbox.json` (29 instances, assembly
+  coordinates). New GLB compaction: build123d exports one primitive per B-rep face (hundreds of draw calls); the script
+  now rewrites each GLB as one indexed primitive with crease-aware normals: gear.glb 457 → 84 KB, all landing GLBs 1.15 MB.
+- Founder direction applied: no Coming soon / Preview / Illustration / (concept) labels on the landing page (OfficeBoard
+  copy now present tense, module status badges removed, FAQ rewritten). "Why should I buy this" CTA in the hero and
+  "Why Formwright" nav link to `/why` (page built by another agent). New sections: **Integrates with your CAD**
+  (`CadTools.tsx`, own monogram tiles; dropping `web/public/landing/logos/<slug>.svg` replaces a tile via a build-time
+  glob; trademark notice) and **Formwright in your pocket** (`AppDevices.tsx`, generic phone + landscape tablet frames,
+  each with its own loop: home tap → splash → chat → live 3D flange → board → "Gearbox approved ✓" toast; tablet Design
+  Studio with live gear, tree, checks, chat, then the Office board; static frames under reduced motion; stacks on mobile).
+- Removed the old flange hero (`HeroVisual.tsx`, `heroTimeline*`, flange-blank/bore GLBs).
+
+### Verified
+- Interference: every gearbox instance pair intersected in build123d at the assembled pose: only ≤ 0.004 mm³ tolerance
+  noise at nominal fits; planet/ring and planet/sun 0 at three sun angles, 234 mm³ when a planet is deliberately
+  half a pitch off (the phase formula matters). Tapped holes modelled at nominal Ø (Toolbox cosmetic-thread rule).
+- `npx tsc --noEmit`, `npm test` (48), `npx vite build`, `ruff check src tests scripts`, `pytest` (335 passed; `test_mesh::test_highlight_protection…` failed under load and passes alone, known flaky Blender render, no src change).
+- Headless Chrome (puppeteer-core) on port 8799 with a throwaway data dir: desktop 1440 shots at every chapter (brief,
+  plan, board ×2, build ×2, explode, seating, assembled, run ×2 + mesh close-up), mobile 390 (all chapters), reduced
+  motion (assembled still + six static steps), CAD and mobile sections at 1440 and 390; 0 console errors/warnings;
+  no horizontal scroll. rAF rate with a GPU (headless d3d11) about 96–98 fps in build/assemble/run (swiftshader is far
+  slower, so the story clock runs in real time with dt capped at 0.5 s). Fixed from screenshots: FLIP cards compounding
+  transforms (layout rects now measured without the running transform), stock top-face clipping speckle, run view
+  clutter (output side to glass), mobile framing (camera keyframes fit half width AND height), compact run HUD,
+  mobile build labels (latest only), reduced-motion still frame rendering, phone 3D viewport mounting.
+
+### Not done / limitations
+- The story is scripted (deterministic timeline), not a recording of a live run; numbers shown are the design values.
+- GLBs are not Draco/meshopt compressed (served gzipped by the app). Housing parts are simple (no fillets or seals).
+- Exploded/seating framing leaves some empty space at the bottom on desktop; could be tuned.
+
+### Next
+- Merge `wip/landing-hero` after the `/why` page lands; consider meshopt compression if the asset budget tightens.
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done

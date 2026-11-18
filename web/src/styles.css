@@ -122,6 +122,8 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 .fw-ping { animation: fw-ping 1.8s cubic-bezier(0, 0, .2, 1) infinite; }
 .fw-float { animation: fw-float 6s ease-in-out infinite; }
 .fw-shimmer { background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .45) 50%, transparent 70%) 0 0 / 220% 100%; animation: fw-shimmer 2.4s linear infinite; }
+.fw-flow { left: 0; animation: fw-flow 2.2s cubic-bezier(.4, 0, .2, 1) infinite; }
+@keyframes fw-flow { 0% { left: 0; opacity: 0; } 15%, 85% { opacity: 1; } 100% { left: calc(100% - 6px); opacity: 0; } }
 @keyframes fw-draw { to { stroke-dashoffset: 0; } }
 @keyframes fw-pop { to { opacity: 1; transform: none; } }
 @keyframes fw-blink { 50% { opacity: 0; } }
@@ -131,7 +133,7 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 @media (prefers-reduced-motion: reduce) {
   .fw-reveal, .fw-pop { opacity: 1; transform: none; transition: none; animation: none !important; }
   .fw-draw { stroke-dashoffset: 0; animation: none !important; }
-  .fw-caret, .fw-ping, .fw-float, .fw-shimmer { animation: none !important; }
+  .fw-caret, .fw-ping, .fw-float, .fw-shimmer, .fw-flow { animation: none !important; }
 }
 .fw-bar { transform: scaleX(0); transform-origin: left; transition: transform 1.4s cubic-bezier(.2, .7, .2, 1); }
 .is-in .fw-bar { transform: none; }
