@@ -52,9 +52,12 @@ Principle: **renders and vision critique are signals; deterministic geometric ch
 | FX-01 mounting plate (VS-1) | M1 | Holes, pocket, chamfer |
 | FX-02 L-bracket with gusset | M1/M2 | Multi-body union, fillets |
 | FX-03 stepped shaft with keyway | M2 | Revolve, turning DFM |
-| FX-04 two-part enclosure with bosses | M2/M3 | Shell, draft, assembly mate |
-| FX-05 bolted flange assembly (cosmetic threads) | M3 | Fasteners, BOM, interference |
-| FX-06 shock-absorber-like multi-part reference | M3 | Concentric mates, DOF, exploded view — **newly designed, not copied from earlier client/personal projects unless rights are confirmed** |
+| FX-04 bolted bracket assembly (Toolbox bolts, washers, nuts; cosmetic threads) | M3 | Fasteners, length rule, BOM, interference, clearances — `specs/fixtures/fx04_bolted_bracket/` |
+| FX-05 keyed shaft in two bearings in a housing, with a keyed gear | M3 | Concentric mates, freedoms (3), contacts, centre of mass, full-turn sweep — `specs/fixtures/fx05_keyed_shaft/` |
+| FX-06 hinged arm on a clevis base (revolute joint, limits) | M3 | Distance/flush mates, motion range vs hand contact angles — `specs/fixtures/fx06_hinged_arm/` |
+
+FX-04..06 (ASM-012, 2026-11-19) replaced the earlier placeholder ideas (enclosure, flange, shock-absorber-like); all three
+are newly designed for Formwright, with provenance files and hand-computed checks (`specs/fixtures/README.md`).
 
 ## 4. Engineering advice validation levels
 

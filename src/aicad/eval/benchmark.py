@@ -13,6 +13,10 @@ Modes
 
 A case passes when the final build's gating checks pass AND bbox, volume and cylinder census match the case's
 expectation. The agent's own words (summary, self-review) are never used to score.
+
+Render similarity (EVAL-006, advisory, never gating): ``--save-renders DIR`` keeps each case's review sheet as
+DIR/<case id>.png, ``--ref-renders DIR`` compares each new sheet with DIR/<case id>.png (``eval/render_similarity``)
+and logs the score per case and the mean in the summary. It never changes a pass or fail.
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from aicad.agent.blocks import gate_summary
+from aicad.eval import render_similarity
 from aicad.eval.prompts import CASES
 
 BENCH_SUFFIX = ("\n\n[Benchmark run: nobody is available to answer questions. Make reasonable, clearly labelled "
@@ -120,8 +125,30 @@ class _Tap:
             yield m
 
 
+def render_row(views: Path, case_id: str, ref_renders: Path | None, save_renders: Path | None) -> dict[str, Any] | None:
+    """EVAL-006: keep the case's review sheet and/or compare it with the reference one (advisory, never gating)."""
+    if ref_renders is None and save_renders is None:
+        return None
+    if not views.is_file():
+        return {"available": False, "reason": "no render", "advisory": True}
+    if save_renders is not None:
+        import shutil
+
+        save_renders.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(views, save_renders / f"{case_id}.png")
+    if ref_renders is None:
+        return None
+    ref = ref_renders / f"{case_id}.png"
+    sim = render_similarity.compare_files(ref, views) if ref.is_file() else None
+    if sim is None:
+        return {"available": False, "reason": "no reference render" if not ref.is_file() else "unreadable",
+                "advisory": True}
+    return {"available": True, **sim}
+
+
 async def run_case(case: dict[str, Any], mode: str, root: Path, replay_dir: Path | None = None,
-                   record_dir: Path | None = None, model: str | None = None) -> dict[str, Any]:
+                   record_dir: Path | None = None, model: str | None = None, ref_renders: Path | None = None,
+                   save_renders: Path | None = None) -> dict[str, Any]:
     from aicad.agent.replay import RecordingClient, ReplayClient
     from aicad.agent.session import AgentSession
 
@@ -147,6 +174,8 @@ async def run_case(case: dict[str, Any], mode: str, root: Path, replay_dir: Path
     s = AgentSession(ws, model=model, on_event=on_event, worker_key="bench")
     if mode == "dry":
         cassette = synthetic_cassette(case)
+        if ref_renders is not None or save_renders is not None:
+            cassette["render"] = True  # the replay renders the review sheet like a live build does
         s.client_factory = lambda o: _Tap(ReplayClient(o, cassette, worker_key="bench"), sink)
     elif mode == "replay":
         f = (replay_dir or Path(".")) / f"{case['id']}.json"
@@ -170,6 +199,9 @@ async def run_case(case: dict[str, Any], mode: str, root: Path, replay_dir: Path
     result = next((e for e in reversed(events) if e.get("type") == "result"), {})
     usage = sink.get("usage") or {}
     cost = result.get("cost_est_usd") or 0.0
+    rsim = render_row(ws / "out" / "views.png", case["id"], ref_renders, save_renders)
+    if rsim is not None:
+        row["render_similarity"] = rsim
     return {**row, **final, "builds": len(per_build), "first_pass": per_build[0] if per_build else False,
             "pass_within_3": any(per_build[:3]), "turns": result.get("turns"),
             "duration_s": round(time.time() - t0, 1), "cost_usd": round(cost, 4),
@@ -186,7 +218,10 @@ def summarise(rows: list[dict[str, Any]], mode: str) -> dict[str, Any]:
     def rate(k: str) -> float:
         return round(sum(1 for r in ran if r.get(k)) / n, 3)
 
-    return {"mode": mode, "cases": len(rows), "ran": len(ran), "pass_rate": rate("passed"),
+    sims = [float(r["render_similarity"]["score"]) for r in ran
+            if (r.get("render_similarity") or {}).get("available")]
+    extra = {"render_similarity": render_similarity.summary(sims)} if any("render_similarity" in r for r in ran) else {}
+    return {**extra, "mode": mode, "cases": len(rows), "ran": len(ran), "pass_rate": rate("passed"),
             "first_pass_rate": rate("first_pass"), "within_3_rate": rate("pass_within_3"),
             "gates_ok_rate": rate("gates_ok"), "cost_usd": round(sum(r.get("cost_usd") or 0 for r in ran), 3),
             "tokens_platform": sum(r.get("tokens_platform") or 0 for r in ran),
@@ -206,19 +241,33 @@ def markdown(report: dict[str, Any]) -> str:
              f"{s['tokens_platform']} tokens (${s['cost_usd']}) · {s['time_s']} s"), ""]
     if s.get("note"):
         lines += [f"> {s['note']}", ""]
-    lines += ["| Case | Family | Pass | Builds | First pass | Gates | Bbox | Volume | Census | Tokens | Time s | Notes |",
-              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    rs = s.get("render_similarity")
+    if rs:
+        lines += [("Render similarity (advisory, never gating): " + (f"mean {rs['mean']:.3f}, min {rs['min']:.3f} "
+                                                                       f"over {rs['n']} case(s)" if rs.get("n")
+                                                                       else "no reference renders compared")), ""]
+    lines += ["| Case | Family | Pass | Builds | First pass | Gates | Bbox | Volume | Census | Tokens | Time s | Notes |"
+              + (" Render sim (advisory) |" if rs else ""),
+              "|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if rs else "")]
     yn = {True: "yes", False: "no", None: "–"}
     for r in report["rows"]:
         lines.append(f"| {r['id']} | {r['family']} | {yn[r.get('passed')]} | {r.get('builds', 0)} | "
                      f"{yn[r.get('first_pass')]} | {yn[r.get('gates_ok')]} | {yn[r.get('bbox_ok')]} | "
                      f"{yn[r.get('volume_ok')]} | {yn[r.get('census_ok')]} | {r.get('tokens_platform', 0)} | "
-                     f"{r.get('duration_s', '–')} | {'; '.join(r.get('notes') or [])} |")
+                     f"{r.get('duration_s', '–')} | {'; '.join(r.get('notes') or [])} |"
+                     + (f" {_sim_cell(r.get('render_similarity'))} |" if rs else ""))
     return "\n".join(lines) + "\n"
 
 
+def _sim_cell(r: dict[str, Any] | None) -> str:
+    if not r:
+        return "–"
+    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "–")
+
+
 async def run(cases: list[dict[str, Any]], mode: str, out: Path, replay_dir: Path | None = None,
-              record_dir: Path | None = None, model: str | None = None) -> dict[str, Any]:
+              record_dir: Path | None = None, model: str | None = None, ref_renders: Path | None = None,
+              save_renders: Path | None = None) -> dict[str, Any]:
     from aicad.agent import worker
 
     out.mkdir(parents=True, exist_ok=True)
@@ -226,7 +275,7 @@ async def run(cases: list[dict[str, Any]], mode: str, out: Path, replay_dir: Pat
     with tempfile.TemporaryDirectory(prefix="fw-bench-") as tmp:
         try:
             for c in cases:
-                r = await run_case(c, mode, Path(tmp), replay_dir, record_dir, model)
+                r = await run_case(c, mode, Path(tmp), replay_dir, record_dir, model, ref_renders, save_renders)
                 rows.append(r)
                 print(f"  {c['id']:<4} {'PASS' if r.get('passed') else 'FAIL'}  builds {r.get('builds', 0)}  "
                       f"{'; '.join(r.get('notes') or [])}", flush=True)
@@ -255,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", help="with --live: agent model override")
     ap.add_argument("--api-key", action="store_true", help="with --live: bill ANTHROPIC_API_KEY instead of the login")
     ap.add_argument("--out", type=Path, default=Path("bench-out"), help="report folder (report.json, report.md)")
+    ap.add_argument("--ref-renders", type=Path, metavar="DIR",
+                    help="compare each review sheet with DIR/<case id>.png (advisory render similarity)")
+    ap.add_argument("--save-renders", type=Path, metavar="DIR", help="keep each review sheet as DIR/<case id>.png")
     a = ap.parse_args(argv)
     cases = CASES
     if a.only:
@@ -281,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
 
             use_subscription_auth()
     print(f"Benchmark ({mode}): {len(cases)} case(s)")
-    report = asyncio.run(run(cases, mode, a.out, a.replay, a.record, a.model))
+    report = asyncio.run(run(cases, mode, a.out, a.replay, a.record, a.model, a.ref_renders, a.save_renders))
     s = report["summary"]
     print(f"pass {s['pass_rate']:.0%} | first-pass {s['first_pass_rate']:.0%} | <=3 builds {s['within_3_rate']:.0%} | "
           f"{s['tokens_platform']} tokens | {s['time_s']} s  -> {a.out / 'report.md'}")

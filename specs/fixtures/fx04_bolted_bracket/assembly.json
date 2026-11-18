@@ -1,0 +1,1176 @@
+{
+ "schema": "formwright.fixture-assembly/1",
+ "fixture": "FX-04",
+ "title": "Bolted bracket assembly",
+ "units": "mm, g, degrees",
+ "params": {
+  "plate_L": 120.0,
+  "plate_W": 80.0,
+  "plate_T": 10.0,
+  "bolt_hole_d": 6.6,
+  "bolt_x": 20.0,
+  "corner_hole_d": 9.0,
+  "corner_x": 50.0,
+  "corner_y": 30.0,
+  "foot_L": 60.0,
+  "foot_W": 40.0,
+  "foot_T": 8.0,
+  "upright_T": 8.0,
+  "upright_H": 50.0,
+  "fix_hole_d": 8.4,
+  "fix_hole_z": 40.0,
+  "M": 6,
+  "bolt_L": 30.0
+ },
+ "parts": [
+  {
+   "key": "plate",
+   "name": "FX-04 base plate",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "al_6061",
+   "params": {
+    "plate_L": 120.0,
+    "plate_W": 80.0,
+    "plate_T": 10.0,
+    "bolt_hole_d": 6.6,
+    "bolt_x": 20.0,
+    "corner_hole_d": 9.0,
+    "corner_x": 50.0,
+    "corner_y": 30.0
+   },
+   "hand": {
+    "bbox": [
+     120.0,
+     80.0,
+     10.0
+    ],
+    "volume_mm3": 92771.071071,
+    "solids": 1
+   }
+  },
+  {
+   "key": "bracket",
+   "name": "FX-04 angle bracket",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "al_6061",
+   "params": {
+    "foot_L": 60.0,
+    "foot_W": 40.0,
+    "foot_T": 8.0,
+    "upright_T": 8.0,
+    "upright_H": 50.0,
+    "fix_hole_d": 8.4,
+    "fix_hole_z": 40.0,
+    "bolt_hole_d": 6.6,
+    "bolt_x": 20.0
+   },
+   "hand": {
+    "bbox": [
+     60.0,
+     40.0,
+     58.0
+    ],
+    "volume_mm3": 42209.267341,
+    "solids": 1
+   }
+  },
+  {
+   "key": "bolt",
+   "name": "Hex bolt ISO 4017 M6×30",
+   "kind": "toolbox",
+   "standard": "ISO 4017",
+   "designation": "M6×30",
+   "material": "steel_1045",
+   "params": {
+    "code": "hex_bolt",
+    "D": 6,
+    "L": 30.0
+   },
+   "hand": {
+    "bbox": [
+     11.547005,
+     10.0,
+     34.0
+    ],
+    "volume_mm3": 1194.640178,
+    "solids": 1
+   }
+  },
+  {
+   "key": "washer",
+   "name": "Washer ISO 7089 M6",
+   "kind": "toolbox",
+   "standard": "ISO 7089",
+   "designation": "M6",
+   "material": "steel_1045",
+   "params": {
+    "code": "washer",
+    "D": 6
+   },
+   "hand": {
+    "bbox": [
+     12.0,
+     12.0,
+     1.6
+    ],
+    "volume_mm3": 129.483883,
+    "solids": 1
+   }
+  },
+  {
+   "key": "nut",
+   "name": "Hex nut ISO 4032 M6",
+   "kind": "toolbox",
+   "standard": "ISO 4032",
+   "designation": "M6",
+   "material": "steel_1045",
+   "params": {
+    "code": "hex_nut",
+    "D": 6
+   },
+   "hand": {
+    "bbox": [
+     11.547005,
+     10.0,
+     5.2
+    ],
+    "volume_mm3": 303.306674,
+    "solids": 1
+   }
+  }
+ ],
+ "instances": [
+  {
+   "id": "plate",
+   "part": "plate",
+   "fixed": true,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": null
+  },
+  {
+   "id": "bracket",
+   "part": "bracket",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    10.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": null
+  },
+  {
+   "id": "washer_top1",
+   "part": "washer",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    18.0
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "bolt1",
+   "part": "bolt",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    19.6
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "washer_nut1",
+   "part": "washer",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    -1.6
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "nut1",
+   "part": "nut",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    -6.8
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "washer_top2",
+   "part": "washer",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    -20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    18.0
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "bolt2",
+   "part": "bolt",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    -20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    19.6
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "washer_nut2",
+   "part": "washer",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    -20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    -1.6
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "nut2",
+   "part": "nut",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    -20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    -6.8
+   ],
+   "free_spin_axis": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "relative_to": null
+  }
+ ],
+ "mates": [
+  {
+   "id": "m_foot",
+   "type": "coincident",
+   "a": "plate",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     10.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bracket",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_hole1",
+   "type": "concentric",
+   "a": "plate",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "bracket",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   }
+  },
+  {
+   "id": "m_washer_top1_axis",
+   "type": "concentric",
+   "a": "bracket",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "washer_top1",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_top1_seat",
+   "type": "coincident",
+   "a": "bracket",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     20.0,
+     0,
+     8.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "washer_top1",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_bolt1_axis",
+   "type": "concentric",
+   "a": "washer_top1",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bolt1",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_bolt1_head",
+   "type": "coincident",
+   "a": "washer_top1",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     1.6
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bolt1",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_nut1_axis",
+   "type": "concentric",
+   "a": "plate",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "washer_nut1",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_nut1_seat",
+   "type": "coincident",
+   "a": "plate",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   },
+   "b": "washer_nut1",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     1.6
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_nut1_axis",
+   "type": "concentric",
+   "a": "bolt1",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "nut1",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_nut1_seat",
+   "type": "coincident",
+   "a": "washer_nut1",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   },
+   "b": "nut1",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     5.2
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_hole2",
+   "type": "concentric",
+   "a": "plate",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     -20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "bracket",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     -20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   }
+  },
+  {
+   "id": "m_washer_top2_axis",
+   "type": "concentric",
+   "a": "bracket",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     -20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "washer_top2",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_top2_seat",
+   "type": "coincident",
+   "a": "bracket",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     -20.0,
+     0,
+     8.0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "washer_top2",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_bolt2_axis",
+   "type": "concentric",
+   "a": "washer_top2",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bolt2",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_bolt2_head",
+   "type": "coincident",
+   "a": "washer_top2",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     1.6
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "bolt2",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_nut2_axis",
+   "type": "concentric",
+   "a": "plate",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     -20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ],
+    "r": 3.3
+   },
+   "b": "washer_nut2",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_washer_nut2_seat",
+   "type": "coincident",
+   "a": "plate",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     -20.0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   },
+   "b": "washer_nut2",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     1.6
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_nut2_axis",
+   "type": "concentric",
+   "a": "bolt2",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   },
+   "b": "nut2",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_nut2_seat",
+   "type": "coincident",
+   "a": "washer_nut2",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   },
+   "b": "nut2",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     5.2
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ ],
+ "joints": [],
+ "motion": [],
+ "expected": {
+  "dof": 8,
+  "interference": "none (contacts only)",
+  "thread_engagement": [
+   [
+    "bolt1",
+    "nut1"
+   ],
+   [
+    "bolt2",
+    "nut2"
+   ]
+  ],
+  "contacts": [
+   {
+    "a": "bracket",
+    "b": "plate",
+    "min_distance_mm": 0.0,
+    "why": "bracket foot sits on the plate"
+   },
+   {
+    "a": "bolt1",
+    "b": "plate",
+    "min_distance_mm": 0.2999999999999998,
+    "why": "M6 shank centred in the Ø6.6 hole: (6.6 − 6) / 2"
+   },
+   {
+    "a": "bolt1",
+    "b": "bracket",
+    "min_distance_mm": 0.2999999999999998,
+    "why": "same clearance in the bracket foot"
+   },
+   {
+    "a": "bolt1",
+    "b": "washer_top1",
+    "min_distance_mm": 0.0,
+    "why": "head bears on the washer"
+   },
+   {
+    "a": "washer_nut1",
+    "b": "plate",
+    "min_distance_mm": 0.0,
+    "why": "washer under the plate"
+   },
+   {
+    "a": "nut1",
+    "b": "washer_nut1",
+    "min_distance_mm": 0.0,
+    "why": "nut bears on the washer"
+   },
+   {
+    "a": "bolt2",
+    "b": "plate",
+    "min_distance_mm": 0.2999999999999998,
+    "why": "M6 shank centred in the Ø6.6 hole: (6.6 − 6) / 2"
+   },
+   {
+    "a": "bolt2",
+    "b": "bracket",
+    "min_distance_mm": 0.2999999999999998,
+    "why": "same clearance in the bracket foot"
+   },
+   {
+    "a": "bolt2",
+    "b": "washer_top2",
+    "min_distance_mm": 0.0,
+    "why": "head bears on the washer"
+   },
+   {
+    "a": "washer_nut2",
+    "b": "plate",
+    "min_distance_mm": 0.0,
+    "why": "washer under the plate"
+   },
+   {
+    "a": "nut2",
+    "b": "washer_nut2",
+    "min_distance_mm": 0.0,
+    "why": "nut bears on the washer"
+   }
+  ],
+  "bom": [
+   {
+    "part": "FX-04 base plate",
+    "qty": 1
+   },
+   {
+    "part": "FX-04 angle bracket",
+    "qty": 1
+   },
+   {
+    "part": "Washer ISO 7089 M6",
+    "qty": 4
+   },
+   {
+    "part": "Hex bolt ISO 4017 M6×30",
+    "qty": 2
+   },
+   {
+    "part": "Hex nut ISO 4032 M6",
+    "qty": 2
+   }
+  ],
+  "mass_g": 392.030473,
+  "com_mm": [
+   0.0,
+   2.595838,
+   12.446361
+  ]
+ }
+}

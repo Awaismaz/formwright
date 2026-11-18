@@ -83,3 +83,10 @@ the runner, so never mutate it: every op returns a new `Sheet`). Flanges are fou
 edges, by transforming the picked point into each panel frame (z = 0 bottom, z = T top). The flat pattern is built from
 the same model (BA = θ·(R + K·T)); test flat sizes against the bend-deduction formula, never against the built flat.
 A `Location` transforms points via `(loc * Location(v)).position` (`loc * Vector` raises).
+
+## Golden assembly fixtures (ASM-012)
+FX-04/05/06 live in `src/aicad/fixtures/` (part scripts + hand values) with data in `specs/fixtures/` (README there).
+Every expected value is a hand formula (volume decompositions with centroids, placements, min distances, motion
+predicate). After a deliberate change run `uv run python -m aicad.fixtures --write` or `tests/test_fixtures_asm.py`
+fails on the stale `assembly.json`. The solver's `Result.dof` sums freedoms per instance; a group that moves as one
+(shaft + key + gear) counts once per member there, so compare mechanism freedoms as 6n − rank (see `harness.run`).

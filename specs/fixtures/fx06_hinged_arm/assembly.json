@@ -1,0 +1,422 @@
+{
+ "schema": "formwright.fixture-assembly/1",
+ "fixture": "FX-06",
+ "title": "Hinged arm with a revolute joint and motion range",
+ "units": "mm, g, degrees",
+ "params": {
+  "base_L": 80.0,
+  "base_W": 40.0,
+  "base_T": 8.0,
+  "mount_hole_d": 6.6,
+  "mount_x": 30.0,
+  "lug_T": 8.0,
+  "lug_gap": 24.0,
+  "lug_W": 20.0,
+  "lug_top": 30.0,
+  "pivot_z": 24.0,
+  "pin_d": 8.0,
+  "pin_L": 40.0,
+  "arm_W": 22.0,
+  "arm_L": 100.0,
+  "arm_H": 12.0,
+  "hub_r": 8.0,
+  "end_hole_d": 8.4,
+  "end_hole_y": 90.0,
+  "limits": [
+   -20.0,
+   200.0
+  ]
+ },
+ "parts": [
+  {
+   "key": "base",
+   "name": "FX-06 clevis base",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "al_6061",
+   "params": {
+    "base_L": 80.0,
+    "base_W": 40.0,
+    "base_T": 8.0,
+    "mount_hole_d": 6.6,
+    "mount_x": 30.0,
+    "lug_T": 8.0,
+    "lug_gap": 24.0,
+    "lug_W": 20.0,
+    "lug_top": 30.0,
+    "pivot_z": 24.0,
+    "pin_d": 8.0
+   },
+   "hand": {
+    "bbox": [
+     80.0,
+     40.0,
+     30.0
+    ],
+    "volume_mm3": 31288.361177,
+    "solids": 1
+   }
+  },
+  {
+   "key": "arm",
+   "name": "FX-06 arm",
+   "kind": "fixture",
+   "standard": null,
+   "designation": null,
+   "material": "al_6061",
+   "params": {
+    "arm_W": 22.0,
+    "arm_L": 100.0,
+    "arm_H": 12.0,
+    "hub_r": 8.0,
+    "pin_d": 8.0,
+    "end_hole_d": 8.4,
+    "end_hole_y": 90.0
+   },
+   "hand": {
+    "bbox": [
+     22.0,
+     108.0,
+     16.0
+    ],
+    "volume_mm3": 27159.959756,
+    "solids": 1
+   }
+  },
+  {
+   "key": "pin",
+   "name": "Dowel pin Ø8×40",
+   "kind": "toolbox",
+   "standard": "ISO 8734 (envelope)",
+   "designation": "Ø8×40",
+   "material": "steel_1045",
+   "params": {
+    "code": "dowel",
+    "D": 8.0,
+    "L": 40.0
+   },
+   "hand": {
+    "bbox": [
+     8.0,
+     8.0,
+     40.0
+    ],
+    "volume_mm3": 1987.580952,
+    "solids": 1
+   }
+  }
+ ],
+ "instances": [
+  {
+   "id": "base",
+   "part": "base",
+   "fixed": true,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0
+   ],
+   "free_spin_axis": null,
+   "relative_to": null
+  },
+  {
+   "id": "pin",
+   "part": "pin",
+   "fixed": false,
+   "T": [
+    0.0,
+    0.0,
+    1.0,
+    -20.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    -1.0,
+    0.0,
+    0.0,
+    24.0
+   ],
+   "free_spin_axis": [
+    [
+     0,
+     0,
+     0
+    ],
+    [
+     0,
+     0,
+     1
+    ]
+   ],
+   "relative_to": null
+  },
+  {
+   "id": "arm",
+   "part": "arm",
+   "fixed": false,
+   "T": [
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    24.0
+   ],
+   "free_spin_axis": [
+    [
+     0,
+     0,
+     0
+    ],
+    [
+     1,
+     0,
+     0
+    ]
+   ],
+   "relative_to": null
+  }
+ ],
+ "mates": [
+  {
+   "id": "m_pin_axis",
+   "type": "concentric",
+   "a": "base",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     24.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "r": 4.0
+   },
+   "b": "pin",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "id": "m_pin_flush",
+   "type": "flush",
+   "a": "base",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     -20.0,
+     0,
+     24.0
+    ],
+    "v": [
+     -1,
+     0,
+     0
+    ]
+   },
+   "b": "pin",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "id": "m_arm_axis",
+   "type": "concentric",
+   "a": "base",
+   "ra": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     24.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ],
+    "r": 4.0
+   },
+   "b": "arm",
+   "rb": {
+    "kind": "axis",
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": "m_arm_gap",
+   "type": "distance",
+   "a": "base",
+   "ra": {
+    "kind": "plane",
+    "p": [
+     -12.0,
+     0,
+     24.0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   },
+   "b": "arm",
+   "rb": {
+    "kind": "plane",
+    "p": [
+     -11.0,
+     50.0,
+     0
+    ],
+    "v": [
+     -1,
+     0,
+     0
+    ]
+   },
+   "value": 1.0
+  }
+ ],
+ "joints": [
+  {
+   "id": "j_hinge",
+   "type": "revolute",
+   "name": "Hinge",
+   "p": [
+    0,
+    0,
+    24.0
+   ],
+   "dir": [
+    1,
+    0,
+    0
+   ],
+   "insts": [
+    "arm"
+   ],
+   "limits": [
+    -20.0,
+    200.0
+   ]
+  }
+ ],
+ "motion": [
+  {
+   "name": "within limits",
+   "driver": "j_hinge",
+   "start": -20.0,
+   "end": 200.0,
+   "steps": 22,
+   "collide": []
+  },
+  {
+   "name": "beyond limits",
+   "driver": "j_hinge",
+   "start": -40.0,
+   "end": 220.0,
+   "steps": 26,
+   "collide": [
+    -40.0,
+    -30.0,
+    210.0,
+    220.0
+   ]
+  }
+ ],
+ "expected": {
+  "dof": 2,
+  "interference": "none (contacts only)",
+  "thread_engagement": [],
+  "contacts": [
+   {
+    "a": "pin",
+    "b": "base",
+    "min_distance_mm": 0.0,
+    "why": "pin in the lug bores"
+   },
+   {
+    "a": "arm",
+    "b": "pin",
+    "min_distance_mm": 0.0,
+    "why": "arm bore on the pin"
+   },
+   {
+    "a": "arm",
+    "b": "base",
+    "min_distance_mm": 1.0,
+    "why": "side clearance between the arm and a lug: (24 − 22) / 2"
+   }
+  ],
+  "bom": [
+   {
+    "part": "FX-06 clevis base",
+    "qty": 1
+   },
+   {
+    "part": "Dowel pin Ø8×40",
+    "qty": 1
+   },
+   {
+    "part": "FX-06 arm",
+    "qty": 1
+   }
+  ],
+  "mass_g": 173.412977,
+  "com_mm": [
+   0.0,
+   19.513356,
+   15.650677
+  ]
+ }
+}
