@@ -1,11 +1,11 @@
 # Punch List
 
-Last updated: 2026-11-17 (Session 1n, product audit and fixes; see `docs/reports/AUDIT_2026-11-17.md`). Synchronized with `ROADMAP.md`.
+Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/plans/CHIEF_DESIGNER.md`).
 
 ## Legend
 
 - **Priority:** P0 = required for current milestone / blocks others · P1 = important, next milestone · P2 = later / opportunistic
-- **Status:** Backlog · Ready (deps met, can start) · In Progress · Blocked (reason in Notes) · Done (objective evidence required)
+- **Status:** Backlog · Ready (deps met, can start) · In Progress · Blocked (reason in Notes) · Done (objective evidence required) · Superseded (replaced by a later decision; reason in Notes)
 - **Scope:** MVP = part of M1 vertical slice · LT = long-term
 - **Owner:** Founder (product/commercial decisions, pilots) · Eng (implementation; Claude Code + founder review) · Counsel (legal)
 - **Definition of done (all items):** acceptance criteria met; evidence column links to test/artifact/commit/doc; docs updated; no unresolved P0 warnings. Engineering-related items additionally require explicit advice level (VALIDATION §4).
@@ -13,15 +13,16 @@ Last updated: 2026-11-17 (Session 1n, product audit and fixes; see `docs/reports
 
 ## Summary
 
-| Module | Items | Done | In Progress | Blocked |
-|---|---|---|---|---|
-| GOV / ARC / LEG / COM | 33 | 16 | 1 | 7 |
-| CAD / IO / PRN / DRW / ASM | 67 | 0 | 8 | 2 |
-| AGT / EVAL | 22 | 1 | 2 | 1 |
-| MFG / ENG | 24 | 0 | 0 | 0 |
-| MSH | 12 | 0 | 0 | 0 |
-| PLT / SEC / UX / INF / DOC | 39 | 1 | 4 | 1 |
-| **Total** | **212** | **38** | **33** | **11** |
+| Status | Items |
+|---|---|
+| Done | 164 |
+| In Progress | 23 |
+| Backlog | 77 |
+| Blocked | 11 |
+| Superseded | 8 |
+| **Total** | **283** |
+
+Recomputed 2026-11-18 after reconciling rows the Design Studio work had already delivered.
 
 Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboarding, tours, billing with tokens and add-ons, admin console, God mode) and the live **Design Studio** (AI agent, checks, live viewer, parameter edits, revisions). Other CAD modules are honest **Preview** placeholders (ADR-016). Per-module rows above are not re-split; the Total row is authoritative.
 
@@ -35,7 +36,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | GOV-002 | Governance | Create doc skeleton (7 docs) | P0 | Done | M0 | MVP | Eng | — | All 7 files exist and cross-reference | `docs/` | |
 | GOV-003 | Governance | Initial traceable punch list covering master prompt §2 | P0 | Done | M0 | MVP | Eng | GOV-002 | Every §2 bullet maps to ≥1 ID (see trace table at end) | This file §Trace | |
 | GOV-004 | Governance | Initialize git repo, `.gitignore`, commit docs | P0 | Done | M0 | MVP | Eng | approval | `git log` shows initial commit | `.git` + initial commit |  |
-| GOV-005 | Governance | Session start/end ritual (read punch list + log; update both) | P0 | In Progress | All | MVP | Eng | GOV-002 | Every session has a log entry with completed/blocked/next/decision | SESSION_LOG; `formwright-ship` skill | Ongoing |
+| GOV-005 | Governance | Session start/end ritual (read punch list + log; update both) | P0 | Done | All | MVP | Eng | GOV-002 | Every session has a log entry with completed/blocked/next/decision | CLAUDE.md start/end ritual + `formwright-ship` skill; SESSION_LOG entries (a)…(n) | Reconciled 2026-11-18 |
 | GOV-006 | Governance | Project Claude Code skills for repeatable workflows (ship, review, studio feature, kernel, toolbox, design agent, module graduation, e2e, dev setup) | P1 | Done | All | MVP | Eng | GOV-005 | Skills committed in repo; CLAUDE.md lists them | `.claude/skills/*/SKILL.md`; SESSION_LOG 2026-11-16 (i) | Skills encode recipes from code as of 74dfc5d; e2e template not yet executed (toolchain missing on new machine) |
 | ARC-001 | Architecture | Initial critical architecture recommendation | P0 | Done | M0 | MVP | Eng | GOV-001 | ARCHITECTURE §1 with stack, changes, risks, wedge | ARCHITECTURE.md | Draft; approval pending |
 | ARC-002 | Architecture | Approve wedge + direction (ADR-001/002/003) | P0 | Done | M0 | MVP | Founder | ARC-001 | ADRs marked Accepted | DECISIONS ADR-001/002/003/005 Accepted 2026-11-16 | Founder: "Go ahead" |
@@ -46,7 +47,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | ARC-007 | Architecture | Deployment comparison | P1 | Done | M0 | MVP | Eng | — | Staged plan | ARCHITECTURE §3.5 | |
 | ARC-008 | Architecture | Drawings/sketch/mates/history approach survey | P1 | Done | M0 | MVP | Eng | — | Table per area | ARCHITECTURE §3.6 | |
 | ARC-010 | Architecture | Geometry spike: uv venv Py3.12 + build123d; build FX-01 from hand-written code; STEP export/reimport; volume/bbox checks | P0 | Done | M0 | MVP | Eng | ARC-002 | FX-01 passes CHK-02..08; timings recorded | `tests/test_plate.py` (20 tests pass); `out/fx01_plate/status.json`: CHK-02..08 pass, vol rel err 5e-16, build+checks 0.5 s | Hand-written build123d, no DSL yet |
-| ARC-011 | Architecture | Part Spec DSL v0 schema design (features, params, IDs, selectors, assumptions, open questions) | P0 | Backlog | M0 | MVP | Eng | ARC-010 | JSON schema + 3 example specs validate; reviewed by founder | — | Deprioritised by ADR-013: DSL now optional (structured param editing / LLM-free regeneration) |
+| ARC-011 | Architecture | Part Spec DSL v0 schema design (features, params, IDs, selectors, assumptions, open questions) | P0 | Superseded | M0 | MVP | Eng | ARC-010 | JSON schema + 3 example specs validate; reviewed by founder | — | Superseded by ADR-013: the agent writes build123d directly; no Part Spec DSL |
 | ARC-012 | Architecture | Python 3.12 vs 3.13 wheel compatibility check | P2 | Done | M0 | MVP | Eng | ARC-010 | Decision recorded in ADR-005 | ADR-005: Py 3.12.13 chosen; 3.13 not tested | Revisit if a dependency requires 3.13 |
 | LEG-001 | Legal | Record licenses of direct deps (metadata) | P0 | Done | M0 | MVP | Eng | — | List with versions | SESSION_LOG §A; ARCHITECTURE §5 | Metadata only, not legal review |
 | LEG-002 | Legal | Transitive dependency license audit (pip-licenses or similar) + SBOM | P0 | Backlog | M0 | MVP | Eng | ARC-010 | Report of every package/license; copyleft flagged | — | |
@@ -70,30 +71,30 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| CAD-001 | CAD | Spec compiler: base block (box/extruded profile) | P0 | In Progress | M1 | MVP | Eng | ARC-011 | Unit tests: dims, volume exact | `src/aicad/parts/plate.py` (hand-coded) | Spec compiler not built yet |
-| CAD-002 | CAD | Holes: through/blind, clearance tables (ISO metric, UNC/UNF) | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Census check CHK-06 passes | Through holes in FX-01; CHK-06 census | Blind holes + clearance tables pending |
-| CAD-003 | CAD | Hole patterns (rect, circular, linear) | P0 | Backlog | M1 | MVP | Eng | CAD-002 | Count/positions within 0.01 mm | — | |
-| CAD-004 | CAD | Rectangular/rounded pockets (blind/through) | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Volume analytic match | Rounded blind pocket in FX-01; analytic volume match |  |
-| CAD-005 | CAD | Slots | P1 | Backlog | M1 | MVP | Eng | CAD-001 | Volume analytic match | — | |
-| CAD-006 | CAD | Edge fillets/chamfers via semantic edge selectors | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Valid solid; volume within 1 % | Top-perimeter chamfer via edge group selector | Fillets + semantic selectors pending |
-| CAD-007 | CAD | Semantic selectors & stable feature IDs (topological-naming mitigation) | P0 | Backlog | M1 | MVP | Eng | ARC-011 | Param change keeps selector → same logical faces (tests) | — | R-TEC-04 |
-| CAD-008 | CAD | Parameter table with ranges/units; derived params | P0 | Backlog | M1 | MVP | Eng | ARC-011 | Out-of-range rejected with typed error | — | |
-| CAD-009 | CAD | Deterministic regeneration + geometry fingerprint | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-08 passes | CHK-08: fingerprint + STEP bytes identical on rebuild | Not yet via spec compiler |
-| CAD-010 | CAD | Emit readable build123d source per spec (for transparency/export) | P1 | Backlog | M1 | MVP | Eng | CAD-001 | Running emitted source reproduces fingerprint | — | |
-| CAD-011 | CAD | Natural language → Part Spec (via AGT) with controllable dims & intent | P0 | Backlog | M1 | MVP | Eng | AGT-003 | Benchmark EVAL-003 pass-rate reported | — | §2.A bullet 1 |
-| CAD-012 | CAD | Conversational revisions: spec diffs, undo/redo, version list | P0 | In Progress | M1 | MVP | Eng | CAD-009 | Revision N reproducible; undo restores fingerprint | Conversational revisions + revision snapshots + restore + param edits | Undo/redo of single steps pending |
+| CAD-001 | CAD | Spec compiler: base block (box/extruded profile) | P0 | Superseded | M1 | MVP | Eng | ARC-011 | Unit tests: dims, volume exact | `src/aicad/parts/plate.py` (hand-coded) | Superseded by ADR-013 (no spec compiler); base bodies via agent, sketcher, Toolbox |
+| CAD-002 | CAD | Holes: through/blind, clearance tables (ISO metric, UNC/UNF) | P0 | Done | M1 | MVP | Eng | CAD-001 | Census check CHK-06 passes | Hole Wizard DS-033 (`src/aicad/holes.py`): ISO 273 clearance, tapped, counterbore, countersink, blind/through; `tests/test_studio_fixes.py`. Inch (UNC/UNF) series not yet | Reconciled 2026-11-18 |
+| CAD-003 | CAD | Hole patterns (rect, circular, linear) | P0 | Done | M1 | MVP | Eng | CAD-002 | Count/positions within 0.01 mm | Linear/circular hole patterns (DS-010, `fw._op` hole), pattern-any-feature (DS-024); grid/linear/circular recognised on imports (DS-019) | Reconciled 2026-11-18 |
+| CAD-004 | CAD | Rectangular/rounded pockets (blind/through) | P0 | Done | M1 | MVP | Eng | CAD-001 | Volume analytic match | Sketch cut on any planar face incl. rounded/arc profiles (DS-017); `tests/test_studio.py`::test_sketch_feature_with_hole_and_arc | Reconciled 2026-11-18 |
+| CAD-005 | CAD | Slots | P1 | Done | M1 | MVP | Eng | CAD-001 | Volume analytic match | Sketch slot tool (DS-026) + cut; analytic volume tests in `tests/test_studio.py` | Reconciled 2026-11-18 |
+| CAD-006 | CAD | Edge fillets/chamfers via semantic edge selectors | P0 | Done | M1 | MVP | Eng | CAD-001 | Valid solid; volume within 1 % | Fillet/chamfer on picked edges via location selectors `fw.edges_near` (exact one-edge picks, DS-031) | Reconciled 2026-11-18 |
+| CAD-007 | CAD | Semantic selectors & stable feature IDs (topological-naming mitigation) | P0 | In Progress | M1 | MVP | Eng | ARC-011 | Param change keeps selector → same logical faces (tests) | — | Location/surface-based selectors (`fw.edges_near`, `face_key`); mates follow dimension changes (ASM-014). Persistent IDs across topology changes not yet |
+| CAD-008 | CAD | Parameter table with ranges/units; derived params | P0 | Done | M1 | MVP | Eng | ARC-011 | Out-of-range rejected with typed error | PARAM_META ranges/units/groups, sliders, server-side limit enforcement (DS-006) | Reconciled 2026-11-18 |
+| CAD-009 | CAD | Deterministic regeneration + geometry fingerprint | P0 | Done | M1 | MVP | Eng | CAD-001 | CHK-08 passes | CHK-08 deterministic regeneration (fingerprint + byte-identical STEP, assemblies normalised); Toolbox determinism test | Reconciled 2026-11-18 |
+| CAD-010 | CAD | Emit readable build123d source per spec (for transparency/export) | P1 | Superseded | M1 | MVP | Eng | CAD-001 | Running emitted source reproduces fingerprint | — | Superseded by ADR-013: the model source IS readable build123d (Source panel) |
+| CAD-011 | CAD | Natural language → Part Spec (via AGT) with controllable dims & intent | P0 | Superseded | M1 | MVP | Eng | AGT-003 | Benchmark EVAL-003 pass-rate reported | — | Superseded by ADR-013: natural language → build123d via the design agent; quality tracked by EVAL-003 |
+| CAD-012 | CAD | Conversational revisions: spec diffs, undo/redo, version list | P0 | Done | M1 | MVP | Eng | CAD-009 | Revision N reproducible; undo restores fingerprint | Revisions, restore, undo last agent change, 3D compare (DS-007/011), change notice per revision (DS-029) | Reconciled 2026-11-18 |
 | CAD-020 | CAD | Vector-PDF drawing → spec (dimension text extraction, view association) | P1 | Done | M2 | LT | Eng | COM-001 | 10 original drawings: dims recovered, ambiguities flagged | Vector-PDF read (pdfminer.six, MIT): dimension grammar (Ø/R/M/±/fits/4X/THRU/angles), views by outline weight + labels, title-block scale/units, scale evidence check; `tests/test_image2cad.py` (65 tests; generated 1:2 sheet within 1 mm; Drawing Studio round trip); live: Formwright drawing of the mounting plate → model bbox 120.00 × 80.00 × 10.00 mm; docs/reports/image2cad.md | Image & Drawing to CAD Live 2026-11-17; page 1 only |
 | CAD-021 | CAD | Raster drawing → spec (OCR + vision), flag missing views/tolerances | P2 | Done | M2 | LT | Eng | CAD-020 | Ambiguity list on every run | Scans/photos read by one read-only agent vision turn returning fw-read JSON (confidence, location), re-parsed by the same grammar; unreadable areas and missing sizes become blocking questions | Vision positions approximate |
 | CAD-022 | CAD | Image/photo/sketch → spec with explicit missing-dimension questions | P1 | Done | M2 | LT | Eng | AGT-006 | Never invents scale; asks for ≥1 reference dim | Review screen 'What we read / What we need': scale Undefined until one real dimension is confirmed; Create disabled while anything is open; live sketch read kept scale Undefined (no model created) | PD-23 thresholds/limits |
-| CAD-023 | CAD | Additional part families: L-brackets/gussets (FX-02) | P1 | Backlog | M2 | LT | Eng | CAD-006 | FX-02 passes checks | — | |
-| CAD-024 | CAD | Revolved parts: shafts, steps, grooves, keyways (FX-03) | P1 | Backlog | M2 | LT | Eng | CAD-001 | FX-03 passes checks | — | |
-| CAD-025 | CAD | Shells, bosses, ribs, draft (enclosures, FX-04) | P2 | Backlog | M2 | LT | Eng | CAD-006 | FX-04 passes checks | — | |
+| CAD-023 | CAD | Additional part families: L-brackets/gussets (FX-02) | P1 | Done | M2 | LT | Eng | CAD-006 | FX-02 passes checks | L-bracket template + Toolbox `l_bracket` generator (`tests/test_library.py`) | Reconciled 2026-11-18 |
+| CAD-024 | CAD | Revolved parts: shafts, steps, grooves, keyways (FX-03) | P1 | Done | M2 | LT | Eng | CAD-001 | FX-03 passes checks | Revolve (DS-024) + Toolbox shaft with DIN 6885 keyway (`tests/test_library.py`) | Reconciled 2026-11-18 |
+| CAD-025 | CAD | Shells, bosses, ribs, draft (enclosures, FX-04) | P2 | Done | M2 | LT | Eng | CAD-006 | FX-04 passes checks | Shell (DS-023), draft + rib (DS-026), bosses via sketch boss (DS-017) | Reconciled 2026-11-18 |
 | CAD-026 | CAD | Sheet metal features (flange, bend, flat pattern) | P2 | Backlog | M4 | LT | Eng | CAD-001 | Flat pattern length within K-factor tolerance | — | |
 | CAD-027 | CAD | Cosmetic threads + thread callouts | P1 | Backlog | M2 | LT | Eng | CAD-002 | Thread metadata in STEP/drawing | — | Modelled threads later |
 | CAD-028 | CAD | Approval gate: interpreted requirements echo-back before build | P0 | Backlog | M1 | MVP | Eng | AGT-003 | User sees assumptions; can edit before build | — | R-TEC-01 |
-| CAD-030 | CAD | STEP import as reference geometry (clearly labelled non-parametric) | P1 | Backlog | M2 | LT | Eng | IO-005 | Imported solids marked "dumb solid" in UI and metadata | — | Honesty requirement |
-| CAD-060 | CAD | Sketch entities + constraint solver evaluation (planegcs, SolveSpace, own) | P2 | Backlog | M5 | LT | Eng | LEG-004 | ADR with license-cleared choice | — | |
-| CAD-061 | CAD | Feature tree UI-backed native history (edit any feature, regenerate) | P2 | Backlog | M5 | LT | Eng | CAD-007 | Edit mid-tree → valid regeneration in tests | — | §2.A bullet 7 |
+| CAD-030 | CAD | STEP import as reference geometry (clearly labelled non-parametric) | P1 | Done | M2 | LT | Eng | IO-005 | Imported solids marked "dumb solid" in UI and metadata | STEP import as exact 'Imported blank' + recognised features (DS-018/019) | Reconciled 2026-11-18 |
+| CAD-060 | CAD | Sketch entities + constraint solver evaluation (planegcs, SolveSpace, own) | P2 | Done | M5 | LT | Eng | LEG-004 | ADR with license-cleared choice | Decision: in-house Levenberg–Marquardt solver (`web/src/sketch/model.ts`, no GPL dependency); DS-017/026 + vitest | Reconciled 2026-11-18 |
+| CAD-061 | CAD | Feature tree UI-backed native history (edit any feature, regenerate) | P2 | Done | M5 | LT | Eng | CAD-007 | Edit mid-tree → valid regeneration in tests | Manual features edit/suppress/reorder/delete with regeneration (DS-010c); agent features suppress/delete (DS-027); `tests/test_studio.py`::test_manual_feature_lifecycle | Reconciled 2026-11-18 |
 | CAD-062 | CAD | Feature graph revision model (branching, compare) | P2 | Backlog | M5 | LT | Eng | CAD-012 | Diff two revisions visually + structurally | — | |
 | CAD-070 | CAD | SOLIDWORKS export pathway via STEP with explicit disclosure (no native history) | P1 | Backlog | M2 | LT | Eng | IO-001 | Disclosure text in UI and docs; SW 2025 opens file | — | §2.A bullet 9 |
 | CAD-071 | CAD | SOLIDWORKS API bridge spike (feature recreation from spec) | P2 | Blocked | M3 | LT | Eng | LEG-006 | Spike report: feasibility, licensing, deployment | — | Blocked on API/EULA review |
@@ -107,7 +108,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | IO-002 | IO | STL export with tolerance control | P0 | Done | M1 | MVP | Eng | CAD-001 | Watertight mesh; deviation ≤ tol | Absolute 0.01 mm chordal deviation (`runner.export_stl_abs`; build123d's tolerance is relative: R100 cylinder sag 0.031 → 0.005 mm); `tests/test_agent.py`::test_stl_export_deviation_is_absolute; PP-17 re-reads part.stl | Found by the 3D Print Prep agent |
 | IO-003 | IO | GLB export for web viewer | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Loads in Three.js; scale correct | `model.glb` loads in Three.js viewer (screenshot, session log) | Unit scale inferred in viewer; explicit check pending |
 | IO-004 | IO | 3MF export | P1 | Done | M2 | LT | Eng | IO-002 | Opens in a slicer; units preserved | 3MF with unit=millimeter, byte-identical rewrite, read-back volume match rel 1e-5 (`tests/test_print.py`) | Via 3D Print Prep exports; Studio also writes part.3mf |
-| IO-005 | IO | STEP import + validation (size limits, isolated parse) | P1 | Backlog | M2 | LT | Eng | SEC-005 | Malformed files rejected safely | — | |
+| IO-005 | IO | STEP import + validation (size limits, isolated parse) | P1 | Done | M2 | LT | Eng | SEC-005 | Malformed files rejected safely | Import: ISO-10303-21 sniff, 50 MB cap, parse in the worker subprocess; malformed file → 415 (`tests/test_library.py`) | Reconciled 2026-11-18 |
 | IO-006 | IO | Assembly STEP export (hierarchy, placements) | P1 | Done | M3 | LT | Eng | ASM-001 | Reimport preserves tree & transforms | Assembly STEP with sub-assemblies per fastener stack; reimport 18/18 instances, 4 groups, placement deviation 0 |  |
 | IO-007 | IO | DXF export of drawings/flat patterns | P2 | Done | M2 | LT | Eng | DRW-001 | Opens in CAD; scale 1:1 | DXF 1:1 via build123d ExportDXF (ezdxf, MIT) with layers | DXF dims are lines+text, not associative; DXF bytes not deterministic |
 | IO-008 | IO | Coordinate system + unit preservation tests across all formats | P0 | Backlog | M1 | MVP | Eng | IO-001 | Round-trip test matrix green | — | |
@@ -154,7 +155,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | ASM-007 | Assembly | Exploded views | P2 | Done | M3 | LT | Eng | ASM-002 | Render + drawing view | Explode along the mate tree (walkthrough at 70 %) |  |
 | ASM-008 | Assembly | BOM generation (qty, material, standard parts) | P1 | Done | M3 | LT | Eng | ASM-001 | BOM matches tree | BOM qty/material/mass/standard (plate 1, block 1, M6×25 ×4, washer ×8, nut ×4; 355.92 g); CSV | Masses at nominal density, verify |
 | ASM-009 | Assembly | Standard fastener library (original/licensed data) | P1 | In Progress | M3 | LT | Eng | CAD-027 | Dims match cited standard tables | Toolbox ISO fasteners used in assemblies (M3–M24 coarse) | Fine threads, other heads not yet |
-| ASM-010 | Assembly | AI assembly planning from description | P2 | Backlog | M3 | LT | Eng | ASM-003, AGT-003 | FX-05 from text | — | |
+| ASM-010 | Assembly | AI assembly planning from description | P1 | Backlog | M3 | LT | Eng | ASM-003, AGT-003 | FX-05 from text | — | |
 | ASM-011 | Assembly | Motion range check / simple kinematics | P2 | Backlog | M5 | LT | Eng | ASM-006 | Range-of-motion collision sweep | — | |
 | ASM-012 | Assembly | Golden fixtures FX-04/05/06 (original designs) | P1 | Backlog | M3 | LT | Eng | ASM-001 | Fixtures with provenance + checks | — | |
 | ASM-013 | Assembly | **Fastener auto-fit**: pick a hole pattern; grip measured by ray probes through mated parts; ISO 273 size, ISO 888 length after grip + washers + nut + 2·pitch (or engagement for tapped joints); to-scale joint section; inserts one stack per hole, mated | P1 | Done | M3 | LT | Eng | ASM-003 | Length rule on hand cases | `tests/test_assembly.py` (5 through + 2 tapped cases); walkthrough: 4 × M6×25, grip 10, min 20.4 → 25 | Rule shown with VERIFY |
@@ -170,11 +171,11 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | AGT-001 | Agent | LLMProvider interface (structured output, vision, metering) | P0 | Backlog | M1 | MVP | Eng | ARC-011 | Typed interface + tests | — | ADR-009 |
 | AGT-002 | Agent | Recorded/replay provider for CI (zero paid calls) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | CI passes offline | — | |
-| AGT-003 | Agent | Requirement interpretation → Part Spec + assumptions + open questions | P0 | Backlog | M1 | MVP | Eng | AGT-001 | Schema-valid output on benchmark prompts | — | |
-| AGT-004 | Agent | Generate–check–render–critique–revise loop (shared orchestrator) | P0 | In Progress | M1 | MVP | Eng | AGT-003, EVAL-001 | Bounded; stops on criteria/limits; all artifacts saved | `aicad studio`: agent writes model.py → build_model → checks + render → revise; SESSION_LOG 2026-11-16 (c) e2e L-bracket | Loop owned by Agent SDK (ADR-013); stop = agent judgement + max_turns 80 |
+| AGT-003 | Agent | Requirement interpretation → Part Spec + assumptions + open questions | P0 | Superseded | M1 | MVP | Eng | AGT-001 | Schema-valid output on benchmark prompts | — | Superseded by ADR-013: interpretation + assumptions + choice questions by the agent (DS-022); approval gate stays as CAD-028 |
+| AGT-004 | Agent | Generate–check–render–critique–revise loop (shared orchestrator) | P0 | Done | M1 | MVP | Eng | AGT-003, EVAL-001 | Bounded; stops on criteria/limits; all artifacts saved | Loop run by the Agent SDK (ADR-013): generate → build → checks → render → revise, bounded by max_turns | Reconciled 2026-11-18 |
 | AGT-005 | Agent | Domain validator plug-in interface (CAD now, mesh later) | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CAD validators registered via interface | `src/aicad/agent/tools.py` build_model MCP tool; checks provider-neutral | Mesh validators later |
 | AGT-006 | Agent | Vision critique: observed vs uncertain findings, structured | P1 | In Progress | M1 | MVP | Eng | UX-003 | Structured output; never overrides gates | build_model returns 4-view PNG to agent (`agent/render.py`) | Critique is the agent's own; no structured findings schema yet |
-| AGT-007 | Agent | Revision on spec (not exported file) | P0 | In Progress | M1 | MVP | Eng | AGT-004 | Revisions are spec diffs | Agent revises model.py source, never the STEP |  |
+| AGT-007 | Agent | Revision on spec (not exported file) | P0 | Superseded | M1 | MVP | Eng | AGT-004 | Revisions are spec diffs | Agent revises model.py source, never the STEP | Superseded by ADR-013: revisions are model-source snapshots with parameter diffs (CAD-012) |
 | AGT-008 | Agent | Iteration/time/cost caps + human-approval stop | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CHK-14 enforced | max_turns=80, 180 s build timeout, Stop button (interrupt) | No per-session cost cap under subscription auth |
 | AGT-009 | Agent | Run record: prompts (policy-permitting), model IDs, versions, costs, timings | P0 | Backlog | M1 | MVP | Eng | AGT-001 | `run.json` complete | — | |
 | AGT-010 | Agent | Live Claude provider | P0 | In Progress | M1 | MVP | Eng | AGT-001, LEG-005 | Live benchmark run completes | Agent SDK 0.2.182 on claude-opus-5-5 via subscription login (dev); `--api-key` flag for API billing | Dev auth only (R-LIC-05) |
@@ -236,6 +237,30 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DS-033 | Studio | **Fastener-aware Hole Wizard**: clearance / tapped / counterbore / countersink from cited tables (ISO 273, DIN 974-1, ISO 10642, ISO 7089), placed by distance from face edges, edge-distance (1.5 d) and washer checks before OK, holes follow the face on resize | P1 | Done | M2 | LT | Eng | DS-031 | C'bore/c'sink volumes equal analytic values; 4 x M6 by edge distance | `tests/test_studio_fixes.py`; walkthrough 58631.52 mm3 | Depth and tap drill values flagged verify |
 | DS-034 | Studio | **Typed commands without tokens** (Ctrl+K in the Studio): `fillet 3`, `hole M6 x4 10 from edges`, `view top`, `suppress <feature>` on the current selection | P2 | Done | M2 | LT | Eng | DS-031 | Commands parse and run deterministically | `web/src/pages/app/studio/commands.test.ts` | |
 | DS-035 | Studio | **Agent fills the PropertyManager** (audit IDEA 2): small edits open the real PM pre-filled for OK instead of writing code | P2 | Backlog | M3 | LT | Eng | DS-031 | Small edit in seconds, few tokens | | From the audit |
+
+### Design Office — Chief Designer and specialist agents (founder-requested 2026-11-18)
+
+Plan: `docs/plans/CHIEF_DESIGNER.md`.
+
+| ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| ASM-019 | Assembly | **Auto-pick components**: describe what you need ('4 M6 bolts', 'a 6204 bearing', 'the motor bracket') → Libby picks Toolbox generators or your own company parts (similarity search) and Ada inserts + mates them | P1 | Backlog | M4 | LT | Eng | ASM-010 | Correct component chosen on a fixture set; inserted and mated with 0 interference | — | Founder request 2026-11-18 |
+| CD-001 | Design Office | Program data model: brief, skeleton, ICD, item tree (sub-assemblies/parts), tickets, events, budget; tickets own Studio projects / Assembly docs | P1 | Backlog | M4 | LT | Eng | ASM-010 | Program persists and reloads; every artefact is a normal project/assembly | — | Plan: docs/plans/CHIEF_DESIGNER.md |
+| CD-002 | Design Office | Atlas (Chief Designer) agent: brief → decomposition → tickets with estimates; brief approval gate (closes CAD-028) | P1 | Backlog | M4 | LT | Eng | CD-001 | Benchmark briefs decompose into sensible trees; user approves/edits before work starts | — |  |
+| CD-003 | Design Office | Program board (Jira-style): columns, swimlanes per sub-assembly, live cards (SSE), agent avatars, estimate/progress bars | P1 | Backlog | M4 | LT | Eng | CD-001 | Cards move live during a run | — |  |
+| CD-004 | Design Office | Estimates + milestone progress + effort-weighted roll-up to sub-assembly and program; ETA ranges | P1 | Backlog | M4 | LT | Eng | CD-003 | Roll-up equals hand calculation on a fixture program | — |  |
+| CD-005 | Design Office | Office home + team roster (named specialist agents, status, utilisation) + reviews inbox | P1 | Backlog | M4 | LT | Eng | CD-003 |  | — | PD-35 |
+| CD-006 | Design Office | Orchestrator: concurrency cap, critical-path priority, cancellation/retry, budget stops | P1 | Backlog | M4 | LT | Eng | CD-002 | N agents never exceeded; budget stop halts new work | — | PD-36 |
+| CD-007 | Design Office | Specialist part agents (Mira, Theo, Gale, Polly; Sheila after CAD-026) working tickets in their Studio projects | P1 | Backlog | M4 | LT | Eng | CD-006 | Tickets complete with gating checks passing | — |  |
+| CD-008 | Design Office | Vera (Checker): independent review, send-back with findings; no self-approval | P1 | Backlog | M4 | LT | Eng | CD-007 | Seeded defects are sent back | — |  |
+| CD-009 | Design Office | Ticket comments reach the working agent; reprioritise/reassign/reopen; take over by hand | P1 | Backlog | M4 | LT | Eng | CD-006 |  | — |  |
+| CD-010 | Design Office | Skeleton + ICD (named interfaces with numbers); ICD page; ICD conformance measurement (deterministic) | P1 | Backlog | M4 | LT | Eng | CD-002 | Interface features measured equal to ICD within tolerance | — |  |
+| CD-011 | Design Office | Placeholder bodies with named interface features; Ada mates placeholders by ICD name; swap in real part on Done | P1 | Backlog | M4 | LT | Eng | CD-010, ASM-010 | Swap-in keeps every mate; interference re-run | — |  |
+| CD-012 | Design Office | Engineering change requests for interface changes (Atlas decides, affected tickets reopened) | P1 | Backlog | M4 | LT | Eng | CD-010 |  | — | PD-37 |
+| CD-013 | Design Office | Live program assembly view (placeholders translucent → solid as parts arrive) | P1 | Backlog | M4 | LT | Eng | CD-011 |  | — |  |
+| CD-014 | Design Office | Program deliverables: drawings (Drew), DFM (Forge), BOM, release pack | P2 | Backlog | M4 | LT | Eng | CD-011 |  | — |  |
+| CD-015 | Design Office | Estimate calibration from completed tickets; timeline (Gantt-lite) | P2 | Backlog | M4 | LT | Eng | CD-004 | Estimate error shrinks across runs | — |  |
+| CD-016 | Design Office | Program token budget per ticket/program with 80 %/100 % stops and spend on cards | P1 | Backlog | M4 | LT | Eng | CD-006 |  | — | PD-36 |
 
 ## B. AI Manufacturing Advisor
 
@@ -306,7 +331,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | PLT-008 | Platform | Consent-gated dataset collection | P2 | Backlog | M2 | LT | Eng | LEG-008 | No data stored without consent flag | — | |
 | PLT-009 | Platform | Usage controls per tenant | P2 | In Progress | M4 | LT | Eng | PLT-004 | Caps enforced | Token preflight, plan/trial gating, seat limits | Per-tenant spend caps pending |
 | PLT-010 | Platform | Collaboration foundations (sharing, comments) | P2 | Backlog | M4 | LT | Eng | PLT-004 | | — | |
-| PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | In Progress | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | STEP/STL downloads per project | Zip bundle pending |
+| PLT-011 | Platform | Export bundle (zip of all artifacts + report) | P0 | Done | M1 | MVP | Eng | PLT-002 | Bundle reproduces run | Hand-off pack `handoff.zip` and frozen release packs (`tests/test_handoff.py`, `tests/test_release.py`) | Reconciled 2026-11-18 |
 | PLT-012 | Platform | **Find similar parts** (O-1): orientation-free shape signatures; similar-part ranking with reasons; search by size (`120x80x10`, `Ø50 x 200`) in Projects; Studio Library → Similar Parts | P1 | Done | M2 | LT | Eng | — | Identical part 100 %, scaled family recognised, unrelated parts ranked low | `tests/test_search.py`; walkthrough SESSION_LOG (k): flange copy 100 %, pipe flange 79 %, DN150 'Same shape, scaled ×1.50' 48 % | Research: ~12 h/week spent finding existing models |
 | PLT-013 | Platform | **Shop handoff pack** (O-4): one zip per revision with STEP/STL/3MF, current drawing (PDF/DXF/SVG), DFM report, change notice, README and SHA-256 manifest; stale outputs left out unless asked; missing ones listed with where to make them | P1 | Done | M2 | LT | Eng | PLT-011 | Manifest hashes match; stale drawing excluded | `tests/test_handoff.py`; walkthrough SESSION_LOG (l): Flange DN100 rev 4 pack 182 KB | Supersedes PLT-011's zip bundle |
 | PLT-014 | Platform | **Audit fixes (PLT-01..34)**: honest landing (no internals, no "manufacturable"), copy matches all-Live modules, add-on taglines, plan badge, trial access to every Live module, 24 h email grace + one-screen onboarding, "Next for this part" card, proration preview + extra seat, team confirmations, project rename/duplicate/sort, notifications (run finished, revision by others, module jobs), in-shell 404, page titles/OG, phone layout, admin unit-economics | P0 | Done | M2 | MVP | Eng | | New user reaches a first part with an honest cost | `tests/test_platform.py`; `docs/reports/audit/platform-fixes.md` | Partly PLT-29 (size reason in mm), PLT-34 (no +-10 % toggle) |
@@ -322,11 +347,11 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | SEC-007 | Security | Data classification at upload + "no third-party AI" mode | P1 | Backlog | M2 | LT | Eng | LEG-009 | Classified data never reaches provider (test) | — | R-SEC-04 |
 | SEC-008 | Security | Threat model document | P1 | Backlog | M2 | LT | Eng | ARC-002 | STRIDE-style doc reviewed | — | |
 | SEC-009 | Security | Dependency vulnerability scanning in CI | P1 | Backlog | M1 | MVP | Eng | INF-003 | CI job runs pip-audit/npm audit | — | |
-| UX-001 | UX | CLI: `make`, `edit-param`, `revise`, `export` | P0 | Backlog | M1 | MVP | Eng | AGT-004 | End-to-end demo via CLI | — | M1a |
+| UX-001 | UX | CLI: `make`, `edit-param`, `revise`, `export` | P0 | Superseded | M1 | MVP | Eng | AGT-004 | End-to-end demo via CLI | — | Superseded: the web app is the product surface; `aicad` CLI kept for dev (`app`, `studio`) |
 | UX-002 | UX | Minimal web UI: prompt, assumptions approval, params panel, downloads | P0 | Done | M1 | MVP | Eng | INF-004 | VS-1 demo in browser | Full React app: marketing, auth, onboarding, dashboard, studio, modules, billing, team, settings, help, admin; E2E browser walk-through, SESSION_LOG (d) |  |
 | UX-003 | UX | Offscreen renderer (fixed cameras) | P0 | In Progress | M1 | MVP | Eng | CAD-001 | CHK-10 passes | `agent/render.py` VTK offscreen 2×2 views | CHK-10 automatic render check pending |
-| UX-004 | UX | Three.js viewer: orbit, part tree, selection, measure | P1 | In Progress | M1 | MVP | Eng | IO-003 | Measured dims match spec | React Viewer3D (orbit, 4 views, edges, wireframe, section, measure) | Part tree for assemblies pending |
-| UX-005 | UX | Feature tree + parameter editing UI | P1 | In Progress | M2 | LT | Eng | UX-004 | Edit → regenerate | Params tab: deterministic edit + rebuild, no AI/tokens; `tests/test_platform.py`::test_param_edit_* | Only simple numeric top-level assignments |
+| UX-004 | UX | Three.js viewer: orbit, part tree, selection, measure | P1 | Done | M1 | MVP | Eng | IO-003 | Measured dims match spec | B-rep viewer (DS-001…013); assembly part tree in Assembly Studio (ASM-001) | Reconciled 2026-11-18 |
+| UX-005 | UX | Feature tree + parameter editing UI | P1 | Done | M2 | LT | Eng | UX-004 | Edit → regenerate | Feature tree + Params panel (DS-006/008/010); typed commands (DS-034) | Reconciled 2026-11-18 |
 | UX-006 | UX | Revision history / compare UI | P2 | Done | M2 | LT | Eng | CAD-012 | | Revisions tab with restore (deterministic rebuild) | Visual diff pending |
 | UX-007 | UX | Clear capability labels (implemented/prototype/inferred/not approved) | P0 | Done | M1 | MVP | Eng | — | Labels on every output | Live/Preview badges, SAMPLE labels, NOT APPROVED banner, simulated-payment banners |  |
 | UX-008 | UX | Live local viewer: auto-reload on spec save, mesh from re-imported STEP, checks panel | P0 | Done | M0 | MVP | Eng | ARC-010 | Save spec → viewer shows new geometry + checks within ~1 s; only allow-listed files served | `aicad live`; headless-Chrome screenshots 120→150 mm rebuild (SESSION_LOG 2026-11-16 b); `tests/test_viewer.py` | Founder request; ADR-012. Three.js from CDN: vendor before offline use |
@@ -351,7 +376,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | INF-009 | Infra | Distributed rate limiting + session cleanup job | P1 | Backlog | M2 | LT | Eng | INF-006 | | — | Current limiter is in-process |
 | DOC-001 | Docs | Known limitations doc (single-view ambiguity, sign-off, no native history) | P0 | Backlog | M1 | MVP | Eng | — | Doc published in repo/UI | — | |
 | DOC-002 | Docs | Developer README (setup, run, test) | P0 | In Progress | M1 | MVP | Eng | INF-001 | New machine setup succeeds | `README.md` | Fresh-machine test pending |
-| DOC-003 | Docs | Part Spec DSL reference | P1 | Backlog | M1 | MVP | Eng | ARC-011 | Every op documented with example | — | |
+| DOC-003 | Docs | Part Spec DSL reference | P1 | Superseded | M1 | MVP | Eng | ARC-011 | Every op documented with example | — | Superseded by ADR-013 (no DSL); helper library documented in `src/aicad/fw.py` and the design-agent skill |
 | DOC-004 | Docs | Legal checklist draft (IP, confidentiality, TM, privacy, retention, export control) | P1 | Backlog | M1 | MVP | Eng | — | Draft for counsel; marked "not legal advice" | — | Feeds LEG-007..009 |
 
 ---

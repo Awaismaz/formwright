@@ -4,6 +4,25 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (o) — Punch list reconciliation; Design Office (Chief Designer) plan
+
+### Done
+- Reconciled the punch list against the code: 20 rows the Studio work had already delivered closed with evidence
+  (holes/patterns, pockets, slots, fillets, params, determinism, revisions, brackets, revolve, shell/rib/draft, STEP
+  import, sketch solver, feature history, viewer, tree, hand-off pack, agent loop); 8 Part-Spec-DSL rows marked
+  **Superseded** by ADR-013; CAD-007 moved to In Progress. New status "Superseded" in the legend.
+- Founder asked for AI assembly with automatic Toolbox / own-part picking and a Chief Designer that runs named
+  specialist agents in parallel with a Jira-style board and rolled-up progress. Refined plan written:
+  `docs/plans/CHIEF_DESIGNER.md` (interfaces-first skeleton + ICD, proxy bodies so assembly runs in parallel,
+  change requests, reuse-before-design, critical-path priority, milestone-based progress, independent Checker,
+  user as engineering manager, 11 named agents). Punch list: ASM-019, CD-001…CD-016; ASM-010 raised to P1.
+
+### Decisions parked
+PD-35 agent names, PD-36 concurrency/budget defaults, PD-37 mandatory gates.
+
+### Next
+Phase 1 of the plan: ASM-010 + ASM-019 (assembly from a description with automatic component picking).
+
 ## 2026-11-17 (n): Ruthless product audit, then fixes across every area
 
 ### Done
