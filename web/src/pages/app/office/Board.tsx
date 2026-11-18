@@ -79,6 +79,8 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
             <span className="whitespace-nowrap font-mono">{t.key}</span>
             {t.kind === "standard" && <Tip content="Standard part: Hex picks it from the Toolbox"><Library className="h-3 w-3" /></Tip>}
             {t.kind === "integration" && <Tip content="Assembly integration"><Puzzle className="h-3 w-3" /></Tip>}
+            {t.kind === "deliverable" && <Tip content={t.deliverable === "dfm" ? "Program deliverable: Smithy's manufacturing review" : "Program deliverable: Ortho's drawings and the assembly BOM"}>
+              <span className="rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success">deliverable</span></Tip>}
             {t.qty > 1 && <span>×{t.qty}</span>}
             {t.priority === "high" && <Tip content="High priority"><ArrowUp className="h-3 w-3 text-danger" /></Tip>}
             {t.fitted ? <Tip content={`Interfaces conform to ICD v${t.icd_check?.version ?? ""}; swapped into the program assembly in place of its placeholder`}>

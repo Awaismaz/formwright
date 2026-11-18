@@ -41,6 +41,9 @@ export function useProgramEvents(pid: string | undefined) {
       timer.current = setTimeout(() => {
         qc.invalidateQueries({ queryKey: ["office-program", pid] });
         qc.invalidateQueries({ queryKey: ["office-activity", pid] });
+        qc.invalidateQueries({ queryKey: ["office-timeline", pid] });
+        qc.invalidateQueries({ queryKey: ["office-deliverables", pid] });
+        if (e.type === "estimate.calibrated") qc.invalidateQueries({ queryKey: ["office-calibration"] });
         qc.invalidateQueries({ queryKey: ["office-home"] });
       }, 120);
     };

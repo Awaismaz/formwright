@@ -23,12 +23,13 @@ export default function NewProgram() {
   const [brief, setBrief] = useState("");
   const [planner, setPlanner] = useState<"archie" | "standard">("archie");
   const [concurrency, setConcurrency] = useState(3);
+  const [deliverables, setDeliverables] = useState(true);
   const [budget, setBudget] = useState(3000);
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
     try {
-      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: budget });
+      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: budget, deliverables });
       qc.invalidateQueries({ queryKey: ["office-home"] });
       nav(`/app/office/programs/${p.id}`);
     } catch (e) {
@@ -71,7 +72,7 @@ export default function NewProgram() {
             </div>
           </div>
           <details className="rounded-lg border border-border px-3 py-2 text-[13px]">
-            <summary className="cursor-pointer select-none font-medium">Concurrency and budget</summary>
+            <summary className="cursor-pointer select-none font-medium">Concurrency, budget and deliverables</summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Field label="Agents in parallel" hint="Used for ETA ranges now, and as the cap when auto-run arrives.">
                 <Input type="number" min={1} max={12} value={concurrency} onChange={e => setConcurrency(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} />
@@ -80,6 +81,8 @@ export default function NewProgram() {
                 <Input type="number" min={0} step={100} value={budget} onChange={e => setBudget(Math.max(0, Number(e.target.value) || 0))} />
               </Field>
             </div>
+            <label className="mt-3 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={deliverables} onChange={e => setDeliverables(e.target.checked)} />
+              <span>After integration, Ortho draws every part and the assembly with its BOM, and Smithy reviews every part for manufacture (no tokens).</span></label>
           </details>
           <div className="flex justify-end gap-2 border-t border-border pt-4">
             <Button variant="secondary" onClick={() => nav("/app/office")}>Cancel</Button>

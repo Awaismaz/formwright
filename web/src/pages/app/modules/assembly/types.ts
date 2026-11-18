@@ -89,6 +89,8 @@ export interface AsmView {
   home_project: { id: string; name: string } | null;
   instances: Instance[]; parts: Record<string, PartView>; mates: Mate[]; groups: Group[]; solve: Solve | null;
   subassemblies?: SubAsm[]; office?: { program: string; level: string } | null;
+  /** The Design Office holds this document's lock right now (shared with hand edits: they wait for it). */
+  office_busy?: boolean;
   explode: Record<string, V3>; analysis: Analysis | null; export: ExportInfo | null; bom: Bom; can_edit: boolean; thumb_rev: number | null;
   result?: Record<string, unknown>;
 }

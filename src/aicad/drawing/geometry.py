@@ -382,6 +382,10 @@ def census(shape: Any) -> dict[str, Any]:
                         "open": 0 if thru else (-1 if not ends[0] else 1)})
             holes.append(rec)
     chamfers.sort(key=lambda c: (c["edge"], c["legs"], c["mid"]))
+    # a faceted curved profile (an involute gear flank, a polyline cam) reads as dozens of "chamfers" of different
+    # sizes; real edge breaks come in a few sizes. More than 6 sizes: none of them is dimensioned as a chamfer.
+    if len({tuple(round(x, 2) for x in c["legs"]) for c in chamfers}) > 6:
+        chamfers = []
     return {"bbox": bb, "holes": holes, "outer": outer, "unsupported_holes": unsupported,
             "levels": {a: sorted(v) for a, v in levels.items()}, "arcs": arcs, "chamfers": chamfers}
 
@@ -396,7 +400,8 @@ def _chamfer(face: Any, n: Vec) -> dict[str, Any] | None:
     b = face.bounding_box(optimal=True)
     ext = [b.max.X - b.min.X, b.max.Y - b.min.Y, b.max.Z - b.min.Z]
     legs = [r6(ext[i]) for i in range(3) if i != e]
-    if min(legs) <= 1e-6 or max(legs) > 25.0 or ext[e] < 2 * max(legs):  # a sloped wall, not an edge break
+    # a sloped wall is not an edge break; a leg under 0.1 mm is a facet of a curved profile (an involute flank)
+    if min(legs) < 0.1 or max(legs) > 25.0 or ext[e] < 2 * max(legs):
         return None
     c = b.center()
     names = ["x", "y", "z"]

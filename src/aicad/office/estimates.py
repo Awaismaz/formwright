@@ -41,6 +41,8 @@ MINUTES_PER_UNIT: dict[str, float] = {
     "plastic": 5.0,      # shells, bosses, ribs, draft
     "standard": 0.5,     # Toolbox lookup: deterministic, almost free
     "integration": 3.0,  # place, mate and interference-check one assembly level
+    "drawings": 0.5,     # Ortho: deterministic sheets (per complexity unit = about two parts)
+    "dfm": 0.5,          # Smithy: deterministic DFM screening (per complexity unit = about two parts)
 }
 COMPLEXITY_MIN, COMPLEXITY_MAX = 1, 5
 DEFAULT_CONCURRENCY = 3  # PD-36
@@ -67,8 +69,11 @@ def clamp_complexity(v: Any) -> int:
     return max(COMPLEXITY_MIN, min(COMPLEXITY_MAX, c))
 
 
-def estimate_minutes(family: str, complexity: int) -> float:
-    return round(clamp_complexity(complexity) * MINUTES_PER_UNIT.get(family, MINUTES_PER_UNIT["machined"]), 1)
+def estimate_minutes(family: str, complexity: int, rates: dict[str, float] | None = None) -> float:
+    """complexity x minutes per unit (the calibrated ``rates`` when given, else the starting constants)."""
+    r = rates or MINUTES_PER_UNIT
+    rate = r.get(family, MINUTES_PER_UNIT.get(family, MINUTES_PER_UNIT["machined"]))
+    return round(clamp_complexity(complexity) * float(rate), 2)
 
 
 def integration_complexity(children: int) -> int:
@@ -149,8 +154,8 @@ def eta(items: list[dict[str, Any]], tickets: list[dict[str, Any]], item_id: str
             "high_min": round(ETA_HIGH_FACTOR * (cp + w / n), 1)}
 
 
-def constants() -> dict[str, Any]:
+def constants(rates: dict[str, float] | None = None) -> dict[str, Any]:
     """What the client needs to preview estimates while the user edits a plan (same numbers as the server)."""
-    return {"minutes_per_unit": MINUTES_PER_UNIT, "complexity": [COMPLEXITY_MIN, COMPLEXITY_MAX],
+    return {"minutes_per_unit": {**MINUTES_PER_UNIT, **(rates or {})}, "complexity": [COMPLEXITY_MIN, COMPLEXITY_MAX],
             "milestones": [{"code": c, "label": lbl, "weight": w} for c, lbl, w in MILESTONES],
             "default_concurrency": DEFAULT_CONCURRENCY, "eta_factors": [ETA_LOW_FACTOR, ETA_HIGH_FACTOR]}

@@ -11,9 +11,11 @@ import { STATUS_LABEL } from "./Home";
 import { BASE, useProgram, useProgramEvents } from "./api";
 import AssemblyView from "./AssemblyView";
 import Board from "./Board";
+import Deliverables from "./Deliverables";
 import Interfaces from "./Interfaces";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
+import TimelineView from "./TimelineView";
 import Tree from "./Tree";
 import { saveNative } from "@/components/NativeExport";
 import { budgetTone, fmtEta, fmtMinutes, orchestratorLabel, recentHandoffs } from "./model";
@@ -31,6 +33,7 @@ function Gates({ p }: { p: Program }) {
             {g.status === "approved" ? <CheckCircle2 className="h-3.5 w-3.5" /> : g.status === "pending" ? <Circle className="h-3.5 w-3.5" /> : <Lock className="h-3 w-3" />}
             {g.name}{g.status === "later" && <span className="text-[10.5px]">· not on this program</span>}
             {g.code === "icd" && p.icd && g.status !== "locked" && <span className="text-[10.5px]">· ICD v{p.icd.version}</span>}
+            {g.code === "release" && p.released && <span className="text-[10.5px]">· rev {p.released.rev}</span>}
           </span>
         </span>))}
     </div>
@@ -99,7 +102,7 @@ function RunBar({ p }: { p: Program }) {
       {o?.bypass && <span title="God mode: the token budget is not enforced"><Badge tone="neutral">Budget bypass</Badge></span>}
       <p className="min-w-[260px] flex-1 text-[12px] text-muted">
         {running || o?.state === "complete" || o?.state === "paused"
-          ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved; <b>Fitz</b> assembles each level. Comment, pause, reassign or take over any ticket.</>
+          ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved; <b>Fitz</b> assembles each level{p.deliverables_auto !== false ? <>; then <b>Ortho</b> draws every part and the assembly with its BOM and <b>Smithy</b> reviews every part for manufacture</> : ""}. Comment, pause, reassign or take over any ticket.</>
           : o?.state === "stopped"
             ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
             : p.icd?.status === "draft" ? <>Approve the interfaces (ICD) first: part work starts at that gate, against the numbers you approved.</>
@@ -113,9 +116,10 @@ function BudgetDialog({ p, open, onOpenChange }: { p: Program; open: boolean; on
   const qc = useQueryClient();
   const [tokens, setTokens] = useState(p.budget.tokens);
   const [conc, setConc] = useState(p.concurrency);
+  const [deliv, setDeliv] = useState(p.deliverables_auto !== false);
   const save = async () => {
     try {
-      const v = await api.patch<Program>(`${BASE}/programs/${p.id}`, { budget_tokens: tokens, concurrency: conc });
+      const v = await api.patch<Program>(`${BASE}/programs/${p.id}`, { budget_tokens: tokens, concurrency: conc, deliverables: deliv });
       qc.setQueryData(["office-program", p.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
       onOpenChange(false);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
@@ -130,6 +134,8 @@ function BudgetDialog({ p, open, onOpenChange }: { p: Program; open: boolean; on
           <input className="input mt-1" type="number" min={1} max={12} value={conc} onChange={e => setConc(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} /></label>
       </div>
       <p className="mt-2 text-[12px] text-muted">More agents finish sooner but share one AI subscription: above 3 at a time, expect waits for capacity.</p>
+      <label className="mt-3 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={deliv} onChange={e => setDeliv(e.target.checked)} />
+        <span>Make the deliverables after integration: Ortho's drawings (parts and the assembly with its BOM) and Smithy's manufacturing review. They cost no tokens.</span></label>
     </Modal>
   );
 }
@@ -157,7 +163,8 @@ export default function ProgramPage() {
   }, [p, params, setParams]);
   useEffect(() => {
     const m = recent[0];
-    if (m?.type === "program.milestone" || m?.type === "program.done") toast.success(m.text, { icon: <PartyPopper className="h-4 w-4" /> });
+    if (m?.type === "program.milestone" || m?.type === "program.done" || m?.type === "program.released") toast.success(m.text, { icon: <PartyPopper className="h-4 w-4" /> });
+    else if (m?.type === "deliverable.done") toast.success(m.text);
     else if (m?.type === "cr.accepted") toast.info(m.text);
     else if (m?.type === "cr.rejected") toast.warning(m.text);
     else if (m?.type === "budget.warn") toast.warning(m.text);
@@ -184,7 +191,7 @@ export default function ProgramPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-[22px] font-semibold tracking-tight">{p.name}</h1>
             <span className="kbd">{p.key}</span>
-            <Badge tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>{STATUS_LABEL[p.status]}</Badge>
+            <Badge tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>{p.released ? `Released · rev ${p.released.rev}` : STATUS_LABEL[p.status]}</Badge>
             <Badge tone="preview">Preview</Badge>
           </div>
           <div className="mt-2"><Gates p={p} /></div>
@@ -216,10 +223,12 @@ export default function ProgramPage() {
         </Card>}
         <RunBar p={p} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
-          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
+          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="deliverables">Deliverables{p.gates.some(g => g.code === "release" && g.status === "pending") ? " ·" : ""}</Tab><Tab value="timeline">Timeline</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
           <TabPanel value="board"><Board program={p} onOpen={setOpen} handoffs={handoffs} /></TabPanel>
           <TabPanel value="interfaces"><Interfaces program={p} /></TabPanel>
           <TabPanel value="assembly"><AssemblyView program={p} recent={recent} /></TabPanel>
+          <TabPanel value="deliverables"><Deliverables program={p} /></TabPanel>
+          <TabPanel value="timeline"><TimelineView program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="tree"><Tree program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="activity"><Activity program={p} /></TabPanel>
           <TabPanel value="brief">

@@ -320,8 +320,12 @@ def view(doc: dict[str, Any]) -> dict[str, Any] | None:
         if f["kind"] == "shaft_bore":
             h, s = icd.fit_zones(f["data"]["d"], f["data"]["fit"])
             extra["limits"] = {"hole": h, "shaft": s}
+        if f["kind"] == "bearing_seat":
+            d = f["data"]
+            extra["limits"] = {"hole": icd.zone(d["D"], d["housing_fit"]), "shaft": icd.zone(d["d"], d["shaft_fit"])}
         out.append({**f, "label": icd.KIND_LABEL[f["kind"]], "sides": sides, "crs": crs,
                     "editable": list(icd.EDITABLE[f["kind"]]), **extra})
     return {"version": ic["version"], "status": ic["status"], "interfaces": out, "history": ic["history"][-60:],
             "problems": ic.get("problems") or [], "skeleton": {k: v for k, v in sk.items()},
-            "fits": list(icd.FITS), "fasteners": [f"M{m}" for m in icd.CLEARANCE]}
+            "fits": list(icd.FITS), "fasteners": [f"M{m}" for m in icd.CLEARANCE],
+            "bearings": [str(k) for k in sorted(icd.BEARINGS)], "housing_fits": list(icd.HOUSING_FITS)}

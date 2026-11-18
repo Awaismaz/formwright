@@ -28,7 +28,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from aicad.office import icd
+from aicad.assembly import locks
+from aicad.office import frames, icd
 
 _locks: dict[str, asyncio.Lock] = {}
 ProjectPart = Callable[[str], Awaitable[str]]
@@ -51,8 +52,11 @@ def subs_of(prog: dict[str, Any]) -> list[dict[str, Any]]:
             and any(v["sub"] == i["id"] for v in sk["items"].values())]
 
 
-def _T(at: list[float]) -> list[float]:
-    return [1.0, 0.0, 0.0, float(at[0]), 0.0, 1.0, 0.0, float(at[1]), 0.0, 0.0, 1.0, float(at[2])]
+def place(sk: dict[str, Any], item: str, copy: int, f: dict[str, Any] | None = None) -> list[float]:
+    """Where an item copy sits: its part frame at the skeleton position, turned by its quarter-turn about Z, and
+    (a real part modelled in another frame) through the frame Gage found."""
+    it = sk["items"][item]
+    return frames.placed(it["copies"][copy], float(it.get("rot") or 0) + float(it.get("phase") or 0), f)
 
 
 # ----------------------------------------------------------------------------- finding interface features on a part
@@ -78,6 +82,15 @@ def find_feature(refs: dict[str, Any], info: dict[str, Any], feat: dict[str, Any
             if off <= tol and abs(float(h["d"]) - feat["d"]) <= 0.5 and (best is None or off < best[0]):
                 best = (off, int(h["faces"][0]))
         return best[1] if best else None
+    if feat["type"] == "seat":  # any cylinder along Z on the axis with that Ø (a bore over a Z range)
+        best = None
+        for fid, r in faces.items():
+            if r.get("kind") != "axis" or r.get("r") is None or abs(abs(float(r["v"][2])) - 1) > 1e-3:
+                continue
+            off = math.hypot(float(r["p"][0]) - feat["c"][0], float(r["p"][1]) - feat["c"][1])
+            if off <= tol and abs(2 * float(r["r"]) - feat["d"]) <= 0.5 and (best is None or off < best[0]):
+                best = (off, int(fid))
+        return best[1] if best else None
     if feat["type"] == "boss":
         holes = {int(f) for h in info.get("holes") or [] for f in h.get("faces") or []}
         best = None
@@ -91,10 +104,15 @@ def find_feature(refs: dict[str, Any], info: dict[str, Any], feat: dict[str, Any
     return None
 
 
-def _part_data(aroot: Path, key: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _part_data(aroot: Path, key: str, f: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Exact references and recognised features of a part, in its ICD part frame (through ``f`` when the part was
+    modelled in another frame)."""
     from aicad.assembly import store as astore
 
-    return astore.refs(aroot, key), (astore.part(aroot, key) or {}).get("info") or {}
+    refs, info = astore.refs(aroot, key), (astore.part(aroot, key) or {}).get("info") or {}
+    if f:
+        return frames.refs_in(refs, f["R"], f["t"]), frames.info_in(info, f["R"], f["t"])
+    return refs, info
 
 
 def icd_mates(aroot: Path, adoc: dict[str, Any], skel: dict[str, Any], f: dict[str, Any], ia: dict[str, Any],
@@ -104,8 +122,8 @@ def icd_mates(aroot: Path, adoc: dict[str, Any], skel: dict[str, Any], f: dict[s
     from aicad.assembly import service as aservice
 
     fa, fb = icd.side_features(skel, f, "a"), icd.side_features(skel, f, "b")
-    ra, na = _part_data(aroot, ia["part"])
-    rb, nb = _part_data(aroot, ib["part"])
+    ra, na = _part_data(aroot, ia["part"], (ia.get("office") or {}).get("frame"))
+    rb, nb = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))
     pairs: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = []  # (mate type, role, feat a, feat b)
     if f["kind"] == "hole_pattern":
         pairs.append(("coincident", "face", fa[0], fb[0]))
@@ -121,6 +139,14 @@ def icd_mates(aroot: Path, adoc: dict[str, Any], skel: dict[str, Any], f: dict[s
         pairs.append(("concentric", "axis", fa[0], fb[0]))
         if len(fa) > 1 and len(fb) > 1:
             pairs.append(("flush", "end", fa[1], fb[1]))
+    elif f["kind"] == "bearing_seat":
+        seat = next(x for x in fa if x["type"] == "seat")
+        journal = next(x for x in fb if x["type"] == "boss")
+        pairs.append(("concentric", "axis", seat, journal))
+        ea = next((x for x in fa if x["type"] == "face" and x["n"] < 0 and "flush" in x["label"]), None)
+        eb = next((x for x in fb if x["type"] == "face"), None)
+        if ea and eb:
+            pairs.append(("flush", "end", ea, eb))
     elif f["kind"] == "face":
         pairs.append(("coincident", "face", fa[0], fb[0]))
     made, problems = 0, []
@@ -211,42 +237,43 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
     sub_docs: dict[str, dict[str, Any]] = {}
     for sub in subs_of(prog):
         aid = (state.get("subs") or {}).get(sub["id"])
-        adoc = astore.load(aroot, aid) if aid else None
-        if adoc is None:
-            adoc = astore.new_doc(f"{prog['name']} · {sub['name']}"[:120], org_id, user_id, None)
-        adoc.update(instances=[], mates=[], groups=[], subassemblies=[], solve=None, office={"program": prog["id"],
-                                                                                              "level": sub["id"]})
-        base = _sub_base(prog, sub["id"])
-        for item, v in sk["items"].items():
-            if v["sub"] != sub["id"]:
-                continue
-            for c, at in enumerate(v["copies"]):
-                inst = aservice.add_instance(aroot, adoc, parts[item]["key"], T=_T(at), name=v["name"])
-                inst["fixed"] = item == base and c == 0
-                inst["office"] = {"program": prog["id"], "item": item, "copy": c}
-        if not any(i["fixed"] for i in adoc["instances"]) and adoc["instances"]:
-            adoc["instances"][0]["fixed"] = True
-        _n, p = relink(aroot, adoc, sk, ifaces, None)
-        problems += p
-        aservice.run_solve(aroot, adoc)
-        astore.save(aroot, adoc)
+        fresh = astore.new_doc(f"{prog['name']} · {sub['name']}"[:120], org_id, user_id, None)
+        async with locks.hold(aid or fresh["id"], locks.OFFICE):  # the same lock as Assembly Studio's hand edits
+            adoc = (astore.load(aroot, aid) if aid else None) or fresh
+            adoc.update(instances=[], mates=[], groups=[], subassemblies=[], solve=None,
+                        office={"program": prog["id"], "level": sub["id"]})
+            base = _sub_base(prog, sub["id"])
+            for item, v in sk["items"].items():
+                if v["sub"] != sub["id"]:
+                    continue
+                for c, _at in enumerate(v["copies"]):
+                    inst = aservice.add_instance(aroot, adoc, parts[item]["key"], T=place(sk, item, c), name=v["name"])
+                    inst["fixed"] = item == base and c == 0
+                    inst["office"] = {"program": prog["id"], "item": item, "copy": c}
+            if not any(i["fixed"] for i in adoc["instances"]) and adoc["instances"]:
+                adoc["instances"][0]["fixed"] = True
+            _n, p = relink(aroot, adoc, sk, ifaces, None)
+            problems += p
+            aservice.run_solve(aroot, adoc)
+            astore.save(aroot, adoc)
         sub_docs[sub["id"]] = adoc
     fid = state.get("final")
-    final = astore.load(aroot, fid) if fid else None
-    if final is None:
-        final = astore.new_doc(f"{prog['name']} · Final assembly"[:120], org_id, user_id, None)
-    final.update(instances=[], mates=[], groups=[], subassemblies=[], solve=None,
-                 office={"program": prog["id"], "level": "root"})
-    for sub in subs_of(prog):
-        aservice.insert_subassembly(aroot, final, sub_docs[sub["id"]], T=xform.to12(xform.ident()), name=sub["name"])
-    for i in final["instances"]:
-        o = i.get("office") or {}
-        i["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
-    _n, p = relink(aroot, final, sk, ifaces, None, top_only=True)
-    problems += p
-    aservice.run_solve(aroot, final)
-    an = await aservice.analyse(aroot, org_id, final)
-    astore.save(aroot, final)
+    fresh = astore.new_doc(f"{prog['name']} · Final assembly"[:120], org_id, user_id, None)
+    async with locks.hold(fid or fresh["id"], locks.OFFICE):
+        final = (astore.load(aroot, fid) if fid else None) or fresh
+        final.update(instances=[], mates=[], groups=[], subassemblies=[], solve=None,
+                     office={"program": prog["id"], "level": "root"})
+        for sub in subs_of(prog):
+            aservice.insert_subassembly(aroot, final, sub_docs[sub["id"]], T=xform.to12(xform.ident()),
+                                        name=sub["name"])
+        for i in final["instances"]:
+            o = i.get("office") or {}
+            i["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
+        _n, p = relink(aroot, final, sk, ifaces, None, top_only=True)
+        problems += p
+        aservice.run_solve(aroot, final)
+        an = await aservice.analyse(aroot, org_id, final)
+        astore.save(aroot, final)
     clashes = _clashes(an)
     n_mates = len(final["mates"])
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
@@ -266,9 +293,11 @@ def _clashes(an: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str, str],
-               analyse: bool = True) -> dict[str, Any]:
+               analyse: bool = True, frames: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     """Put new part snapshots in for items (real part on approval, or a regenerated placeholder): same instances,
-    skeleton placement, interface mates re-attached by name, interference re-run. ``updates``: item -> key."""
+    skeleton placement, interface mates re-attached by name, interference re-run. ``updates``: item -> key.
+    ``frames``: item -> the frame Gage found (``conformance.best_frame``) for a real part modelled in another frame:
+    the instance is placed through it and its features are found through it."""
     from aicad.assembly import service as aservice
     from aicad.assembly import store as astore
 
@@ -278,45 +307,50 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     items = set(updates)
     touched_subs = {sk["items"][i]["sub"] for i in items if i in sk["items"]}
     sub_docs: dict[str, dict[str, Any]] = {}
+    fr = frames or {}
     for sub, aid in (state.get("subs") or {}).items():
-        adoc = astore.load(aroot, aid)
-        if adoc is None:
-            continue
-        sub_docs[sub] = adoc
-        if sub not in touched_subs:
-            continue
-        for inst in adoc["instances"]:
-            o = inst.get("office") or {}
-            if o.get("item") in items:
-                key = updates[o["item"]]
-                p = astore.part(aroot, key)
-                if p is None:
-                    continue
-                inst["part"], inst["source"] = key, aservice._source(p)
-                inst["T"] = _T(sk["items"][o["item"]]["copies"][o["copy"]])
-                # stacks fitted through the old part no longer fit
-                for g in [g for g in adoc["groups"] if (g.get("hole") or {}).get("inst") == inst["id"]]:
-                    aservice.remove_group(adoc, g["id"])
-        _n, p = relink(aroot, adoc, sk, ifaces, items)
-        problems += p
-        aservice.run_solve(aroot, adoc)
-        astore.save(aroot, adoc)
-    final = astore.load(aroot, state["final"])
+        async with locks.hold(aid, locks.OFFICE):  # the same lock as Assembly Studio's hand edits
+            adoc = astore.load(aroot, aid)
+            if adoc is None:
+                continue
+            sub_docs[sub] = adoc
+            if sub not in touched_subs:
+                continue
+            for inst in adoc["instances"]:
+                o = inst.get("office") or {}
+                if o.get("item") in items:
+                    key = updates[o["item"]]
+                    p = astore.part(aroot, key)
+                    if p is None:
+                        continue
+                    inst["part"], inst["source"] = key, aservice._source(p)
+                    f = fr.get(o["item"]) if not key.startswith("h_") else None
+                    inst["T"] = place(sk, o["item"], o["copy"], f)
+                    inst["office"] = {**o, "frame": f} if f else {k: v for k, v in o.items() if k != "frame"}
+                    # stacks fitted through the old part no longer fit
+                    for g in [g for g in adoc["groups"] if (g.get("hole") or {}).get("inst") == inst["id"]]:
+                        aservice.remove_group(adoc, g["id"])
+            _n, p = relink(aroot, adoc, sk, ifaces, items)
+            problems += p
+            aservice.run_solve(aroot, adoc)
+            astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
-    if final is not None:
-        for g in final.get("subassemblies") or []:
-            src = sub_docs.get(next((s for s, a in state["subs"].items() if a == g["assembly_id"]), ""))
-            if src is not None:
-                aservice.sync_subassembly(aroot, final, g["id"], src)
-        for inst in final["instances"]:
-            o = inst.get("office") or {}
-            inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
-        _n, p = relink(aroot, final, sk, ifaces, items, top_only=True)
-        problems += p
-        aservice.run_solve(aroot, final)
-        if analyse:
-            clashes = _clashes(await aservice.analyse(aroot, org_id, final))
-        astore.save(aroot, final)
+    async with locks.hold(state["final"], locks.OFFICE):
+        final = astore.load(aroot, state["final"])
+        if final is not None:
+            for g in final.get("subassemblies") or []:
+                src = sub_docs.get(next((s for s, a in state["subs"].items() if a == g["assembly_id"]), ""))
+                if src is not None:
+                    aservice.sync_subassembly(aroot, final, g["id"], src)
+            for inst in final["instances"]:
+                o = inst.get("office") or {}
+                inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
+            _n, p = relink(aroot, final, sk, ifaces, items, top_only=True)
+            problems += p
+            aservice.run_solve(aroot, final)
+            if analyse:
+                clashes = _clashes(await aservice.analyse(aroot, org_id, final))
+            astore.save(aroot, final)
     parts = dict(state.get("parts") or {})
     for i, key in updates.items():
         parts[i] = {"key": key, "kind": "placeholder" if key.startswith("h_") else "real",
@@ -379,126 +413,149 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     state = prog["assembly"]
     log: list[dict[str, str]] = []
     stats = {"stacks": 0, "asked": 0, "binned": 0}
+    seated: dict[str, int] = {}
 
     def say(text: str, tone: str = "ok") -> None:
         log.append({"agent": "Fitz", "text": text, "tone": tone})
 
     if level != "root":
         aid = state["subs"].get(level)
-        adoc = astore.load(aroot, aid) if aid else None
-        if adoc is None:
+        if not aid or astore.load(aroot, aid) is None:
             return {"blocked": "The sub-assembly's assembly document is missing. Rebuild the program assembly."}
-        joints = [f for f in ifaces if f["kind"] == "hole_pattern" and sk["items"][f["a"]["item"]]["sub"] == level
-                  and sk["items"][f["b"]["item"]]["sub"] == level]
-        fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in adoc["groups"] if g.get("hole")}
-        env = sk["envelope"]
-        bin_y = env["max"][1] + 40.0
-        bin_x = env["min"][0]
-        sub_items = [x["id"] for x in prog["items"] if x["kind"] == "subassembly"]
-        bin_x += 120.0 * (sub_items.index(level) if level in sub_items else 0)
-        for t in standard:
-            r = t.get("reuse") or {}
-            if r.get("source") != "toolbox":
-                continue
-            kind, code = r.get("kind"), r.get("code")
-            if kind == "fastener" or code in ("hex_bolt", "shcs"):
-                mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
-                targets = []
-                for f in mine:
-                    ib = _inst_of(adoc, f["b"]["item"], f["b"]["copy"])
-                    if ib is None:
-                        continue
-                    info = (astore.part(aroot, ib["part"]) or {}).get("info") or {}
-                    for xy in f["data"]["positions"]:
-                        k = _hole_index(info, icd._local(sk, f["b"], xy))
-                        if k is not None and (ib["id"], k) not in fitted:
-                            targets.append({"inst": ib["id"], "hole": k})
-                            fitted.add((ib["id"], k))
-                want = int(t.get("qty") or 1)
-                stats["asked"] += want
-                targets = targets[:want]
-                if not targets:
-                    say(f"{t['title']}: no bolted joint inside this sub-assembly; put in the parts bin", "warn")
-                else:
+        async with locks.hold(aid, locks.OFFICE):  # the same lock as Assembly Studio's hand edits
+            adoc = astore.load(aroot, aid)
+            joints = [f for f in ifaces if f["kind"] == "hole_pattern" and sk["items"][f["a"]["item"]]["sub"] == level
+                      and sk["items"][f["b"]["item"]]["sub"] == level]
+            fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in adoc["groups"] if g.get("hole")}
+            env = sk["envelope"]
+            bin_y = env["max"][1] + 40.0
+            bin_x = env["min"][0]
+            sub_items = [x["id"] for x in prog["items"] if x["kind"] == "subassembly"]
+            bin_x += 120.0 * (sub_items.index(level) if level in sub_items else 0)
+            for t in standard:
+                r = t.get("reuse") or {}
+                if r.get("source") != "toolbox":
+                    continue
+                kind, code = r.get("kind"), r.get("code")
+                seat = icd.seated(ifaces, t["item_id"])
+                if seat:  # bearings in their seats, dowel pins in their holes (coaxial with the ICD features)
                     try:
-                        res = await aservice.accept(aroot, org_id, adoc, targets, "shcs" if code == "shcs" else "hex_bolt",
-                                                    "both", False)
-                        stats["stacks"] += res["inserted"]
-                        summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
-                        say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()}: " + "; ".join(summ)
-                            + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else ""),
-                            "ok" if res["inserted"] >= want else "warn")
+                        key = await aservice.ensure_toolbox_part(aroot, org_id, seat["code"], seat["params"])
+                    except Exception as e:  # noqa: BLE001 - a size the generator refuses
+                        say(f"{t['title']}: {e}", "warn")
                         continue
-                    except AssemblyInputError as e:
-                        say(f"Fitz couldn't fit {t['title']}: {e}", "warn")
-            # everything else (and fasteners that found no joint): the parts bin, beside the program, no clash
-            try:
-                key = await aservice.ensure_toolbox_part(aroot, org_id, code, r.get("params") or {})
-            except Exception as e:  # noqa: BLE001 - a Toolbox value Hex read but the generator refuses
-                say(f"{t['title']}: {e}", "warn")
-                continue
-            part = astore.part(aroot, key) or {}
-            bb = (part.get("info") or {}).get("bbox") or [0, 0, 0, 10, 10, 10]
-            for _n in range(min(int(t.get("qty") or 1), 4)):
-                inst = aservice.add_instance(aroot, adoc, key, T=xform.to12(xform.translate(
-                    (bin_x - bb[0], bin_y - bb[1], -bb[2]))), name=t["title"])
-                inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": _n, "bin": True}
-                bin_x += (bb[3] - bb[0]) + 10.0
-                stats["binned"] += 1
-            say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
-                "by hand", "muted")
-        aservice.run_solve(aroot, adoc)
-        an = await aservice.analyse(aroot, org_id, adoc)
-        astore.save(aroot, adoc)
-        clashes = _clashes(an)
-        aid_out = adoc["id"]
+                    for n, at in enumerate(seat["at"]):
+                        inst = aservice.add_instance(aroot, adoc, key, T=xform.to12(xform.translate(tuple(at))),
+                                                     name=t["title"])
+                        inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
+                    what = "bearing" if seat["code"] == "bearing" else "dowel pin"
+                    seated[what] = seated.get(what, 0) + len(seat["at"])
+                    extra = int(t.get("qty") or 1) - len(seat["at"])
+                    say(f"Fitz seated {len(seat['at'])} × {seat['title']} in the {seat['what']} of {seat['interface']}"
+                        + (f" ({extra} more than the ICD places: left out)" if extra > 0 else ""),
+                        "ok" if extra <= 0 else "warn")
+                    continue
+                if kind == "fastener" or code in ("hex_bolt", "shcs"):
+                    mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
+                    targets = []
+                    for f in mine:
+                        ib = _inst_of(adoc, f["b"]["item"], f["b"]["copy"])
+                        if ib is None:
+                            continue
+                        info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
+                        for xy in f["data"]["positions"]:
+                            k = _hole_index(info, icd._local(sk, f["b"], xy))
+                            if k is not None and (ib["id"], k) not in fitted:
+                                targets.append({"inst": ib["id"], "hole": k})
+                                fitted.add((ib["id"], k))
+                    want = int(t.get("qty") or 1)
+                    stats["asked"] += want
+                    targets = targets[:want]
+                    if not targets:
+                        say(f"{t['title']}: no bolted joint inside this sub-assembly; put in the parts bin", "warn")
+                    else:
+                        try:
+                            res = await aservice.accept(aroot, org_id, adoc, targets, "shcs" if code == "shcs" else "hex_bolt",
+                                                        "both", False)
+                            stats["stacks"] += res["inserted"]
+                            summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
+                            say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()}: " + "; ".join(summ)
+                                + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else ""),
+                                "ok" if res["inserted"] >= want else "warn")
+                            continue
+                        except AssemblyInputError as e:
+                            say(f"Fitz couldn't fit {t['title']}: {e}", "warn")
+                # everything else (and fasteners that found no joint): the parts bin, beside the program, no clash
+                try:
+                    key = await aservice.ensure_toolbox_part(aroot, org_id, code, r.get("params") or {})
+                except Exception as e:  # noqa: BLE001 - a Toolbox value Hex read but the generator refuses
+                    say(f"{t['title']}: {e}", "warn")
+                    continue
+                part = astore.part(aroot, key) or {}
+                bb = (part.get("info") or {}).get("bbox") or [0, 0, 0, 10, 10, 10]
+                for _n in range(min(int(t.get("qty") or 1), 4)):
+                    inst = aservice.add_instance(aroot, adoc, key, T=xform.to12(xform.translate(
+                        (bin_x - bb[0], bin_y - bb[1], -bb[2]))), name=t["title"])
+                    inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": _n, "bin": True}
+                    bin_x += (bb[3] - bb[0]) + 10.0
+                    stats["binned"] += 1
+                say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
+                    "by hand", "muted")
+            aservice.run_solve(aroot, adoc)
+            an = await aservice.analyse(aroot, org_id, adoc)
+            astore.save(aroot, adoc)
+            clashes = _clashes(an)
+            aid_out = adoc["id"]
     else:
         clashes = []
         aid_out = state["final"]
     # the final assembly follows every sub-assembly
-    final = astore.load(aroot, state["final"])
-    if final is not None:
-        for g in final.get("subassemblies") or []:
-            sub = next((s for s, a in state["subs"].items() if a == g["assembly_id"]), None)
-            src = astore.load(aroot, state["subs"][sub]) if sub else None
-            if src is not None:
-                aservice.sync_subassembly(aroot, final, g["id"], src)
-        for inst in final["instances"]:
-            o = inst.get("office") or {}
-            inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0 and not o.get("bin")
-        relink(aroot, final, sk, ifaces, None, top_only=True)
-        if level == "root":
-            # bolted joints between sub-assemblies: Fitz's auto-fit (ISO 4017 + washers + ISO 4032)
-            joints = [f for f in ifaces if f["kind"] == "hole_pattern"
-                      and sk["items"][f["a"]["item"]]["sub"] != sk["items"][f["b"]["item"]]["sub"]]
-            fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in final["groups"] if g.get("hole")}
-            targets = []
-            for f in joints:
-                ib = _inst_of(final, f["b"]["item"], f["b"]["copy"])
-                if ib is None:
-                    continue
-                info = (astore.part(aroot, ib["part"]) or {}).get("info") or {}
-                for xy in f["data"]["positions"]:
-                    k = _hole_index(info, icd._local(sk, f["b"], xy))
-                    if k is not None and (ib["id"], k) not in fitted:
-                        targets.append({"inst": ib["id"], "hole": k})
-            if targets:
-                try:
-                    res = await aservice.accept(aroot, org_id, final, targets, "hex_bolt", "both", False)
-                    stats["stacks"] += res["inserted"]
-                    say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (ISO auto-fit)")
-                except AssemblyInputError as e:
-                    say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
-        aservice.run_solve(aroot, final)
-        an = await aservice.analyse(aroot, org_id, final)
-        astore.save(aroot, final)
-        if level == "root":
-            clashes = _clashes(an)
+    async with locks.hold(state["final"], locks.OFFICE):
+        final = astore.load(aroot, state["final"])
+        if final is not None:
+            for g in final.get("subassemblies") or []:
+                sub = next((s for s, a in state["subs"].items() if a == g["assembly_id"]), None)
+                src = astore.load(aroot, state["subs"][sub]) if sub else None
+                if src is not None:
+                    aservice.sync_subassembly(aroot, final, g["id"], src)
+            for inst in final["instances"]:
+                o = inst.get("office") or {}
+                inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0 and not o.get("bin")
+            relink(aroot, final, sk, ifaces, None, top_only=True)
+            if level == "root":
+                # bolted joints between sub-assemblies: Fitz's auto-fit (ISO 4017 + washers + ISO 4032)
+                joints = [f for f in ifaces if f["kind"] == "hole_pattern"
+                          and sk["items"][f["a"]["item"]]["sub"] != sk["items"][f["b"]["item"]]["sub"]]
+                fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in final["groups"] if g.get("hole")}
+                targets = []
+                for f in joints:
+                    ib = _inst_of(final, f["b"]["item"], f["b"]["copy"])
+                    if ib is None:
+                        continue
+                    info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
+                    for xy in f["data"]["positions"]:
+                        k = _hole_index(info, icd._local(sk, f["b"], xy))
+                        if k is not None and (ib["id"], k) not in fitted:
+                            targets.append({"inst": ib["id"], "hole": k})
+                if targets:
+                    try:
+                        res = await aservice.accept(aroot, org_id, final, targets, "hex_bolt", "both", False)
+                        stats["stacks"] += res["inserted"]
+                        say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (ISO auto-fit)")
+                    except AssemblyInputError as e:
+                        say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
+            aservice.run_solve(aroot, final)
+            an = await aservice.analyse(aroot, org_id, final)
+            astore.save(aroot, final)
+            if level == "root":
+                clashes = _clashes(an)
     bits = []
     if stats["asked"]:
         bits.append(f"fitted {stats['stacks']} fastener stack{'s' if stats['stacks'] != 1 else ''}")
     elif stats["stacks"]:
         bits.append(f"fitted {stats['stacks']} fastener stacks between sub-assemblies")
+    for what, n in seated.items():
+        bits.append(f"seated {n} {what}{'s' if n != 1 else ''} per the ICD")
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)

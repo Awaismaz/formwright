@@ -34,7 +34,7 @@ export function clampComplexity(c: number, k: Constants): number {
 
 export function estimateMinutes(family: Family, complexity: number, k: Constants): number {
   const per = k.minutes_per_unit[family] ?? k.minutes_per_unit.machined;
-  return Math.round(clampComplexity(complexity, k) * per * 10) / 10;
+  return Math.round(clampComplexity(complexity, k) * per * 100) / 100;
 }
 
 export function integrationComplexity(children: number, k: Constants): number {
@@ -156,7 +156,8 @@ export function recentHandoffs(events: OfficeEvent[], now: number, windowMs = 40
 }
 
 /** Which specialists a ticket may be given (Gage never designs: no self-approval; Fitz only assembles). */
-export function assignable(kind: Ticket["kind"]): string[] {
+export function assignable(kind: Ticket["kind"], deliverable?: Ticket["deliverable"]): string[] {
+  if (kind === "deliverable") return [deliverable === "dfm" ? "smithy" : "ortho"];
   return kind === "integration" ? ["fitz"] : ["mill", "chuck", "axel", "benny", "molly", "hex"];
 }
 
@@ -173,6 +174,9 @@ export function ifaceSummary(f: Pick<Interface, "kind" | "data">): string {
     case "shaft_bore": return `Ø${n(d.d)} ${d.fit} · ${n(d.length)} long`;
     case "face": return `plane Z ${n(d.plane_z)} · flatness ${n(d.flatness)}`;
     case "gear_mesh": return `m${n(d.module)} · ${d.teeth_a} / ${d.teeth_b} teeth · a = ${n(d.centre_distance)}`;
+    case "bearing_seat": return `${d.count} × ${d.designation} · seat Ø${n(d.D)} ${d.housing_fit} × ${n(d.B)} · journal Ø${n(d.d)} ${d.shaft_fit}`;
+    case "key": return `key ${n(d.b)} × ${n(d.h)} × ${n(d.length)} (DIN 6885) · shaft ${n(d.t1)} / hub ${n(d.t2)} deep`;
+    case "dowel": return `${d.count} × Ø${n(d.d)} × ${n(d.length)} (ISO 8734) · holes ${String(d.fit).split("/")[0]}`;
     default: return "";
   }
 }
@@ -194,7 +198,8 @@ export function ifaceStatus(f: Pick<Interface, "sides">): SideStatus {
 export const FIELD_LABEL: Record<string, string> = {
   fastener: "Fastener", d: "Diameter Ø (mm)", count: "Holes", inset: "Edge distance (mm)", flatness: "Flatness (mm)",
   position_tol: "Position tolerance ± (mm)", fit: "Fit (ISO 286)", module: "Module", teeth_a: "Teeth (first gear)",
-  teeth_b: "Teeth (second gear)",
+  teeth_b: "Teeth (second gear)", designation: "Bearing (60xx / 62xx)", housing_fit: "Housing fit (ISO 286)",
+  length: "Key length (mm)",
 };
 
 /** The current value of an editable field (the fastener is stored as "M6"). */
@@ -209,7 +214,7 @@ export function changedValues(f: Pick<Interface, "data" | "editable">, form: Rec
   for (const k of f.editable) {
     const v = (form[k] ?? "").trim();
     if (v === "" || v === fieldValue(f, k)) continue;
-    out[k] = k === "fit" || k === "fastener" ? v : Number(v);
+    out[k] = k === "fit" || k === "fastener" || k === "housing_fit" ? v : Number(v);
   }
   return out;
 }

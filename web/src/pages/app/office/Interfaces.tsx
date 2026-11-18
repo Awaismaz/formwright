@@ -28,6 +28,13 @@ const DATA_ROWS: Record<Interface["kind"], [string, string][]> = {
   face: [["plane_z", "Plane Z"], ["flatness", "Flatness"], ["position_tol", "Position tol. ±"]],
   gear_mesh: [["module", "Module"], ["teeth_a", "Teeth (first)"], ["teeth_b", "Teeth (second)"], ["ratio", "Ratio"], ["centre_distance", "Centre distance"],
     ["face_width", "Face width"], ["pressure_angle", "Pressure angle (°)"]],
+  bearing_seat: [["bearing", "Bearing"], ["count", "Bearings"], ["D", "Seat Ø (outer ring)"], ["housing_fit", "Housing fit"], ["B", "Seat depth (width)"],
+    ["d", "Journal Ø (bore)"], ["shaft_fit", "Shaft fit"], ["clearance_d", "Shaft clearance Ø"], ["axis", "Axis (X, Y)"], ["z", "Along Z"],
+    ["standard", "Table"]],
+  key: [["standard", "Standard"], ["d", "Shaft Ø"], ["b", "Key width b"], ["h", "Key height h"], ["length", "Key length"], ["t1", "Shaft groove depth t1"],
+    ["t2", "Hub groove depth t2"], ["axis", "Axis (X, Y)"], ["dir", "Keyway side (X, Y)"], ["z", "Along Z"]],
+  dowel: [["standard", "Standard"], ["d", "Pin Ø"], ["length", "Pin length"], ["fit", "Hole / pin fit"], ["positions", "Positions (X, Y)"],
+    ["plane_z", "Joint face Z"], ["joint", "Bolted joint"]],
 };
 
 function Rows({ rows }: { rows: CheckRow[] }) {
@@ -57,7 +64,9 @@ function Side({ s, title }: { s: IcdSide; title: string }) {
         {s.features.map((f, i) => <li key={i}>
           {f.type === "hole" ? `${f.label}: Ø${fmt(f.d)}${f.fit ? ` ${f.fit}` : ""} at (${fmt(f.c?.[0])}, ${fmt(f.c?.[1])})`
             : f.type === "boss" ? `${f.label} at (${fmt(f.c?.[0])}, ${fmt(f.c?.[1])})`
-              : f.type === "face" ? `${f.label}: Z ${fmt(f.z)}` : f.label}
+              : f.type === "seat" ? `${f.label} at (${fmt(f.c?.[0])}, ${fmt(f.c?.[1])}), Z ${fmt(f.z0)} to ${fmt(f.z1)}`
+                : f.type === "keyway" ? `${f.label}, Z ${fmt(f.z0)} to ${fmt(f.z1)}`
+                  : f.type === "face" ? `${f.label}: Z ${fmt(f.z)}` : f.label}
         </li>)}
       </ul>
       <div className="mt-1 text-[10.5px] text-muted">Part frame: origin at the centre of its envelope.</div>
@@ -100,6 +109,10 @@ function EditForm({ f, mode, program, onDone }: { f: Interface; mode: "edit" | "
               {icd.fasteners.map(x => <option key={x} value={x}>{x}</option>)}</select>
               : k === "fit" ? <select className="input mt-0.5 h-8" value={form[k] ?? ""} onChange={e => setForm(s => ({ ...s, [k]: e.target.value }))}>
                 {icd.fits.map(x => <option key={x} value={x}>{x}</option>)}</select>
+                : k === "designation" ? <select className="input mt-0.5 h-8" value={form[k] ?? ""} onChange={e => setForm(s => ({ ...s, [k]: e.target.value }))}>
+                  {(icd.bearings ?? []).map(x => <option key={x} value={x}>{x}</option>)}</select>
+                  : k === "housing_fit" ? <select className="input mt-0.5 h-8" value={form[k] ?? ""} onChange={e => setForm(s => ({ ...s, [k]: e.target.value }))}>
+                    {(icd.housing_fits ?? []).map(x => <option key={x} value={x}>{x}</option>)}</select>
                 : <Input className="mt-0.5 h-8" type="number" step="any" value={form[k] ?? ""} onChange={e => setForm(s => ({ ...s, [k]: e.target.value }))} />}
           </label>))}
       </div>

@@ -165,3 +165,7 @@
   .fw-ho-out { display: none !important; }
   .fw-ho-in, .fw-ho-card, .fw-ho-caption { animation: none !important; }
 }
+
+/* Timeline (CD-015): waiting spells are striped so they read apart from work at a glance */
+.fw-tl-wait { background: repeating-linear-gradient(135deg, rgb(240 140 0 / .55) 0 4px, rgb(240 140 0 / .18) 4px 8px); }
+.fw-tl-blocked { background: repeating-linear-gradient(135deg, rgb(201 42 42 / .6) 0 4px, rgb(201 42 42 / .18) 4px 8px); }

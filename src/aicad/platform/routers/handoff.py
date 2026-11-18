@@ -75,30 +75,39 @@ class IssueIn(BaseModel):
     tz: str | None = None
 
 
-@router.post("/projects/{project_id}/releases")
-async def issue_release(project_id: str, body: IssueIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Freeze the current build as the next revision: issue copy of the drawing, DFM report, signed calculation
-    packages and print exports, in one hashed pack. Refused (409) while the gate has blocking items."""
+class ReleaseBlocked(ValueError):
+    """The release gate has blocking items (``blocking``) or an output could not be frozen (plain message)."""
+
+    def __init__(self, message: str, blocking: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(message)
+        self.blocking = blocking or []
+
+
+async def issue(p: Any, *, by: str, by_id: str | None, note: str = "", leave_out: list[str] | None = None,
+                has_drawings: bool = True, day: str | None = None, reuse_current: bool = False) -> dict[str, Any]:
+    """Freeze the project's current build as its next revision (the release gate, MAKE-08). Shared by the route
+    and the Design Office's program release. ``reuse_current``: when this exact build is already issued, return
+    that release instead of refusing. Raises ReleaseBlocked."""
     from aicad.platform.routers import mod_drawings
 
-    p = _project(ctx, project_id)
-    if ctx.role == "viewer":
-        raise HTTPException(403, "Viewers can download releases but can't issue them.")
-    leave_out = [x for x in body.leave_out if x in handoff.LEAVABLE]
+    leave_out = [x for x in (leave_out or []) if x in handoff.LEAVABLE]
     ws = workspace_for(p)
     lock = _locks.setdefault(p.id, asyncio.Lock())
     async with lock:
         await wait_finalized(p.id)
-        g = handoff.gate(ws, has_drawings=_has_drawings(ctx), leave_out=leave_out)
+        g = handoff.gate(ws, has_drawings=has_drawings, leave_out=leave_out)
         if not g["ready"]:
-            raise HTTPException(409, {"message": "This revision can't be issued yet: " + " ".join(b["text"] for b in g["blocking"]),
-                                      "blocking": g["blocking"]})
+            latest = handoff.latest_release(ws)
+            if reuse_current and latest and all(b["kind"] == "release" for b in g["blocking"]):
+                return {**latest, "reused": True}
+            raise ReleaseBlocked("This revision can't be issued yet: " + " ".join(b["text"] for b in g["blocking"]),
+                                 g["blocking"])
         st = deliverables.read_status(ws)
         rev = g["next_rev"]
-        note = body.note.strip() or g["suggested_note"]
+        note = note.strip() or g["suggested_note"]
         release = {"rev": rev, "build": g["build"], "issued_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-                   "date": mod_drawings.local_date(body.local_date, body.tz), "by": ctx.user.name or ctx.user.email,
-                   "by_id": ctx.user.id, "note": note, "params": st.get("params") or {}, "left_out": leave_out}
+                   "date": day or mod_drawings.local_date(None, None), "by": by, "by_id": by_id, "note": note,
+                   "params": st.get("params") or {}, "left_out": leave_out}
         rel_dir = ws / "releases" / rev
         shutil.rmtree(rel_dir, ignore_errors=True)  # a half-written earlier attempt of this letter
         drawing_dir = None
@@ -108,7 +117,7 @@ async def issue_release(project_id: str, body: IssueIn, ctx: Ctx = Depends(verif
                 await mod_drawings.render_issue(p, ws, drawing_dir, release, release["by"])
             except ValueError as e:
                 shutil.rmtree(rel_dir, ignore_errors=True)
-                raise HTTPException(409, str(e)) from None
+                raise ReleaseBlocked(str(e)) from None
         extra: dict[str, bytes] = {}
         name = handoff._safe(p.name)
         eng = g["modules"]["engineering"]
@@ -128,7 +137,7 @@ async def issue_release(project_id: str, body: IssueIn, ctx: Ctx = Depends(verif
                                                 extra=extra, left_out=left)
         except ValueError as e:
             shutil.rmtree(rel_dir, ignore_errors=True)
-            raise HTTPException(409, str(e)) from None
+            raise ReleaseBlocked(str(e)) from None
         rec = handoff.record_release(ws, release, pack, manifest)
         # the working sheet now carries the letter too (same build, so no new history row)
         drw = handoff._json(ws / "drawings" / "drawing.json")
@@ -138,11 +147,30 @@ async def issue_release(project_id: str, body: IssueIn, ctx: Ctx = Depends(verif
                 await mod_drawings._generate(p, ws, drw.get("options") or {}, meta, mod_drawings._edits(ws), ws / "drawings")
             except HTTPException:
                 pass  # the frozen issue copy is what counts; the working sheet updates on its next regeneration
-    audit(ctx.db, "project.release_issued", ctx.user, p.org_id, target=p.id, rev=rev, files=len(manifest["files"]),
+    return {**rec, "manifest_files": len(manifest["files"])}
+
+
+@router.post("/projects/{project_id}/releases")
+async def issue_release(project_id: str, body: IssueIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Freeze the current build as the next revision: issue copy of the drawing, DFM report, signed calculation
+    packages and print exports, in one hashed pack. Refused (409) while the gate has blocking items."""
+    from aicad.platform.routers import mod_drawings
+
+    p = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403, "Viewers can download releases but can't issue them.")
+    leave_out = [x for x in body.leave_out if x in handoff.LEAVABLE]
+    try:
+        rec = await issue(p, by=ctx.user.name or ctx.user.email, by_id=ctx.user.id, note=body.note,
+                          leave_out=leave_out, has_drawings=_has_drawings(ctx),
+                          day=mod_drawings.local_date(body.local_date, body.tz))
+    except ReleaseBlocked as e:
+        raise HTTPException(409, {"message": str(e), "blocking": e.blocking} if e.blocking else str(e)) from None
+    audit(ctx.db, "project.release_issued", ctx.user, p.org_id, target=p.id, rev=rec["rev"], files=rec["manifest_files"],
           left_out=leave_out)
     ctx.db.commit()
     return {"release": {k: rec.get(k) for k in ("rev", "date", "by", "note", "issued_at", "pack_sha256", "files", "left_out")},
-            "status": handoff.deliverables_status(ws)}
+            "status": handoff.deliverables_status(workspace_for(p))}
 
 
 @router.get("/projects/{project_id}/releases/{rev}/pack.zip")

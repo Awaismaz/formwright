@@ -5,6 +5,7 @@ here; no user script is executed (the worker reads the verified ``part.step`` / 
 
 Protocol (one JSON object per line):
   parent -> worker  {"op": "generate", "out": str, "dest": str, "options": {...}, "meta": {...}, "edits": {...}}
+                    {"op": "assembly", "nodes": [...], "rows": [...], "dest": str, "meta": {...}}  (DRW-014)
   worker -> parent  {"ok": bool, "rc": int, "error": str | None, "result": {...}, "elapsed_s": float}
 """
 
@@ -36,7 +37,13 @@ def serve() -> None:
         t0 = time.perf_counter()
         try:
             req = json.loads(line)
-            if req.get("op") != "generate":
+            if req.get("op") == "assembly":  # DRW-014: assembly drawing with its BOM and balloons
+                from aicad.drawing import assembly_sheet
+
+                res = assembly_sheet.generate(req["nodes"], req["rows"], Path(req["dest"]), req.get("meta") or {},
+                                              req.get("size") or "A3")
+                resp = {"ok": True, "rc": 0, "result": res}
+            elif req.get("op") != "generate":
                 resp: dict[str, Any] = {"ok": False, "rc": 2, "error": f"unknown op {req.get('op')}"}
             else:
                 res = generate(Path(req["out"]), Path(req["dest"]), req.get("options") or {}, req.get("meta") or {},
@@ -77,6 +84,12 @@ async def generate(key: str, out: Path, dest: Path, options: dict[str, Any], met
                    edits: dict[str, Any] | None = None, timeout: float = 120) -> dict[str, Any]:
     return await get_worker(key).request({"op": "generate", "out": str(out), "dest": str(dest), "options": options,
                                           "meta": meta, "edits": edits}, timeout)
+
+
+async def assembly(key: str, nodes: list[dict[str, Any]], rows: list[dict[str, Any]], dest: Path,
+                   meta: dict[str, Any], size: str = "A3", timeout: float = 300) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "assembly", "nodes": nodes, "rows": rows, "dest": str(dest),
+                                          "meta": meta, "size": size}, timeout)
 
 
 async def shutdown_all() -> None:

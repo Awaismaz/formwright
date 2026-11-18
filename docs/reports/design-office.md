@@ -389,3 +389,147 @@ fake_agents}.py`, `platform/routers/{office,mod_assembly}.py`, `assembly/{servic
 4. **Locking**: share Assembly Studio's per-document lock with the office and show "the office is updating this
    assembly" in Assembly Studio.
 5. A live run (PD-48) to check that real part agents follow the `fw-icd` excerpt and raise sensible CRs.
+
+---
+
+# Design Office — Phase 5 report (CD-014, CD-015, DRW-014 + Phase 4 follow-ups)
+
+Branch `wip/office-phase5`, 2026-11-18. After the final assembly is integrated, **Ortho** draws every part the
+program makes and the assembly with its BOM and balloons, **Smithy** runs the Manufacturing Advisor on every part,
+and one **Release program** action issues every part through its own release gate, tags it, and writes one pack.
+Every ticket records its actual agent time; finished tickets **recalibrate** the estimating constants; a **Timeline**
+tab shows planned against actual. The ICD gained **bearing seats, DIN 6885 keys, ISO 8734 dowels** and quarter-turn
+part frames; Gage **matches a part's own frame** before measuring; the office and Assembly Studio **share one lock**
+per assembly document. PD-55 holds the defaults.
+
+## What happens now
+1. **Deliverable tickets** (`service.add_deliverables`, orchestrator): when every part and integration ticket is
+   integrated (program switch "make the deliverables", default on), two tickets open in the final-assembly lane:
+   *Drawings* (Ortho) and *Manufacturing review* (Smithy), complexity = ⌈parts made / 2⌉, estimated with the program's
+   calibrated rates. They are claimed like any ticket (stages `drawings` / `dfm`) and show on the board with the
+   Ortho / Smithy avatars and progress per sheet ("Ortho is dimensioning sheet 2 of 5"). *complete* still means first
+   article assembled; the orchestrator stops when the deliverables are done and the **Release gate goes pending**.
+2. **Ortho** (`PlatformEnv.drawing`): per part made, the Drawing Studio sheet of the latest verified build. The ICD
+   numbers the part carries (`deliverables.icd_spec`: bore / journal Ø with their ISO 286 class, clearance and dowel
+   hole Ø, bearing seat Ø, bolt-circle PCD, keyway notes) are kept with the part (`drawings/spec.json`, so Drawing
+   Studio regenerations and release issue copies keep them) and offered to the tagger as spec values. An ICD value is
+   offered only when no model parameter already carries it (two names for one size would make both ambiguous); a
+   model parameter of the same kind and value carries the fit instead. Fits print after the value ("Ø20 H7") unless
+   the engineer wrote a tolerance. A sheet failing CHK-12 blocks the ticket for the engineer.
+3. **Assembly drawing (DRW-014)** (`drawing/assembly_sheet.py`, drawing-worker op `assembly`): the final assembly
+   placed instance by instance, exact HLR isometric view, A3 with the standard title block and NOT APPROVED banner,
+   the program BOM as a table above the title block (22 lines on the sheet, the rest in the CSV), one balloon per BOM
+   line with a leader to an instance; balloons sit on an ellipse around the view in the angular order of their
+   anchors, pushed apart so they never overlap. SVG / PDF / DXF.
+4. **Program BOM** (`deliverables.bom`): the final assembly as built (washers and nuts Fitz added included) merged
+   with the plan: planned quantities win for planned parts (the parts bin holds at most four of a kind), rows map back
+   to tickets, make = designed or company parts, buy = Toolbox parts with designation and standard, masses from
+   nominal densities. CSV download.
+5. **Smithy** (`PlatformEnv.dfm`): `analyse_workspace` on every part made (workspace shop profile, quantity
+   max(10, ticket qty)); per part the best process, CHK-13 flag counts, top findings, unit cost; the summary adds a
+   **relative cost index** (cheapest part = 1.0), each part's share of the batch and the parts needing attention.
+   "Relative estimate, not a quote"; advisory, never a gate.
+6. **Release program** (`POST /programs/{pid}/release`): refused (409, plain blocking list) until every part and
+   integration ticket is integrated and both deliverables are done. Then per part made `routers/handoff.issue` (the
+   per-part release gate, refactored out of the route and shared): frozen issue drawing + DFM report + pack at the
+   part's next letter (or its current letter when that exact build was already issued) and a collaboration **tag**
+   "`<KEY> Rev <letter>`" on main. Then the assembly STEP (exported under the shared lock), the assembly drawing
+   stamped with the program letter, BOM CSV, DFM summary (CSV + JSON), the ICD (JSON), the `.fwprog` (refactored
+   `mod_native.program_bytes`), README and a SHA-256 manifest, one zip under `<program>/releases/<rev>/pack.zip`. The
+   Release gate turns approved; the program shows "Released · rev A".
+7. **Calibration (CD-015)** (`office/calibration.py`): every stage the orchestrator runs is recorded on its ticket as a
+   work segment (stage, agent instance, start, end); waits for capacity and blocked spells are segments too. When the
+   office finishes a ticket, its actual agent time (work only) teaches its family's rate: observed = actual /
+   complexity, clamped to ×2 / ÷2 of the rate, EMA α 0.3, bounded 0.05–60 min per unit; the update is kept and
+   announced ("estimate.calibrated"). Learned once per ticket; hand-worked tickets never teach. Per organisation, two
+   profiles: live and simulated (dev fake agents never move live constants). New plans snapshot the current rates.
+8. **Timeline (CD-015)** (`office/timeline.py`, Timeline tab): planned schedule = greedy list scheduling of the
+   estimates at the program's concurrency with critical-path priority; critical path = longest estimate chain; rows by
+   ticket (planned outline, actual segments in the agent's colour, striped waits for capacity / for the engineer,
+   error % per finished ticket) or lanes by agent instance; change-request markers; a "now" line while running. Below
+   it the calibration panel (starting vs current rate per specialist, tickets learned from, latest updates in words,
+   rolling mean absolute error over 5 tickets). The ticket drawer shows estimate vs actual and rounds per stage.
+9. **New interface kinds** (`office/icd.py`):
+   - *bearing_seat*: a shaft in a sub-assembly with a bearing part runs in Toolbox 62xx / 60xx bearings (the written
+     designation when its bore fits, else the 62xx with the largest bore ≤ the shaft; an assumed shaft takes the
+     bore); two seats (top + bottom counterbores, housing H7, depth B) when the plan has two bearings per shaft, a
+     clearance Ø d + 2 between, journal k6; the housing grows to 2B + 4; hosts machined or moulded, never sheet. Fitz
+     seats the bearings; Hex takes exactly the ICD's bearing.
+   - *key*: a hub / gear whose name or sub-assembly says "key" gets a DIN 6885-1 form A key with keyways on both sides.
+   - *dowel*: block joints in a sub-assembly with a dowel part get two ISO 8734 pins (Ø = bolt size, H7 holes both
+     sides) clear of the bolts; Fitz places the pins.
+   - *rotations*: a block's part frame can turn by quarter turns about Z (Archie's `rotate` hint or an override).
+   - *coaxial stacks / spacing*: bearings in the host, hubs and gears on the shaft; station gaps grow with the parts
+     (12 mm or a tenth of the larger); gear meshes still space shafts at exactly m(z1 + z2)/2.
+   Placeholders carry every new feature (`placeholder.cut`; the simulated agents use the same code). Conformance
+   measures *seat* (Ø in the fit zone, depth through its shoulder, two seats told apart by their circular edges) and
+   *keyway* (width ±0.05, depth ±0.1); dowel holes are H7 holes.
+10. **Frame-tolerant Gage** (`conformance.best_frame`): a part failing in the ICD frame is matched over the 24
+    axis-aligned rotations with translations that pair its features with the ICD's; the best frame (ICD frame wins
+    ties) is reported ("rotated 270° about Z, moved by (0, 0, −34.5) mm") and Fitz places the part through it.
+11. **Shared lock** (`assembly/locks.py`): build, swap-in, integration, CR regeneration and the release export take
+    Assembly Studio's per-document lock (loading inside it); Assembly Studio shows "The Design Office is updating this
+    assembly right now" while the office holds it.
+
+## Files
+New: `src/aicad/office/{calibration,timeline,deliverables,frames}.py`, `src/aicad/assembly/locks.py`,
+`src/aicad/drawing/assembly_sheet.py`, `tests/test_office_phase5.py`, web office `Deliverables.tsx`, `TimelineView.tsx`,
+`timeline.ts` + `timeline.test.ts`. Changed: `office/{icd,conformance,orchestrator,service,estimates,roster,
+platform_env,program_assembly,fake_agents,interfaces}.py`, `assembly/placeholder.py`, `drawing/{generate,worker}.py`,
+routers `office`, `handoff`, `mod_drawings`, `mod_native`, `mod_assembly`; web office `types.ts`, `model.ts`, `api.ts`,
+`ProgramPage.tsx`, `TicketDrawer.tsx`, `Board.tsx`, `Home.tsx`, `NewProgram.tsx`, `Interfaces.tsx`, `avatars.css`;
+assembly `Workspace.tsx`, `types.ts`; `test_office_icd.py` (gear reducer: bearing seats + key),
+`test_office_orchestrator.py` (helper runs without deliverables).
+
+## Verification
+- `tests/test_office_phase5.py` (9 tests, fake agents only; one checks the tooth phasing on two real Toolbox gears:
+  395 mm³ of overlap unphased, none phased): calibration EMA hand-computed (4 → 3.4, 4 → 5.2, floor,
+  ceiling, 4 → 3.4 → 2.89, profiles, MAPE 50 / 35 / 26.7); timeline on a hand-computed DAG (A 0–10, B 0–20, C 10–15,
+  E 15–19, D 20–26, F 26–29 at 2 agents; critical path B → D → F; waits, lanes, CR marker); BOM from fixture rows and
+  the DFM summary (relative cost 2.5 / 1.0); new kinds laid out by hand (6204 seats Z −14..0 / −40..−26, key 6 × 6 × 18
+  at Z 1..19, dowels at −24.4 / −7.6, rotated bracket); placeholders conform and seeded defects fail with measured
+  values (seat Ø47.100 vs H7, keyway 5.000 wide, dowel hole Ø6.200); frame-tolerant measurement (turned + moved shaft
+  passes with its transform, strict fails, a wrong part stays wrong); the shared lock; end to end deliverables +
+  release (2 sheets passing CHK-12, assembly drawing with BOM and balloons, BOM, DFM, timeline lanes, calibration
+  snapshotted into a new plan, rev A with both parts issued and tagged, pack contents and hashes verified).
+- Phase 3 / 4 suites pass; `tests/test_drawings.py` passes with the gear-facet fix; vitest `office/timeline.test.ts` (7).
+- Browser walkthrough (puppeteer-core 25.18.1, port 8805, throwaway data, simulated agents, 1.2 s steps): the
+  standard gear reducer "Gearbox GB-3" (16 tickets incl. the 2 deliverables). ICD: 13 interfaces (5 bolted joints,
+  2 bearing seats 6205 × 2, 2 shaft fits, a DIN 6885 key 8 × 7, 2 seating faces, the 18 / 54 mesh); placeholder
+  assembly 7 placeholders, 23 mates, 0 clashes; every part swapped in with 0 clashes, bearings seated by Fitz, final
+  assembly 0 clashes. Ortho: 7 part sheets passing CHK-12 (scales 1:50 to 2:1) and the A3 assembly drawing at 1:5 with
+  a 14-line BOM and 14 balloons; Smithy: 7 parts (CNC milling / turning, relative cost 1.00× to 11.37×). BOM: 7 make /
+  7 buy lines, 46 pieces, 8.93 kg. Release rev A: 7 parts issued at rev A and tagged "GG3 Rev A", pack 31 files,
+  6.9 MB (STEP per part + assembly STEP, 8 PDF + 8 DXF drawings, BOM CSV, DFM CSV / JSON, ICD JSON, .fwprog, README,
+  manifest). Timeline: planned 41 min at 3 agents vs 23 min of simulated agent time, 8 min waiting for the engineer
+  (the gear sheets before the fix); calibration moved 6 families in the simulated profile. 0 console / page errors.
+  Screenshots: `docs/reports/design-office/phase5/`.
+- Found by the walkthrough and fixed: the gear envelope (pitch circle → tip circle), tooth phasing of meshing gears
+  (the real gears collided: 395 mm³), Drawing Studio reading faceted involute flanks as 121 "chamfers" (gear sheets
+  failed CHK-12; drawing VERSION 1.1.3), the BOM listing a shared bearing twice, Smithy's top finding preferring the
+  chosen process.
+
+## Limitations (honest)
+- No live AI run yet (PD-48): calibration has only learned from simulated agents here, so the live constants are
+  still the starting values; real agent times will move them.
+- The layout is still a conceptual row on the program base with vertical shafts: bearing caps stay row stations (not
+  coaxial over the seats: on tight gear centres they would collide), rotations are quarter turns about Z only, no
+  horizontal shafts in side walls yet.
+- Keys sit on the +X side; no circlips, shoulders other than bearing seats, or tolerance stack-ups.
+- Assembly drawing: one isometric view, balloons point at an instance's bounding-box centre (can land behind another
+  part in the view); BOM over 22 lines continues in the CSV only.
+- The release pack issues each part's own release; a part whose drawing fails CHK-12 blocks the whole release.
+- Frame fit uses axis-aligned rotations only; a part modelled at an arbitrary angle still fails (with a clear note).
+- The shared lock is in memory (one web process, PD-53).
+- Interference checks with seated ball bearings take minutes on this machine (OCCT booleans on every ball); the
+  simulated gearbox took about 15 min end to end, most of it in those checks.
+- Gage does not check a gear's tooth phase (the assembly phases the second gear of a mesh; the part is modelled with
+  a tooth on +X of its own frame, as the ICD excerpt says).
+
+## What remains for the Design Office
+1. A live multi-agent run (PD-48) and an API key before other users (PD-09); then real calibration.
+2. Product architecture beyond a row: horizontal shafts in side walls, caps coaxial with bearings, multi-row packing,
+   Archie placing parts freely.
+3. Drawing depth: GD&T from the ICD datums (A|B|C) on part sheets, more assembly views and exploded view with
+   balloons on visible faces.
+4. Per-part design review gate (optional, PD-37) and program-level change notices after a release.

@@ -4,6 +4,52 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (u) — Design Office Phase 5: deliverables, release, calibration, timeline (CD-014, CD-015, DRW-014, CD-018…020)
+
+Branch `wip/office-phase5` (worktree `fw-wt/office-phase5`). Report: docs/reports/design-office.md, Phase 5. PD-55.
+
+### Done
+- CD-014: Ortho / Smithy deliverable tickets after integration (drawings per part with ICD spec values, assembly
+  drawing with BOM table + balloons = DRW-014, program BOM, DFM summary with relative cost index); one "Release
+  program" action (per-part release gate shared with the Studio route, tags "<KEY> Rev A", one hashed pack with STEP
+  per part + assembly STEP, PDF/DXF drawings, BOM CSV, DFM, ICD, .fwprog); Release gate real; Deliverables tab.
+- CD-015: work / wait segments per ticket, bounded EMA calibration per family persisted per org (live / simulated
+  profiles), plans snapshot the rates; Timeline tab (planned vs actual, critical path, agent lanes, waits, CR
+  markers), calibration panel, estimate vs actual in the drawer.
+- Phase 4 follow-ups: bearing seats (6000/6200), DIN 6885 keys, ISO 8734 dowels, quarter-turn part frames, coaxial
+  bearing stacks, size-based spacing (CD-018); frame-tolerant Gage with the transform reported and used by Fitz
+  (CD-019); Assembly Studio's lock shared with the office + "updating" banner (CD-020).
+- Found in the walkthrough and fixed: (1) a gear's ICD envelope was its pitch circle, so every real gear "left its
+  envelope" (now the tip circle; placeholders stay pitch cylinders); (2) two real gears at the exact centre distance
+  collided (both Toolbox gears have a tooth on +X): the second gear of a mesh now gets a tooth phase (half a tooth),
+  its keyway turning with it; (3) Drawing Studio read the faceted involute flanks as ~120 "chamfers" and the gear
+  sheets failed CHK-12 (drawing VERSION 1.1.3: facet legs < 0.1 mm or more than 6 chamfer sizes are not
+  chamfers); (4) the BOM listed a bearing twice when two tickets share one Toolbox bearing; (5) "bearings / pins"
+  wording; timeline axis label wrap; rates shown to 3 decimals.
+
+### Verified how
+- `tests/test_office_phase5.py` (9 tests, fake agents), Phase 3 / 4 office suites, `tests/test_drawings.py` (28),
+  vitest `office/timeline.test.ts` (7). Full gate after merging main: pytest 573 passed (22 min, machine shared with
+  other work), ruff clean, tsc clean, vitest 117 passed, vite build OK.
+- Browser walkthrough (puppeteer-core 25.18.1, port 8805, throwaway data dir, `FW_OFFICE_FAKE_AGENTS=1`, 1.2 s
+  steps, God mode paywall/token bypass): standard-planner gear reducer "Gearbox GB-3" (14 tickets: housing base,
+  cover, 4 bearing caps, 8 cover bolts, input / output shafts in 6205 seats, pinion 18 / gear 54 keyed, bearings)
+  → ICD review (13 interfaces incl. 2 bearing seats and a key) → placeholder assembly (7 placeholders, 23 mates, 0
+  clashes) → Run → every part swapped in, 0 clashes, bearings seated by Fitz → Ortho 7 sheets (CHK-12 pass after the
+  gear fix) + assembly drawing 1:5 with 14 BOM lines / 14 balloons → Smithy 7 parts → Release rev A from the UI: 7
+  parts issued and tagged "GG3 Rev A", pack 31 files / 6.9 MB downloaded (200, application/zip) → timeline (by ticket,
+  by agent) and calibration panel → drawers (estimate vs actual). 0 console / page errors. Screenshots:
+  docs/reports/design-office/phase5/. Server stopped, scratch data deleted.
+
+### Not done / limitations
+- No live AI run (PD-48): calibration learned only in the simulated profile. Layout is still a row with vertical
+  shafts (bearing caps are row stations, not coaxial caps). Assembly-drawing balloons anchor at bounding-box centres.
+  Interference checks with seated ball bearings take minutes on this machine (OCCT booleans on many balls).
+
+### Next
+- Live multi-agent run (PD-48); horizontal-shaft architecture with caps in side walls; GD&T from the ICD datums on
+  part sheets.
+
 ## 2026-11-18 (t) — Design Office Phase 4: skeleton + ICD, placeholders, swap-in, change requests (CD-010…013)
 
 Branch `wip/office-phase4` (worktree `fw-wt/office-phase4`). Report: docs/reports/design-office.md, Phase 4.

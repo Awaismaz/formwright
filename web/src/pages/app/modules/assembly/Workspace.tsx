@@ -27,7 +27,8 @@ type TabKey = "describe" | "mate" | "fasten" | "check" | "bom";
 export default function Workspace({ aid, onClose }: { aid: string; onClose: () => void }) {
   const qc = useQueryClient();
   const key = useMemo(() => ["asm", aid], [aid]);
-  const q = useQuery({ queryKey: key, queryFn: () => api.get<AsmView>(`${BASE}/assemblies/${aid}`) });
+  const q = useQuery({ queryKey: key, queryFn: () => api.get<AsmView>(`${BASE}/assemblies/${aid}`),
+    refetchInterval: qq => (qq.state.data?.office_busy ? 2000 : false) });
   const view = q.data;
   const setView = useCallback((v: AsmView) => qc.setQueryData(key, v), [qc, key]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -333,6 +334,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
               {exp && !exp.stale ? "Re-export" : "Export STEP"}</Button></Tip>}
         </div>
       </header>
+      {view.office_busy && <div className="flex items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-1.5 text-[12.5px]" role="status" data-testid="office-busy">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />The Design Office is updating this assembly right now. Your next change waits until Fitz has finished (usually a few seconds).</div>}
 
       <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[264px_minmax(0,1fr)_360px] lg:overflow-hidden">
         <aside className="flex min-h-0 flex-col border-r border-border bg-panel">

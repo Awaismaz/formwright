@@ -126,7 +126,10 @@ comments, branches + merge requests). DB backup taken before collaboration went 
 
 **In flight:** `wip/office-phase5` (worktree `C:/Users/Awais/Desktop/fw-wt/office-phase5`): program deliverables
 (drawings, BOM, DFM, release pack), calibration + timeline, better layouts, bearing/key/dowel interfaces,
-frame-tolerant measurement, shared assembly lock. If it is on GitHub but not merged into main, it is unfinished.
+frame-tolerant measurement, shared assembly lock. If it is on GitHub but not merged into main, it is unfinished. Status
+2026-11-18 evening: Design Office Phase 5 complete on that branch, gate green, committed, not pushed, waiting for the
+master to merge (report: docs/reports/design-office.md Phase 5; PD-55). Drawing Studio VERSION 1.1.3 (faceted gear
+flanks are no longer read as chamfers). Calibration keeps simulated runs in their own profile.
 
 **Next after phase 5:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.

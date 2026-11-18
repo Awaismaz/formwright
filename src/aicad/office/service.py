@@ -10,6 +10,7 @@ Callers hold ``store.lock(program_id)`` around load -> change -> save.
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import threading
 from pathlib import Path
@@ -111,8 +112,28 @@ def new_program(name: str, brief: str, org_id: str, user_id: str, concurrency: i
             "budget": {"tokens": max(0, int(budget_tokens)), "planning_tokens": 0}}
 
 
+def profile() -> str:
+    """Which calibration profile applies now: simulated agents (development) never touch the live constants."""
+    from aicad.office import fake_agents
+
+    return "simulated" if fake_agents.enabled() else "live"
+
+
+def snapshot_rates(root: Path, doc: dict[str, Any]) -> None:
+    """The program takes the organisation's current calibrated rates when it is planned (CD-015)."""
+    from aicad.office import calibration
+
+    prof = profile()
+    doc["calibration"] = {"profile": prof, "rates": calibration.rates(root, prof), "at": store.now()}
+
+
+def rates_of(doc: dict[str, Any]) -> dict[str, float] | None:
+    return (doc.get("calibration") or {}).get("rates")
+
+
 def set_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any], actor: dict[str, Any], *,
              narrative: str = "", note: str | None = None) -> None:
+    snapshot_rates(root, doc)
     if doc.get("plan"):
         doc.setdefault("plan_history", []).append(doc["plan"])
         doc["plan_history"] = doc["plan_history"][-5:]
@@ -128,9 +149,9 @@ def gate(doc: dict[str, Any], code: str) -> dict[str, Any]:
     return next(g for g in doc["gates"] if g["code"] == code)
 
 
-def plan_estimate(plan: dict[str, Any], concurrency: int) -> dict[str, Any]:
+def plan_estimate(plan: dict[str, Any], concurrency: int, rates: dict[str, float] | None = None) -> dict[str, Any]:
     """Estimates for a plan that has no tickets yet (plan review shows what approval will create)."""
-    items, tickets = _build(plan, "Program", "P")
+    items, tickets = _build(plan, "Program", "P", rates=rates)
     total = sum(t["estimate_min"] for t in tickets)
     return {"tickets": len(tickets), "estimate_min": round(total, 1),
             "eta": estimates.eta(items, tickets, "root", concurrency)}
@@ -147,8 +168,8 @@ def _ticket_brief(program: str, brief: str, sub: str, part: dict[str, Any]) -> s
             f"Program brief: {brief[:1500]}")
 
 
-def _build(plan: dict[str, Any], name: str, prefix: str, brief: str = "") \
-        -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _build(plan: dict[str, Any], name: str, prefix: str, brief: str = "",
+           rates: dict[str, float] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     items: list[dict[str, Any]] = [{"id": "root", "parent_id": None, "kind": "program", "name": name}]
     tickets: list[dict[str, Any]] = []
     seq = [0]
@@ -158,7 +179,8 @@ def _build(plan: dict[str, Any], name: str, prefix: str, brief: str = "") \
         seq[0] += 1
         t = {"id": f"t{seq[0]}", "key": f"{prefix}-{seq[0]}", "item_id": item_id, "kind": kind, "title": title,
              "brief": brief_, "family": family, "specialist": roster.specialist_for(family),
-             "complexity": complexity, "estimate_min": estimates.estimate_minutes(family, complexity), "qty": qty,
+             "complexity": complexity, "estimate_min": estimates.estimate_minutes(family, complexity, rates),
+             "qty": qty,
              "column": column, "milestones": [], "progress": 0, "project_id": None, "assembly_id": None,
              "depends_on": depends, "comments": [], "checks": None, "tokens": 0, "run": None,
              "created_at": store.now(), "updated_at": store.now()}
@@ -200,7 +222,7 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
             raise OfficeInputError("The plan needs at least one sub-assembly with one part.")
         p2["edited"] = _plan_shape(p2) != _plan_shape(doc["plan"])
         doc["plan"] = {**doc["plan"], **p2}
-    items, tickets = _build(doc["plan"], doc["name"], doc["key"], doc["brief"])
+    items, tickets = _build(doc["plan"], doc["name"], doc["key"], doc["brief"], rates_of(doc))
     doc["items"], doc["tickets"], doc["ticket_seq"] = items, tickets, len(tickets)
     doc["status"] = "active"
     g = gate(doc, "brief")
@@ -211,6 +233,43 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
     from aicad.office import interfaces
 
     interfaces.create(root, doc, actor)
+
+
+DELIVERABLE_TICKETS = (
+    ("drawings", "Drawings: part sheets and the assembly drawing",
+     ("Draw every part the program makes (Drawing Studio sheets, ICD interface numbers tagged as spec dimensions where "
+     "they map) and the assembly drawing with its BOM table and balloons.")),
+    ("dfm", "Manufacturing review of every part",
+     ("Run the Manufacturing Advisor on every part the program makes and summarise the program: process per part, "
+     "flags, relative cost.")),
+)
+
+
+def add_deliverables(root: Path, doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """After the final assembly is integrated: Ortho's and Smithy's deliverable tickets (CD-014). One complexity
+    unit per two parts made; the estimate uses the program's calibrated rates."""
+    from aicad.office import deliverables
+
+    final = next((t for t in doc["tickets"] if t["kind"] == "integration" and t["item_id"] == "root"), None)
+    n = len(deliverables.make_parts(doc))
+    cx = estimates.clamp_complexity(max(1, math.ceil(n / 2)))
+    out = []
+    for code, title, brief in DELIVERABLE_TICKETS:
+        doc["ticket_seq"] = int(doc.get("ticket_seq") or len(doc["tickets"])) + 1
+        seq = doc["ticket_seq"]
+        t = {"id": f"t{seq}", "key": f"{doc['key']}-{seq}", "item_id": "root", "kind": "deliverable",
+             "deliverable": code, "title": title, "brief": brief, "family": code,
+             "specialist": roster.specialist_for(code), "complexity": cx,
+             "estimate_min": estimates.estimate_minutes(code, cx, rates_of(doc)), "qty": 1, "column": "ready",
+             "milestones": [], "progress": 0, "project_id": None, "assembly_id": None,
+             "depends_on": [final["id"]] if final else [], "comments": [], "checks": None, "tokens": 0, "run": None,
+             "created_at": store.now(), "updated_at": store.now()}
+        doc["tickets"].append(t)
+        out.append(t)
+    emit(root, doc, "deliverables.opened", f"First article assembled: Ortho draws the {n} part"
+         f"{'s' if n != 1 else ''} the program makes and the assembly drawing with its BOM; Smithy reviews every part "
+         "for manufacture.", agent_actor("archie"))
+    return out
 
 
 def _plan_shape(plan: dict[str, Any]) -> Any:
@@ -261,7 +320,9 @@ def move(root: Path, doc: dict[str, Any], tid: str, column: str, actor: dict[str
 
 
 def _check_complete(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
-    done = all(t["column"] == "integrated" for t in doc["tickets"])
+    """Complete = first article assembled: every part and integration ticket integrated (deliverables follow)."""
+    core = [t for t in doc["tickets"] if t["kind"] != "deliverable"]
+    done = bool(core) and all(t["column"] == "integrated" for t in core)
     if done and doc["status"] != "complete":
         doc["status"] = "complete"
         emit(root, doc, "program.milestone", f"Every ticket of {doc['name']} is integrated. First article "
@@ -297,9 +358,11 @@ def update(root: Path, doc: dict[str, Any], tid: str, actor: dict[str, Any], *, 
     if specialist is not None and specialist != t["specialist"]:
         if specialist not in roster.AGENT_CODES or specialist == "archie":
             raise OfficeInputError("Unknown specialist")
+        if t["kind"] == "deliverable" and specialist != roster.specialist_for(t["family"]):
+            raise OfficeInputError("Deliverables stay with their owner: Ortho draws, Smithy reviews for manufacture.")
         if t["kind"] == "integration" and specialist != "fitz":
             raise OfficeInputError("Fitz assembles sub-assemblies; assign part tickets to the designers.")
-        if t["kind"] != "integration" and specialist not in roster.DESIGNERS + ("hex",):
+        if t["kind"] in ("part", "standard") and specialist not in roster.DESIGNERS + ("hex",):
             raise OfficeInputError(f"{roster.agent(specialist)['name']} doesn't design parts. Gage checks them "
                                    "independently, so he can't be the designer (no self-approval).")
         t["specialist"] = specialist
@@ -307,7 +370,7 @@ def update(root: Path, doc: dict[str, Any], tid: str, actor: dict[str, Any], *, 
     if complexity is not None:
         cx = estimates.clamp_complexity(complexity)
         if cx != t["complexity"]:
-            t["complexity"], t["estimate_min"] = cx, estimates.estimate_minutes(t["family"], cx)
+            t["complexity"], t["estimate_min"] = cx, estimates.estimate_minutes(t["family"], cx, rates_of(doc))
             changes.append(f"complexity {cx} ({t['estimate_min']:g} min estimate)")
     if changes:
         _refresh(t)
@@ -386,7 +449,9 @@ def sync_studio(root: Path, doc: dict[str, Any], info: dict[str, dict[str, Any]]
 AGENT_STATE = {"in_design": "working", "in_review": "review", "changes_requested": "blocked",
                "approved": "done", "integrated": "done"}
 RUN_STATE = {"searching": "working", "designing": "working", "reviewing": "working", "integrating": "working",
-             "blocked": "blocked", "done": "done"}
+             "fitting": "working", "drafting": "working", "screening": "working", "blocked": "blocked",
+             "done": "done"}
+WORKING = ("searching", "designing", "reviewing", "integrating", "fitting", "drafting", "screening")
 
 
 def ticket_view(t: dict[str, Any]) -> dict[str, Any]:
@@ -399,11 +464,17 @@ def ticket_view(t: dict[str, Any]) -> dict[str, Any]:
         state = "idle"
     if st == "done" and t["column"] not in DONE_COLUMNS:
         state = AGENT_STATE.get(t["column"], "idle")
-    agent_code = r.get("agent") if st in ("searching", "designing", "reviewing", "integrating") else t["specialist"]
+    agent_code = r.get("agent") if st in WORKING else t["specialist"]
     if st == "done" and r.get("agent") in ("hex", "gage", "fitz"):
         agent_code = r["agent"]
-    return {**t, "agent": agent_code or t["specialist"], "agent_label": r.get("agent_label") if st in (
-        "searching", "designing", "reviewing", "integrating") else None,
+    from aicad.office import timeline
+
+    actual = timeline.actual_minutes(t)
+    done = t["column"] in DONE_COLUMNS and st in (None, "done")
+    return {**t, "agent": agent_code or t["specialist"], "agent_label": r.get("agent_label") if st in WORKING else None,
+            "actual_min": actual, "rounds": timeline.rounds(t),
+            "error_pct": round(100.0 * (actual - float(t["estimate_min"])) / float(t["estimate_min"]), 1)
+            if done and actual and t["estimate_min"] else None,
             "agent_state": state, "line": r.get("line"), "run_status": "paused" if t.get("paused") else st,
             "review_tokens": int(t.get("review_tokens") or 0), "spent": int(t.get("tokens") or 0) + int(t.get("review_tokens") or 0)}
 
@@ -444,8 +515,8 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
                                           ("waiting_capacity", "retry")),
                            "blocked": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "blocked")}
     if doc.get("plan") and doc["status"] == "plan_review":
-        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"])
-    out["constants"] = estimates.constants()
+        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc))
+    out["constants"] = estimates.constants(rates_of(doc))
     out["families"] = [{"code": f, "label": lbl, "specialist": s} for f, (lbl, s) in roster.FAMILIES.items()]
     return out
 
@@ -454,7 +525,7 @@ def summary(doc: dict[str, Any]) -> dict[str, Any]:
     v = view(doc)
     v.pop("icd", None)
     return {k: v.get(k) for k in ("id", "name", "key", "status", "planner", "created_at", "updated_at", "rollup",
-                                  "eta", "counts", "budget", "gates", "concurrency", "orchestrator")} | {
+                                  "eta", "counts", "budget", "gates", "concurrency", "orchestrator", "released")} | {
         "tickets": len(doc["tickets"]), "brief": doc["brief"][:300]}
 
 
@@ -487,7 +558,7 @@ def roster_view(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     if best is None or rank[s] > rank[best[0]]:
                         best = (s, t, d)
             live = [(t, d) for d in docs for t in d["tickets"] if (t.get("run") or {}).get("agent") == a["code"]
-                    and (t.get("run") or {}).get("status") in ("searching", "designing", "reviewing", "integrating")]
+                    and (t.get("run") or {}).get("status") in WORKING]
             if live:
                 t, d = live[0]
                 state, prog = "working", d["id"]

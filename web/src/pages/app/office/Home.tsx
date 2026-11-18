@@ -41,7 +41,7 @@ function ProgramCard({ p }: { p: ProgramSummary }) {
           <div className="mt-0.5 line-clamp-1 text-[12.5px] text-muted">{p.brief}</div>
         </div>
         <Badge className="max-sm:ml-[50px]" tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>
-          {STATUS_LABEL[p.status]}</Badge>
+          {p.released ? `Released · rev ${p.released.rev}` : STATUS_LABEL[p.status]}</Badge>
       </div>
       {p.rollup ? (
         <div className="mt-3">
