@@ -131,12 +131,11 @@ frame-tolerant Gage (24 axis rotations), shared assembly lock (in-memory, single
 docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3.
 
 **In flight (worktrees under `C:/Users/Awais/Desktop/fw-wt/`, WORKLIST 23-25):** `wip/drawing-depth` (threads, detail
-views, GD&T from explicit input, STEP→drawing), `wip/eng-hygiene` (unit round-trip matrix, licences + SBOM, run record,
-repeatability), `wip/studio-intel` (agent fills the PropertyManager, change-impact preview). Unmerged = unfinished.
+views, GD&T from explicit input, STEP→drawing), `wip/studio-intel` (agent fills the PropertyManager, change-impact preview). Unmerged = unfinished.
 Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
 review gate, change notices after release).
 
-**Engineering hygiene (branch `wip/eng-hygiene`, 2026-11-18):** every design-agent turn writes a server-side run record `.fw/runs/<id>/run.json` (AGT-009; super-admin API only, prompt hashed + redacted by default, PD-56); licence audit + CycloneDX SBOMs in `docs/legal/` (regenerate with `uv run python scripts/sbom.py` after any dependency change; `tests/test_sbom.py` fails on a stale SBOM or an un-allow-listed copyleft licence); IO round-trip matrix `docs/reports/io-roundtrip.md`; `aicad repeat` repeatability harness (fake/replay by default).
+**Engineering hygiene (merged 2026-11-18, 63a9887):** every design-agent turn writes a server-side run record `.fw/runs/<id>/run.json` (AGT-009; super-admin API only, prompt hashed + redacted by default, PD-56); licence audit + CycloneDX SBOMs in `docs/legal/` (regenerate with `uv run python scripts/sbom.py` after any dependency change; `tests/test_sbom.py` fails on a stale SBOM or an un-allow-listed copyleft licence); IO round-trip matrix `docs/reports/io-roundtrip.md`; `aicad repeat` repeatability harness (fake/replay by default).
 
 **Next:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
