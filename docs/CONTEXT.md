@@ -108,7 +108,7 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-46).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-54).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
@@ -117,18 +117,18 @@ record/replay agent, 20-prompt benchmark harness; sidebar fixes; animated landin
 AI Render Studio (OpenAI images with the user's own key — not yet run live); 2D drafting without a model; Mesh
 fixes (fail-fast output paths, degenerate triangles).
 
-**In flight on branches (git worktrees under `C:\Users\Awais\Desktop\fw-wt\`, branch `wip/<name>`), merged one by one:**
-- `wip/office-phase3` — Design Office orchestrator (auto-run agents on tickets, Gage checker, Fitz integration, budgets).
-- `wip/landing-hero` — landing hero = planetary-gearbox Design Office story, phone + tablet app mockups,
-  "Integrates with your CAD" section, "Why should I buy this" button, no "coming soon" labels.
-- `wip/pwa` — installable app (PWA) + mobile/tablet layout pass.
-- `wip/native-formats` — .fwpart/.fwasm/.fwdrw/.fwprog/.fwrender/.fwmfg/.fwcalc/.fwprint/.fwread save/open in every module.
-- `wip/collab` — teams, per-project permissions, sharing, presence/comments, branches + merge requests.
-If a branch exists on GitHub but not in main, it was not finished/merged yet: check its last commit and the
-work list before continuing it.
+**Also merged later on 2026-11-18:** Design Office phases 3-4 (orchestrator with Hex/specialists/Gage/Fitz, budgets;
+ICD + conformance measurement, placeholders + swap-in, change requests, live program assembly, nested
+sub-assemblies); landing hero v2 (planetary gearbox story, CAD tools tiles, phone + tablet); installable PWA +
+mobile/tablet pass; Formwright native files in every module (.fwpart/.fwasm/.fwdrw/.fwprog/.fwrender/.fwmfg/
+.fwcalc/.fwprint/.fwread, opened by the installed app); collaboration (teams, permissions, sharing, presence,
+comments, branches + merge requests). DB backup taken before collaboration went live: `data/backups/` (local only).
 
-**Next after these:** Design Office phase 4 (skeleton + ICD, placeholder bodies, mates by ICD name, change
-requests, live program assembly) and phase 5 (program deliverables, estimate calibration, timeline); then the
+**In flight:** `wip/office-phase5` (worktree `C:/Users/Awais/Desktop/fw-wt/office-phase5`): program deliverables
+(drawings, BOM, DFM, release pack), calibration + timeline, better layouts, bearing/key/dowel interfaces,
+frame-tolerant measurement, shared assembly lock. If it is on GitHub but not merged into main, it is unfinished.
+
+**Next after phase 5:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
 
 **Process rules (founder):** push after every merge; update CONTEXT/PUNCH_LIST/SESSION_LOG/DECISIONS/WORKLIST at
