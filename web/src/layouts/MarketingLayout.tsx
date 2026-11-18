@@ -7,8 +7,8 @@ import { Button, Logo } from "@/components/ui";
 import { cx } from "@/lib/format";
 
 const LINKS = [
-  { to: "/#how", label: "How it works" }, { to: "/#modules", label: "Modules" },
-  { to: "/#trust", label: "Security" }, { to: "/why", label: "Why Formwright" }, { to: "/pricing", label: "Pricing" },
+  { to: "/#how", label: "How it works" }, { to: "/why", label: "Why Formwright" }, { to: "/#modules", label: "Modules" },
+  { to: "/#trust", label: "Security" }, { to: "/pricing", label: "Pricing" },
 ];
 
 export default function MarketingLayout() {
