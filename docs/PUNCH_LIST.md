@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 
 | Status | Items |
 |---|---|
-| Done | 166 |
+| Done | 167 |
 | In Progress | 23 |
 | Backlog | 91 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **298** |
+| **Total** | **299** |
 
 Recomputed 2026-11-18 after reconciling rows the Design Studio work had already delivered.
 
@@ -387,6 +387,7 @@ Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
 | UX-016 | UX | Super-admin console: KPIs, funnel, users, orgs, catalog editor, payments, feedback, audit, outbox, system | P0 | Done | M1 | MVP | Eng | PLT-004 | | `tests/test_platform.py`::test_admin_console_and_impersonation | |
 | UX-017 | UX | Brand identity: name, logo, palette, typography (BRAND.md) | P0 | Done | M1 | MVP | Eng | ADR-015 | | docs/BRAND.md | Trademark check parked (PD-01) |
 | UX-018 | UX | Mobile/tablet layout pass for the app shell and studio | P2 | Backlog | M2 | LT | Eng | UX-002 | Usable at 768 px | — | Marketing is responsive; studio is desktop-first |
+| UX-019 | UX | **Sidebar fixes**: Design Studio listed first in Modules (was filtered out); Modules always expanded (no collapse); collapsed rail 64 px with 40×40 items, 20 px icons, separators, tooltips, active highlight (was lost); data-driven nav sections | P1 | Done | M2 | MVP | Eng | — | All modules visible; collapsed rail readable | `web/src/layouts/AppLayout.tsx`; browser walkthrough (7 screenshots, active state per route) | Founder bug report 2026-11-18 |
 | INF-001 | Infra | uv venv (Py3.12), lockfile, pinned deps | P0 | Done | M1 | MVP | Eng | ARC-010 | Fresh clone → `uv sync` → tests pass | `pyproject.toml`, `uv.lock`, `.venv` Py 3.12.13 | Fresh clone on 2nd workstation: `uv sync` + `npm ci` → 82 passed, ruff clean, tsc + vite OK (2026-11-16) |
 | INF-002 | Infra | SQLite persistence + local artifact store | P0 | Done | M1 | MVP | Eng | INF-001 | Migration + tests | SQLAlchemy + SQLite + filesystem workspaces |  |
 | INF-003 | Infra | CI (lint, type, tests, no paid calls) incl. Linux runner | P0 | Backlog | M1 | MVP | Eng | GOV-004 | CI green on Win + Linux | — | R-TEC-07 |
