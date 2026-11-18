@@ -34,7 +34,9 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   GET    /api/office/programs/{pid}/bom.csv                  the program BOM
   GET    /api/office/programs/{pid}/deliverables/assembly.{svg|pdf|dxf}   the assembly drawing (DRW-014)
   POST   /api/office/programs/{pid}/release                  release the program: one pack, every part tagged
-  GET    /api/office/programs/{pid}/releases/{rev}/pack.zip  a program release pack
+  GET    /api/office/programs/{pid}/releases/{rev}/pack.zip  a program release pack (immutable once written)
+  POST   /api/office/programs/{pid}/tickets/{tid}/review     the per-part review gate: approve / request changes
+  POST   /api/office/programs/{pid}/ecn                      raise a change notice on a released program (CD-024)
 """
 
 from __future__ import annotations
@@ -66,6 +68,7 @@ from aicad.office import (
     store,
     timeline,
 )
+from aicad.office import ecn as ecn_mod
 from aicad.platform import metering
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
@@ -86,6 +89,7 @@ class ProgramIn(BaseModel):
     concurrency: int = Field(default=3, ge=1, le=12)
     budget_tokens: int = Field(default=service.DEFAULT_BUDGET_TOKENS, ge=0, le=1_000_000)
     deliverables: bool = True  # Ortho and Smithy make the drawings, BOM and DFM summary after integration
+    review_gate: bool = False  # every part waits for the engineer's approval after Gage passes it (CD-023)
 
 
 class ProgramPatch(BaseModel):
@@ -93,6 +97,19 @@ class ProgramPatch(BaseModel):
     concurrency: int | None = Field(default=None, ge=1, le=12)
     budget_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     deliverables: bool | None = None
+    review_gate: bool | None = None
+
+
+class ReviewIn(BaseModel):
+    decision: str  # "approve" | "changes"
+    note: str = Field("", max_length=2000)
+
+
+class EcnIn(BaseModel):
+    reason: str = Field(..., max_length=600)
+    items: list[str] = Field(default_factory=list, max_length=200)
+    interface: str | None = None
+    values: dict[str, Any] | None = None
 
 
 class ReleaseIn(BaseModel):
@@ -309,6 +326,7 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     root = _root(ctx)
     doc = service.new_program(name, brief, org.id, ctx.user.id, body.concurrency, body.budget_tokens, kind)
     doc["deliverables_auto"] = body.deliverables
+    doc["review_gate"] = body.review_gate
     service.emit(root, doc, "program.created", f"{ctx.user.name or 'Someone'} opened the program {name}.",
                  _actor(ctx))
     _start_planning(ctx, root, doc, kind)
@@ -348,6 +366,16 @@ def patch_program(pid: str, body: ProgramPatch, ctx: Ctx = Depends(verified_ctx)
             doc["concurrency"] = body.concurrency
         if body.deliverables is not None:
             doc["deliverables_auto"] = body.deliverables
+        if body.review_gate is not None and bool(body.review_gate) != bool(doc.get("review_gate")):
+            doc["review_gate"] = bool(body.review_gate)
+            if not body.review_gate:  # switched off: parts waiting for review go on as Gage approved them
+                for t in doc["tickets"]:
+                    if (t.get("run") or {}).get("status") == "awaiting_review":
+                        orchestrator.review_decision(root, doc, t["id"], "approve", "Review gate switched off.",
+                                                     _actor(ctx))
+            service.emit(root, doc, "program.review_gate", f"{ctx.user.name or 'Someone'} switched the per-part review "
+                         f"gate {'on: every part waits for your approval after Gage' if body.review_gate else 'off'}.",
+                         _actor(ctx), on=bool(body.review_gate))
         if body.budget_tokens is not None:
             doc["budget"]["tokens"] = body.budget_tokens
             o = doc.get("orchestrator") or {}
@@ -489,6 +517,11 @@ def move_ticket(pid: str, tid: str, body: MoveIn, ctx: Ctx = Depends(verified_ct
         if orchestrator.run_of(t).get("status") in orchestrator.ACTIVE:
             who = orchestrator.run_of(t).get("agent_label") or "An agent"
             raise OfficeInputError(f"{who} is working on this ticket. Pause it or take over first.")
+        if orchestrator.run_of(t).get("status") == "awaiting_review" and body.column in ("approved", "changes_requested"):
+            if body.column == "changes_requested":  # the review gate needs the note that goes to the designer
+                raise OfficeInputError("Request changes from the ticket with a note for the designer.")
+            orchestrator.review_decision(root, d, tid, "approve", "", _actor(ctx))
+            return
         service.move(root, d, tid, body.column, _actor(ctx))
         if body.column in ("ready", "backlog") and t.get("run"):
             t["run"] = None  # the engineer put it back in the queue: the office starts it afresh
@@ -538,6 +571,49 @@ async def ticket_control(pid: str, tid: str, body: ControlIn, ctx: Ctx = Depends
         await orchestrator.interrupt(pid, tid)
     orchestrator.poke(pid)
     return _view(doc)
+
+
+@router.post("/programs/{pid}/tickets/{tid}/review")
+def ticket_review(pid: str, tid: str, body: ReviewIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The per-part review gate (CD-023): approve (the part goes on to assembly) or request changes with a note
+    (the ticket reopens and the note is the designer's next instruction)."""
+    doc = _mutate(ctx, pid, lambda root, d: orchestrator.review_decision(root, d, tid, body.decision, body.note,
+                                                                         _actor(ctx)))
+    orchestrator.poke(pid)
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/ecn")
+async def raise_ecn(pid: str, body: EcnIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Raise an engineering change notice on a released program (CD-024): the affected parts reopen with the
+    reason, the office reworks them, and the next release issues only them at a new letter."""
+    from aicad.office import platform_env
+    from aicad.platform.routers.projects import can_run_agent
+
+    _editor(ctx)
+    allowed, reason, cta = can_run_agent(ctx)
+    if not allowed:
+        raise HTTPException(402, {"message": reason, "cta": cta})
+    out: list[dict[str, Any]] = []
+
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        out.append(ecn_mod.open_ecn(root, d, body.reason, body.items, _actor(ctx), body.interface, body.values))
+    doc = _mutate(ctx, pid, fn)
+    e = out[0]
+    if e.get("cr_id"):
+        env = orchestrator.make_env(_root(ctx), {**doc, "orchestrator": {**(doc.get("orchestrator") or {}),
+                                                                          "user_id": ctx.user.id,
+                                                                          "god_tokens": ctx.god_on("bypass_tokens")}})
+        await platform_env.decide_cr(_root(ctx), pid, e["cr_id"], env if isinstance(env, platform_env.PlatformEnv)
+                                     else None)
+    doc = _mutate(ctx, pid, lambda root, d: orchestrator.start(
+        root, d, _actor(ctx), user_id=ctx.user.id, god_tokens=ctx.god_on("bypass_tokens"),
+        god_paywall=ctx.god_on("bypass_paywall")))
+    orchestrator.ensure(_root(ctx), pid)
+    audit(ctx.db, "office.ecn_raised", ctx.user, doc["org_id"], target=pid, ecn=e["id"], parts=len(e["items"]))
+    track(ctx.db, "office_ecn_raised", ctx.user, doc["org_id"], parts=len(e["items"]))
+    ctx.db.commit()
+    return {**_view(doc), "ecn": e}
 
 
 @router.post("/programs/{pid}/run")
@@ -699,11 +775,14 @@ def _gate_release(doc: dict[str, Any]) -> dict[str, Any]:
     if any((t.get("run") or {}).get("status") in orchestrator.ACTIVE for t in doc["tickets"]):
         blocking.append("An agent is still working on the program.")
     rels = doc.get("releases") or []
+    cur = ecn_mod.current(doc)
+    if rels and cur is None:
+        blocking.append(f"Rev {rels[-1]['rev']} is released: raise a change notice (ECN) to change the program.")
     from aicad import handoff
 
     return {"ready": not blocking, "blocking": blocking, "next_rev": handoff.REV_LETTERS[len(rels)]
             if len(rels) < len(handoff.REV_LETTERS) else None, "releases": list(reversed(rels)),
-            "released": doc.get("released")}
+            "released": doc.get("released"), "ecn": cur, "ecns": list(reversed(doc.get("ecns") or []))}
 
 
 @router.get("/programs/{pid}/deliverables")
@@ -794,6 +873,7 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
     from aicad.platform.routers import projects as prj
 
     _editor(ctx)
+    body = body or ReleaseIn()  # a release without a body: no note, the server's date
     org = ctx.require_org()
     root = _root(ctx)
     lock = _release_locks.setdefault(pid, asyncio.Lock())
@@ -804,6 +884,10 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
             raise HTTPException(409, {"message": "The program can't be released yet: " + " ".join(gate["blocking"]),
                                       "blocking": gate["blocking"]})
         rev = gate["next_rev"]
+        rel_dir = store.program_dir(root, pid) / "releases" / rev
+        if (rel_dir / "pack.zip").exists() or any(r["rev"] == rev for r in doc.get("releases") or []):
+            raise HTTPException(409, f"Rev {rev} is already released: a release pack is never overwritten.")
+        cur_ecn = ecn_mod.current(doc)
         by = ctx.user.name or ctx.user.email
         day = mod_drawings.local_date(body.local_date, body.tz)
         note = body.note.strip() or ("Initial release" if not doc.get("releases") else "Program changed")
@@ -843,7 +927,6 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
         # the assembly STEP (the final assembly as it is now) and the assembly drawing stamped with the letter
         aroot = astore.org_root(get_settings().data_dir, org.id)
         fid = (doc.get("assembly") or {}).get("final")
-        rel_dir = store.program_dir(root, pid) / "releases" / rev
         if fid:
             async with locks.hold(fid, locks.OFFICE):
                 final = astore.load(aroot, fid)
@@ -879,7 +962,19 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
             raise HTTPException(409, f"The program file could not be written: {e.detail}") from None
         record = {"rev": rev, "date": day, "by": by, "by_id": ctx.user.id, "note": note,
                   "issued_at": datetime.now(UTC).replace(microsecond=0).isoformat(), "parts": released,
-                  "icd_version": (doc.get("icd") or {}).get("version"), "bom_lines": len(b["rows"])}
+                  "icd_version": (doc.get("icd") or {}).get("version"), "bom_lines": len(b["rows"]),
+                  "ecn": cur_ecn["id"] if cur_ecn else None}
+        if doc.get("releases"):  # the diff summary against the previous release (its pack is the record)
+            prev = doc["releases"][-1]
+            prev_bom = _pack_text(root, pid, prev["rev"], "bom.csv")
+            prev_icd = _pack_text(root, pid, prev["rev"], "icd/icd.json")
+            diff = ecn_mod.release_diff(
+                prev, released, prev_bom, b, json.loads(prev_icd) if prev_icd else None,
+                {"version": doc["icd"]["version"], "skeleton": doc["skeleton"], "interfaces": doc["icd"]["interfaces"]}
+                if doc.get("icd") else None, cur_ecn)
+            record["diff"] = diff
+            files["CHANGES.txt"] = ecn_mod.changes_txt(doc, rev, diff).encode("utf-8")
+            files["changes.json"] = json.dumps(diff, indent=1, ensure_ascii=False).encode("utf-8")
         files["README.txt"] = deliverables.readme(doc, record, list(files) + ["README.txt", "manifest.json"],
                                                   released, b, dfm).encode("utf-8")
         manifest = {"program": doc["name"], "release": {k: record[k] for k in ("rev", "date", "by", "note", "issued_at")},
@@ -895,7 +990,10 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
                 z.writestr(info, files[k])
         pack = buf.getvalue()
         rel_dir.mkdir(parents=True, exist_ok=True)
-        (rel_dir / "pack.zip").write_bytes(pack)
+        try:
+            _write_new(rel_dir / "pack.zip", pack)
+        except FileExistsError:
+            raise HTTPException(409, f"Rev {rev} is already released: a release pack is never overwritten.") from None
         record.update(pack_sha256=hashlib.sha256(pack).hexdigest(), pack_bytes=len(pack), files=sorted(files))
 
         def fn(r: Path, d: dict[str, Any]) -> None:
@@ -903,6 +1001,10 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
             d["released"] = {k: record[k] for k in ("rev", "date", "by", "issued_at")}
             g = service.gate(d, "release")
             g.update(status="approved", by=by, at=store.now(), rev=rev, note=f"Released rev {rev}")
+            done = ecn_mod.mark_released(d, rev, by)
+            if done:
+                service.emit(r, d, "ecn.released", f"{done['id']} released as rev {rev}: "
+                             f"{(record.get('diff') or {}).get('summary', '')}", _actor(ctx), ecn=done["id"], rev=rev)
             service.emit(r, d, "program.released", f"{by} released {d['name']} rev {rev}: {len(released)} part"
                          f"{'s' if len(released) != 1 else ''} issued and tagged, drawings, BOM, DFM summary, ICD and "
                          "the program file in one pack.", _actor(ctx), rev=rev)
@@ -912,6 +1014,22 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
     track(ctx.db, "office_program_released", ctx.user, org.id, parts=len(released))
     ctx.db.commit()
     return {"release": {k: v for k, v in record.items() if k != "by_id"}, "program": _view(doc)}
+
+
+def _write_new(f: Path, data: bytes) -> None:
+    """Exclusive create: a released pack is never rewritten (FileExistsError when it exists)."""
+    with open(f, "xb") as fh:
+        fh.write(data)
+
+
+def _pack_text(root: Path, pid: str, rev: str, name: str) -> str | None:
+    """One file of a released pack, as text (None when missing)."""
+    f = store.program_dir(root, pid) / "releases" / rev / "pack.zip"
+    if not f.is_file():
+        return None
+    with zipfile.ZipFile(f) as z:
+        hit = next((n for n in z.namelist() if n.split("/", 1)[-1] == name), None)
+        return z.read(hit).decode("utf-8") if hit else None
 
 
 @router.get("/programs/{pid}/releases/{rev}/pack.zip")
@@ -936,3 +1054,63 @@ async def _resume_on_startup() -> None:
 
 router.on_startup.append(_resume_on_startup)
 router.on_shutdown.append(orchestrator.shutdown)
+
+
+# ----------------------------------------------------------------------------- motion range check (ASM-011)
+class ProgramMotionIn(BaseModel):
+    steps: int = 24
+    start: float | None = None
+    end: float | None = None
+
+
+@router.post("/programs/{pid}/assembly/motion")
+async def program_motion(pid: str, body: ProgramMotionIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Turn the program's shafts through a range (gear meshes by their ratios, joints from the ICD) and check
+    collisions at every step of the final assembly. Nothing is saved to the assembly itself."""
+    from aicad.assembly import AssemblyInputError, locks
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+    from aicad.office import motion_joints
+
+    doc = _load(ctx, pid)
+    state = doc.get("assembly") or {}
+    if state.get("status") != "ready" or not state.get("final"):
+        raise HTTPException(409, "The program assembly isn't ready yet.")
+    aroot = astore.org_root(get_settings().data_dir, ctx.require_org().id)
+    steps = max(2, min(int(body.steps or 24), 72))
+    async with locks.hold(state["final"], locks.OFFICE):
+        adoc = astore.load(aroot, state["final"])
+        if adoc is None:
+            raise HTTPException(409, "The final assembly is missing. Rebuild the program assembly.")
+        pj = motion_joints.program_joints(doc, adoc)
+        if not pj["driver"]:
+            raise HTTPException(409, "No shaft in this program turns in a bearing or a bore, so there is no motion "
+                                     "to check.")
+        try:
+            res = await aservice.motion_check(aroot, ctx.require_org().id, adoc, pj["joints"], pj["driver"],
+                                              body.start, body.end, steps, save=False)
+        except (AssemblyInputError, aservice.WorkerError) as e:
+            raise HTTPException(400, str(e)) from e
+    res["notes"] = pj["notes"]
+    astore.write_json(astore.doc_dir(aroot, adoc["id"]) / "motion_program.json", res)
+    audit(ctx.db, "office.motion_checked", ctx.user, doc["org_id"], target=pid, steps=len(res["steps"]),
+          colliding=len(res["colliding_steps"]))
+    ctx.db.commit()
+    return {"motion": {**res, "stale": False}}
+
+
+@router.get("/programs/{pid}/assembly/motion")
+def program_motion_last(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+
+    doc = _load(ctx, pid)
+    fid = (doc.get("assembly") or {}).get("final")
+    if not fid:
+        return {"motion": None}
+    aroot = astore.org_root(get_settings().data_dir, ctx.require_org().id)
+    adoc = astore.load(aroot, fid)
+    res = astore.read_json(astore.doc_dir(aroot, fid) / "motion_program.json") if adoc else None
+    if res:
+        res["stale"] = res.get("signature") != aservice.geometry_signature(adoc)
+    return {"motion": res or None}

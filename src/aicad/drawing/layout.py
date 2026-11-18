@@ -846,10 +846,15 @@ def _projection_symbol(g: Group, x: float, y: float, first_angle: bool) -> None:
 
 
 def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first_angle: bool,
-                 revisions: list[dict[str, Any]], size: str) -> tuple[Group, list[float]]:
+                 revisions: list[dict[str, Any]], size: str, rev_at: str = "above") -> tuple[Group, list[float]]:
     """Title block (ISO 7200 fields) and the revision table of issued revisions, in the bottom-right corner.
-    A4 uses a compact block so the views keep a sensible scale (MAKE-07)."""
+    A4 uses a compact block so the views keep a sensible scale (MAKE-07). ``rev_at="top"`` puts the revision table
+    in the top-right corner of the frame instead of over the title block (ASME Y14.35 practice; "topleft": a narrower
+    table in the top-left corner), for sheets whose
+    views need the space beside the title block; its box is then ``g.rev_box`` and the returned box is the title
+    block's alone."""
     g = Group()
+    g.rev_box = None  # type: ignore[attr-defined]
     compact = size in ("A4", "ANSI A")
     x0 = W - FRAME["right"] - TB_W
     yb = H - FRAME["bottom"]
@@ -905,22 +910,28 @@ def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first
     rows_h = revisions[-3:]
     if rows_h:
         rt_h = 5.0 + 4.6 * len(rows_h)
-        ry = y0 - 2.0 - rt_h
-        g.rect("tbthin", x0, ry, TB_W, rt_h)
-        cols = [(0, 14, "REV"), (14, 104, "DESCRIPTION"), (118, 26, "DATE"), (144, 36, "BY")]
+        ry = y0 - 2.0 - rt_h if rev_at == "above" else FRAME["top"] + 2.0
+        rw = TB_W if rev_at != "topleft" else 90.0
+        rx = x0 if rev_at != "topleft" else FRAME["left"] + 2.0
+        g.rect("tbthin", rx, ry, rw, rt_h)
+        cols = ([(0, 14, "REV"), (14, 104, "DESCRIPTION"), (118, 26, "DATE"), (144, 36, "BY")] if rev_at != "topleft"
+                else [(0, 9, "REV"), (9, 41, "DESCRIPTION"), (50, 21, "DATE"), (71, 19, "BY")])
         for cx, _w, lab_ in cols:
             if cx:
-                g.line("tbthin", x0 + cx, ry, x0 + cx, ry + rt_h)
-            g.text(x0 + cx + 1.2, ry + 3.6, 2.0, lab_, font="bold", color="label", kind="rev")
-        g.line("tbthin", x0, ry + 5.0, x0 + TB_W, ry + 5.0)
+                g.line("tbthin", rx + cx, ry, rx + cx, ry + rt_h)
+            g.text(rx + cx + 1.2, ry + 3.6, 2.0, lab_, font="bold", color="label", kind="rev")
+        g.line("tbthin", rx, ry + 5.0, rx + rw, ry + 5.0)
         for i, h in enumerate(rows_h):
             yy = ry + 5.0 + 4.6 * i + 3.4
             vals = [str(h.get("rev", "")), str(h.get("change", "")), str(h.get("date", "")), str(h.get("by", ""))]
             for (cx, w, _lab), v in zip(cols, vals, strict=True):
                 while v and text_width(v, 2.3) > w - 2.4:
                     v = v[:-2] + "…"
-                g.text(x0 + cx + 1.2, yy, 2.3, v, kind="rev")
-        top = ry
+                g.text(rx + cx + 1.2, yy, 2.3, v, kind="rev")
+        if rev_at != "above":
+            g.rev_box = [rx, ry, rx + rw, ry + rt_h]  # type: ignore[attr-defined]
+        else:
+            top = ry
     return g, [x0, top, x0 + TB_W, yb]
 
 
@@ -1121,10 +1132,15 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         detail_of[id(dv)] = dd
         extras.append(dv)
 
-    info, info_box = _info_blocks(W, H, meta, scale_label(sc), proj == "first", revisions, size)
-    notes_g, notes_box = _notes_block(W, H, notes, info_box[0])
     frame = [FRAME["left"], FRAME["top"], W - FRAME["right"], H - FRAME["bottom"]]
-    blocked = [info_box] + ([notes_box] if notes_box else [])
+
+    def info_layout(rev_at: str) -> tuple[Group, list[float], Group, list[float] | None, list[list[float]]]:
+        g, box = _info_blocks(W, H, meta, scale_label(sc), proj == "first", revisions, size, rev_at)
+        ng, nbox = _notes_block(W, H, notes, box[0])
+        rb = getattr(g, "rev_box", None)
+        return g, box, ng, nbox, [box] + ([rb] if rb else []) + ([nbox] if nbox else [])
+
+    info, _box, notes_g, notes_box, blocked = info_layout("above")
 
     # grid of principal views, aligned by projection
     cells = GRID[proj]
@@ -1166,6 +1182,13 @@ def _try(an: dict[str, Any], dims: list[dict[str, Any]], callouts: list[dict[str
         return not any(boxes_overlap(box, o, 2.0) for o in others)
 
     occupied = [abs_box(vls[v], pos[v]) for v in vls]
+    if not force and not all(ok(b, blocked) for b in occupied) and revisions:
+        # the revision table over the title block is in the way: try it in the top-right corner of the frame
+        for where in ("top", "topleft"):
+            alt = info_layout(where)
+            if all(ok(b, alt[4]) for b in occupied):
+                info, _box, notes_g, notes_box, blocked = alt
+                break
     if not force and not all(ok(b, blocked) for b in occupied):
         return None
     grid_box = [min(b[0] for b in occupied), min(b[1] for b in occupied),

@@ -65,7 +65,7 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
       onDragStart={e => { e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; }}
       aria-label={`${t.key} ${t.title}, ${t.agent_label ?? AGENT[who]?.name}, ${t.progress} percent${t.line ? `. ${t.line}` : ""}`}
       className={cx("group rounded-md border border-border bg-panel p-2 shadow-sm transition hover:border-primary/40 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-        draggable && "cursor-grab active:cursor-grabbing", t.column === "changes_requested" && "border-warning/50",
+        draggable && "cursor-grab active:cursor-grabbing", (t.column === "changes_requested" || t.run_status === "awaiting_review") && "border-warning/50",
         busy && "border-primary/40 shadow-[0_0_0_3px_rgb(54_79_199/.08)]", handoff && "fw-ho-card")}>
       {handoff && <div className="fw-ho-caption">{AGENT[handoff.from]?.name} → {AGENT[handoff.to]?.name}</div>}
       <div className="flex items-start gap-2">
@@ -136,6 +136,10 @@ export default function Board({ program, onOpen, handoffs }: { program: Program;
           {program.columns.map(c => (
             <div key={c.code} className="flex snap-start items-center gap-1.5 px-1 text-[11.5px] font-semibold uppercase tracking-wider text-muted">
               <span className={cx("h-2 w-2 rounded-full", COLUMN_TONE[c.code])} />{c.label}
+              {c.code === "in_review" && program.review_gate && <Tip content={(program.orchestrator?.review ?? 0) > 0
+                ? "Parts Gage passed, waiting for your approval (the program's review gate)" : "Review gate on: every part waits here for your approval after Gage"}>
+                <span className="rounded-full bg-warning/15 px-1.5 text-[10px] normal-case tracking-normal text-warning" data-review-count>
+                  {(program.orchestrator?.review ?? 0) > 0 ? `${program.orchestrator?.review} for you` : "gate on"}</span></Tip>}
               <span className="ml-auto rounded-full bg-text/[.06] px-1.5 text-[10.5px] tabular-nums">{program.counts[c.code] ?? 0}</span>
             </div>))}
         </div>

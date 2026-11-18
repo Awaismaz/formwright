@@ -3,7 +3,7 @@
 Only Formwright's own assembly code runs here, on verified part snapshots; no user script is executed.
 
 Protocol (one JSON object per line):
-  parent -> worker  {"op": "prepare" | "interference" | "clearance" | "probe" | "export", ...}
+  parent -> worker  {"op": "prepare" | "interference" | "clearance" | "motion" | "probe" | "export", ...}
   worker -> parent  {"ok": bool, "rc": int, "error": str | None, "result": {...}, "elapsed_s": float}
 """
 
@@ -41,9 +41,15 @@ def _handle(req: dict[str, Any]) -> Any:
                                   float(req.get("near_mm", 10.0)))
     if op == "analyse":
         inter = geometry.interference(req["instances"])
+        hits = {(p["a"], p["b"]): p["center"] for p in inter["pairs"]}  # overlapping pairs: distance 0
         clear = geometry.clearance(req["instances"], [tuple(p) for p in req.get("pairs", [])],
-                                   float(req.get("near_mm", 10.0)))
+                                   float(req.get("near_mm", 10.0)), overlaps=hits)
         return {"interference": inter, "clearance": clear}
+    if op == "motion":  # ASM-011: collisions per step of a joint sweep
+        from aicad.assembly import motion
+
+        return motion.sweep(req["instances"], req.get("body") or {}, req["steps"],
+                            float(req.get("vol_tol", motion.VOL_TOL)))
     if op == "probe":
         return [geometry.probe(req["instances"], t) for t in req["targets"]]
     if op == "export":

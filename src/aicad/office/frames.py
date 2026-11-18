@@ -14,6 +14,14 @@ from typing import Any
 
 Mat = list[list[float]]
 IDENT: Mat = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+# Canonical feature frames (Phase 6): rotation canonical -> part frame whose canonical Z is the named part axis. A
+# cylindrical feature (hole, seat, journal, keyway) or a plane along part axis ``ax`` is written in its canonical
+# frame, so every measurement / cut written for Z features works for X and Y features unchanged.
+CANON: dict[str, Mat] = {
+    "z": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    "y": [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],   # Rx(-90 deg): canonical Z -> +Y, canonical Y -> -Z
+    "x": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],   # Ry(+90 deg): canonical Z -> +X, canonical X -> -Z
+}
 
 
 def _clean(v: float) -> float:
@@ -130,10 +138,17 @@ def refs_in(refs: dict[str, Any], R: Mat, t: list[float]) -> dict[str, Any]:
     return {**refs, "faces": move(refs.get("faces") or {}), "edges": move(refs.get("edges") or {})}
 
 
-def placed(at: list[float], rot: float = 0.0, f: dict[str, Any] | None = None) -> list[float]:
-    """Assembly placement of a part: its ICD part frame at ``at`` turned ``rot`` degrees about Z, and the part as
-    modelled mapped into that frame by ``f`` (None: modelled in the ICD frame)."""
-    R, t = rot_z(rot), [float(x) for x in at]
+def item_rotation(ax: str = "z", rot: float = 0.0) -> Mat:
+    """Part frame -> program frame of an ICD item: its part Z laid along program axis ``ax`` (a horizontal shaft:
+    "y"), then turned ``rot`` degrees about its own Z (quarter turns of a block, a gear's tooth phase)."""
+    return mul(CANON.get(ax or "z", IDENT), rot_z(rot))
+
+
+def placed(at: list[float], rot: float = 0.0, f: dict[str, Any] | None = None, ax: str = "z") -> list[float]:
+    """Assembly placement of a part: its ICD part frame at ``at`` (part Z along program ``ax``) turned ``rot``
+    degrees about its Z, and the part as modelled mapped into that frame by ``f`` (None: modelled in the ICD
+    frame)."""
+    R, t = item_rotation(ax, rot), [float(x) for x in at]
     if f:
         R, t = compose(R, t, f["R"], f["t"])
     return to12(R, t)

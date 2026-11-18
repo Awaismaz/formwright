@@ -56,12 +56,17 @@ def place(sk: dict[str, Any], item: str, copy: int, f: dict[str, Any] | None = N
     """Where an item copy sits: its part frame at the skeleton position, turned by its quarter-turn about Z, and
     (a real part modelled in another frame) through the frame Gage found."""
     it = sk["items"][item]
-    return frames.placed(it["copies"][copy], float(it.get("rot") or 0) + float(it.get("phase") or 0), f)
+    return frames.placed(it["copies"][copy], float(it.get("rot") or 0) + float(it.get("phase") or 0), f,
+                         it.get("ax") or "z")
 
 
 # ----------------------------------------------------------------------------- finding interface features on a part
 def find_feature(refs: dict[str, Any], info: dict[str, Any], feat: dict[str, Any]) -> int | None:
-    """The face id (topology numbering) carrying one ICD feature, or None."""
+    """The face id (topology numbering) carrying one ICD feature, or None. A feature along X or Y (``ax``) is looked
+    for in its canonical frame (face ids don't change with the frame)."""
+    from aicad.office import conformance
+
+    info, refs = conformance.in_canon(feat.get("ax"), info, refs)
     tol = max(float(feat.get("tol") or icd.POS_TOL), 0.05)
     faces = refs.get("faces") or {}
     if feat["type"] == "face":
@@ -392,7 +397,12 @@ async def regenerate(aroot: Path, org_id: str, prog: dict[str, Any], items: set[
 
 
 # ----------------------------------------------------------------------------- integrating one level
-def _hole_index(info: dict[str, Any], c: list[float]) -> int | None:
+def _hole_index(info: dict[str, Any], c: list[float], lax: str | None = None) -> int | None:
+    """The recognised hole on the axis at ``c`` (canonical frame of part axis ``lax``)."""
+    if lax and lax != "z":
+        from aicad.office import conformance
+
+        info = conformance.in_canon(lax, info, {})[0]
     for k, h in enumerate(info.get("holes") or []):
         if abs(abs(float(h["axis"][2])) - 1) < 1e-3 and math.hypot(float(h["center"][0]) - c[0],
                                                                     float(h["center"][1]) - c[1]) <= 0.1:
@@ -437,6 +447,11 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 if r.get("source") != "toolbox":
                     continue
                 kind, code = r.get("kind"), r.get("code")
+                # integrating again (a change reopened the level): the pieces Fitz seated or binned last time go,
+                # so they are placed once, where the ICD says now (fastener stacks are skipped by ``fitted``)
+                for old in [i for i in adoc["instances"] if (i.get("office") or {}).get("item") == t["item_id"]
+                            and ((i.get("office") or {}).get("bin") or (i.get("office") or {}).get("seated"))]:
+                    aservice.remove_instance(adoc, old["id"])
                 seat = icd.seated(ifaces, t["item_id"])
                 if seat:  # bearings in their seats, dowel pins in their holes (coaxial with the ICD features)
                     try:
@@ -445,7 +460,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         say(f"{t['title']}: {e}", "warn")
                         continue
                     for n, at in enumerate(seat["at"]):
-                        inst = aservice.add_instance(aroot, adoc, key, T=xform.to12(xform.translate(tuple(at))),
+                        T = frames.to12(seat["R"], at) if seat.get("R") else xform.to12(xform.translate(tuple(at)))
+                        inst = aservice.add_instance(aroot, adoc, key, T=T,
                                                      name=t["title"])
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
                     what = "bearing" if seat["code"] == "bearing" else "dowel pin"
@@ -464,7 +480,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                             continue
                         info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
                         for xy in f["data"]["positions"]:
-                            k = _hole_index(info, icd._local(sk, f["b"], xy))
+                            g = icd._axial(sk, f["b"], f["data"], xy, f["data"]["plane_z"])
+                            k = _hole_index(info, g["c"], g.get("ax"))
                             if k is not None and (ib["id"], k) not in fitted:
                                 targets.append({"inst": ib["id"], "hole": k})
                                 fitted.add((ib["id"], k))
@@ -534,7 +551,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         continue
                     info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
                     for xy in f["data"]["positions"]:
-                        k = _hole_index(info, icd._local(sk, f["b"], xy))
+                        g = icd._axial(sk, f["b"], f["data"], xy, f["data"]["plane_z"])
+                        k = _hole_index(info, g["c"], g.get("ax"))
                         if k is not None and (ib["id"], k) not in fitted:
                             targets.append({"inst": ib["id"], "hole": k})
                 if targets:

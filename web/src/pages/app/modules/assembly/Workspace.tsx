@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
+  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Orbit, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Button, EmptyState, Input, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
-import type { AsmView, Clash, FitPlan, HoleFix, Mate, RefreshResult, SmartItem, V3 } from "./types";
+import type { AsmView, Clash, FitPlan, HoleFix, Mate, MotionResult, RefreshResult, SmartItem, V3 } from "./types";
+import { MotionPanel, stepScene } from "./MotionPanel";
 import type { AsmPick, FaceMark } from "./viewer";
 import { Viewport, topoCache } from "./Viewport";
 import { Tree } from "./Tree";
@@ -22,7 +23,7 @@ import { FileButtons } from "@/components/NativeExport";
 import { Segmented, SolveChip, mm } from "./bits";
 
 const BASE = "/api/m/assembly";
-type TabKey = "describe" | "mate" | "fasten" | "check" | "bom";
+type TabKey = "describe" | "mate" | "fasten" | "check" | "motion" | "bom";
 
 export default function Workspace({ aid, onClose }: { aid: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -55,6 +56,14 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const [fitKey, setFitKey] = useState<string | null>(null);
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate">("translate");
   const keepPicks = useRef(false);
+  const [motion, setMotion] = useState<MotionResult | null>(null);
+  const [mstep, setMstep] = useState(0);
+  useEffect(() => {   // the last motion check of this assembly (ASM-011)
+    let off = false;
+    setMotion(null); setMstep(0);
+    api.get<{ motion: MotionResult | null }>(`${BASE}/assemblies/${aid}/motion`).then(r => { if (!off) setMotion(r.motion); }).catch(() => undefined);
+    return () => { off = true; };
+  }, [aid]);
 
   const run = useCallback(async (label: string, fn: () => Promise<AsmView>, ok?: string | ((v: AsmView) => string | null)) => {
     setBusy(label);
@@ -149,6 +158,17 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
       if (m?.status === "conflict") toast.error(`${m.label} conflicts with the existing mates. It is kept but not applied.`);
       else toast.success(`${m?.label ?? "Mate"} added`);
     }
+  };
+  const runMotion = async (body: { driver?: string; start?: number; end?: number; steps: number }) => {
+    setBusy("motion");
+    try {
+      const r = await api.post<{ motion: MotionResult }>(`${A}/motion`, body);
+      setMotion(r.motion);
+      const w = r.motion.worst === null ? 0 : Math.max(0, r.motion.steps.findIndex(x => x.i === r.motion.worst));
+      setMstep(w);
+      if (r.motion.colliding_steps.length) toast.error(`Collisions in ${r.motion.colliding_steps.length} of ${r.motion.steps.length} steps`);
+      else toast.success("No collisions through the range");
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   };
   const runCheck = async () => {
     setBusy("check");
@@ -281,6 +301,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
     for (const s of [hoverMate.a, hoverMate.b]) if (s.kind === "face") marks.push({ inst: s.inst, faces: [s.id], color: 0x1f5fbf, opacity: 0.45 });
   }
   const clashPairs = tab === "check" && view.analysis && !view.analysis.stale ? view.analysis.interference.pairs.filter(p => p.kind === "interference" && p.mesh) : [];
+  const scene = stepScene(motion, mstep);
   const row = tab === "check" && rowFocus !== null ? view.analysis?.clearance.rows[rowFocus] : undefined;
   const focusPair = clashFocus !== null ? clashPairs[clashFocus] : undefined;
   const ghost = focusPair ? new Set([focusPair.a, focusPair.b]) : null;
@@ -291,7 +312,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
     : tab === "fasten" ? (target ? holeLabel(view, target.inst, target.hole) : "Click a hole to fit fasteners") : null;
   const selInst = view.instances.find(i => i.id === sel);
   const movable = !!selInst && view.can_edit && !selInst.fixed && !(selInst.dof && (selInst.dof.dof === 0 || selInst.dof.spin));
-  const gizmo = movable && tab !== "mate" && tab !== "fasten" && explode === 0 ? { id: selInst!.id, mode: gizmoMode } : null;
+  const gizmo = movable && tab !== "mate" && tab !== "fasten" && tab !== "motion" && explode === 0 ? { id: selInst!.id, mode: gizmoMode } : null;
   if (tab === "fasten" && fmode === "pair") {
     for (const id of pair) if (id) {
       const i = view.instances.find(x => x.id === id);
@@ -392,7 +413,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             </div>
           ) : (
             <Viewport view={view} picking={picking} picks={picks} marks={marks} selected={selected} ghost={ghost}
-              clashes={clashPairs.map(p => p.mesh!)} clashFocus={clashFocus} measure={measure} explode={explode} onExplode={setExplode}
+              clashes={tab === "motion" ? scene.meshes : clashPairs.map(p => p.mesh!)} clashFocus={tab === "motion" ? null : clashFocus}
+              poses={tab === "motion" ? scene.poses : null} hot={tab === "motion" ? scene.hot : undefined} measure={measure} explode={explode} onExplode={setExplode}
               onPick={onPick} hint={hint} describe={tab === "mate" ? describe : undefined}
               thumbKey={view.can_edit && view.thumb_rev !== view.assembly.rev ? view.assembly.rev : null}
               gizmo={gizmo} fitKey={fitKey} onDrag={(iid, T) => patchInst(iid, { T })}
@@ -411,6 +433,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
               <Tab value="fasten" compact><Wrench className="h-3.5 w-3.5" />Fasten</Tab>
               <Tab value="check" compact><ScanSearch className="h-3.5 w-3.5" />Check{view.analysis && !view.analysis.stale && view.analysis.interference.count > 0 &&
                 <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{view.analysis.interference.count}</span>}</Tab>
+              <Tab value="motion" compact title="Joints and a motion range check"><Orbit className="h-3.5 w-3.5" />Motion{motion && !motion.stale && motion.colliding_steps.length > 0 &&
+                <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">!</span>}</Tab>
               <Tab value="bom" compact><ClipboardList className="h-3.5 w-3.5" />BOM</Tab>
             </TabList>
             <TabPanel value="describe">
@@ -435,6 +459,12 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             </TabPanel>
             <TabPanel value="check">
               <CheckPanel view={view} onRun={runCheck} busy={busy === "check"} focus={clashFocus} onFocus={setClashFocus} rowFocus={rowFocus} onRowFocus={setRowFocus} />
+            </TabPanel>
+            <TabPanel value="motion">
+              <MotionPanel view={view} motion={motion} step={mstep} onStep={setMstep} busy={busy}
+                onAddJoint={async b => { await run("joint", () => api.post<AsmView>(`${A}/joints`, b), "Joint added"); }}
+                onDeleteJoint={async id => { await run("joint", () => api.del<AsmView>(`${A}/joints/${id}`), "Joint deleted"); }}
+                onRun={runMotion} />
             </TabPanel>
             <TabPanel value="bom">
               <BomPanel view={view} onFocus={r => setBomFocus(r ? r.instances : null)} />

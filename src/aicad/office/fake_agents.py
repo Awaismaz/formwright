@@ -92,7 +92,7 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
     L, W, H = (float(x) for x in spec["size"])
     L, W = L + grow, W + grow
     # the same feature builder as the placeholders: holes, bearing seats, journals, keyways
-    bs = icd.body_spec(spec["shape"], [L, W, H], spec.get("features") or [], spec.get("bore"))
+    bs = icd.body_spec(spec["shape"], [L, W, H], spec.get("features") or [], spec.get("bore"), cavity=spec.get("cavity"))
     if shift and bs["holes"]:
         h0 = bs["holes"][0]
         bs["holes"][0] = {**h0, "c": [float(h0["c"][0]) + shift, float(h0["c"][1])]}

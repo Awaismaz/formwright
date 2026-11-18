@@ -93,6 +93,26 @@ export interface AsmView {
   office_busy?: boolean;
   explode: Record<string, V3>; analysis: Analysis | null; export: ExportInfo | null; bom: Bom; can_edit: boolean; thumb_rev: number | null;
   result?: Record<string, unknown>;
+  /** Joints for the motion range check (ASM-011). */
+  joints?: Joint[];
+}
+
+/** A joint (ASM-011): revolute / slider carrying instances, or a gear pair coupling two revolutes by a ratio. */
+export interface Joint {
+  id: string; type: "revolute" | "slider" | "gear"; name: string;
+  p?: V3; dir?: V3; insts?: string[]; limits?: [number, number] | null;
+  a?: string; b?: string; ratio?: number; teeth?: [number, number];
+}
+
+export interface MotionCollision { a: string; b: string; a_name: string; b_name: string; volume_mm3: number; center: V3 | null;
+  mesh?: { pos: number[]; idx: number[] } }
+export interface MotionStep { i: number; value: number; values: Record<string, number>; T: Record<string, number[]>;
+  collisions: MotionCollision[]; total_mm3: number }
+/** A motion range check: the driving joint swept in steps, collisions per step, the worst step. */
+export interface MotionResult {
+  driver: string; driver_name: string; unit: string; start: number; end: number; steps: MotionStep[];
+  worst: number | null; colliding_steps: number[]; summary: string; note: string; elapsed_s: number | null;
+  pairs_per_step: number | null; joints: Joint[]; stale?: boolean; notes?: string[]; at?: string;
 }
 
 export interface SourceProject { id: string; name: string; thumbnail: string | null; material: string | null; verified: boolean }

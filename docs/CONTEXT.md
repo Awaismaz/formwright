@@ -138,14 +138,13 @@ docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.
 **Batch 23-25 merged + pushed (2026-11-18 night):** drawing depth (threads, detail views, GD&T only from explicit
 input / ICD, STEP→drawing; PD-58), engineering hygiene (IO matrix, SBOM, run record, repeatability; PD-56), studio
 intelligence (agent fills the PropertyManager, change-impact preview, datasheet pack; PD-57). Full suite 623 passed.
-**In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/office-phase6`.
-Unmerged = unfinished. Agent platform (WORKLIST 28: LLM provider layer, Export for SOLIDWORKS, Blender IO) merged; PD-59. Parked decisions now PD-35…PD-58.
-**`wip/agent-platform` finished (2026-11-18, not merged):** LLMProvider abstraction + stub / Messages API providers
-(AGT-001, AGT-013), "Export for SOLIDWORKS" STEP pathway with disclosure (CAD-070), Blender exports in the IO matrix
-(IO-008b). PD-59.
+**Batch 26-28 merged + pushed (2026-11-19):** sheet metal (CAD-026; PD-60), Design Office phase 6 (gearbox layout,
+review gate, change notices / Rev B, motion check, faster clash screening; PD-61), agent platform (LLM provider layer,
+Export for SOLIDWORKS, Blender IO; PD-59). Nothing in flight on branches. Parked decisions now PD-35…PD-61.
 
+**Design Office phase 6 (merged 2026-11-19):** gearbox-like programs lay their shafts along +Y in the housing's side walls (seat per wall, caps coaxial over the seats with tapped holes, cover = lid, gear cavity); ICD features along X/Y carry `ax` and are written in a canonical frame (`office/frames.CANON`) so the Z code (placeholders, Gage, Fitz, GD&T) is reused; optional per-part review gate (`review_gate`); change notices after release (`office/ecn.py`, Rev B pack + diff, packs write-once); motion range check (ASM-011, `assembly/motion.py`, program joints from the ICD); faster interference / clearance screening (ASM-022). Report: docs/reports/design-office.md Phase 6; defaults PD-61.
 **Engineering hygiene (merged 2026-11-18, 63a9887):** every design-agent turn writes a server-side run record `.fw/runs/<id>/run.json` (AGT-009; super-admin API only, prompt hashed + redacted by default, PD-56); licence audit + CycloneDX SBOMs in `docs/legal/` (regenerate with `uv run python scripts/sbom.py` after any dependency change; `tests/test_sbom.py` fails on a stale SBOM or an un-allow-listed copyleft licence); IO round-trip matrix `docs/reports/io-roundtrip.md`; `aicad repeat` repeatability harness (fake/replay by default).
-**Studio intelligence (branch `wip/studio-intel`, 2026-11-18):** DS-035 the design agent answers a small edit with a
+**Studio intelligence (merged 2026-11-18):** DS-035 the design agent answers a small edit with a
 ```fw-edit``` block (`agent/edits.py`) that opens the real PropertyManager pre-filled with the targets highlighted; the user
 presses OK (normal manual-feature / parameter path, no agent code). ASM-018 every Studio edit on a part used in an
 assembly is previewed first (`POST /api/m/assembly/impact/{project}`: trial rebuild in the warm worker + in-memory

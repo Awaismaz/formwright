@@ -1,14 +1,102 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, ExternalLink, FileText, Hammer, PackageCheck, PencilRuler, Rocket, Table2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, ExternalLink, FilePen, FileText, Hammer, PackageCheck, PencilRuler, Rocket, Table2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Modal, PageLoader, Tip } from "@/components/ui";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
-import type { Deliverables as D, Program, ProgramRelease } from "./types";
+import type { Deliverables as D, Ecn, Program, ProgramRelease } from "./types";
+
+const ECN_TONE: Record<Ecn["status"], "warning" | "primary" | "success" | "neutral"> = {
+  open: "neutral", in_work: "warning", ready: "primary", released: "success" };
+const ECN_LABEL: Record<Ecn["status"], string> = { open: "Open", in_work: "In work", ready: "Ready to release", released: "Released" };
+
+/** Raise an engineering change notice on a released program: the parts to change (and optionally one interface
+ * change Archie checks first), with the reason. Only the affected parts are reworked and revised. */
+function EcnDialog({ program, open, onOpenChange }: { program: Program; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient();
+  const parts = program.tickets.filter(t => t.kind === "part" && t.project_id);
+  const [reason, setReason] = useState("");
+  const [items, setItems] = useState<Set<string>>(new Set());
+  const [iid, setIid] = useState("");
+  const [field, setField] = useState("");
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ifs = program.icd?.interfaces ?? [];
+  const f = ifs.find(x => x.id === iid);
+  const raise = async () => {
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = { reason, items: [...items] };
+      if (f && field && value.trim()) {
+        body.interface = f.id;
+        body.values = { [field]: Number.isFinite(Number(value)) ? Number(value) : value.trim() };
+      }
+      const r = await api.post<Program & { ecn: Ecn }>(`${BASE}/programs/${program.id}/ecn`, body);
+      qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...r, can_edit: old?.can_edit }));
+      qc.invalidateQueries({ queryKey: ["office-deliverables", program.id] });
+      toast.success(`${r.ecn.id} raised: ${r.ecn.titles.join(", ")} back in work`);
+      onOpenChange(false); setReason(""); setItems(new Set()); setIid(""); setField(""); setValue("");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "The change notice was refused"); } finally { setBusy(false); }
+  };
+  const ok = reason.trim().length > 0 && (items.size > 0 || (!!f && !!field && !!value.trim()));
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title={`Change notice on ${program.name} rev ${program.released?.rev ?? ""}`}
+      description="Only the parts you name (and those an interface change touches) are reopened and revised; the others keep their revision. The next release carries a summary of the changes."
+      footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button loading={busy} disabled={!ok} icon={<FilePen className="h-4 w-4" />} onClick={raise}>Raise and start the rework</Button></>}>
+      <label className="block"><span className="label">Reason</span>
+        <textarea className="input mt-1 min-h-[64px] w-full py-1.5" value={reason} onChange={e => setReason(e.target.value)} maxLength={600}
+          placeholder="What must change and why (the designers get this as their instruction)" /></label>
+      <div className="mt-3"><span className="label">Parts to change</span>
+        <div className="mt-1 grid gap-1 sm:grid-cols-2">{parts.map(t => <label key={t.id} className="flex items-center gap-2 text-[12.5px]">
+          <input type="checkbox" checked={items.has(t.item_id)} onChange={() => setItems(s => { const n = new Set(s); n.has(t.item_id) ? n.delete(t.item_id) : n.add(t.item_id); return n; })} />
+          <span className="font-mono text-[11px] text-muted">{t.key}</span>{t.title}</label>)}</div></div>
+      {ifs.length > 0 && <div className="mt-3"><span className="label">Interface change (optional)</span>
+        <div className="mt-1 grid gap-2 sm:grid-cols-[1fr_140px_100px]">
+          <select className="input h-9 py-0" value={iid} onChange={e => { setIid(e.target.value); setField(""); setValue(""); }} aria-label="Interface">
+            <option value="">No interface change</option>
+            {ifs.filter(x => x.editable.length).map(x => <option key={x.id} value={x.id}>{x.id} · {x.name}</option>)}</select>
+          <select className="input h-9 py-0" value={field} disabled={!f} onChange={e => setField(e.target.value)} aria-label="Value to change">
+            <option value="">Value…</option>{(f?.editable ?? []).map(k => <option key={k} value={k}>{k}{f?.data[k] !== undefined ? ` (now ${String(f.data[k])})` : ""}</option>)}</select>
+          <Input value={value} disabled={!field} onChange={e => setValue(e.target.value)} placeholder="New value" aria-label="New value" />
+        </div>
+        <p className="mt-1 text-[11.5px] text-muted">Archie checks it against the frozen envelopes first; both parts on the interface are added to the notice.</p></div>}
+    </Modal>
+  );
+}
+
+function ReleaseDiffLine({ r }: { r: ProgramRelease }) {
+  const d = r.diff;
+  if (!d) return null;
+  return (
+    <div className="w-full pl-14 text-[11.5px] text-muted" data-diff={r.rev}>
+      <span className="text-text">Against rev {d.from}:</span> {d.summary}
+      {d.parts.some(p => p.changed) && <> Revised: {d.parts.filter(p => p.changed).map(p => `${p.key} ${p.before ?? "—"} → ${p.after}`).join(", ")}.</>}
+      {d.icd.changes.length > 0 && <> Interfaces: {d.icd.changes.slice(0, 3).join("; ")}{d.icd.changes.length > 3 ? "…" : ""}.</>}
+    </div>
+  );
+}
+
+function EcnLog({ ecns }: { ecns: Ecn[] }) {
+  if (!ecns.length) return null;
+  return (
+    <div className="mt-3" data-ecn-log>
+      <div className="label mb-1">Change notices</div>
+      <div className="divide-y divide-border rounded-md border border-border">
+        {ecns.map(e => <div key={e.id} className="px-3 py-2 text-[12.5px]" data-ecn={e.id}>
+          <div className="flex flex-wrap items-center gap-2"><b>{e.id}</b><Badge tone={ECN_TONE[e.status]}>{ECN_LABEL[e.status]}</Badge>
+            <span className="text-muted">rev {e.from_rev} → {e.to_rev ?? "next release"} · {e.by.name} · {ago(e.created_at)}</span></div>
+          <div className="mt-0.5">{e.reason}</div>
+          <div className="text-[11.5px] text-muted">Parts: {e.titles.join(", ")}{e.icd_changes.length ? ` · interface: ${e.icd_changes.join("; ")}` : ""}</div>
+        </div>)}
+      </div>
+    </div>
+  );
+}
 
 const g = (x: number | null | undefined) => (x === null || x === undefined ? "—" : x >= 1000 ? `${num(Math.round(x))} g` : `${Math.round(x * 10) / 10} g`);
 
@@ -17,7 +105,9 @@ function ReleaseCard({ program, d }: { program: Program; d: D }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ecnOpen, setEcnOpen] = useState(false);
   const gate = d.gate;
+  const inWork = gate.ecn ?? null;
   const release = async () => {
     setBusy(true);
     try {
@@ -40,20 +130,29 @@ function ReleaseCard({ program, d }: { program: Program; d: D }) {
           <p className="text-[12.5px] text-muted">One action: every part the program makes is issued at its next revision through its release gate (frozen
             issue drawing, DFM report) and tagged in its project; one pack holds the parts' STEP, the assembly STEP, the drawings (PDF, DXF), the BOM,
             the DFM summary, the ICD and the program file. Drawings stay NOT APPROVED FOR MANUFACTURE until an engineer approves them.</p>
-          {!gate.ready && gate.blocking.length > 0 && <ul className="mt-2 space-y-0.5 text-[12px] text-warning">{gate.blocking.map((b, i) =>
+          {inWork && <p className="mt-1 text-[12.5px]" data-ecn-current><b>{inWork.id}</b> {ECN_LABEL[inWork.status].toLowerCase()}: {inWork.titles.join(", ")} reworked;
+            the other parts keep rev {inWork.from_rev}. Release rev {gate.next_rev} when the rework is integrated.</p>}
+          {!gate.ready && gate.blocking.length > 0 && !(gate.released && !inWork) && <ul className="mt-2 space-y-0.5 text-[12px] text-warning">{gate.blocking.map((b, i) =>
             <li key={i} className="flex gap-1.5"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />{b}</li>)}</ul>}
         </div>
-        {d.can_edit && <Button disabled={!gate.ready} icon={<Rocket className="h-4 w-4" />} onClick={() => setOpen(true)}>
-          {gate.released ? `Release rev ${gate.next_rev}` : "Release program"}</Button>}
+        {d.can_edit && gate.released && !inWork ? <Button variant="secondary" icon={<FilePen className="h-4 w-4" />} onClick={() => setEcnOpen(true)} data-raise-ecn>
+          Raise a change notice</Button>
+          : d.can_edit && <Button disabled={!gate.ready} icon={<Rocket className="h-4 w-4" />} onClick={() => setOpen(true)}>
+            {gate.released ? `Release rev ${gate.next_rev}${inWork ? ` (${inWork.id})` : ""}` : "Release program"}</Button>}
       </div>
       {gate.releases.length > 0 && <div className="mt-3 divide-y divide-border rounded-md border border-border">
         {gate.releases.map(r => <div key={r.rev} className="flex flex-wrap items-center gap-3 px-3 py-2 text-[12.5px]" data-rev={r.rev}>
           <b className="w-14">Rev {r.rev}</b><span className="text-muted">{r.date} · {r.by} · {r.note}</span>
+          {r.ecn && <Badge tone="neutral">{r.ecn}</Badge>}
           <span className="text-muted">{r.parts.length} parts ({r.parts.map(p => `${p.key} rev ${p.rev}`).join(", ")}) · tag “{r.parts[0]?.tag}”</span>
           <a className="ml-auto inline-flex items-center gap-1 font-medium text-primary hover:underline" href={`${BASE}/programs/${program.id}/releases/${r.rev}/pack.zip`}>
             <Download className="h-3.5 w-3.5" />Release pack (.zip{r.pack_bytes ? `, ${Math.round(r.pack_bytes / 1024)} KB` : ""})</a>
+          <ReleaseDiffLine r={r} />
         </div>)}
       </div>}
+      {gate.releases.length > 0 && <p className="mt-1 text-[11px] text-muted">Released packs are frozen: each stays downloadable exactly as issued (SHA-256 in its manifest).</p>}
+      <EcnLog ecns={gate.ecns ?? []} />
+      <EcnDialog program={program} open={ecnOpen} onOpenChange={setEcnOpen} />
       <Modal open={open} onOpenChange={setOpen} title={`Release ${program.name} rev ${gate.next_rev}`}
         description="Each part is issued at its next revision (or keeps its current one when that exact build was already issued) and tagged in its project."
         footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button loading={busy} icon={<Rocket className="h-4 w-4" />} onClick={release}>Release</Button></>}>
@@ -78,6 +177,7 @@ function Drawings({ program, d }: { program: Program; d: D }) {
           {drw.sheets.map(s => (
             <div key={s.ticket} className="flex flex-wrap items-center gap-2 rounded-md border border-border px-3 py-2 text-[12.5px]" data-sheet={s.key}>
               <PencilRuler className="h-4 w-4 text-muted" /><b>{s.title}</b><span className="font-mono text-[10.5px] text-muted">{s.key}</span>
+              {s.kept && <Tip content="Not affected by the change notice: the sheet of the previous release stands"><span><Badge tone="neutral">unchanged</Badge></span></Tip>}
               {s.ok ? <>
                 <span className="text-muted">{s.size} · {s.scale}</span>
                 {s.check_passed ? <Tip content="Drawing consistency check (CHK-12) passes"><CheckCircle2 className="h-3.5 w-3.5 text-success" /></Tip>
@@ -154,7 +254,8 @@ function Dfm({ program, d }: { program: Program; d: D }) {
             return (
               <tr key={p.ticket} className="border-t border-border/60 align-top" data-dfm-row={p.key}>
                 <td className="py-1.5"><span className="font-medium">{p.title}</span> <span className="font-mono text-[10.5px] text-muted">{p.key}</span>
-                  {p.qty > 1 && <span className="text-muted"> ×{p.qty}</span>}</td>
+                  {p.qty > 1 && <span className="text-muted"> ×{p.qty}</span>}
+                  {p.kept && <span className="ml-1 text-[10.5px] text-muted">(unchanged)</span>}</td>
                 <td>{p.ok ? p.process_name : <span className="text-danger">{p.error}</span>}{p.material && <div className="text-[10.5px] text-muted">{p.material}</div>}</td>
                 <td className="whitespace-nowrap">{p.ok && <>
                   {(p.critical ?? 0) > 0 && <span className="mr-1 rounded-full bg-danger/10 px-1.5 text-[11px] font-semibold text-danger">{p.critical} critical</span>}

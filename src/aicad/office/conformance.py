@@ -15,6 +15,9 @@ Per feature:
   keyway two exact side planes at ±b/2 from the keyway's centre line (width ±0.05) and the groove bottom (shaft) or
          the keyway top (hub) at the stated depth (±0.1), on the stated side of the axis
   envelope  the part's bounding box inside its envelope (+0.1 mm)
+Features along X or Y (``ax``, Phase 6: a gearbox housing's wall seats and cap screw holes) are measured with the
+same code after the part data is turned into the feature's canonical frame (``frames.CANON``). A ``blind`` hole (a
+tapped hole) must not go through.
 
 Frame (Gage, frame tolerant): a part modelled in another frame than the ICD's (rotated by quarter turns, moved) is
 matched first: ``best_frame`` tries the 24 axis-aligned rotations with translations that pair the part's features
@@ -72,12 +75,13 @@ def _hole(f: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     md = float(near["d"])
     pos_ok = dist(near) <= tol
     d_ok, d_txt = _dia_ok(md, float(f["d"]), f.get("fit"))
-    thr_ok = bool(near.get("through", True))
+    blind = bool(f.get("blind"))
+    thr_ok = (not near.get("through", True)) if blind else bool(near.get("through", True))
     bits = [f"Ø{md:.3f} at {_fmt(m)}"]
     if not pos_ok:
         bits.append(f"{dist(near):.2f} mm off position (±{tol:g})")
     if not thr_ok:
-        bits.append("blind, the ICD says through")
+        bits.append("through, the ICD says blind (tapped)" if blind else "blind, the ICD says through")
     return {"feature": f["label"], "spec": f"{d_txt} at {_fmt(c)}", "measured": ", ".join(bits),
             "ok": pos_ok and d_ok and thr_ok, "delta_mm": round(dist(near), 4), "d_mm": round(md, 4)}
 
@@ -225,7 +229,27 @@ def envelope(item: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
             "ok": not out}
 
 
+_CANON_CACHE: dict[tuple[int, int, str], tuple[Any, Any, dict[str, Any], dict[str, Any]]] = {}
+
+
+def in_canon(lax: str | None, info: dict[str, Any], refs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The part data turned into the canonical frame of part axis ``lax`` (cached per data and axis)."""
+    if not lax or lax == "z":
+        return info, refs
+    key = (id(info), id(refs), lax)
+    hit = _CANON_CACHE.get(key)
+    if hit is not None and hit[0] is info and hit[1] is refs:
+        return hit[2], hit[3]
+    Rt = frames.transpose(frames.CANON[lax])
+    out = (frames.info_in(info, Rt, [0.0, 0.0, 0.0]), frames.refs_in(refs, Rt, [0.0, 0.0, 0.0]))
+    if len(_CANON_CACHE) > 256:
+        _CANON_CACHE.clear()
+    _CANON_CACHE[key] = (info, refs, *out)
+    return out
+
+
 def _row(f: dict[str, Any], info: dict[str, Any], refs: dict[str, Any]) -> dict[str, Any]:
+    info, refs = in_canon(f.get("ax"), info, refs)
     if f["type"] == "hole":
         return _hole(f, info)
     if f["type"] == "boss":

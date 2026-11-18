@@ -6,7 +6,11 @@ Spec (part frame, mm; built by ``aicad.office.icd.placeholder_spec`` / ``icd.bod
    "holes":    [{"c": [x, y], "d": Ø}]                              through along Z
    "seats":    [{"c": [x, y], "d": Ø, "z0", "z1"}]                  a bore over a Z range (bearing seat, clearance)
    "journals": [{"c": [x, y], "d": Ø, "z0", "z1"}]                  a shaft turned down to Ø over a Z range
-   "keyways":  [{"on": "shaft" | "hub", "c", "d", "b", "depth", "dir": [dx, dy], "z0", "z1"}]  DIN 6885 grooves}
+   "keyways":  [{"on": "shaft" | "hub", "c", "d", "b", "depth", "dir": [dx, dy], "z0", "z1"}]  DIN 6885 grooves
+   "pockets":  [{"min": [x, y, z], "max": [x, y, z]}]               a box removed (a housing's gear cavity)}
+A hole with ``z0`` / ``z1`` is blind over that range (a tapped hole). A feature with ``"ax": "x" | "y"`` runs along
+that part axis and is written in its canonical frame (``aicad.office.frames.CANON``: canonical Z = the feature
+axis): the body is turned into that frame, cut with the same Z code, and turned back.
 The body is centred on the origin (the part frame of the ICD).
 """
 
@@ -42,11 +46,43 @@ def shape(spec: dict[str, Any]) -> Any:
     return cut(Box(L, W, H) if spec["shape"] == "box" else Cylinder(L / 2, H), spec)
 
 
+# part frame -> canonical frame of a feature axis: (axis of the turn, degrees); the size permutation follows
+_TO_CANON = {"y": ("X", 90.0, (0, 2, 1)), "x": ("Y", -90.0, (2, 1, 0))}
+
+
 def cut(body: Any, spec: dict[str, Any]) -> Any:
     """Cut the spec's interface features into a body centred on the part frame."""
+    from build123d import Axis, Box, Pos
+
+    L, W, H = (float(x) for x in spec["size"])
+    for pk in spec.get("pockets") or []:
+        mn, mx = [float(v) for v in pk["min"]], [float(v) for v in pk["max"]]
+        half = (L / 2, W / 2, H / 2)
+        # open where it reaches a face: cut 1 mm past it so the face is clean
+        mn = [m - 1.0 if m <= -half[k] + 1e-6 else m for k, m in enumerate(mn)]
+        mx = [m + 1.0 if m >= half[k] - 1e-6 else m for k, m in enumerate(mx)]
+        body = body - Pos(*[(a + b) / 2 for a, b in zip(mn, mx, strict=True)]) * Box(*[b - a for a, b in zip(mn, mx, strict=True)])
+    groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for key in ("journals", "holes", "seats", "keyways"):
+        for f in spec.get(key) or []:
+            groups.setdefault(str(f.get("ax") or "z"), {}).setdefault(key, []).append(f)
+    for ax, g in groups.items():
+        if ax == "z":
+            body = _cut_z(body, g, L, H)
+            continue
+        axis, deg, perm = _TO_CANON[ax]
+        size = (L, W, H)
+        ac = getattr(Axis, axis)
+        turned = body.rotate(ac, deg)
+        turned = _cut_z(turned, g, size[perm[0]], size[perm[2]])
+        body = turned.rotate(ac, -deg)
+    return body
+
+
+def _cut_z(body: Any, spec: dict[str, Any], L: float, H: float) -> Any:
+    """Features along Z on a body whose extent along Z is ``H`` (and whose turned Ø is ``L``)."""
     from build123d import Cylinder, Pos
 
-    L, _W, H = (float(x) for x in spec["size"])
     for j in spec.get("journals") or []:  # turned down: remove the ring outside the journal Ø
         z0, z1 = float(j["z0"]), float(j["z1"])
         lo = z0 - 1.0 if z0 <= -H / 2 + 1e-6 else z0
@@ -54,6 +90,12 @@ def cut(body: Any, spec: dict[str, Any]) -> Any:
             Cylinder(L / 2 + 1, z1 - lo) - Cylinder(float(j["d"]) / 2, z1 - lo + 0.02))
         body = body - ring
     for h in spec.get("holes") or []:
+        if h.get("z0") is not None:  # blind over a range (open at a face: cut 1 mm past it)
+            z0, z1 = float(h["z0"]), float(h["z1"])
+            lo = z0 - 1.0 if z0 <= -H / 2 + 1e-6 else z0
+            hi = z1 + 1.0 if z1 >= H / 2 - 1e-6 else z1
+            body = body - Pos(float(h["c"][0]), float(h["c"][1]), (lo + hi) / 2) * Cylinder(float(h["d"]) / 2, hi - lo)
+            continue
         body = body - Pos(float(h["c"][0]), float(h["c"][1]), 0) * Cylinder(float(h["d"]) / 2, H + 2)
     for sd in spec.get("seats") or []:
         z0, z1 = float(sd["z0"]), float(sd["z1"])

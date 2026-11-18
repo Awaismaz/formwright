@@ -83,7 +83,9 @@ def icd_gdt(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: dic
         if not ifs:
             continue
         letter = next(letters)
-        target = {"kind": "plane", "point": pt([0.0, 0.0, f["z"]]), "normal": vec([0.0, 0.0, float(f["n"])])}
+        lax = f.get("ax") or "z"  # a face along X / Y is written in its canonical frame
+        target = {"kind": "plane", "point": pt(icd.from_canon(lax, [0.0, 0.0, f["z"]])),
+                  "normal": vec(icd.from_canon(lax, [0.0, 0.0, float(f["n"])]))}
         datums.append({"letter": letter, "target": target, "ref": ifs[0], "label": f["label"]})
         for i in ifs:
             face_of.setdefault(i, letter)
@@ -96,7 +98,9 @@ def icd_gdt(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: dic
             continue
         ifs = [f["if"], *f.get("also", [])]
         z = (f["z0"] + f["z1"]) / 2 if f.get("z0") is not None else 0.0
-        target = {"kind": "axis", "point": pt([f["c"][0], f["c"][1], z]), "dir": vec([0.0, 0.0, 1.0]), "d": f["d"]}
+        lax = f.get("ax") or "z"
+        target = {"kind": "axis", "point": pt(icd.from_canon(lax, [f["c"][0], f["c"][1], z])),
+                  "dir": vec(icd.from_canon(lax, [0.0, 0.0, 1.0])), "d": f["d"]}
         if f.get("fit") and kinds.get(f["if"]) in ("shaft_bore", "bearing_seat"):
             datums.append({"letter": next(letters), "target": target, "ref": f["if"], "label": f["label"]})
         refs = [face_of[i] for i in ifs if i in face_of]
@@ -127,9 +131,12 @@ def icd_spec(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: di
         if fit:
             fits[name] = fit
 
+    tapped: dict[tuple[str, float], set[str]] = {}
     for f in icd.item_features(skel, doc_icd["interfaces"], item):
         iid = f["if"].replace("-", "")
-        if f["type"] == "hole":
+        if f["type"] == "hole" and f.get("thread"):  # a tapped hole: one thread note per size, not a Ø to tag
+            tapped.setdefault((f["thread"], abs(f["z1"] - f["z0"])), set()).add(f["if"])
+        elif f["type"] == "hole":
             label = f"{f['if']} hole Ø" if not f.get("fit") else f"{f['if']} bore Ø"
             put(f"ICD_{iid}_D{'_FIT' if f.get('fit') else ''}", f["d"], label, f.get("fit"))
         elif f["type"] == "boss":
@@ -139,6 +146,8 @@ def icd_spec(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: di
         elif f["type"] == "keyway":
             notes.append(f"{f['if']}: KEYWAY {f['b']:g} × {f['depth']:g} DEEP ({'HUB' if f['on'] == 'hub' else 'SHAFT'}) "
                          "TO DIN 6885-1, TOLERANCES TO BE ADDED BY THE ENGINEER.")
+    for (thread, depth), ids in sorted(tapped.items()):
+        notes.append(f"TAPPED HOLES {thread}, {depth:g} DRILLED ({', '.join(sorted(ids))}).")
     for f in doc_icd["interfaces"]:
         if f["kind"] == "hole_pattern" and f["data"].get("pcd") and item in (f["a"]["item"], f["b"]["item"]):
             put(f"ICD_{f['id'].replace('-', '')}_PCD", f["data"]["pcd"], f"{f['id']} pitch circle Ø")

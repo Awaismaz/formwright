@@ -623,8 +623,23 @@ def worker_instances(root: Path, doc: dict[str, Any], skip_groups: bool = False)
                "T": i["T"], "bbox": p["info"]["bbox"], "material": p.get("material"), "holes": p["info"].get("holes", [])}
         if p["kind"] == "toolbox" and p["code"] in THREADED:
             row["thread"] = {"d_nom": p["params"]["D"], "p": [0, 0, 0], "d": [0, 0, 1]}
+        env = part_envelope(p)
+        if env:
+            row["envelope"] = env
         out.append(row)
     return out
+
+
+def part_envelope(p: dict[str, Any]) -> dict[str, Any] | None:
+    """A simple solid that contains every solid of a multi-solid Toolbox part, for clash screening: a ball bearing
+    (rings + balls) lies inside the ring from its bore to its OD over its width (``toolbox._bearing``)."""
+    if p.get("kind") != "toolbox" or p.get("code") != "bearing":
+        return None
+    row = toolbox.BEARING.get(round(float((p.get("params") or {}).get("SERIES") or 0)))
+    if not row:
+        return None
+    d, D, B = (float(x) for x in row)
+    return {"kind": "annulus", "r0": d / 2, "r1": D / 2, "z0": 0.0, "z1": B}
 
 
 def display_names(doc: dict[str, Any]) -> dict[str, str]:
@@ -1057,3 +1072,91 @@ def remove_subassembly(doc: dict[str, Any], gid: str) -> None:
     doc["subassemblies"] = [g for g in doc.get("subassemblies") or [] if g["id"] != gid]
     if doc["instances"] and not any(i["fixed"] for i in doc["instances"]):
         doc["instances"][0]["fixed"] = True
+
+
+# ----------------------------------------------------------------------------- motion (ASM-011)
+def _axis_world(root: Path, doc: dict[str, Any], body: dict[str, Any]) -> tuple[list[float], list[float]]:
+    """The axis of a new joint in the assembly frame: a concentric mate's axis, a picked cylindrical face /
+    circular edge, or an explicit point + direction."""
+    ref = None
+    if body.get("from_mate"):
+        m = next((x for x in doc["mates"] if x["id"] == body["from_mate"]), None)
+        if m is None or m["type"] != "concentric":
+            raise AssemblyInputError("Pick a concentric mate: its axis becomes the joint axis.")
+        ref = m["a"]
+    elif body.get("ref"):
+        ref = resolve_ref(root, doc, body["ref"])
+    if ref is not None:
+        r = ref["ref"]
+        if r.get("kind") != "axis":
+            raise AssemblyInputError("Pick a cylindrical face or a circular edge for the axis.")
+        T = xform.from12(_inst(doc, ref["inst"])["T"])
+        return [float(x) for x in xform.pt(T, r["p"])], [float(x) for x in xform.unit(xform.vec(T, r["v"]))]
+    return list(body.get("p") or [0, 0, 0]), list(body.get("dir") or [0, 0, 1])
+
+
+def _gear_teeth(root: Path, doc: dict[str, Any], j: dict[str, Any]) -> int | None:
+    parts = _parts(root, doc)
+    for iid in j.get("insts") or []:
+        part = parts[_inst(doc, iid)["part"]]
+        if part.get("kind") == "toolbox" and part.get("code") == "spur_gear" and (part.get("params") or {}).get("Z"):
+            return int(part["params"]["Z"])
+        comp = (part.get("info") or {}).get("component") or {}
+        if comp.get("kind") == "spur_gear" and (comp.get("params") or {}).get("teeth"):
+            return int(comp["params"]["teeth"])
+    return None
+
+
+def add_joint(root: Path, doc: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    from aicad.assembly import motion
+
+    joints = doc.setdefault("joints", [])
+    if len(joints) >= motion.MAX_JOINTS:
+        raise AssemblyInputError(f"An assembly can hold up to {motion.MAX_JOINTS} joints.")
+    body = dict(body)
+    if body.get("type") in ("revolute", "slider"):
+        p, d = _axis_world(root, doc, body)
+        body["p"], body["dir"] = p, d
+    elif body.get("type") == "gear" and not body.get("teeth") and not body.get("ratio"):
+        by = {x["id"]: x for x in joints}
+        if body.get("a") not in by or body.get("b") not in by:
+            raise AssemblyInputError("A gear pair couples two different revolute joints.")
+        za = _gear_teeth(root, doc, by.get(body.get("a"), {}))
+        zb = _gear_teeth(root, doc, by.get(body.get("b"), {}))
+        if not za or not zb:
+            raise AssemblyInputError("No gear teeth found on the parts of one of the joints: enter the tooth counts.")
+        body["teeth"] = [za, zb]
+    j = motion.clean_joint(body, {i["id"] for i in doc["instances"]}, joints)
+    j["id"] = store.next_id(doc, "j")
+    joints.append(j)
+    return j
+
+
+def delete_joint(doc: dict[str, Any], jid: str) -> None:
+    joints = doc.get("joints") or []
+    if not any(j["id"] == jid for j in joints):
+        raise AssemblyInputError("Joint not found")
+    doc["joints"] = [j for j in joints if j["id"] != jid and not (j["type"] == "gear" and jid in (j["a"], j["b"]))]
+
+
+async def motion_check(root: Path, org_id: str, doc: dict[str, Any], joints: list[dict[str, Any]] | None = None,
+                       driver: str | None = None, start: float | None = None, end: float | None = None,
+                       steps: int | None = None, save: bool = True) -> dict[str, Any]:
+    """Sweep the driving joint through its range and check collisions at every step (worker, exact booleans
+    behind box screening). ``joints`` default: the document's own."""
+    from aicad.assembly import motion
+
+    joints = joints if joints is not None else (doc.get("joints") or [])
+    live = {i["id"] for i in doc["instances"]}
+    joints = [j if j["type"] == "gear" else {**j, "insts": [x for x in j["insts"] if x in live]} for j in joints]
+    pl = motion.plan({i["id"]: i["T"] for i in doc["instances"]}, joints, driver, start, end,
+                     steps or motion.DEFAULT_STEPS)
+    insts = worker_instances(root, doc)
+    body = {k: v for k, v in motion.bodies(joints).items() if k in live}
+    res = await _call(org_id, {"op": "motion", "instances": insts, "body": body,
+                               "steps": [{"i": s["i"], "T": s["T"]} for s in pl["steps"]]}, timeout=1200)
+    out = motion.summarize(pl, res, display_names(doc))
+    out.update(signature=geometry_signature(doc), at=store.now(), joints=joints)
+    if save:
+        store.write_json(store.doc_dir(root, doc["id"]) / "motion.json", out)
+    return out

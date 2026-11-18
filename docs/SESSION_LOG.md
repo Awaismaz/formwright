@@ -112,6 +112,40 @@ model calls.
 - PD-60 (sheet-metal defaults: K 0.44, R = T, 4·T flange rule, position conventions).
 
 ---
+## 2026-11-18 (z) — Design Office Phase 6: gearbox layout, review gate, change notices, motion check (CD-022…025, ASM-011, ASM-022)
+
+Branch `wip/office-phase6` (worktree `fw-wt/office-phase6`), WORKLIST row 27. Report: docs/reports/design-office.md
+Phase 6. PD-61. No live model calls (PD-41 / PD-48): simulated agents only.
+
+### Done
+- CD-022 gearbox layout: shafts in bearings with meshing gears run along +Y in the housing's side walls (seat per wall),
+  caps coaxial over the seats with tapped screw holes, cover = lid on a tapped rim, gear cavity; `ax` features in a
+  canonical frame (`frames.CANON`) reuse the Z code in placeholders, conformance, Fitz's mates and GD&T; bearings are
+  seated with their Z along +Y; tapped holes become one thread note per size on drawings.
+- CD-023 optional per-part review gate; CD-024 change notices after release (ECN, Rev B pack with diff, write-once
+  packs); ASM-011 / CD-025 motion range check (Assembly Studio joints + program joints from the ICD, scrubber);
+  ASM-022 faster interference / clearance screening. (Items 2–4 built in parallel forks, merged on the branch.)
+- Fixes found by the walkthrough: one tapped-hole note per interface crowded the housing sheet (CHK-12) → one note per
+  thread size; the issue sheet's revision table over the title block met the housing's top view at every scale →
+  the layout now tries the table in the top-right, then a narrower one in the top-left corner; `POST .../release`
+  without a body crashed (500) → empty body defaults; Fitz re-integrating a level duplicated seated / binned parts →
+  removed before placing again.
+
+### Verified
+- New tests: `tests/test_office_phase6_layout.py` (5: hand-checked positions, caps that can't fit, Y-feature defects,
+  simulated gearbox end to end with 0 clashes, revision table placement), `tests/test_office_phase6_review_ecn.py` (5),
+  `tests/test_assembly_motion.py` (10); vitest office `icd.test.ts` (axis labels, axis chips), assembly `motion.test.ts`.
+- Gate: ruff clean; office suites 71 passed (11 min); assembly + drawings 80 + 57 passed; tsc clean, vitest 126 passed,
+  vite build ok.
+- Walkthrough (puppeteer-core 25.18.1, port 8840, throwaway data, simulated agents, 0.3 s steps): standard gear reducer "Gearbox GB-6" (3:1, review gate on), 16 tickets. ICD: 11 interfaces, 10 along Y (2 bearing seats 6205 x 2 in the side walls, 2 shaft fits, a DIN 6885 key 8 x 7, 4 cap joints M4 tapped, the 18/54 mesh) plus the M6 lid joint; placeholder assembly 7 placeholders, 21 mates, 0 clashes (shafts through the walls, caps coaxial, lid on top). Review gate: every part stopped in review; one 'Request changes' note reached Mill and the base came back; the rest approved; parts integrated in 195 s of simulated work: 7 real parts, 53 mates, 8 fastener stacks, 0 clashes; 4 bearings seated with their Z along +Y. Motion: 2 shaft revolutes + the mesh (-1/3), 'No collisions through Input shaft rotation 0-360 deg in 24 steps' in 46 s. Release Rev A: 7 parts tagged "GG6 Rev A", pack 6.8 MB. ECN-001 (Output gear): Gage escalated the simulated rework after 3 rounds (a reason with a size the fake designer can't follow), the engineer approved it by hand; only the gear was redrawn and re-screened; Rev B: 1 part revised (GG6-11 A -> B), 6 unchanged at A, BOM / ICD unchanged, pack 2.8 MB; the Rev A pack downloaded byte-identical (SHA-256) afterwards. 0 console / page errors. Scripts and screenshots: docs/reports/design-office/phase6/ (layout_*, review_*, motion_*, ecn_*; office6_walkthrough.mjs, ecn_finish.mjs, motion_walkthrough.mjs).
+- Found by the walkthrough and fixed: one tapped-hole note per interface crowded the housing sheet (CHK-12) -> one note per thread size; the issue copy's revision table over the title block met the housing's top view at every scale (release refused) -> the layout tries the table in the top-right, then a narrower one in the top-left corner; a release POST without a body answered 500 -> defaults; a part the engineer approved by hand kept its 'needs you' status after Fitz integrated it -> cleared on integration; Fitz duplicated seated / binned parts when a level was integrated again -> removed first.
+
+### Not done / limitations
+- One gear stage per housing row, no split housing, flat caps; Gage doesn't check tooth phase; ECN BOM diff by name;
+  motion joints relative to ground only. Details in the report.
+
+### Next
+- Merge `wip/office-phase6`; then a live multi-agent run (PD-48) when the founder approves token use.
 
 ## 2026-11-18 (v) — Engineering hygiene: IO round-trip matrix, licence audit + SBOM, agent run record, repeatability (IO-008, LEG-002, AGT-009, EVAL-008)
 
