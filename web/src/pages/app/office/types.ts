@@ -27,7 +27,7 @@ export interface Comment { id: string; by: Actor; text: string; t: string; deliv
 
 /** What the orchestrator is doing with a ticket (server: office/orchestrator.py). */
 export type RunStatus = "queued" | "searching" | "designing" | "reviewing" | "integrating" | "fitting" | "drafting"
-  | "screening" | "waiting_capacity" | "retry" | "blocked" | "done" | "manual" | "paused";
+  | "screening" | "waiting_capacity" | "retry" | "blocked" | "done" | "manual" | "paused" | "awaiting_review";
 export interface TicketRun {
   status?: RunStatus; next?: string; agent?: string; agent_label?: string; line?: string; attempt?: number;
   review_round?: number; next_try_at?: number; blocked?: string; started_at?: string;
@@ -50,6 +50,8 @@ export interface Ticket {
   deliverable?: "drawings" | "dfm"; actual_min?: number; error_pct?: number | null; rounds?: Record<string, number>;
   calibrated?: { actual_min: number; learned: boolean; error_pct?: number | null; before?: number; after?: number;
     observed?: number; why?: string; profile?: string } | null;
+  /** Phase 6: the engineer's decision at the per-part review gate; the change notice that reopened it. */
+  reviewed?: { by: string; at: string; decision: "approved" | "changes"; note: string | null } | null; ecn?: string;
 }
 
 // ------------------------------------------------------------------ Phase 4: skeleton, ICD, change requests
@@ -134,7 +136,7 @@ export type OrchestratorState = "idle" | "running" | "paused" | "stopped" | "com
 export interface Orchestrator {
   state: OrchestratorState; reason?: "budget" | "balance" | null; by?: string | null; started_at?: string | null;
   capacity_until?: number | null; bypass?: boolean; working: number; waiting: number; blocked: number;
-  active?: number; simulated?: boolean;
+  active?: number; simulated?: boolean; review?: number;
 }
 
 export interface Gate { code: string; name: string; mandatory: boolean; status: string; note?: string; by?: string; at?: string }
@@ -158,6 +160,8 @@ export interface Program {
   /** Phase 5 */
   released?: { rev: string; date: string; by: string; issued_at: string } | null; deliverables_auto?: boolean;
   calibration?: { profile: "live" | "simulated"; rates: Record<string, number>; at: string } | null;
+  /** Phase 6 */
+  review_gate?: boolean; ecns?: Ecn[];
 }
 
 export interface ProgramSummary {
@@ -173,7 +177,7 @@ export interface RosterAgent {
 }
 
 export interface InboxItem {
-  kind: "brief" | "ticket" | "blocked" | "icd"; reason?: string | null; program_id: string; program: string; at: string; title: string;
+  kind: "brief" | "ticket" | "blocked" | "icd" | "review"; reason?: string | null; program_id: string; program: string; at: string; title: string;
   ticket_id?: string; key?: string; specialist?: string; checks?: { ok: boolean } | null; source?: string;
 }
 
@@ -219,7 +223,7 @@ export interface Bom { rows: BomRow[]; total_qty: number; make: number; buy: num
 export interface DfmLine {
   ticket: string; key: string; title: string; qty: number; ok: boolean; error?: string; process?: string; process_name?: string;
   critical?: number; warning?: number; info?: number; unit_cost?: number | null; currency?: string | null; relative_cost?: number | null;
-  cost_share_pct?: number | null; material?: string; mass_kg?: number;
+  cost_share_pct?: number | null; material?: string; mass_kg?: number; kept?: boolean;
   findings?: { rule: string; severity: string; title: string; measured: string; limit: string; fix: string }[];
 }
 export interface DfmSummary {
@@ -229,9 +233,25 @@ export interface DfmSummary {
 export interface DrawingSheet {
   ticket: string; key: string; title: string; project_id: string; ok: boolean; error?: string; check_passed?: boolean;
   problems?: string[]; scale?: string; size?: string; spec_dims?: number; inferred_dims?: number; icd_dims?: number; icd_offered?: number;
+  kept?: boolean;
+}
+/** Phase 6: an engineering change notice on a released program. */
+export interface Ecn {
+  id: string; reason: string; by: Actor; created_at: string; items: string[]; tickets: string[]; titles: string[];
+  from_rev: string; to_rev: string | null; interface: string | null; values: Record<string, unknown> | null;
+  icd_changes: string[]; cr_id: string | null; status: "open" | "in_work" | "ready" | "released";
+  history: { status: string; at: string; by: string | null; text: string }[];
+}
+export interface ReleaseDiff {
+  from: string; ecn: { id: string; reason: string } | null; changed: number; unchanged: number; summary: string;
+  parts: { ticket: string; key: string; title: string; before: string | null; after: string; changed: boolean }[];
+  bom: { added: { part: string; designation: string | null; qty: number }[]; removed: { part: string; designation: string | null; qty: number }[];
+    qty_changed: { part: string; designation: string | null; before: number; after: number }[]; unchanged: number };
+  icd: { before: number | null; after: number | null; changes: string[] };
 }
 export interface ProgramRelease {
   rev: string; date: string; by: string; note: string; issued_at: string; pack_sha256?: string; pack_bytes?: number; files?: string[];
+  ecn?: string | null; diff?: ReleaseDiff;
   parts: { ticket: string; key: string; title: string; project_id: string; rev: string; reused: boolean; model_rev: number | null; tag: string }[];
 }
 export interface Deliverables {
@@ -239,5 +259,6 @@ export interface Deliverables {
   drawings: { sheets: DrawingSheet[]; at: string; assembly: { ok: boolean; error?: string; scale?: string; balloons?: { item: number }[];
     rows?: number; urls?: Record<string, string> } } | null;
   tickets: Ticket[]; auto: boolean; can_edit: boolean;
-  gate: { ready: boolean; blocking: string[]; next_rev: string | null; releases: ProgramRelease[]; released: Program["released"] };
+  gate: { ready: boolean; blocking: string[]; next_rev: string | null; releases: ProgramRelease[]; released: Program["released"];
+    ecn?: Ecn | null; ecns?: Ecn[] };
 }

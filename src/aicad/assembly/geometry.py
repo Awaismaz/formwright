@@ -273,60 +273,138 @@ def _within_thread(shape: Any, ax: tuple[np.ndarray, np.ndarray, float]) -> bool
     return bool(np.max(radial) <= r + 2e-3)
 
 
+def _envelope(inst: dict[str, Any]) -> Any | None:
+    """A simple solid that contains every solid of a multi-solid part (a ball bearing: the ring from bore to OD
+    over its width), placed in the world; None when the part declares none. Used to screen pairs: when the other
+    part does not overlap the envelope it cannot overlap any of the solids inside it (exact, not an estimate)."""
+    env = inst.get("envelope")
+    if not env or env.get("kind") != "annulus":
+        return None
+    key = "env|" + json.dumps([round(float(env[k]), 6) for k in ("r0", "r1", "z0", "z1")])
+    if key not in _CACHE:
+        from build123d import Align, Cylinder, Pos
+
+        h = float(env["z1"]) - float(env["z0"])
+        al = (Align.CENTER, Align.CENTER, Align.MIN)
+        ring = Pos(0, 0, float(env["z0"])) * Cylinder(float(env["r1"]), h, align=al)
+        if float(env["r0"]) > 0:
+            ring = ring - Pos(0, 0, float(env["z0"]) - 0.01) * Cylinder(float(env["r0"]), h + 0.02, align=al)
+        _CACHE[key] = ring
+    return _CACHE[key].moved(_loc(xform.from12(inst["T"])))
+
+
+def _sbox(shape: Any) -> tuple[np.ndarray, np.ndarray]:
+    bb = shape.bounding_box()
+    return np.array([bb.min.X, bb.min.Y, bb.min.Z]), np.array([bb.max.X, bb.max.Y, bb.max.Z])
+
+
+def _apart(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray], gap: float = 1e-6) -> bool:
+    return bool(np.any(a[0] > b[1] + gap) or np.any(b[0] > a[1] + gap))
+
+
+class _Shapes:
+    """World shapes of instances, split into solids with their bounding boxes (computed once per check)."""
+
+    def __init__(self, instances: list[dict[str, Any]]) -> None:
+        self.instances = instances
+        self._solids: dict[int, list[tuple[Any, tuple[np.ndarray, np.ndarray]]]] = {}
+        self._env: dict[int, Any] = {}
+
+    def solids(self, k: int) -> list[tuple[Any, tuple[np.ndarray, np.ndarray]]]:
+        if k not in self._solids:
+            self._solids[k] = [(s, _sbox(s)) for s in _solids(_world(self.instances[k]))]
+        return self._solids[k]
+
+    def envelope(self, k: int) -> Any | None:
+        if k not in self._env:
+            self._env[k] = _envelope(self.instances[k]) if len(self.solids(k)) > 2 else None
+        return self._env[k]
+
+
+STATS = {"screened": 0, "booleans": 0}
+
+
+def overlap(sh: _Shapes, a: int, b: int, vol_tol: float = 1e-6) -> tuple[float, list[Any]]:
+    """Exact overlap volume of two instances and the common solids. Solid pairs whose boxes are apart are skipped;
+    a multi-solid part with an envelope (a bearing) is screened first: no overlap with the envelope = none at all."""
+    for k, o in ((a, b), (b, a)):
+        env = sh.envelope(k)
+        if env is None:
+            continue
+        eb = _sbox(env)
+        v = 0.0
+        for so, bo in sh.solids(o):
+            if _apart(eb, bo):
+                continue
+            STATS["booleans"] += 1
+            c = _common(env, so)
+            if c is not None:
+                v += _volume(c)
+        if v <= vol_tol:
+            STATS["screened"] += 1
+            return 0.0, []
+    vol = 0.0
+    commons = []
+    for sa, ba in sh.solids(a):
+        for sb, bb_ in sh.solids(b):
+            if _apart(ba, bb_):
+                continue
+            STATS["booleans"] += 1
+            c = _common(sa, sb)
+            if c is None:
+                continue
+            v = _volume(c)
+            if v > vol_tol:
+                vol += v
+                commons.append(c)
+    return vol, commons
+
+
 def interference(instances: list[dict[str, Any]], vol_tol: float = 1e-6,
                  only: list[str] | None = None) -> dict[str, Any]:
-    """Pairwise exact interference. Each instance: {id, step, T, bbox, thread?}. Returns pairs with overlap.
-    ``only``: check just the pairs that involve one of these instance ids (e.g. a stack that was just inserted)."""
+    """Pairwise exact interference. Each instance: {id, step, T, bbox, thread?, envelope?}. Returns pairs with
+    overlap. ``only``: check just the pairs that involve one of these instance ids (e.g. a stack just inserted).
+    Screening (exact, never drops an overlap): instance boxes, then solid boxes, then a declared envelope."""
     n = len(instances)
     focus = set(only) if only is not None else None
     boxes = [_aabb(i, i["bbox"]) for i in instances]
-    world = {}
+    sh = _Shapes(instances)
     out = []
     checked = 0
     for a in range(n):
         for b in range(a + 1, n):
             if focus is not None and instances[a]["id"] not in focus and instances[b]["id"] not in focus:
                 continue
-            (amin, amax), (bmin, bmax) = boxes[a], boxes[b]
-            if np.any(amin > bmax + 1e-6) or np.any(bmin > amax + 1e-6):
+            if _apart(boxes[a], boxes[b]):
                 continue
             checked += 1
             ia, ib = instances[a], instances[b]
-            for k in (a, b):
-                if k not in world:
-                    world[k] = _world(instances[k])
-            vol = 0.0
-            commons = []
-            for sa in _solids(world[a]):
-                for sb in _solids(world[b]):
-                    c = _common(sa, sb)
-                    if c is None:
-                        continue
-                    v = _volume(c)
-                    if v > vol_tol:
-                        vol += v
-                        commons.append(c)
+            vol, commons = overlap(sh, a, b, vol_tol)
             if vol <= vol_tol:
                 continue
-            from build123d import Compound
-
-            common = commons[0] if len(commons) == 1 else Compound(children=commons)
-            kind = "interference"
-            for one in (ia, ib):
-                ax = _thread_axis(one)
-                if ax is not None and _within_thread(common, ax):
-                    kind = "thread"
-                    break
-            bb = common.bounding_box()
-            size = max(bb.size.X, bb.size.Y, bb.size.Z, 1e-3)
-            c = common.center()
-            out.append({"a": ia["id"], "b": ib["id"], "volume_mm3": round(vol, 9), "kind": kind,
-                        "center": [round(c.X, 4), round(c.Y, 4), round(c.Z, 4)],
-                        "bbox": [round(bb.min.X, 4), round(bb.min.Y, 4), round(bb.min.Z, 4), round(bb.max.X, 4),
-                                 round(bb.max.Y, 4), round(bb.max.Z, 4)],
-                        "mesh": _mesh(common, max(size / 200, 0.005)) if kind == "interference" else None})
+            out.append(_pair_row(ia, ib, vol, commons))
     out.sort(key=lambda r: (-r["volume_mm3"], r["a"], r["b"]))
     return {"pairs": out, "checked_pairs": checked, "instances": n}
+
+
+def _pair_row(ia: dict[str, Any], ib: dict[str, Any], vol: float, commons: list[Any], mesh: bool = True) -> dict[str, Any]:
+    from build123d import Compound
+
+    common = commons[0] if len(commons) == 1 else Compound(children=commons)
+    kind = "interference"
+    for one in (ia, ib):
+        ax = _thread_axis(one)
+        if ax is not None and _within_thread(common, ax):
+            kind = "thread"
+            break
+    bb = common.bounding_box()
+    size = max(bb.size.X, bb.size.Y, bb.size.Z, 1e-3)
+    c = common.center()
+    return {"a": ia["id"], "b": ib["id"], "volume_mm3": round(vol, 9), "kind": kind,
+            "center": [round(c.X, 4), round(c.Y, 4), round(c.Z, 4)],
+            "bbox": [round(bb.min.X, 4), round(bb.min.Y, 4), round(bb.min.Z, 4), round(bb.max.X, 4),
+                     round(bb.max.Y, 4), round(bb.max.Z, 4)],
+            "mesh": _mesh(common, max(size / 200, 0.005)) if kind == "interference" and mesh else None}
 
 
 # ----------------------------------------------------------------------------- clearance
@@ -341,9 +419,75 @@ def min_distance(sa: Any, sb: Any) -> tuple[float, list[float], list[float]]:
     return float(d.Value()), [p1.X(), p1.Y(), p1.Z()], [p2.X(), p2.Y(), p2.Z()]
 
 
-def clearance(instances: list[dict[str, Any]], pairs: list[tuple[str, str, str]], near_mm: float) -> dict[str, Any]:
+def _face_data(shape: Any) -> tuple[list[Any], np.ndarray, np.ndarray]:
+    """Faces of a (world) shape, their boxes (N x 6) and its vertices (points on its surface)."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+
+    faces = list(shape.faces())
+    boxes = np.empty((len(faces), 6))
+    for k, f in enumerate(faces):
+        bx = Bnd_Box()
+        BRepBndLib.Add_s(f.wrapped, bx, False)
+        lo, hi = bx.CornerMin(), bx.CornerMax()
+        boxes[k] = (lo.X(), lo.Y(), lo.Z(), hi.X(), hi.Y(), hi.Z())
+    pts = np.asarray([(v.X, v.Y, v.Z) for v in shape.vertices()], dtype=float).reshape(-1, 3)
+    return faces, boxes, pts
+
+
+def _upper(pa: np.ndarray, pb: np.ndarray) -> float:
+    """Smallest distance between two point sets (points on both surfaces: an upper bound of their distance)."""
+    if not len(pa) or not len(pb):
+        return math.inf
+    best = math.inf
+    for k in range(0, len(pa), 512):
+        d = np.sqrt(((pa[k:k + 512, None, :] - pb[None, :, :]) ** 2).sum(axis=2)).min()
+        best = min(best, float(d))
+    return best
+
+
+def _box_gap(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    """Pairwise gap between boxes (N x 6, M x 6) -> N x M distances (0 when they overlap)."""
+    lo = np.maximum(0.0, np.maximum(A[:, None, :3] - B[None, :, 3:], B[None, :, :3] - A[:, None, 3:]))
+    return np.sqrt((lo ** 2).sum(axis=2))
+
+
+MAX_FACE_PAIRS = 20000
+
+
+def min_distance_near(sa: Any, sb: Any) -> tuple[float, list[float], list[float]]:
+    """``min_distance`` for two solids known not to overlap, by branch and bound over face pairs: an upper bound U
+    from the vertices of both, the face pairs whose boxes come within U sorted by box gap, the exact distance of
+    each pair until the next box gap is no smaller than the best distance found (a pair can't be closer than its
+    boxes). Same value as on the whole shapes (no containment without an overlap); much faster on many-faced parts
+    such as meshing gears. Falls back to the whole shapes when the search would be too large."""
+    fa, ba, pa = _face_data(sa)
+    fb, bb, pb = _face_data(sb)
+    if not fa or not fb or len(fa) * len(fb) > 4_000_000:
+        return min_distance(sa, sb)
+    U = _upper(pa, pb)
+    gaps = _box_gap(ba, bb)
+    ia, ib = np.nonzero(gaps <= (U if math.isfinite(U) else np.inf) + 1e-6)
+    if len(ia) > MAX_FACE_PAIRS:
+        return min_distance(sa, sb)
+    order = np.argsort(gaps[ia, ib], kind="stable")
+    best: tuple[float, list[float], list[float]] | None = None
+    for k in order:
+        g = float(gaps[ia[k], ib[k]])
+        if best is not None and g >= best[0]:
+            break
+        d = min_distance(fa[int(ia[k])], fb[int(ib[k])])
+        if best is None or d[0] < best[0]:
+            best = d
+    return best if best is not None else min_distance(sa, sb)
+
+
+def clearance(instances: list[dict[str, Any]], pairs: list[tuple[str, str, str]], near_mm: float,
+              overlaps: dict[tuple[str, str], list[float]] | None = None) -> dict[str, Any]:
     """Minimum distance for the requested pairs (with their reason) plus every other pair whose bounding boxes
-    come within ``near_mm``. Returns one row per pair."""
+    come within ``near_mm``. Returns one row per pair. ``overlaps`` (pair -> a point in the overlap), from the
+    interference check just run: those pairs are at distance 0 by definition, and every other pair is known not
+    to overlap, so its distance is computed on the nearby faces only (``min_distance_near``)."""
     by_id = {i["id"]: i for i in instances}
     boxes = {i["id"]: _aabb(i, i["bbox"]) for i in instances}
     want: dict[tuple[str, str], set[str]] = {}
@@ -363,10 +507,15 @@ def clearance(instances: list[dict[str, Any]], pairs: list[tuple[str, str, str]]
     world: dict[str, Any] = {}
     rows = []
     for (a, b), why in sorted(want.items()):
-        for k in (a, b):
-            if k not in world:
-                world[k] = _world(by_id[k])
-        d, p1, p2 = min_distance(world[a], world[b])
+        hit = None if overlaps is None else overlaps.get((a, b)) or overlaps.get((b, a))
+        if hit is not None:
+            d, p1, p2 = 0.0, list(hit), list(hit)
+        else:
+            for k in (a, b):
+                if k not in world:
+                    world[k] = _world(by_id[k])
+            d, p1, p2 = (min_distance(world[a], world[b]) if overlaps is None
+                         else min_distance_near(world[a], world[b]))
         rows.append({"a": a, "b": b, "distance_mm": round(d, 10), "pa": [round(x, 4) for x in p1],
                      "pb": [round(x, 4) for x in p2], "why": sorted(why)})
     return {"rows": rows}

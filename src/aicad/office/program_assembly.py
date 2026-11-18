@@ -437,6 +437,11 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 if r.get("source") != "toolbox":
                     continue
                 kind, code = r.get("kind"), r.get("code")
+                # integrating again (a change reopened the level): the pieces Fitz seated or binned last time go,
+                # so they are placed once, where the ICD says now (fastener stacks are skipped by ``fitted``)
+                for old in [i for i in adoc["instances"] if (i.get("office") or {}).get("item") == t["item_id"]
+                            and ((i.get("office") or {}).get("bin") or (i.get("office") or {}).get("seated"))]:
+                    aservice.remove_instance(adoc, old["id"])
                 seat = icd.seated(ifaces, t["item_id"])
                 if seat:  # bearings in their seats, dowel pins in their holes (coaxial with the ICD features)
                     try:

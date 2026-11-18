@@ -90,6 +90,27 @@ function InboxRow({ i, canEdit }: { i: InboxItem; canEdit: boolean }) {
       qc.invalidateQueries({ queryKey: ["office-home"] });
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
   };
+  const approve = async () => {
+    setBusy(true);
+    try {
+      await api.post(`${BASE}/programs/${i.program_id}/tickets/${i.ticket_id}/review`, { decision: "approve" });
+      toast.success(`${i.key} approved for assembly`);
+      qc.invalidateQueries({ queryKey: ["office-home"] });
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
+  };
+  if (i.kind === "review") return (
+    <div className="flex items-center gap-3 border-b border-border px-3 py-2.5 last:border-0" data-inbox-review>
+      <AgentAvatar code="gage" state="review" size={30} />
+      <Link to={`/app/office/programs/${i.program_id}?ticket=${i.ticket_id}`} className="min-w-0 flex-1 hover:text-primary">
+        <div className="truncate text-[13px] font-medium"><span className="font-mono text-[11px] text-muted">{i.key}</span> {i.title}</div>
+        <div className="text-[11.5px] text-muted">Gage passed it · your review gate · {i.program} · {ago(i.at)}</div>
+      </Link>
+      {canEdit && <div className="flex shrink-0 gap-1">
+        <Button size="sm" variant="secondary" onClick={() => nav(`/app/office/programs/${i.program_id}?ticket=${i.ticket_id}`)}>Changes…</Button>
+        <Button size="sm" disabled={busy} onClick={approve}>Approve</Button>
+      </div>}
+    </div>
+  );
   if (i.kind === "blocked") return (
     <Link to={`/app/office/programs/${i.program_id}?ticket=${i.ticket_id}`} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
       <AgentAvatar code={i.specialist ?? "gage"} state="blocked" size={30} still />

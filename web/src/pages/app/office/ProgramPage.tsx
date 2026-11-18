@@ -102,7 +102,7 @@ function RunBar({ p }: { p: Program }) {
       {o?.bypass && <span title="God mode: the token budget is not enforced"><Badge tone="neutral">Budget bypass</Badge></span>}
       <p className="min-w-[260px] flex-1 text-[12px] text-muted">
         {running || o?.state === "complete" || o?.state === "paused"
-          ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved; <b>Fitz</b> assembles each level{p.deliverables_auto !== false ? <>; then <b>Ortho</b> draws every part and the assembly with its BOM and <b>Smithy</b> reviews every part for manufacture</> : ""}. Comment, pause, reassign or take over any ticket.</>
+          ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved{p.review_gate ? <> and then <b>you</b> approve it (review gate on)</> : ""}; <b>Fitz</b> assembles each level{p.deliverables_auto !== false ? <>; then <b>Ortho</b> draws every part and the assembly with its BOM and <b>Smithy</b> reviews every part for manufacture</> : ""}. Comment, pause, reassign or take over any ticket.</>
           : o?.state === "stopped"
             ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
             : p.icd?.status === "draft" ? <>Approve the interfaces (ICD) first: part work starts at that gate, against the numbers you approved.</>
@@ -117,15 +117,16 @@ function BudgetDialog({ p, open, onOpenChange }: { p: Program; open: boolean; on
   const [tokens, setTokens] = useState(p.budget.tokens);
   const [conc, setConc] = useState(p.concurrency);
   const [deliv, setDeliv] = useState(p.deliverables_auto !== false);
+  const [gate, setGate] = useState(!!p.review_gate);
   const save = async () => {
     try {
-      const v = await api.patch<Program>(`${BASE}/programs/${p.id}`, { budget_tokens: tokens, concurrency: conc, deliverables: deliv });
+      const v = await api.patch<Program>(`${BASE}/programs/${p.id}`, { budget_tokens: tokens, concurrency: conc, deliverables: deliv, review_gate: gate });
       qc.setQueryData(["office-program", p.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
       onOpenChange(false);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
   };
   return (
-    <Modal open={open} onOpenChange={onOpenChange} title="Budget and agents" description="The office warns at 80 % of the budget and starts no new work at 100 %."
+    <Modal open={open} onOpenChange={onOpenChange} title="Budget, agents and reviews" description="The office warns at 80 % of the budget and starts no new work at 100 %."
       footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={save}>Save</Button></>}>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block"><span className="label">Token budget</span>
@@ -136,6 +137,8 @@ function BudgetDialog({ p, open, onOpenChange }: { p: Program; open: boolean; on
       <p className="mt-2 text-[12px] text-muted">More agents finish sooner but share one AI subscription: above 3 at a time, expect waits for capacity.</p>
       <label className="mt-3 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={deliv} onChange={e => setDeliv(e.target.checked)} />
         <span>Make the deliverables after integration: Ortho's drawings (parts and the assembly with its BOM) and Smithy's manufacturing review. They cost no tokens.</span></label>
+      <label className="mt-2 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={gate} onChange={e => setGate(e.target.checked)} data-review-gate-option />
+        <span>Review every part myself: after Gage passes a part it waits in In review for your approval or your requested changes. Switching this off lets waiting parts go on.</span></label>
     </Modal>
   );
 }

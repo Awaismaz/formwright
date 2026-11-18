@@ -107,7 +107,7 @@ def new_program(name: str, brief: str, org_id: str, user_id: str, concurrency: i
                  "note": "Opens when the brief is approved: Archie lays out the skeleton and names the interfaces."},
                 {"code": "release", "name": "Release", "mandatory": True, "status": "locked"},
             ],
-            "items": [], "tickets": [],
+            "items": [], "tickets": [], "review_gate": False,
             "concurrency": max(1, min(estimates.MAX_CONCURRENCY, int(concurrency))),
             "budget": {"tokens": max(0, int(budget_tokens)), "planning_tokens": 0}}
 
@@ -450,7 +450,7 @@ AGENT_STATE = {"in_design": "working", "in_review": "review", "changes_requested
                "approved": "done", "integrated": "done"}
 RUN_STATE = {"searching": "working", "designing": "working", "reviewing": "working", "integrating": "working",
              "fitting": "working", "drafting": "working", "screening": "working", "blocked": "blocked",
-             "done": "done"}
+             "done": "done", "awaiting_review": "review"}
 WORKING = ("searching", "designing", "reviewing", "integrating", "fitting", "drafting", "screening")
 
 
@@ -465,7 +465,7 @@ def ticket_view(t: dict[str, Any]) -> dict[str, Any]:
     if st == "done" and t["column"] not in DONE_COLUMNS:
         state = AGENT_STATE.get(t["column"], "idle")
     agent_code = r.get("agent") if st in WORKING else t["specialist"]
-    if st == "done" and r.get("agent") in ("hex", "gage", "fitz"):
+    if st in ("done", "awaiting_review") and r.get("agent") in ("hex", "gage", "fitz"):
         agent_code = r["agent"]
     from aicad.office import timeline
 
@@ -513,7 +513,10 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
                                           orchestrator.ACTIVE),
                            "waiting": sum(1 for t in tickets if (t.get("run") or {}).get("status") in
                                           ("waiting_capacity", "retry")),
-                           "blocked": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "blocked")}
+                           "blocked": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "blocked"),
+                           "review": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "awaiting_review")}
+    out["review_gate"] = bool(doc.get("review_gate"))
+    out["ecns"] = doc.get("ecns") or []
     if doc.get("plan") and doc["status"] == "plan_review":
         out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc))
     out["constants"] = estimates.constants(rates_of(doc))
@@ -593,6 +596,11 @@ def inbox(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                             "ticket_id": t["id"], "key": t["key"], "title": t["title"],
                             "specialist": t["specialist"], "checks": t.get("checks"),
                             "reason": (t.get("run") or {}).get("blocked")})
+                continue
+            if (t.get("run") or {}).get("status") == "awaiting_review":
+                out.append({"kind": "review", "program_id": d["id"], "program": d["name"], "at": t["updated_at"],
+                            "ticket_id": t["id"], "key": t["key"], "title": t["title"],
+                            "specialist": t["specialist"], "checks": t.get("checks")})
                 continue
             if t["column"] == "in_review" and not (t.get("run") or {}).get("status"):
                 out.append({"kind": "ticket", "program_id": d["id"], "program": d["name"], "at": t["updated_at"],

@@ -112,6 +112,7 @@ export function runChip(t: Pick<Ticket, "run_status" | "paused" | "taken_over" |
     case "waiting_capacity": return { label: "Waiting for capacity", tone: "warning" };
     case "retry": return { label: `Retry ${t.run?.attempt ?? 1}`, tone: "warning" };
     case "blocked": return { label: "Needs you", tone: "danger" };
+    case "awaiting_review": return { label: "Your review", tone: "warning" };
     default: return null;
   }
 }
@@ -125,6 +126,7 @@ export function orchestratorLabel(o: Orchestrator | undefined, concurrency: numb
       if (waiting) return { label: "Waiting for capacity", tone: "warning" };
       const bits = [`${o.working} of ${concurrency} working`];
       if (o.blocked) bits.push(`${o.blocked} need${o.blocked === 1 ? "s" : ""} you`);
+      if (o.review) bits.push(`${o.review} waiting for your review`);
       return { label: `Running · ${bits.join(" · ")}`, tone: "primary" };
     }
     case "paused": return { label: o.working ? `Pausing · ${o.working} finishing` : "Paused", tone: "neutral" };

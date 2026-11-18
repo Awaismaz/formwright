@@ -25,6 +25,8 @@ Viewers can open assemblies, the BOM and the last exported STEP; changes need th
   POST   /api/m/assembly/assemblies/{id}/analyse             interference + clearance (exact)
   GET    /api/m/assembly/assemblies/{id}/bom[?format=csv]
   POST   /api/m/assembly/assemblies/{id}/export              assembly STEP (re-import verified)
+  POST   /api/m/assembly/assemblies/{id}/joints              declare a joint (ASM-011); DELETE .../joints/{jid}
+  GET|POST /api/m/assembly/assemblies/{id}/motion            last / run a motion range check (collisions per step)
   GET    /api/m/assembly/assemblies/{id}/files/assembly.step
   POST   /api/m/assembly/assemblies/{id}/fasteners/propose   fastener auto-fit proposal for a hole / pattern
   POST   /api/m/assembly/assemblies/{id}/fasteners/accept    insert the proposed stacks
@@ -226,6 +228,7 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
         "assembly": {k: doc.get(k) for k in ("id", "name", "project_id", "rev", "created_at", "updated_at")},
         "home_project": {"id": home.id, "name": home.name} if home else None,
         "instances": instances, "parts": pview, "mates": mates, "groups": doc["groups"], "subassemblies": subs,
+        "joints": doc.get("joints") or [],
         "office": doc.get("office"), "office_busy": locks.holder(doc["id"]) == OFFICE, "solve": solve or None,
         "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
         "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
@@ -830,6 +833,68 @@ async def analyse(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     track(ctx.db, "assembly_analysed", ctx.user, ctx.require_org().id, interferences=res["interference"]["count"])
     ctx.db.commit()
     return {"analysis": {**res, "stale": False}}
+
+
+class JointIn(BaseModel):
+    type: Literal["revolute", "slider", "gear"]
+    name: str | None = Field(default=None, max_length=80)
+    insts: list[str] = Field(default_factory=list, max_length=200)
+    from_mate: str | None = None
+    ref: dict[str, Any] | None = None
+    p: list[float] | None = None
+    dir: list[float] | None = None
+    limits: list[float] | None = None
+    a: str | None = None
+    b: str | None = None
+    teeth: list[int] | None = None
+    ratio: float | None = None
+
+
+class MotionIn(BaseModel):
+    driver: str | None = None
+    start: float | None = None
+    end: float | None = None
+    steps: int = Field(default=24, ge=2, le=120)
+
+
+@router.post("/assemblies/{aid}/joints")
+async def add_joint(aid: str, body: JointIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """ASM-011: declare a joint (revolute / slider on picked parts, or a gear pair coupling two revolutes)."""
+    def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        return {"_extra": service.add_joint(root, doc, body.model_dump(exclude_none=True))}
+    return await _mutate(ctx, aid, fn, solve=False)
+
+
+@router.delete("/assemblies/{aid}/joints/{jid}")
+async def delete_joint(aid: str, jid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    return await _mutate(ctx, aid, lambda doc, root: service.delete_joint(doc, jid), solve=False)
+
+
+@router.get("/assemblies/{aid}/motion")
+def get_motion(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """The last motion range check, stale when the parts moved since."""
+    doc = _doc(ctx, aid)
+    res = store.read_json(store.doc_dir(_root(ctx), aid) / "motion.json")
+    if res:
+        res["stale"] = res.get("signature") != service.geometry_signature(doc)
+    return {"motion": res or None}
+
+
+@router.post("/assemblies/{aid}/motion")
+async def run_motion(aid: str, body: MotionIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """ASM-011: sweep the driving joint through its range in N steps and report collisions per step."""
+    _editor(ctx)
+    async with _lock(aid):
+        doc = _doc(ctx, aid)
+        try:
+            res = await service.motion_check(_root(ctx), ctx.require_org().id, doc, None, body.driver, body.start,
+                                             body.end, body.steps)
+        except (AssemblyInputError, service.WorkerError) as e:
+            raise _err(e) from e
+    track(ctx.db, "assembly_motion_checked", ctx.user, ctx.require_org().id, steps=len(res["steps"]),
+          colliding=len(res["colliding_steps"]))
+    ctx.db.commit()
+    return {"motion": {**res, "stale": False}}
 
 
 @router.get("/assemblies/{aid}/bom")

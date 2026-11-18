@@ -83,6 +83,57 @@ _DOWELY = re.compile(r"\bdowel|\blocating pin", re.IGNORECASE)
 _NUM = r"(\d+(?:\.\d+)?)"
 
 
+# ----------------------------------------------------------------------------- axes of interfaces (Phase 6)
+# An interface whose features are cylinders / planes along a program axis other than Z carries ``data["ax"]`` ("x"
+# or "y"; absent = "z"). Its 2-D numbers are then in the plane across that axis, in program coordinates ordered
+# ``PLANE[ax]`` ("axis": [X, Z] for a shaft along Y), and its 1-D numbers ("z" ranges, "plane_z", "flush_z") are
+# coordinates along the axis.
+PLANE = {"z": (0, 1), "y": (0, 2), "x": (1, 2)}
+AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
+# canonical feature frame -> part frame: the canonical Z is the feature's axis (rows of a proper rotation)
+CANON: dict[str, list[list[float]]] = {
+    "z": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    "y": [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],   # Rx(-90°): canonical Z -> +Y, canonical Y -> -Z
+    "x": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],   # Ry(+90°): canonical Z -> +X, canonical X -> -Z
+}
+
+
+def ax_of(data: dict[str, Any]) -> str:
+    a = str((data or {}).get("ax") or "z")
+    return a if a in PLANE else "z"
+
+
+def point3(ax: str, a2: Any, t: float) -> list[float]:
+    """A program-frame point from an interface's 2-D axis coordinates and a coordinate along its axis."""
+    p = [0.0, 0.0, 0.0]
+    i, j = PLANE[ax]
+    p[i], p[j] = float(a2[0]), float(a2[1])
+    p[AXIS_INDEX[ax]] = float(t)
+    return p
+
+
+def unit(ax: str) -> list[float]:
+    v = [0.0, 0.0, 0.0]
+    v[AXIS_INDEX[ax]] = 1.0
+    return v
+
+
+def joint_axis(f: dict[str, Any], which: str = "a") -> dict[str, Any] | None:
+    """The rotation axis an interface defines, in the program frame: {"p": [x, y, z], "dir": [dx, dy, dz]}.
+    bearing_seat / shaft_bore / key: the shaft axis; gear_mesh: the axis of gear ``which`` ("a" or "b")."""
+    d = f.get("data") or {}
+    ax = ax_of(d)
+    if f.get("kind") in ("bearing_seat", "shaft_bore", "key") and d.get("axis") is not None:
+        z = d.get("z") or [0.0, 0.0]
+        return {"p": point3(ax, d["axis"], float(z[0])), "dir": unit(ax)}
+    if f.get("kind") == "gear_mesh":
+        a2 = d.get("axis_a" if which == "a" else "axis_b")
+        if a2 is None:
+            return None
+        return {"p": point3(ax, a2, float(d.get("plane_" + which) or 0.0)), "dir": unit(ax)}
+    return None
+
+
 def key_for(d: float) -> tuple[float, float, float, float] | None:
     """DIN 6885-1 key (b, h, t1, t2) for a shaft Ø, or None outside the table (8..65 mm)."""
     for (lo, hi), v in KEYS:

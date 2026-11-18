@@ -44,6 +44,7 @@ from aicad.office import (
     calibration,
     conformance,
     deliverables,
+    ecn,
     estimates,
     gage,
     interfaces,
@@ -145,7 +146,7 @@ def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
     if (t["column"] in service.DONE_COLUMNS and r.get("next") != "fit") or t.get("paused") or t.get("taken_over"):
         return None
     st = r.get("status")
-    if st in ACTIVE or st in ("blocked", "done", "manual"):
+    if st in ACTIVE or st in ("blocked", "done", "manual", "awaiting_review"):
         return None
     if st in ("waiting_capacity", "retry") and float(r.get("next_try_at") or 0) > now:
         return None
@@ -301,6 +302,53 @@ def control(root: Path, doc: dict[str, Any], tid: str, action: str, actor: dict[
                      f"{service._label(t)}.", actor, tid)
         return False
     raise OfficeInputError("Unknown action")
+
+
+def gated(doc: dict[str, Any], t: dict[str, Any]) -> bool:
+    """The program's optional per-part review gate (PD default: off): part tickets wait for the engineer after
+    Gage passes them."""
+    return bool(doc.get("review_gate")) and t["kind"] == "part"
+
+
+def review_decision(root: Path, doc: dict[str, Any], tid: str, decision: str, note: str,
+                    actor: dict[str, Any]) -> dict[str, Any]:
+    """The engineer's decision at the per-part review gate. ``approve``: the part goes on to assembly exactly as a
+    Gage approval does (Fitz swaps it in next). ``changes``: the ticket reopens with the note as the designer's
+    instruction (its next turn starts from it)."""
+    t = service.ticket(doc, tid)
+    r = run_of(t)
+    if r.get("status") != "awaiting_review":
+        raise OfficeInputError("This ticket is not waiting for your review.")
+    who = actor.get("name", "Someone")
+    body = " ".join((note or "").split())[: service.MAX_COMMENT]
+    close_wait(t)
+    if decision == "approve":
+        service.comment(root, doc, tid, f"Approved by {who} at the review gate." + (f" {body}" if body else ""), actor)
+        t["comments"][-1]["delivery"] = "stored"
+        service.move(root, doc, tid, "approved", actor)
+        t["reviewed"] = {"by": who, "at": store.now(), "decision": "approved", "note": body or None}
+        if (doc.get("assembly") or {}).get("status") in ("ready", "building") and                 t["item_id"] in (doc.get("skeleton") or {}).get("items", {}):
+            _set_run(t, status="queued", next="fit", agent="fitz", agent_label="Fitz",
+                     line=f"Approved by {who}: Fitz swaps {t['title']} in next")
+        else:
+            _set_run(t, status="done", next=None, line=f"Approved by {who}")
+        service.emit(root, doc, "ticket.review_approved", f"{who} approved {service._label(t)} at the review gate.",
+                     actor, tid)
+        return t
+    if decision != "changes":
+        raise OfficeInputError("Decide approve or changes.")
+    if not body:
+        raise OfficeInputError("Say what should change: the note goes to the designer.")
+    c = service.comment(root, doc, tid, f"Changes requested at the review gate: {body}", actor)
+    c["delivery"] = "queued"
+    service.move(root, doc, tid, "changes_requested", actor)
+    t["reviewed"] = {"by": who, "at": store.now(), "decision": "changes", "note": body}
+    name = roster.agent(t["specialist"])["name"]
+    _set_run(t, status="queued", next="design", attempt=0, review_round=0, feedback=[f"Engineer review: {body}"],
+             line=f"{who} requested changes: back to {name}")
+    service.emit(root, doc, "ticket.review_changes", f"{who} requested changes on {service._label(t)}: {body}",
+                 actor, tid, note=body)
+    return t
 
 
 def set_priority(root: Path, doc: dict[str, Any], tid: str, prio: str, actor: dict[str, Any]) -> None:
@@ -531,6 +579,7 @@ class Runner:
                         if g["status"] == "locked":
                             g.update(status="pending", note="Drawings, BOM and the manufacturing review are ready: "
                                                             "release the program.")
+                            ecn.mark_ready(self.root, doc)
                     service.emit(self.root, doc, "program.done", f"{doc['name']}: every ticket is integrated"
                                  + (", the drawings, BOM and manufacturing review are done. Ready to release."
                                     if deliv else ". The office has stopped."), service.agent_actor("archie"))
@@ -898,6 +947,13 @@ class Runner:
                     note += " (No AI review note this time: approved on the deterministic checks.)"
                 service.comment(self.root, d, tid, note, g)
                 tt["comments"][-1]["delivery"] = "stored"
+                if gated(d, tt):  # the program's per-part review gate: the engineer approves before assembly
+                    _set_run(tt, status="awaiting_review", next=None, agent="gage", feedback=None,
+                             line=f"Gage passed {tt['title']}: waiting for your review")
+                    open_wait(tt, "blocked")
+                    service.emit(self.root, d, "ticket.review_requested", f"{service._label(tt)} passed Gage and waits "
+                                 "for your review (approve it, or request changes with a note).", g, tid)
+                    return None
                 service.move(self.root, d, tid, "approved", g)
                 _set_run(tt, status="done", line=f"Gage approved {tt['title']}", agent="gage", feedback=None)
                 if parent:
@@ -1063,8 +1119,9 @@ class Runner:
             if tt["column"] != "in_design":
                 service.move(self.root, d, tid, "in_design", service.agent_actor(code))
             self.status(d, tt, code, line, status=STATUS_OF[tt["deliverable"]])
+            sc = ecn.scope(d)
             return [{"ticket_id": p["ticket"]["id"], "project_id": p["project_id"], "reused": p["reused"]}
-                    for p in deliverables.make_parts(d)]
+                    for p in deliverables.make_parts(d) if sc is None or p["ticket"]["id"] in sc]
         return self.edit(fn)
 
     def _deliverable_progress(self, tid: str, code: str, k: int, n: int, line: str) -> None:
@@ -1093,7 +1150,14 @@ class Runner:
             tt = service.ticket(d, tid)
             o = service.agent_actor("ortho")
             dv = d.setdefault("deliverables", {})
-            dv["drawings"] = {"sheets": sheets, "assembly": asm, "at": store.now()}
+            sc = ecn.scope(d)
+            if sc is not None:  # an ECN: only the changed parts were redrawn, the others' sheets stand
+                new = {x["ticket"]: x for x in sheets}
+                old = {x["ticket"]: x for x in (dv.get("drawings") or {}).get("sheets") or []}
+                order = [p["ticket"]["id"] for p in deliverables.make_parts(d)]
+                sheets[:] = [new.get(k) or {**old[k], "kept": True} for k in order if k in new or k in old]
+            dv["drawings"] = {"sheets": sheets, "assembly": asm, "at": store.now(),
+                              "redrawn": None if sc is None else sorted(sc)}
             bad = [x for x in sheets if not x.get("ok") or not x.get("check_passed")]
             spec = sum(int(x.get("icd_dims") or 0) for x in sheets)
             lines = [f"Ortho drew {len(sheets)} part sheet{'s' if len(sheets) != 1 else ''}"
@@ -1129,13 +1193,20 @@ class Runner:
                                                             f"({k + 1} of {n})")
             res = await self.env.dfm(doc, pt, p["project_id"])
             lines.append(deliverables.dfm_part(pt, res.get("analysis"), res.get("error")))
+        sc = ecn.scope(self.load())
+        if sc is not None:  # an ECN: only the changed parts were screened again, the others' lines stand
+            doc = self.load()
+            new = {x["ticket"]: x for x in lines}
+            old = {x["ticket"]: x for x in ((doc.get("deliverables") or {}).get("dfm") or {}).get("parts") or []}
+            order = [p["ticket"]["id"] for p in deliverables.make_parts(doc)]
+            lines = [new.get(k) or {**old[k], "kept": True} for k in order if k in new or k in old]
         summ = deliverables.dfm_summary(lines)
 
         def fn(d: dict[str, Any]) -> None:
             tt = service.ticket(d, tid)
             s_ = service.agent_actor("smithy")
             d.setdefault("deliverables", {})["dfm"] = {**summ, "at": store.now()}
-            head = (f"Smithy screened {summ['analysed']} of {n} part{'s' if n != 1 else ''}: {summ['critical']} "
+            head = (f"Smithy screened {summ['analysed'] if sc is None else len(parts)} of {n} part{'s' if n != 1 else ''}: {summ['critical']} "
                     f"critical and {summ['warning']} warning flag{'s' if summ['warning'] != 1 else ''} (advisory).")
             body = []
             for x in summ["parts"]:

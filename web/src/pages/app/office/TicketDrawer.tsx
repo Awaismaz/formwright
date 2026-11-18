@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Hand, Library, Pause, Play, Puzzle, RotateCcw, Send, Undo2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, FileWarning, Hand, Library, MessageSquareWarning, Pause, Play, Puzzle, RotateCcw, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
@@ -24,6 +24,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
   const nav = useNavigate();
   const move = useMoveTicket(program);
   const [comment, setComment] = useState("");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const canEdit = program.can_edit !== false;
   const t = ticket ? program.tickets.find(x => x.id === ticket.id) ?? ticket : null;
@@ -51,6 +52,8 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
       if (e instanceof ApiError && e.cta) nav(e.cta);
     } finally { setBusy(null); }
   };
+  const review = (decision: "approve" | "changes") => call(decision, () => api.post<Program>(
+    `${BASE}/programs/${program.id}/tickets/${t.id}/review`, { decision, note })).then(() => setNote(""));
   const control = (action: string) => call(action, () => api.post<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}/control`, { action }));
   const who = t.agent ?? t.specialist;
   const holder = AGENT[who];
@@ -80,6 +83,21 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               {!t.run && !done && <div className="mt-1 text-[11.5px] text-muted">Waiting for the office: press Run on the program, or start it by hand.</div>}
             </div>
           </div>
+          {t.run_status === "awaiting_review" && <div className="rounded-md border border-warning/40 bg-warning/5 p-3" data-review-gate>
+            <div className="flex items-center gap-1.5 text-[13px] font-semibold"><MessageSquareWarning className="h-4 w-4 text-warning" />Waiting for your review</div>
+            <p className="mt-0.5 text-[12px] text-muted">Gage passed this part. The program's review gate holds it here until you approve it for assembly or send it back to {spec} with a note.</p>
+            {canEdit && <>
+              <textarea className="input mt-2 min-h-[64px] w-full py-1.5 text-[12.5px]" value={note} onChange={e => setNote(e.target.value)} maxLength={2000}
+                placeholder="Note (required to request changes, optional with an approval)" aria-label="Review note" />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <Button size="sm" loading={busy === "approve"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} onClick={() => review("approve")}>Approve for assembly</Button>
+                <Button size="sm" variant="secondary" loading={busy === "changes"} disabled={!note.trim()} icon={<FileWarning className="h-3.5 w-3.5" />}
+                  onClick={() => review("changes")} title={note.trim() ? undefined : "Write what should change first"}>Request changes</Button>
+              </div></>}
+          </div>}
+          {t.reviewed && t.run_status !== "awaiting_review" && <div className="text-[11.5px] text-muted" data-reviewed>
+            Last review: {t.reviewed.decision === "approved" ? "approved" : "changes requested"} by {t.reviewed.by} {ago(t.reviewed.at)}{t.reviewed.note ? `: ${t.reviewed.note}` : ""}</div>}
+          {t.ecn && <div className="text-[11.5px] text-muted">Reopened by change notice <b>{t.ecn}</b>.</div>}
           {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
             <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
           {t.icd_check && <div className={cx("rounded-md border p-2.5 text-[12.5px]", t.icd_check.ok ? "border-success/30 bg-success/5" : "border-danger/30 bg-danger/5")} data-icd-check>

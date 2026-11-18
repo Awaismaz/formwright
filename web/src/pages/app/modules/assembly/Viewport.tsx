@@ -34,10 +34,13 @@ export interface ViewportProps {
   onDrag?: (id: string, T: number[]) => void;
   /** Change to re-fit the view (e.g. after an insert). */
   fitKey?: string | number | null;
+  /** Motion check: placements overriding instances' own (the current step) and the parts colliding there. */
+  poses?: Record<string, number[]> | null;
+  hot?: string[];
 }
 
 export function Viewport(props: ViewportProps) {
-  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb, gizmo, onDrag, fitKey } = props;
+  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb, gizmo, onDrag, fitKey, poses, hot } = props;
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<AssemblyViewer | null>(null);
   const [loaded, setLoaded] = useState(0);
@@ -70,10 +73,11 @@ export function Viewport(props: ViewportProps) {
   }, [view.parts]);
 
   useEffect(() => {
-    eng.current?.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: i.T, visible: i.visible, fastener: !!i.group,
+    eng.current?.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: poses?.[i.id] ?? i.T, visible: i.visible, fastener: !!i.group,
       tone: i.source.kind === "placeholder" ? "placeholder" as const : undefined })));
     eng.current?.setExplode(view.explode, explode);
-  }, [view.instances, view.explode, loaded, explode]);
+  }, [view.instances, view.explode, loaded, explode, poses]);
+  useEffect(() => { eng.current?.setHot(hot ?? []); }, [hot, loaded]);
   useEffect(() => { eng.current?.setPicking(picking); }, [picking]);
   useEffect(() => { eng.current?.setGizmo(gizmo?.id ?? null, gizmo?.mode); }, [gizmo?.id, gizmo?.mode, view.instances, loaded, explode]);
   useEffect(() => { if (fitKey !== null && fitKey !== undefined && !loading) eng.current?.fit(); }, [fitKey, loading]);

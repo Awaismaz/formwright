@@ -78,11 +78,13 @@ describe("the running office (Phase 3)", () => {
     expect(runChip({ run_status: "designing", paused: true })?.label).toBe("Paused");
     expect(runChip({ run_status: "manual" })?.label).toBe("You took over");
     expect(runChip({ run_status: "designing" })).toBeNull();
+    expect(runChip({ run_status: "awaiting_review" })).toEqual({ label: "Your review", tone: "warning" });
   });
   it("summarises the run state", () => {
     const base = { working: 2, waiting: 0, blocked: 1 };
     expect(orchestratorLabel(undefined, 3).label).toBe("Not running");
     expect(orchestratorLabel({ ...base, state: "running" }, 3).label).toBe("Running · 2 of 3 working · 1 needs you");
+    expect(orchestratorLabel({ ...base, state: "running", review: 2 }, 3).label).toBe("Running · 2 of 3 working · 1 needs you · 2 waiting for your review");
     expect(orchestratorLabel({ ...base, state: "running", capacity_until: Date.now() / 1000 + 60 }, 3).label).toBe("Waiting for capacity");
     expect(orchestratorLabel({ ...base, state: "stopped", reason: "budget" }, 3)).toEqual({ label: "Stopped: budget reached", tone: "danger" });
     expect(orchestratorLabel({ ...base, state: "paused" }, 3).label).toBe("Pausing · 2 finishing");

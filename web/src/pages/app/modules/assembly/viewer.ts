@@ -53,6 +53,7 @@ export class AssemblyViewer {
   private offsets: Record<string, V3> = {};
   private explodeF = 0;
   private selected = new Set<string>();
+  private hot = new Set<string>();
   private picking: Set<"face" | "edge"> = new Set();
   private edgeMat: THREE.LineBasicMaterial;
   private overlays: { picks: THREE.Object3D[]; hover: THREE.Object3D[]; marks: THREE.Object3D[]; clash: THREE.Object3D[]; measure: THREE.Object3D[] } =
@@ -234,6 +235,7 @@ export class AssemblyViewer {
     const base = ph ? PLACEHOLDER : o.fastener ? (this.dark ? FASTENER.dark : FASTENER.light) : this.pal.face;
     const c = new THREE.Color(base);
     if (this.selected.has(o.id)) c.lerp(new THREE.Color(this.pal.select), 0.4);
+    if (this.hot.has(o.id)) c.lerp(new THREE.Color(0xd93a3a), 0.65);
     o.mat.color.copy(c);
     o.mat.metalness = o.fastener ? 0.55 : ph ? 0.05 : 0.25;
     o.mat.roughness = o.fastener ? 0.38 : ph ? 0.8 : 0.5;
@@ -255,6 +257,12 @@ export class AssemblyViewer {
 
   setSelected(ids: string[]) {
     this.selected = new Set(ids);
+    for (const o of this.insts.values()) this.tint(o);
+  }
+
+  /** Parts in a collision (motion check): tinted red. */
+  setHot(ids: string[]) {
+    this.hot = new Set(ids);
     for (const o of this.insts.values()) this.tint(o);
   }
 

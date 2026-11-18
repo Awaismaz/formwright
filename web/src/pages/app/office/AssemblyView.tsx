@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Box, ExternalLink, Layers, Maximize, RefreshCw } from "lucide-react";
+import { AlertTriangle, Box, ExternalLink, Layers, Maximize, RefreshCw, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Spinner } from "@/components/ui";
 import type { Topo } from "@/viewer/types";
 import { AssemblyViewer } from "../modules/assembly/viewer";
+import { MotionScrubber, stepScene } from "../modules/assembly/MotionPanel";
+import type { MotionResult } from "../modules/assembly/types";
 import { AGENT } from "./Avatars";
 import { BASE } from "./api";
 import { liveCounts, swappedIn } from "./model";
@@ -34,6 +36,14 @@ export default function AssemblyView({ program, recent }: { program: Program; re
   const [explode, setExplode] = useState(0);
   const [tip, setTip] = useState<{ x: number; y: number; id: string } | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
+  const [motion, setMotion] = useState<MotionResult | null>(null);
+  const [mstep, setMstep] = useState(0);
+  const [moving, setMoving] = useState(false);
+  useEffect(() => {   // the last motion check of this program (ASM-011)
+    let off = false;
+    api.get<{ motion: MotionResult | null }>(`${BASE}/programs/${program.id}/assembly/motion`).then(r => { if (!off) setMotion(r.motion); }).catch(() => undefined);
+    return () => { off = true; };
+  }, [program.id]);
   const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const data = q.data;
   const view = data?.view ?? null;
@@ -73,14 +83,16 @@ export default function AssemblyView({ program, recent }: { program: Program; re
   useEffect(() => {
     const v = eng.current;
     if (!v || !view) return;
-    v.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: i.T, visible: true, fastener: i.fastener || i.kind === "toolbox",
+    const sc = motion && !motion.stale ? stepScene(motion, mstep) : null;
+    v.setInstances(view.instances.map(i => ({ id: i.id, part: i.part, T: sc?.poses?.[i.id] ?? i.T, visible: true, fastener: i.fastener || i.kind === "toolbox",
       tone: i.kind === "placeholder" ? "placeholder" as const : undefined })));
     v.setExplode(view.explode, explode);
-    v.setClashes(view.clashes.filter(c => c.mesh).map(c => c.mesh!), null);
+    v.setClashes(sc ? sc.meshes : view.clashes.filter(c => c.mesh).map(c => c.mesh!), null);
+    v.setHot(sc ? sc.hot : []);
     const fresh = swappedIn(kinds.current, view.instances);
     if (!reduced) for (const id of fresh) v.animateFit(id);
     kinds.current = new Map(view.instances.map(i => [i.id, i.kind]));
-  }, [view, loaded, explode, reduced]);
+  }, [view, loaded, explode, reduced, motion, mstep]);
 
   if (q.isLoading) return <Card className="flex h-[420px] items-center justify-center"><Spinner className="h-5 w-5" /></Card>;
   if (!data || !data.status) {
@@ -101,6 +113,16 @@ export default function AssemblyView({ program, recent }: { program: Program; re
       </Card>
     );
   }
+  const checkMotion = async () => {
+    setMoving(true);
+    try {
+      const r = await api.post<{ motion: MotionResult }>(`${BASE}/programs/${program.id}/assembly/motion`, { steps: 24 });
+      setMotion(r.motion);
+      setMstep(r.motion.worst === null ? 0 : Math.max(0, r.motion.steps.findIndex(x => x.i === r.motion.worst)));
+      if (r.motion.colliding_steps.length) toast.error(`Collisions in ${r.motion.colliding_steps.length} of ${r.motion.steps.length} steps`);
+      else toast.success("The shafts turn through the range without a collision");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setMoving(false); }
+  };
   const counts = liveCounts(view.instances);
   const byId = new Map(view.instances.map(i => [i.id, i]));
   const hovered = tip ? byId.get(tip.id) : null;
@@ -142,6 +164,12 @@ export default function AssemblyView({ program, recent }: { program: Program; re
               <Link to={`/app/modules/assembly?assembly=${s.assembly_id}`} className="ml-auto inline-flex items-center gap-0.5 text-[11.5px] text-primary hover:underline">open<ExternalLink className="h-3 w-3" /></Link></div>)}
             <Link to={`/app/modules/assembly?assembly=${view.assembly_id}`} className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:underline">Open the final assembly in Assembly Studio<ExternalLink className="h-3 w-3" /></Link>
           </div>
+        </Card>
+        <Card className="p-3 text-[12px]" data-program-motion>
+          <div className="mb-1 flex items-center gap-2 font-semibold"><RotateCw className="h-4 w-4 text-primary" />Motion
+            <Button size="sm" variant="secondary" className="ml-auto" loading={moving} onClick={checkMotion} data-check-motion>Check motion</Button></div>
+          {!motion && <p className="text-muted">Turns every shaft in its bearings through one turn of the input (gear meshes by their ratios) and checks for collisions at each step.</p>}
+          {motion && <MotionScrubber m={motion} step={Math.min(mstep, motion.steps.length - 1)} onStep={setMstep} />}
         </Card>
         {view.clashes.length > 0 && <Card className="p-3 text-[12px]">
           <div className="mb-1 font-semibold text-danger">Clashes</div>
