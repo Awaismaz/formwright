@@ -10,7 +10,7 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 3 | Chat shop-floor status animation | DS-036 | Done |
 | 4 | Chat Discuss / Build mode | DS-037 | Done |
 | 5 | Sidebar: Design Studio missing from Modules; collapsed icons bigger + spaced; Modules always expanded | UX-019 | Done (merged) |
-| 6 | Landing page: animations + live feature previews of the real software | UX-020 | Todo |
+| 6 | Landing page: animations + live feature previews of the real software | UX-020 | Done (merged) |
 | 7 | Phase 1 smart assembly: assembly from a description; Hex picks Toolbox / company parts; Fitz places + mates | ASM-010, ASM-019 | Todo |
 | 8 | Phase 2 Design Office: program model, Archie brief → tree → tickets, Jira board, estimates + roll-up, roster, avatars + animations | CD-001…005, CD-017 | Todo |
 | 9 | Phase 3: orchestrator (concurrency, critical path, budget), specialist part agents, Gage checker, ticket comments | CD-006…009, CD-016 | Todo |

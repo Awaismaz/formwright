@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -12,6 +13,31 @@ import { num } from "@/lib/format";
 import { Badge, Button, StatusBadge } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import HeroVisual from "@/components/HeroVisual";
+import Showcase, { LiveBadge } from "@/components/landing/Showcase";
+import { Reveal, useReducedMotion } from "@/components/landing/motion";
+
+/** Subtle parallax for decorative layers: moves `ref` at `rate` × scroll, off under reduced motion. */
+function useParallax(rate: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduced = useReducedMotion();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reduced) return;
+    let raf = 0;
+    const on = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const y = window.scrollY;
+        if (y < 1200) el.style.transform = `translate3d(0, ${(y * rate).toFixed(1)}px, 0)`;
+      });
+    };
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => { window.removeEventListener("scroll", on); if (raf) cancelAnimationFrame(raf); el.style.transform = ""; };
+  }, [rate, reduced]);
+  return ref;
+}
 
 const STEPS = [
   { icon: MessageSquareText, title: "Describe the part", body: "Brief it like you'd brief an engineer: material, envelope, holes, fillets, intent. Missing a critical dimension? It asks — it doesn't guess." },
@@ -47,6 +73,8 @@ export default function Landing() {
     ? `A new part from a written brief typically uses ${run.new.low}–${run.new.high} tokens; a change to an existing part usually uses less. `
     : ""}Parameter edits, manual features, Toolbox parts and restores are free. Every run shows a live meter and stops at the budget you set. The trial includes ${num(trial)} tokens, about 3 new parts.`];
   const mods = catalog.data?.modules ?? [];
+  const glow = useParallax(0.25);
+  const grid = useParallax(0.12);
   const list = (xs: string[]) => (xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
   const live = list(mods.filter(m => m.status === "live").map(m => m.name));
   const preview = list(mods.filter(m => m.status !== "live").map(m => m.name));
@@ -57,11 +85,11 @@ export default function Landing() {
     <main>
       {/* hero */}
       <section className="relative overflow-hidden border-b border-border">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgb(var(--primary)/.12),transparent_60%)]" />
-        <div className="pointer-events-none absolute inset-0 opacity-[.35] [background-image:linear-gradient(rgb(var(--border))_1px,transparent_1px),linear-gradient(90deg,rgb(var(--border))_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(to_bottom,black,transparent_75%)]" />
-        <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-16 sm:px-6 lg:pt-24">
+        <div ref={glow} className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgb(var(--primary)/.12),transparent_60%)]" />
+        <div ref={grid} className="pointer-events-none absolute inset-0 opacity-[.35] [background-image:linear-gradient(rgb(var(--border))_1px,transparent_1px),linear-gradient(90deg,rgb(var(--border))_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(to_bottom,black,transparent_75%)]" />
+        <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-12 sm:px-6 lg:pt-16">
           <div className="mx-auto max-w-3xl text-center">
-            <Badge tone="accent" className="mb-5"><Sparkles className="h-3 w-3" /> AI design engineer for mechanical teams</Badge>
+            <div className="mb-5 flex flex-wrap justify-center gap-2"><Badge tone="accent" className="animate-fade-in"><Sparkles className="h-3 w-3" /> AI design engineer for mechanical teams</Badge><LiveBadge label="Design Studio is live" /></div>
             <h1 className="text-[40px] font-semibold leading-[1.08] tracking-tight sm:text-[56px]">
               From idea to <span className="bg-gradient-to-r from-primary to-[#5C93E6] bg-clip-text text-transparent">verified</span>, editable CAD.
             </h1>
@@ -71,11 +99,11 @@ export default function Landing() {
             <div className="mt-8 flex flex-wrap justify-center gap-3">
               {signedIn ? <Link to="/app"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button></Link>
                 : <Link to="/signup"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free · {num(trial)} tokens</Button></Link>}
-              <a href="#how"><Button size="lg" variant="secondary">See how it works</Button></a>
+              <a href="#tour"><Button size="lg" variant="secondary">See it work</Button></a>
             </div>
             <p className="mt-3 text-xs text-muted">No credit card · 14-day trial with every module · STEP & STL export included</p>
           </div>
-          <div className="mx-auto mt-14 max-w-5xl"><HeroVisual /></div>
+          <div className="mx-auto mt-10 max-w-5xl"><HeroVisual /></div>
         </div>
       </section>
 
@@ -97,12 +125,12 @@ export default function Landing() {
         </div>
         <div className="mt-12 grid gap-5 md:grid-cols-3">
           {STEPS.map((s, i) => (
-            <div key={s.title} className="card relative p-6">
+            <Reveal key={s.title} delay={i * 0.1} className="card relative p-6">
               <div className="absolute right-5 top-5 text-4xl font-semibold text-text/[.06]">0{i + 1}</div>
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-soft text-primary"><s.icon className="h-5 w-5" /></div>
               <h3 className="mt-4 font-semibold">{s.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted">{s.body}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
@@ -115,16 +143,18 @@ export default function Landing() {
             <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">Engineering-grade, not demo-grade.</h2>
           </div>
           <div className="mt-10 grid gap-px overflow-hidden rounded-xl border border-white/10 bg-white/10 sm:grid-cols-2">
-            {DIFFS.map(d => (
-              <div key={d.title} className="bg-chrome p-7">
+            {DIFFS.map((d, i) => (
+              <Reveal key={d.title} delay={(i % 2) * 0.08} className="bg-chrome p-7">
                 <d.icon className="h-6 w-6 text-[#7FAAF0]" />
                 <h3 className="mt-4 font-semibold text-white">{d.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-chrome-muted">{d.body}</p>
-              </div>
+              </Reveal>
             ))}
           </div>
         </div>
       </section>
+
+      <Showcase />
 
       {/* modules */}
       <section id="modules" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
@@ -141,7 +171,7 @@ export default function Landing() {
             <div key={m.code} className="card flex flex-col p-5 transition hover:-translate-y-0.5 hover:shadow-pop">
               <div className="flex items-center justify-between">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-soft text-primary"><Icon name={m.icon} className="h-[18px] w-[18px]" /></div>
-                <StatusBadge status={m.status} />
+                {m.status === "live" ? <LiveBadge /> : <StatusBadge status={m.status} />}
               </div>
               <h3 className="mt-4 font-semibold">{m.name}</h3>
               <p className="mt-1.5 text-[13px] leading-relaxed text-muted">{m.summary}</p>

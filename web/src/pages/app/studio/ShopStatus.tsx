@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 export type ShopPhase = "plan" | "read" | "build" | "inspect" | "finish" | "discuss";
 
 /** Status words by phase, like a machinist talking you through the job. Shuffled, never repeated back to back. */
-const WORDS: Record<ShopPhase, string[]> = {
+export const WORDS: Record<ShopPhase, string[]> = {
   plan: ["Sketching the concept", "Laying out datums", "Squaring the stock", "Picking cutters", "Planning the setup",
     "Sizing the blank", "Choosing tolerances", "Fixturing the idea", "Zeroing the machine", "Scribing layout lines",
     "Checking the print", "Counting the features"],
