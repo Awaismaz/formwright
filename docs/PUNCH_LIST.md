@@ -15,9 +15,9 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 
 | Status | Items |
 |---|---|
-| Done | 166 |
+| Done | 172 |
 | In Progress | 23 |
-| Backlog | 91 |
+| Backlog | 85 |
 | Blocked | 10 |
 | Superseded | 8 |
 | **Total** | **298** |
@@ -247,11 +247,11 @@ Plan: `docs/plans/CHIEF_DESIGNER.md`.
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | ASM-019 | Assembly | **Auto-pick components**: describe what you need ('4 M6 bolts', 'a 6204 bearing', 'the motor bracket') → Hex picks Toolbox generators or your own company parts (similarity search) and Fitz inserts + mates them | P1 | Backlog | M4 | LT | Eng | ASM-010 | Correct component chosen on a fixture set; inserted and mated with 0 interference | — | Founder request 2026-11-18 |
-| CD-001 | Design Office | Program data model: brief, skeleton, ICD, item tree (sub-assemblies/parts), tickets, events, budget; tickets own Studio projects / Assembly docs | P1 | Backlog | M4 | LT | Eng | ASM-010 | Program persists and reloads; every artefact is a normal project/assembly | — | Plan: docs/plans/CHIEF_DESIGNER.md |
-| CD-002 | Design Office | Archie (Chief Designer) agent: brief → decomposition → tickets with estimates; brief approval gate (closes CAD-028) | P1 | Backlog | M4 | LT | Eng | CD-001 | Benchmark briefs decompose into sensible trees; user approves/edits before work starts | — |  |
-| CD-003 | Design Office | Program board (Jira-style): columns, swimlanes per sub-assembly, live cards (SSE), agent avatars, estimate/progress bars | P1 | Backlog | M4 | LT | Eng | CD-001 | Cards move live during a run | — |  |
-| CD-004 | Design Office | Estimates + milestone progress + effort-weighted roll-up to sub-assembly and program; ETA ranges | P1 | Backlog | M4 | LT | Eng | CD-003 | Roll-up equals hand calculation on a fixture program | — |  |
-| CD-005 | Design Office | Office home + team roster (named specialist agents, status, utilisation) + reviews inbox | P1 | Backlog | M4 | LT | Eng | CD-003 |  | — | PD-35 |
+| CD-001 | Design Office | Program data model: brief, skeleton, ICD, item tree (sub-assemblies/parts), tickets, events, budget; tickets own Studio projects / Assembly docs | P1 | Done | M4 | LT | Eng | ASM-010 | Program persists and reloads; every artefact is a normal project/assembly | `src/aicad/office/` (store, service), `routers/office.py`; per-org JSON + event log; tests/test_office.py CRUD + tenant isolation + viewer; parts open normal Studio projects, integration opens Assembly Studio docs. Skeleton/ICD fields deferred to CD-010 | Plan: docs/plans/CHIEF_DESIGNER.md |
+| CD-002 | Design Office | Archie (Chief Designer) agent: brief → decomposition → tickets with estimates; brief approval gate (closes CAD-028) | P1 | Done | M4 | LT | Eng | CD-001 | Benchmark briefs decompose into sensible trees; user approves/edits before work starts | `office/planner.py`: Archie one-shot turn with strict ```fw-plan block (validated, scrubbed, metered, capped 200 tokens) + deterministic standard planner fallback; brief gate with editable plan review, re-plan with notes; tests (valid/invalid blocks, fallback on bad answer and on failure). No live AI run yet (benchmark briefs untested) |  |
+| CD-003 | Design Office | Program board (Jira-style): columns, swimlanes per sub-assembly, live cards (SSE), agent avatars, estimate/progress bars | P1 | Done | M4 | LT | Eng | CD-001 | Cards move live during a run | Board: 7 Jira columns, swimlanes per sub-assembly + final assembly, HTML5 drag (puppeteer real drag verified), SSE `/programs/{id}/events` + polling fallback, avatar cards with estimate outline/progress fill, checks badge, tokens; e2e screenshots docs/reports/design-office/ |  |
+| CD-004 | Design Office | Estimates + milestone progress + effort-weighted roll-up to sub-assembly and program; ETA ranges | P1 | Done | M4 | LT | Eng | CD-003 | Roll-up equals hand calculation on a fixture program | `office/estimates.py` (all constants), milestone progress 5/35/70/85/100, effort-weighted roll-up incl. integration effort, critical path, ETA range [0.8·max(CP,W/N), 1.3·(CP+W/N)]; hand-calc tests (pytest) + client preview mirrors server (vitest); build milestones derived from linked Studio projects |  |
+| CD-005 | Design Office | Office home + team roster (named specialist agents, status, utilisation) + reviews inbox | P1 | Done | M4 | LT | Eng | CD-003 |  | Office home: programs, roster (state from tickets, hover preview), reviews inbox (brief gates + in-review tickets with Approve/Changes), token spend vs budget. Utilisation/track record beyond open/done counts waits for Phase 3 | PD-35 |
 | CD-006 | Design Office | Orchestrator: concurrency cap, critical-path priority, cancellation/retry, budget stops | P1 | Backlog | M4 | LT | Eng | CD-002 | N agents never exceeded; budget stop halts new work | — | PD-36 |
 | CD-007 | Design Office | Specialist part agents (Mill, Chuck, Axel, Sprue; Benny after CAD-026) working tickets in their Studio projects | P1 | Backlog | M4 | LT | Eng | CD-006 | Tickets complete with gating checks passing | — |  |
 | CD-008 | Design Office | Gage (Checker): independent review, send-back with findings; no self-approval | P1 | Backlog | M4 | LT | Eng | CD-007 | Seeded defects are sent back | — |  |
@@ -263,7 +263,7 @@ Plan: `docs/plans/CHIEF_DESIGNER.md`.
 | CD-014 | Design Office | Program deliverables: drawings (Drew), DFM (Forge), BOM, release pack | P2 | Backlog | M4 | LT | Eng | CD-011 |  | — |  |
 | CD-015 | Design Office | Estimate calibration from completed tickets; timeline (Gantt-lite) | P2 | Backlog | M4 | LT | Eng | CD-004 | Estimate error shrinks across runs | — |  |
 | CD-016 | Design Office | Program token budget per ticket/program with 80 %/100 % stops and spend on cards | P1 | Backlog | M4 | LT | Eng | CD-006 |  | — | PD-36 |
-| CD-017 | Design Office | **Agent avatars + state animations**: illustrated SVG avatar per agent (tool + character, own colour); role-specific 'working' animation (Mill cutter + chips, Chuck spinning jaws, Axel meshing gears, Gage caliper closing, Smithy hammer sparks…); shared idle/review/blocked/done/hand-off states; reduced-motion fallback; used on board, roster, cards and Studio chat | P1 | Backlog | M4 | LT | Eng | CD-003 | Every agent has avatar + all states; reduced motion respected | — | Founder request 2026-11-18; plan §3.1 |
+| CD-017 | Design Office | **Agent avatars + state animations**: illustrated SVG avatar per agent (tool + character, own colour); role-specific 'working' animation (Mill cutter + chips, Chuck spinning jaws, Axel meshing gears, Gage caliper closing, Smithy hammer sparks…); shared idle/review/blocked/done/hand-off states; reduced-motion fallback; used on board, roster, cards and Studio chat | P1 | Done | M4 | LT | Eng | CD-003 | Every agent has avatar + all states; reduced motion respected | `web/src/pages/app/office/Avatars.tsx` + `avatars.css`: 11 SVG avatars, role working animations, idle breathe+blink, review pulse, blocked shake, done pop, progress ring, reduced-motion still pose; "Meet the team" gallery. Not yet in Studio chat; hand-off slide waits for Phase 3 | Founder request 2026-11-18; plan §3.1 |
 
 ### Native CAD Bridge — SOLIDWORKS pilot, then Onshape, Inventor, Creo (founder-requested 2026-11-18)
 

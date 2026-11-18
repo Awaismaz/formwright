@@ -19,6 +19,7 @@ import { Icon } from "@/components/icons";
 import GodPanel from "@/components/GodPanel";
 import CommandPalette from "@/components/CommandPalette";
 import { APP_TOUR, runTour } from "@/lib/tour";
+import { Building2 } from "lucide-react"; // Design Office nav entry
 
 /** Below this a trial can't make another typical part: the banner and the notification say so. */
 export const LOW_TOKENS = 150;
@@ -219,6 +220,7 @@ export default function AppLayout() {
       <Section label="Workspace" collapsed={f}>
         <NavItem to="/app" end icon={<Home />} label="Home" collapsed={f} />
         <NavItem to="/app/projects" icon={<FolderKanban />} label="Projects" collapsed={f} tour="nav-projects" />
+        <NavItem to="/app/office" icon={<Building2 />} label="Design Office" collapsed={f} />
         <div data-tour="nav-modules">
           {f ? <NavItem to="/app/modules" icon={<LayoutGrid />} label="Modules" collapsed /> : (
             <div className={cx("flex h-9 items-center rounded text-[13px] transition", loc.pathname === "/app/modules" ? "bg-primary text-white shadow-sm" : "text-chrome-fg/85 hover:bg-white/[.07] hover:text-white")}>

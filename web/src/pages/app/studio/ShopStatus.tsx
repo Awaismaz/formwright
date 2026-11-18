@@ -22,7 +22,7 @@ const WORDS: Record<ShopPhase, string[]> = {
     "Bagging and tagging"],
 };
 
-function gearPath(teeth: number, rOuter: number, rRoot: number): string {
+export function gearPath(teeth: number, rOuter: number, rRoot: number): string {
   const pts: string[] = [];
   const step = (Math.PI * 2) / teeth;
   for (let i = 0; i < teeth; i++) {
