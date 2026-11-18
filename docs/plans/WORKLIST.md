@@ -18,4 +18,6 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 11 | Phase 5: program deliverables (drawings, DFM, BOM, release), estimate calibration, timeline | CD-014, CD-015 | Todo |
 | 12 | AI quality: brief echo-back approval gate, recorded/replay provider, structured self-critique, 20-prompt benchmark | CAD-028, AGT-002, AGT-006, EVAL-003 | Todo |
 | 13 | Mesh test `test_scene_script_refuses_outputs_outside_its_job_folder` timed out (Blender rendered before checking the output path) | — | Done: paths validated before any render (12 s); test_mesh 90/90 |
+| 14 | Mesh render failed on a founder model (degenerate triangle broke custom normals) | — | Done: triangles cleaned before normals; regression test; test_mesh 91/91 |
+| 15 | 2D drafting without a model in Drawing Studio (tools, dimensions, title block, SVG/PDF/DXF, AI assist + templates) | DRW-017 | In progress (agent) |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |
