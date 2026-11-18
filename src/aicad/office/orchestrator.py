@@ -1100,6 +1100,9 @@ class Runner:
                 kt = service.ticket(d, k)
                 if kt["column"] == "approved":
                     service.move(self.root, d, k, "integrated", f)
+                    if run_of(kt).get("status") == "blocked":  # the engineer approved it by hand: no longer waiting
+                        close_wait(kt)
+                        _set_run(kt, status="done", blocked=None, line="Approved by the engineer and integrated")
             service.move(self.root, d, tid, "integrated", f)
             if "approved" not in tt["milestones"]:
                 tt["milestones"].append("approved")

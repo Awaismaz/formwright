@@ -873,6 +873,7 @@ async def release_program(pid: str, body: ReleaseIn | None = None, ctx: Ctx = De
     from aicad.platform.routers import projects as prj
 
     _editor(ctx)
+    body = body or ReleaseIn()  # a release without a body: no note, the server's date
     org = ctx.require_org()
     root = _root(ctx)
     lock = _release_locks.setdefault(pid, asyncio.Lock())

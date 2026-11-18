@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changedValues, crDelta, crTone, ifaceStatus, ifaceSummary, liveCounts, sideStatus, swappedIn } from "./model";
+import { axisChip, axisLabel, changedValues, crDelta, crTone, ifaceAxis, ifaceStatus, ifaceSummary, liveCounts, sideStatus, swappedIn } from "./model";
 import type { Interface, LiveInstance } from "./types";
 
 // The hand-checked bolted joint of tests/test_office_icd.py (IF-01: bracket on the base plate).
@@ -56,5 +56,28 @@ describe("live assembly", () => {
   it("counts placeholders, real parts and standard parts", () => {
     expect(liveCounts([inst("a", "placeholder"), inst("b", "real"), inst("c", "toolbox", { fastener: true }), inst("d", "toolbox", { bin: true })]))
       .toEqual({ placeholders: 1, real: 1, standard: 2 });
+  });
+});
+
+describe("interfaces along Y (Phase 6 gearbox layout)", () => {
+  it("re-words Z labels for a shaft along Y", () => {
+    expect(axisLabel("Axis (X, Y)", "y")).toBe("Axis (X, Z)");
+    expect(axisLabel("Along Z", "y")).toBe("Along Y");
+    expect(axisLabel("Mounting face Z", "y")).toBe("Mounting face Y");
+    expect(axisLabel("Positions (X, Y)", "x")).toBe("Positions (Y, Z)");
+    expect(axisLabel("Along Z", "z")).toBe("Along Z");
+  });
+  it("summarises a tapped cap joint on a side wall", () => {
+    const f = { kind: "hole_pattern" as const, data: { count: 4, d: 4.5, fastener: "M4", pattern: "circular", pcd: 58.5, ax: "y",
+      plane_z: -41, tapped: { d: 3.3, depth: 13, thread: "M4" } } };
+    expect(ifaceAxis(f.data)).toBe("y");
+    expect(ifaceSummary(f as never)).toBe("4 × Ø4.5 (M4) on PCD 58.5 · tapped M4 in the housing · face Y -41");
+  });
+});
+
+describe("skeleton axis chips", () => {
+  it("names the axis direction for gearbox shafts", () => {
+    expect(axisChip([-54, 0, 0], [0, 0, 1])).toBe("at (X, Y) (-54, 0)");
+    expect(axisChip([-54, 0, -62], [0, 1, 0])).toBe("along Y at (X, Z) (-54, -62)");
   });
 });

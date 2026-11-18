@@ -348,7 +348,7 @@ def summarize(pl: dict[str, Any], res: dict[str, Any], names: dict[str, str]) ->
             "steps": steps, "worst": worst, "colliding_steps": [s["i"] for s in hit], "summary": text,
             "elapsed_s": res.get("elapsed_s"), "pairs_per_step": res.get("pairs_per_step"), "stats": res.get("stats"),
             "vol_tol": res.get("vol_tol"),
-            "note": "Each step is an exact boolean check of the parts in that pose (boxes screen out pairs that can't "
+            "note": "Each step checks the exact solids of the parts in that pose for overlap (boxes screen out pairs that can't "
                     "touch). Parts that move together, or stand still together, are not re-checked here: the "
                     "ordinary interference check covers them. Overlaps up to "
                     f"{res.get('vol_tol', VOL_TOL):g} mm³ count as contact. Nominal geometry; no backlash, "

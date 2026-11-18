@@ -167,16 +167,42 @@ export function assignable(kind: Ticket["kind"], deliverable?: Ticket["deliverab
 // ------------------------------------------------------------------ Phase 4: interfaces and the live assembly
 const n = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000)) : String(v ?? "—"));
 
+/** The program axis an interface runs along (Phase 6: gearbox shafts along Y); "z" when not stated. */
+export function ifaceAxis(data: Record<string, unknown>): "x" | "y" | "z" {
+  const a = data?.ax;
+  return a === "x" || a === "y" ? a : "z";
+}
+
+/** A field label written for Z interfaces, re-worded for an interface along X or Y: "(X, Y)" -> "(X, Z)",
+ *  "Along Z" / "face Z" -> "Along Y" / "face Y". */
+export function axisLabel(label: string, ax: "x" | "y" | "z"): string {
+  if (ax === "z") return label;
+  const across = ax === "y" ? "(X, Z)" : "(Y, Z)";
+  return label.replace("(X, Y)", across).replace(/\bZ\b(?![,)])/g, ax.toUpperCase());
+}
+
+/** A skeleton axis in words: "at (X, Y) (-54, 0)" for a vertical shaft, "along Y at (X, Z) (-54, -62)" for a
+ *  gearbox shaft in the side walls. */
+export function axisChip(origin: number[], dir: number[]): string {
+  const k = [0, 1, 2].reduce((b, i) => (Math.abs(dir[i] ?? 0) > Math.abs(dir[b] ?? 0) ? i : b), 2);
+  const [i, j, names] = k === 2 ? [0, 1, "(X, Y)"] as const : k === 1 ? [0, 2, "(X, Z)"] as const : [1, 2, "(Y, Z)"] as const;
+  return `${k === 2 ? "" : `along ${"XYZ"[k]} `}at ${names} (${n(origin[i])}, ${n(origin[j])})`;
+}
+
 /** The interface's key numbers in one line, as an engineer reads them. */
 export function ifaceSummary(f: Pick<Interface, "kind" | "data">): string {
   const d = f.data as Record<string, number & string & number[]>;
+  const A = ifaceAxis(f.data as Record<string, unknown>).toUpperCase();
+  const tapped = (f.data as { tapped?: { thread: string } }).tapped;
   switch (f.kind) {
     case "hole_pattern":
-      return `${d.count} × Ø${n(d.d)} (${d.fastener})` + (d.pattern === "circular" ? ` on PCD ${n(d.pcd)}` : "") + ` · face Z ${n(d.plane_z)}`;
+      return `${d.count} × Ø${n(d.d)} (${d.fastener})` + (d.pattern === "circular" ? ` on PCD ${n(d.pcd)}` : "")
+        + (tapped ? ` · tapped ${tapped.thread} in the housing` : "") + ` · face ${A} ${n(d.plane_z)}`;
     case "shaft_bore": return `Ø${n(d.d)} ${d.fit} · ${n(d.length)} long`;
-    case "face": return `plane Z ${n(d.plane_z)} · flatness ${n(d.flatness)}`;
+    case "face": return `plane ${A} ${n(d.plane_z)} · flatness ${n(d.flatness)}`;
     case "gear_mesh": return `m${n(d.module)} · ${d.teeth_a} / ${d.teeth_b} teeth · a = ${n(d.centre_distance)}`;
-    case "bearing_seat": return `${d.count} × ${d.designation} · seat Ø${n(d.D)} ${d.housing_fit} × ${n(d.B)} · journal Ø${n(d.d)} ${d.shaft_fit}`;
+    case "bearing_seat": return `${d.count} × ${d.designation} · seat Ø${n(d.D)} ${d.housing_fit} × ${n(d.B)} · journal Ø${n(d.d)} ${d.shaft_fit}`
+      + (A !== "Z" ? ` · shaft along ${A} (side walls)` : "");
     case "key": return `key ${n(d.b)} × ${n(d.h)} × ${n(d.length)} (DIN 6885) · shaft ${n(d.t1)} / hub ${n(d.t2)} deep`;
     case "dowel": return `${d.count} × Ø${n(d.d)} × ${n(d.length)} (ISO 8734) · holes ${String(d.fit).split("/")[0]}`;
     default: return "";

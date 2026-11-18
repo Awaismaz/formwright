@@ -533,3 +533,90 @@ assembly `Workspace.tsx`, `types.ts`; `test_office_icd.py` (gear reducer: bearin
 3. Drawing depth: GD&T from the ICD datums (A|B|C) on part sheets, more assembly views and exploded view with
    balloons on visible faces.
 4. Per-part design review gate (optional, PD-37) and program-level change notices after a release.
+
+
+---
+
+# Design Office — Phase 6 report (CD-022…CD-025, ASM-011, ASM-022)
+
+Branch `wip/office-phase6`, 2026-11-18. A gearbox-like program is no longer a row of parts on a plate: its shafts run
+**horizontally in the housing's side walls**, a bearing seat in each wall, the **bearing caps are bolted over the
+seats** (coaxial) and the cover is the **lid**. Engineers can hold every part for their own **review** before it goes
+into the assembly; a released program changes only through an **engineering change notice** that re-issues the touched
+parts as Rev B and writes a new pack beside the frozen Rev A; and assemblies can be **swept through their motion**
+(gear trains turn by ratio) with collisions per step. Interference and clearance with seated bearings and meshing
+gears are much faster. Defaults: PD-59.
+
+## What happens now
+1. **Gearbox layout (CD-022)** (`office/icd.py`, housing mode). It switches on when two or more shafts running in
+   bearings on one block carry meshing gears (an ICD edit `layout: row` keeps the Phase 5 row). Then:
+   - the shafts lie along program **+Y** at one height, spaced along X by the exact centre distance m(z1 + z2)/2, flush
+     with the −Y outer wall face and out through the +Y wall and its cap by max(15, d) (the coupling end);
+   - each shaft's stack (gear, hubs) is centred on the first gear's mid-plane Y = 0, so meshing gears line up;
+   - the housing is a casing with a **gear cavity** (radial clearance 6 mm, axial 12 mm, floor 10 mm), side walls
+     B + 4 thick (a seat per wall plus a 4 mm shoulder; thicker when the cap or lid screws need it), end walls take what
+     is left; its size comes from the gears and bearings (an assumed envelope is replaced, a stated one only grows);
+   - **bearing seats** in both walls (Ø D housing fit, depth B, shoulder facing the opening, clearance Ø d + 2 between),
+     the shaft end flush with the −Y wall;
+   - **caps** (the plan's "Bearing cap" parts) sit on the outer wall faces over every seat, coaxial: PCD = D + hole Ø +
+     2, OD = PCD + washer Ø, thickness max(8, D/4), bore d + 2; the screw size starts at the size for 0.6 D and steps
+     down to M3 until neighbouring caps clear each other by 1 mm; if even M3 caps would touch, the caps go beside the
+     program for the engineer (a note says why);
+   - the **cover** becomes the lid (the housing's footprint, on top); nothing else is placed on the open top;
+   - joints into the housing are **tapped blind holes** (ISO 2306 tap drill, 2.5 d + 3 deep), so Fitz fits screws
+     without nuts in the cavity; drawings print them as thread notes, not as a hole Ø.
+   Features along X or Y carry `ax` and are written in a canonical frame turned so the feature axis is Z
+   (`frames.CANON`): placeholders are cut, Gage measures, Fitz finds mate faces and Ortho places GD&T targets with
+   the Phase 4/5 Z code after one rotation. Shafts, gears, hubs and caps are still modelled along their own Z (the
+   excerpt says "its +Z laid along program +Y"); the skeleton carries `ax` per item and every placement uses it.
+   Gear tooth phasing, keys, shaft fits and seated bearings (their Z along +Y) follow.
+2. **Review gate (CD-023)**: a program setting (at creation or in Budget, agents and reviews). When on, a part
+   ticket that Gage passes waits in **In review** ("Your review") until the engineer approves it for assembly or
+   requests changes with a note; the note goes to the designer as the next instruction and the part comes back to
+   review after Gage passes it again. Agents never pick a waiting ticket; the timeline shows the wait as waiting for
+   the engineer; the home inbox lists waiting parts.
+3. **Change notices (CD-024)** (`office/ecn.py`): on a released program, "Raise a change notice" takes a reason, the
+   parts and optionally one interface change (checked by Archie's change-request rule). ECN-001 reopens the affected
+   part tickets (the reason is the designer's instruction), their integrations and the two deliverables; Ortho and
+   Smithy redo only the affected parts; the release then issues only the touched parts at their next letter (the rest
+   keep theirs) and writes the Rev B pack with `CHANGES.txt` / `changes.json` (parts changed and unchanged, BOM diff,
+   ICD diff). A released pack is written once and never overwritten; Rev A stays downloadable unchanged.
+4. **Motion (ASM-011, CD-025)** (`assembly/motion.py`, `office/motion_joints.py`): joints (revolute, slider, gear pair)
+   in Assembly Studio's Motion tab, or derived from the ICD for a program (each shaft in bearings turns with its gears
+   and hubs; meshes couple shafts by −z_a/z_b). "Check motion" sweeps 24 steps by default, screens pairs by boxes and
+   bearing envelopes, checks the rest exactly, and shows a step strip with a scrubber, the colliding parts tinted and
+   the worst step.
+5. **Faster interference / clearance (ASM-022)**: box screening and a bearing envelope before the exact check (141 →
+   13 exact checks on the gearbox fixture); clearance skips overlapping pairs and searches face pairs by box distance
+   (85 s → 28 s). The meshing gears' clearance is still the slowest piece.
+
+## Files
+New: `src/aicad/office/{ecn,motion_joints}.py`, `src/aicad/assembly/motion.py`, tests
+`tests/test_office_phase6_layout.py`, `tests/test_office_phase6_review_ecn.py`, `tests/test_assembly_motion.py`, web
+`modules/assembly/MotionPanel.tsx` + `motion.test.ts`. Changed: `office/{icd,frames,conformance,program_assembly,
+deliverables,fake_agents,orchestrator,service}.py`, `assembly/{placeholder,geometry,service,worker}.py`, routers
+`office`, `mod_assembly`; web office `Interfaces`, `Board`, `TicketDrawer`, `Deliverables`, `Home`, `NewProgram`,
+`ProgramPage`, `AssemblyView`, `model.ts` (+ tests), `types.ts`; Assembly Studio `Workspace`, `Viewport`, `viewer`,
+`types`.
+
+## Verification
+- Tests (fake agents only): `tests/test_office_phase6_layout.py` (5: hand-checked gearbox positions, caps that can't fit, Y-feature defects measured, the simulated gearbox end to end with 0 clashes in about 4.5 min, revision table placement), `tests/test_office_phase6_review_ecn.py` (5), `tests/test_assembly_motion.py` (10); vitest office `icd.test.ts` (axis labels, axis chips), assembly `motion.test.ts`. Office suites 71 passed, assembly + drawings 80 + 57 passed; ruff, tsc, vitest (126) and vite build clean. Phase 4/5 ICD tests pass unchanged (single-shaft programs keep the vertical row).
+- Walkthrough (puppeteer-core 25.18.1, port 8840, throwaway data, simulated agents, 0.3 s steps): standard gear reducer "Gearbox GB-6" (3:1, review gate on), 16 tickets. ICD: 11 interfaces, 10 along Y (2 bearing seats 6205 x 2 in the side walls, 2 shaft fits, a DIN 6885 key 8 x 7, 4 cap joints M4 tapped, the 18/54 mesh) plus the M6 lid joint; placeholder assembly 7 placeholders, 21 mates, 0 clashes (shafts through the walls, caps coaxial, lid on top). Review gate: every part stopped in review; one 'Request changes' note reached Mill and the base came back; the rest approved; parts integrated in 195 s of simulated work: 7 real parts, 53 mates, 8 fastener stacks, 0 clashes; 4 bearings seated with their Z along +Y. Motion: 2 shaft revolutes + the mesh (-1/3), 'No collisions through Input shaft rotation 0-360 deg in 24 steps' in 46 s. Release Rev A: 7 parts tagged "GG6 Rev A", pack 6.8 MB. ECN-001 (Output gear): Gage escalated the simulated rework after 3 rounds (a reason with a size the fake designer can't follow), the engineer approved it by hand; only the gear was redrawn and re-screened; Rev B: 1 part revised (GG6-11 A -> B), 6 unchanged at A, BOM / ICD unchanged, pack 2.8 MB; the Rev A pack downloaded byte-identical (SHA-256) afterwards. 0 console / page errors. Scripts and screenshots: docs/reports/design-office/phase6/ (layout_*, review_*, motion_*, ecn_*; office6_walkthrough.mjs, ecn_finish.mjs, motion_walkthrough.mjs).
+- Found by the walkthrough and fixed: one tapped-hole note per interface crowded the housing sheet (CHK-12) -> one note per thread size; the issue copy's revision table over the title block met the housing's top view at every scale (release refused) -> the layout tries the table in the top-right, then a narrower one in the top-left corner; a release POST without a body answered 500 -> defaults; a part the engineer approved by hand kept its 'needs you' status after Fitz integrated it -> cleared on integration; Fitz duplicated seated / binned parts when a level was integrated again -> removed first.
+
+## Limitations (honest)
+- One gear stage per housing row: shafts in one plane, one mesh line along X; no idler stacks across, no second
+  stage above, no split housing (the seats are fully in the base; the lid closes the top).
+- Caps are flat discs with a clearance bore (no spigot, seal or shims); the shaft's stepped shoulders are left to the
+  designer (the ICD gives journals, gear seat and key).
+- Placeholders of gears are pitch cylinders; Gage still does not check tooth phase.
+- Review gate: designed part tickets only; ECN: one in work at a time, BOM lines matched by part name + designation
+  (a renamed part shows as removed + added), the assembly drawing is always regenerated.
+- Motion: joints relative to ground only (no planetary carriers), bearings stand still, pairs that move together are
+  not re-checked, 0.5 mm³ counts as contact, the sweep runs inside the request (program sweeps capped at 72 steps).
+- No live AI run yet (PD-41 / PD-48): every agent here is simulated.
+
+## What remains for the Design Office
+1. A live multi-agent run (PD-48) and an API key before other users (PD-09).
+2. Multi-stage gearboxes (a second mesh line, idler shafts), split housings with half-bores, seals and shims.
+3. Joints riding on moving joints (planetary carriers), backlash and tolerance stacks in the motion check.

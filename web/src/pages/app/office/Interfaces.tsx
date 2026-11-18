@@ -6,7 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
 import { BASE } from "./api";
-import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
+import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, axisChip, axisLabel, ifaceAxis, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
 import type { ChangeRequest, CheckRow, Icd, IcdSide, Interface, Program } from "./types";
 
 const STATUS: Record<SideStatus, { icon: JSX.Element; label: string }> = {
@@ -143,8 +143,13 @@ function Detail({ f, program, crs }: { f: Interface; program: Program; crs: Chan
         <h3 className="mt-1 text-[15px] font-semibold">{f.name}</h3>
       </div>
       <table className="w-full text-[12.5px]"><tbody>
+        {ifaceAxis(data) !== "z" && <tr className="border-t border-border/60 first:border-0"><td className="py-1 pr-3 text-muted">Runs along</td>
+          <td className="py-1 font-mono text-[12px]">program {ifaceAxis(data).toUpperCase()} (gearbox side walls)</td></tr>}
         {DATA_ROWS[f.kind].filter(([k]) => data[k] !== undefined && data[k] !== null).map(([k, label]) => (
-          <tr key={k} className="border-t border-border/60 first:border-0"><td className="py-1 pr-3 text-muted">{label}</td><td className="py-1 font-mono text-[12px]">{fmt(data[k])}{["d", "pcd", "inset", "plane_z", "length", "flatness", "position_tol", "centre_distance", "face_width", "flush_z"].includes(k) ? " mm" : ""}</td></tr>))}
+          <tr key={k} className="border-t border-border/60 first:border-0"><td className="py-1 pr-3 text-muted">{axisLabel(label, ifaceAxis(data))}</td><td className="py-1 font-mono text-[12px]">{fmt(data[k])}{["d", "pcd", "inset", "plane_z", "length", "flatness", "position_tol", "centre_distance", "face_width", "flush_z"].includes(k) ? " mm" : ""}</td></tr>))}
+        {(() => { const t = data.tapped as { thread: string; d: number; depth: number } | undefined; return t ? (
+          <tr className="border-t border-border/60"><td className="py-1 pr-3 text-muted">Housing side</td>
+            <td className="py-1 font-mono text-[12px]">tapped {t.thread} · drill Ø{fmt(t.d)} × {fmt(t.depth)} mm deep (blind)</td></tr>) : null; })()}
         {f.limits?.hole && f.limits.shaft && <tr className="border-t border-border/60"><td className="py-1 pr-3 text-muted">Limits (ISO 286, verify)</td>
           <td className="py-1 font-mono text-[12px]">bore {f.limits.hole[0].toFixed(3)}…{f.limits.hole[1].toFixed(3)} · shaft {f.limits.shaft[0].toFixed(3)}…{f.limits.shaft[1].toFixed(3)}</td></tr>}
       </tbody></table>
@@ -189,7 +194,7 @@ function SkeletonCard({ icd }: { icd: Icd }) {
       <p className="text-muted">{sk.csys}</p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {sk.datums.map(d => <span key={d.id} className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]" title={d.name}>{d.id} · {d.name}</span>)}
-        {sk.axes.map(a => <span key={a.id} className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">{a.id} · {a.name} at ({fmt(a.origin[0])}, {fmt(a.origin[1])})</span>)}
+        {sk.axes.map(a => <span key={a.id} className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px]">{a.id} · {a.name} {axisChip(a.origin, a.dir)}</span>)}
       </div>
       <div className="mt-2 grid gap-1 sm:grid-cols-3">
         <div><span className="text-muted">Envelope</span> <span className="font-mono">{sk.envelope.size.map(fmt).join(" × ")} mm</span></div>

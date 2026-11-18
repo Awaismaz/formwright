@@ -41,6 +41,7 @@ import math
 import re
 from typing import Any
 
+from aicad.office import frames
 from aicad.toolbox import BEARING as _BEARING
 
 # ----------------------------------------------------------------------------- constants (documented, PD-xx)
@@ -52,6 +53,12 @@ MAX_COPIES = 8      # copies of one part laid out in the skeleton (the rest are 
 POS_TOL = 0.1       # mm: default position tolerance of interface features
 FLATNESS = 0.05     # mm: default flatness of a mounting face
 PRESSURE_ANGLE = 20.0
+# gearbox housings (Phase 6): shafts along +Y in two side walls, caps over the seats, the cover as a lid
+CAV = 6.0           # mm between gear tips / hubs and the housing floor, end walls and lid
+CAV_Y = 12.0        # mm between a shaft's stack and the inner face of a side wall (room for the cap screw ends)
+FLOOR = 10.0        # mm floor under the cavity
+SHOULDER = 4.0      # mm of wall left behind a bearing seat (the shoulder the outer ring sits against)
+TAP_DRILL = {3: 2.5, 4: 3.3, 5: 4.2, 6: 5.0, 8: 6.8, 10: 8.5, 12: 10.2, 16: 14.0}  # ISO 2306 tap drills (verify)
 KIND_LABEL = {"hole_pattern": "bolted joint", "shaft_bore": "shaft / bore fit", "face": "seating face",
               "gear_mesh": "gear mesh", "bearing_seat": "bearing seat", "key": "keyed joint", "dowel": "dowel pins"}
 EDITABLE = {"hole_pattern": ("fastener", "d", "count", "inset", "flatness", "position_tol"),
@@ -80,6 +87,8 @@ _HUBBY = re.compile(r"cap|collar|spacer|bush|hub|pulley|ring|flange|locator|slee
 _BEARINGY = re.compile(r"\bbearing|\b6[02]0\d\b", re.IGNORECASE)
 _KEYY = re.compile(r"\bkey(?:ed|way)?\b|feather key|parallel key", re.IGNORECASE)
 _DOWELY = re.compile(r"\bdowel|\blocating pin", re.IGNORECASE)
+_CAPPY = re.compile(r"\bcap\b|end cover|bearing cover", re.IGNORECASE)
+_LIDDY = re.compile(r"cover|\blid\b", re.IGNORECASE)
 _NUM = r"(\d+(?:\.\d+)?)"
 
 
@@ -90,12 +99,7 @@ _NUM = r"(\d+(?:\.\d+)?)"
 # coordinates along the axis.
 PLANE = {"z": (0, 1), "y": (0, 2), "x": (1, 2)}
 AXIS_INDEX = {"x": 0, "y": 1, "z": 2}
-# canonical feature frame -> part frame: the canonical Z is the feature's axis (rows of a proper rotation)
-CANON: dict[str, list[list[float]]] = {
-    "z": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-    "y": [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]],   # Rx(-90°): canonical Z -> +Y, canonical Y -> -Z
-    "x": [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0]],   # Ry(+90°): canonical Z -> +X, canonical X -> -Z
-}
+CANON = frames.CANON  # canonical feature frame -> part frame (the canonical Z is the feature's axis)
 
 
 def ax_of(data: dict[str, Any]) -> str:
@@ -152,6 +156,12 @@ def bearing_for(d: float, designation: int | None = None) -> int | None:
         if fit:
             return max(fit, key=lambda k: (BEARINGS[k][0], -k))
     return None
+
+
+def tap_depth(m: int) -> float:
+    """Depth of a blind tapped hole for an M``m`` screw: 2.5 d of thread room + 3 mm (engagement 2 d in aluminium,
+    thread run-out, chips)."""
+    return float(2.5 * m + 3.0)
 
 
 def dowel_length(total: float) -> float:
@@ -568,13 +578,141 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         """Space between neighbouring stations: 12 mm, or a tenth of the larger part (room for spanners)."""
         return max(GAP, 0.1 * max(a, b))
 
+    def tip(i: str) -> float:
+        """The diameter an item sweeps about its shaft: a gear's tip circle, a hub's OD, a shaft's Ø."""
+        s = spec[i]
+        return s["module"] * (s["teeth"] + 2) if s["role"] == "gear" else od(i)
+
+    # ---- gearbox-like hosts (Phase 6): a block carrying two or more shafts in bearings whose gears mesh holds them
+    # horizontally (part Z along program +Y) in its two side walls: a casing with a cavity open at the top, a bearing
+    # seat in each wall, caps bolted over the seats on the outer wall faces (coaxial), the cover as a lid on top.
+    housing: dict[str, dict[str, Any]] = {}
+    for h in list(stations):
+        row = stations[h]
+        if by_id[h]["family"] == "sheet" or str((iov.get(h) or {}).get("layout") or "") == "row":
+            continue
+        shafts_h = [st for st in row if spec[st[0]]["role"] == "shaft" and spec[st[0]].get("bearing")]
+        if len(shafts_h) < 2 or not any(meshes(shafts_h[n - 1], shafts_h[n]) for n in range(1, len(shafts_h))):
+            continue
+        hm: dict[str, Any] = {"shafts": shafts_h, "rel": [], "r": [], "xs": [0.0]}
+        for k, c in shafts_h:  # each stack along its shaft, about the mid-plane of its first gear (the mesh plane)
+            st = stack.get(k, []) if c == 0 else []
+            pre, tot, found = 0.0, 0.0, False
+            for x, _xc in st:
+                if not found and spec[x]["role"] == "gear":
+                    pre, found = pre + height(x) / 2, True
+                elif not found:
+                    pre += height(x)
+                tot += height(x)
+            if not found:
+                pre = tot / 2
+            hm["rel"].append((-pre, tot - pre))
+            hm["r"].append(max([spec[k]["d"] / 2] + [tip(x) / 2 for x, _xc in st]))
+        D = [BEARINGS[spec[k]["bearing"]["designation"]][1] for k, _c in shafts_h]
+        for n in range(1, len(shafts_h)):
+            mesh = meshes(shafts_h[n - 1], shafts_h[n])
+            dx = (od(mesh[0]) / 2 + od(mesh[1]) / 2) if mesh else max(hm["r"][n - 1] + hm["r"][n] + GAP,
+                                                                      D[n - 1] / 2 + D[n] / 2 + 2 * GAP)
+            hm["xs"].append(hm["xs"][-1] + dx)
+        # caps over the seats, in order: shaft by shaft, -Y wall then +Y wall
+        seats_at = [(n, side) for n, (k, _c) in enumerate(shafts_h)
+                    for side in ((-1, 1) if spec[k]["bearing"]["seats"] >= 2 else (-1,))]
+        cap_sts = [st for st in row if spec[st[0]]["role"] == "hub" and _CAPPY.search(by_id[st[0]]["name"])]
+        caps: list[tuple[tuple[str, int], int, int]] = []
+        cap_m = 0
+        if cap_sts:
+            ci = cap_sts[0][0]
+            cs = spec[ci]
+            co = iov.get(ci) or {}
+            mine = [st for st in cap_sts if st[0] == ci][:len(seats_at)]
+            Dc = max(D[n] for n, _side in seats_at[:len(mine)])
+            want = int(fast_hint.get(by_id[ci]["sub"]) or fastener_for(0.6 * Dc))
+            for m in sorted((x for x in CLEARANCE if x <= max(want, 3)), reverse=True):
+                pcd = Dc + CLEARANCE[m] + 2.0       # 1 mm of wall between the seat and each screw hole
+                OD = float(co["OD"]) if "OD" in co else _r2(pcd + WASHER_OD[m])
+                fits = all((OD + OD) / 2 + 1.0 <= hm["xs"][n] - hm["xs"][n - 1] for n in range(1, len(shafts_h)))
+                if fits and OD >= pcd + CLEARANCE[m] + 2.0:
+                    cap_m = m
+                    cs.update(OD=OD, od_given=True, pcd=_r2(pcd), cap_d=Dc)
+                    if "H" not in co and cs["source"] == "assumed":
+                        cs["H"] = float(round(max(8.0, 0.25 * Dc)))
+                    cs["bore"] = _r2(max(spec[k]["d"] for k, _c in shafts_h) + 2.0)  # the shaft passes through
+                    caps = [(st, seats_at[j][0], seats_at[j][1]) for j, st in enumerate(mine)]
+                    break
+            if not caps:
+                notes.append(f"{by_id[ci]['name']}: no cap fits over the bearing seats at these shaft centres; laid out "
+                             "on the housing instead.")
+        hm.update(caps=caps, cap_m=cap_m, D=D)
+        capped = {st for st, _n, _s in caps}
+        rest = [st for st in row if st not in shafts_h and st not in capped]
+        lid = next((k for k, kc in rest if kc == 0 and spec[k]["role"] == "block" and ncopies_quiet(by_id[k]) == 1
+                    and _LIDDY.search(by_id[k]["name"])), None)
+        hm["lid"] = lid
+        # the casing is open at the top: only the lid sits there; anything else (caps that don't fit, plates) goes
+        # beside the program for the engineer to place (no interface in this layout)
+        stations[h] = []
+        spec[h]["rot"] = 0
+        for k, c in shafts_h:
+            spec[k]["ax"] = "y"
+            for x, _xc in (stack.get(k, []) if c == 0 else []):
+                spec[x]["ax"] = "y"
+        for (ci_, _cc), _n, _s in caps:
+            spec[ci_]["ax"] = "y"
+        housing[h] = hm
+
+    def size_housing(h: str) -> None:
+        """Casing around the gear row: side walls carry the seats (and the cap screws), the cavity clears the stacks
+        by CAV radially and CAV_Y axially, the floor is FLOOR thick, the lid's screws land in the rim."""
+        hm, s, o = housing[h], spec[h], iov.get(h) or {}
+        B = max(BEARINGS[spec[k]["bearing"]["designation"]][2] for k, _c in hm["shafts"])
+        caps_od = max([spec[st[0]]["OD"] for st, _n, _s in hm["caps"]] or [0.0])
+        t = max(B + SHOULDER, tap_depth(hm["cap_m"]) + 3.0 if hm["caps"] else 0.0, 12.0)
+        half_in = max(max(-lo, hi) for lo, hi in hm["rel"]) + CAV_Y
+        rmax, Dmax = max(hm["r"]), max(hm["D"])
+        xs = hm["xs"]
+        lo_x = min(x - r for x, r in zip(xs, hm["r"], strict=True)) - CAV
+        hi_x = max(x + r for x, r in zip(xs, hm["r"], strict=True)) + CAV
+        mid = (lo_x + hi_x) / 2
+        above = max(CAV + rmax, caps_od / 2 + 2.0, Dmax / 2 + 3.0)
+        below = max(FLOOR + CAV + rmax, caps_od / 2 + 2.0, Dmax / 2 + 3.0)
+        for _ in range(2):  # the lid's screws (ISO 273 hole at 2 d from the edge) must land in the rim walls
+            W = 2 * (half_in + t)
+            lm = 0
+            if hm["lid"]:
+                lid_sub = by_id[hm["lid"]]["sub"]
+                lm = int(fast_hint.get(lid_sub) or fastener_for(min(W, 2 * (max(hi_x - mid, mid - lo_x) + t))))
+                lm = lm if lm in CLEARANCE else 6
+                t = max(t, 2.5 * CLEARANCE[lm] + 1.5, tap_depth(lm) - 6.0)
+        reach = max(max(abs(x - mid) + caps_od / 2 + 2.0, abs(x - mid) + Dmax / 2 + 3.0) for x in xs)
+        need_L = 2 * max(hi_x - mid + t, mid - lo_x + t, reach)
+        need_W = 2 * (half_in + t)
+        need_H = above + below
+        for k, need in (("L", need_L), ("W", need_W), ("H", need_H)):
+            if k in o:
+                continue  # frozen (ICD approved): the layout works inside it, problems() says if it can't
+            s[k] = _r2(need) if s["source"] == "assumed" else _r2(max(float(s[k]), need))
+            if k == "L" and s.get("row_len"):
+                s[k] = max(s[k], _r2(s["row_len"]))
+        hm.update(t=_r2(t), mid=mid, above=_r2(above + (s["H"] - need_H) / 2), half_in=_r2(s["W"] / 2 - t))
+        hm["end_t"] = _r2(s["L"] / 2 - max(hi_x - mid, mid - lo_x))  # the end walls take what is left
+        lid = hm["lid"]
+        if lid:
+            ls, lo_ = spec[lid], iov.get(lid) or {}
+            ls["rot"] = 0
+            if "L" not in lo_:
+                ls["L"], ls["W"] = s["L"], s["W"]
+
     # sizes bottom-up (blocks grow to carry their row)
     def size_block(i: str) -> None:
         for k, _c in stations[i]:
             if spec[k]["role"] == "block":
                 size_block(k)
+        if i in housing and housing[i]["lid"]:
+            size_block(housing[i]["lid"])
         row = stations[i]
         if not row:
+            if i in housing:
+                size_housing(i)
             return
         length = 2 * MARGIN
         for n, st in enumerate(row):
@@ -594,6 +732,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             s[along] = max(s[along], length)
             s[across] = max(s[across], width)
         s["row_len"] = length
+        if i in housing:
+            size_housing(i)
 
     if spec[prog_base]["role"] == "block":
         size_block(prog_base)
@@ -611,6 +751,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         if c != 0:
             return
         top, bottom = centre[2] + s["H"] / 2, centre[2] - s["H"] / 2
+        if i in housing:
+            place_housing(i, centre)
         row = stations[i]
         if not row:
             return
@@ -634,6 +776,37 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             else:
                 at[k][kc] = [cx_, centre[1], top + height(k) / 2]
                 under[(k, kc)] = (i, 0)
+
+    def place_housing(h: str, centre: list[float]) -> None:
+        """Shafts along +Y from the -Y outer wall face (flush) out through the +Y wall and its cap; each stack with
+        its first gear on the mesh plane Y = centre; caps on the outer wall faces, coaxial; the lid on top."""
+        hm, s = housing[h], spec[h]
+        cx, cy, cz = centre
+        top = cz + s["H"] / 2
+        za = top - hm["above"]
+        y0 = cy - s["W"] / 2
+        hm["za"], hm["y0"], hm["y1"] = za, y0, cy + s["W"] / 2
+        cap_h = max([spec[st[0]]["H"] for st, _n, side in hm["caps"] if side > 0] or [0.0])
+        for n, (k, c) in enumerate(hm["shafts"]):
+            ks = spec[k]
+            x = cx + hm["xs"][n] - hm["mid"]
+            if "length" not in (iov.get(k) or {}):
+                ks["length"] = _r2(max(ks.get("length") or 0.0, s["W"] + cap_h + max(15.0, ks["d"])))
+            at[k][c] = [_r2(x), _r2(y0 + ks["length"] / 2), _r2(za)]
+            y = cy + hm["rel"][n][0]
+            below: tuple[str, int] | None = None
+            for x_, xc in (stack.get(k, []) if c == 0 else []):
+                at[x_][xc] = [_r2(x), _r2(y + height(x_) / 2), _r2(za)]
+                if below is not None:
+                    under[(x_, xc)] = below
+                below = (x_, xc)
+                y += height(x_)
+        for (ci, cc), n, side in hm["caps"]:
+            hc = spec[ci]["H"]
+            yy = (y0 - hc / 2) if side < 0 else (hm["y1"] + hc / 2)
+            at[ci][cc] = [_r2(cx + hm["xs"][n] - hm["mid"]), _r2(yy), _r2(za)]
+        if hm["lid"]:
+            place_block(hm["lid"], 0, [cx, cy, top + spec[hm["lid"]]["H"] / 2])
 
     def place_shaft(i: str, c: int, x: float, y: float, top: float, bottom: float, host: tuple[str, int]) -> None:
         s = spec[i]
@@ -705,12 +878,22 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     order: list[tuple[str, int]] = []
 
     def walk(i: str) -> None:
+        hm = housing.get(i)
+        if hm and hm["lid"]:
+            order.append((hm["lid"], 0))
+            walk(hm["lid"])
         for k, c in stations.get(i, []):
             order.append((k, c))
             if spec[k]["role"] == "block" and c == 0:
                 walk(k)
             if spec[k]["role"] == "shaft" and c == 0:
                 order.extend(stack.get(k, []))
+        if hm:
+            for k, c in hm["shafts"]:
+                order.append((k, c))
+                if c == 0:
+                    order.extend(stack.get(k, []))
+            order.extend(st for st, _n, _s in hm["caps"])
 
     walk(prog_base)
     dowels_left = {sb: d["qty"] // 2 for sb, d in dowel_item.items()}  # two pins per joint
@@ -756,10 +939,12 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             count = int(o.get("count") or (4 if min(Lp, Wp) - 2 * inset >= wod
                                            and max(Lp, Wp) - 2 * inset >= wod else 2))
             pts = grid(pos, Lp, Wp, d, count, inset)
+            tapped = {"d": TAP_DRILL[m], "depth": tap_depth(m), "thread": f"M{m}"} if host in housing else None
             joint = add("hole_pattern", (host, 0), (k, c), {
                 "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
                 "count": len(pts), "d": d, "pattern": "grid" if len(pts) > 2 else "linear", "inset": inset,
-                "plane_z": _r2(top), "normal": [0, 0, 1], "positions": pts, "through": True,
+                "plane_z": _r2(top), "normal": [0, 0, 1], "positions": pts, "through": tapped is None,
+                **({"tapped": tapped} if tapped else {}),
                 "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
                 ["A", "B", "C"])
             hsub = by_id[host]["sub"]
@@ -777,6 +962,23 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                         "dowel pins (ISO 8734)")
                 else:
                     notes.append(f"{p['name']}: no room for two dowel pins clear of the bolts; located by the bolts.")
+        elif ks["role"] == "shaft" and host in housing:
+            hm = housing[host]
+            br = ks["bearing"]
+            des = br["designation"]
+            bd, bD, bB = BEARINGS[des]
+            hf = str(o.get("housing_fit") or "H7")
+            y0, y1 = hm["y0"], hm["y1"]
+            seats = [{"face": "+Y wall", "open": 1, "z": [_r2(y1 - bB), _r2(y1)]}] if br["seats"] >= 2 else []
+            seats.append({"face": "-Y wall", "open": -1, "z": [_r2(y0), _r2(y0 + bB)]})
+            n_s = len(seats)
+            add("bearing_seat", (host, 0), (k, c), {
+                "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
+                "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
+                "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(y0), _r2(y1)], "seats": seats,
+                "clearance_d": _r2(bd + 2), "flush_z": _r2(y0), "bearing_item": br["item"], "shaft_d": ks["d"],
+                "count": n_s, "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                ["A", "B", "C"], f"shaft in {n_s} bearing{'s' if n_s != 1 else ''} {des} (side walls)")
         elif ks["role"] == "shaft":
             top, bottom = at[host][0][2] + hs["H"] / 2, at[host][0][2] - hs["H"] / 2  # type: ignore[index]
             br = ks.get("bearing")
@@ -801,6 +1003,51 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     "d": ks["d"], "fit": fit if fit in FITS else "H7/h6", "length": _r2(top - bottom),
                     "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(bottom), _r2(top)], "flush_z": _r2(bottom),
                     "position_tol": POS_TOL}, ["A", "B", "C"], "shaft through bore")
+        elif hs["role"] == "shaft" and hs.get("ax") == "y":  # hub / gear on a shaft along +Y (gearbox housing)
+            bottom = pos[1] - height(k) / 2
+            fit = str(o.get("fit") or "H7/k6")
+            a2 = [_r2(pos[0]), _r2(pos[2])]
+            add("shaft_bore", (k, c), (host, 0), {
+                "d": hs["d"], "fit": fit if fit in FITS else "H7/k6", "length": _r2(height(k)), "ax": "y",
+                "axis": a2, "z": [_r2(bottom), _r2(bottom + height(k))], "flush_z": None,
+                "position_tol": POS_TOL}, ["A", "B", "C"], "bore on shaft")
+            key = key_for(hs["d"])
+            keyed = _KEYY.search(f"{p['name']} {p['description']}") or key_item.get(p["sub"])
+            if key and keyed and height(k) >= key[0] + 3:
+                o2 = fov.get(f"IF-{len(ifs) + 1:02d}") or {}
+                kb, kh, t1, t2 = key
+                kl = float(o2.get("length") or math.floor(max(kb + 2, height(k) - 2)))
+                kl = min(kl, float(math.floor(height(k))))
+                z0 = bottom + (height(k) - kl) / 2
+                add("key", (k, c), (host, 0), {
+                    "d": hs["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl, "ax": "y",
+                    "axis": a2, "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
+                    "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
+                    "standard": "DIN 6885-1 A", "position_tol": POS_TOL}, ["A", "B", "C"],
+                    f"parallel key {kb:g} x {kh:g} x {kl:g}")
+            below = under.get((k, c))
+            if below is not None:
+                o2 = fov.get(f"IF-{len(ifs) + 1:02d}") or {}
+                add("face", below, (k, c), {"plane_z": _r2(bottom), "normal": [0, 1, 0], "ax": "y",
+                                            "flatness": float(o2.get("flatness") or FLATNESS),
+                                            "position_tol": float(o2.get("position_tol") or POS_TOL)}, ["A"])
+        elif host in housing and any(st == (k, c) for st, _n, _s in housing[host]["caps"]):  # a cap over a seat
+            hm = housing[host]
+            _st, _n, side = next(x for x in hm["caps"] if x[0] == (k, c))
+            m = int(o.get("fastener") or hm["cap_m"])
+            m = m if m in CLEARANCE else hm["cap_m"]
+            d = float(o.get("d") or CLEARANCE[m])
+            count = int(o.get("count") or 4)
+            pcd = _r2(ks["pcd"])
+            plane = hm["y0"] if side < 0 else hm["y1"]
+            a2 = [_r2(pos[0]), _r2(pos[2])]
+            add("hole_pattern", (host, 0), (k, c), {
+                "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
+                "count": count, "d": d, "pattern": "circular", "pcd": pcd, "centre": a2, "ax": "y",
+                "plane_z": _r2(plane), "normal": [0, side, 0], "positions": circle(a2, pcd, count), "through": False,
+                "tapped": {"d": TAP_DRILL[m], "depth": tap_depth(m), "thread": f"M{m}"},
+                "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
+                ["A", "B", "C"], f"bearing cap over the {'+' if side > 0 else '-'}Y seat")
         else:  # hub / gear
             bottom = pos[2] - height(k) / 2
             if hs["role"] == "shaft":
@@ -844,7 +1091,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
                     ["A", "B", "C"])
     # gear meshes last (their existence depends on numbers; earlier ids stay stable)
-    for i, row in stations.items():
+    rows = list(stations.items()) + [(h, hm["shafts"]) for h, hm in housing.items()]
+    for i, row in rows:
         for n in range(1, len(row)):
             mesh = meshes(row[n - 1], row[n])
             if not mesh:
@@ -852,12 +1100,16 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             ga, gb = mesh
             sa, sb = spec[ga], spec[gb]
             pa, pb = at[ga][0], at[gb][0]
+            gax = "y" if i in housing else "z"
+            pl = PLANE[gax]
             add("gear_mesh", (ga, 0), (gb, 0), {
                 "module": sa["module"], "teeth_a": int(sa["teeth"]), "teeth_b": int(sb["teeth"]),
                 "centre_distance": _r2(sa["module"] * (sa["teeth"] + sb["teeth"]) / 2),
                 "face_width": _r2(min(sa["b"], sb["b"])), "pressure_angle": PRESSURE_ANGLE,
-                "ratio": round(sb["teeth"] / sa["teeth"], 4), "axis_a": [_r2(pa[0]), _r2(pa[1])],  # type: ignore[index]
-                "axis_b": [_r2(pb[0]), _r2(pb[1])]}, ["A", "B"])  # type: ignore[index]
+                "ratio": round(sb["teeth"] / sa["teeth"], 4),
+                "axis_a": [_r2(pa[pl[0]]), _r2(pa[pl[1]])], "axis_b": [_r2(pb[pl[0]]), _r2(pb[pl[1]])],  # type: ignore[index]
+                **({"ax": gax, "plane_a": _r2(pa[1]), "plane_b": _r2(pb[1])} if gax != "z" else {})},  # type: ignore[index]
+                ["A", "B"])
 
     # tooth phasing: the second gear of a mesh turns about its axis so a tooth space faces the first gear's tooth
     # (Toolbox gears have a tooth centred on +X); without it two real gears at the exact centre distance collide
@@ -867,13 +1119,32 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             continue
         ga, gb = f["a"]["item"], f["b"]["item"]
         d = f["data"]
-        th = math.degrees(math.atan2(d["axis_b"][1] - d["axis_a"][1], d["axis_b"][0] - d["axis_a"][0]))
+        # the direction from gear a to gear b in the gears' (unphased) part frames
+        v = frames.apply(frames.transpose(CANON[ax_of(d)]), point3(ax_of(d), [d["axis_b"][0] - d["axis_a"][0],
+                                                                         d["axis_b"][1] - d["axis_a"][1]], 0.0))
+        th = math.degrees(math.atan2(v[1], v[0]))
         pa, pb = 360.0 / d["teeth_a"], 360.0 / d["teeth_b"]
         u = ((th - phase.get(ga, 0.0)) % pa) / pa       # 0 = a tooth faces gear b, 0.5 = a space does
         v = (u + 0.5) % 1.0                              # gear b shows the opposite at the contact
         if gb not in phase:
             phase[gb] = round(((th + 180.0) - v * pb) % pb, 6)
         d["phase_b"] = phase[gb]
+
+    def _cavity(h: str) -> dict[str, Any]:
+        """The housing's cavity in its part frame: open at the top (the lid closes it), the floor below."""
+        hm, s = housing[h], spec[h]
+        L, W, H = s["L"], s["W"], s["H"]
+        return {"min": [_r2(-L / 2 + hm["end_t"]), _r2(-W / 2 + hm["t"]), _r2(-H / 2 + FLOOR)],
+                "max": [_r2(L / 2 - hm["end_t"]), _r2(W / 2 - hm["t"]), _r2(H / 2)],
+                "wall": hm["t"], "end_wall": hm["end_t"], "floor": FLOOR,
+                "note": "Gear cavity: keep it clear (the gears run there); open at the top under the lid."}
+
+    if housing:
+        names_h = ", ".join(by_id[h]["name"] for h in housing)
+        notes.append(f"Gearbox layout: the shafts run along +Y in the side walls of the {names_h}, each in a bearing "
+                     "seat per wall; the gears mesh in the cavity on the plane Y = 0"
+                     + ("; the caps are bolted over the seats (coaxial)" if any(hm["caps"] for hm in housing.values())
+                        else "") + ".")
 
     # ---- skeleton document
     items_out: dict[str, Any] = {}
@@ -883,7 +1154,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         i = p["id"]
         s = spec[i]
         size = _size_of(s)
-        wsize = [size[1], size[0], size[2]] if s.get("rot") in (90, 270) else size
+        Rw = frames.item_rotation(s.get("ax") or "z", float(s.get("rot") or 0) if s["role"] == "block" else 0.0)
+        wsize = [sum(abs(Rw[r][j]) * size[j] for j in range(3)) for r in range(3)]
         for c in at[i]:
             for k in range(3):
                 lo[k] = min(lo[k], c[k] - wsize[k] / 2)  # type: ignore[index]
@@ -892,19 +1164,27 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                         "size": [_r2(x) for x in size], "sub": p["sub"], "parent": parent.get(i),
                         "copies": [[_r2(x) for x in c] for c in at[i]],  # type: ignore[union-attr]
                         "qty": p["qty"], "source": s["source"], **({"rot": s["rot"]} if s.get("rot") else {}),
+                        **({"ax": s["ax"]} if s.get("ax") and s["ax"] != "z" else {}),
+                        **({"cavity": _cavity(i)} if i in housing else {}),
                         **({"phase": phase[i]} if phase.get(i) else {}),
                         **({"d": s["d"]} if s["role"] == "shaft" else {}),
                         **({"bearing": s["bearing"]} if s.get("bearing") else {}),
                         **({"bore": s["bore"]} if s.get("bore") else {}),
                         **({"module": s["module"], "teeth": int(s["teeth"]), "face_width": s["b"]}
                            if s["role"] == "gear" else {})}
-    axes = [{"id": f"AX{n + 1}", "name": f"{items_out[i]['name']} axis", "item": i,
-             "origin": [items_out[i]["copies"][0][0], items_out[i]["copies"][0][1], 0.0], "dir": [0, 0, 1]}
+    def axis_of(i: str) -> dict[str, Any]:
+        ax = items_out[i].get("ax") or "z"
+        c = items_out[i]["copies"][0]
+        o = [c[0], c[1], 0.0] if ax == "z" else [c[0], 0.0, c[2]] if ax == "y" else [0.0, c[1], c[2]]
+        return {"origin": o, "dir": unit(ax)}
+
+    axes = [{"id": f"AX{n + 1}", "name": f"{items_out[i]['name']} axis", "item": i, **axis_of(i)}
             for n, i in enumerate(i for i in items_out if items_out[i]["role"] == "shaft")]
     base = items_out[prog_base]
     skel = {"units": "mm", "base": prog_base,
             "csys": f"Origin at the centre of the top face of the {base['name']} (datums A, B, C); +Z up, away from "
-                    "the base; +X along the row of parts; +Y completes a right-handed frame.",
+                    "the base; +X along the row of parts; +Y completes a right-handed frame."
+                    + (" Gearbox shafts run along +Y." if housing else ""),
             "datums": [{"id": "A", "kind": "plane", "name": f"{base['name']} top face", "origin": [0, 0, 0], "normal": [0, 0, 1]},
                        {"id": "B", "kind": "plane", "name": "Mid-plane XZ", "origin": [0, 0, 0], "normal": [0, 1, 0]},
                        {"id": "C", "kind": "plane", "name": "Mid-plane YZ", "origin": [0, 0, 0], "normal": [1, 0, 0]}],
@@ -942,101 +1222,171 @@ def _empty(parts: list[dict[str, Any]], spec: dict[str, dict[str, Any]]) -> dict
 
 # ----------------------------------------------------------------------------- local features per item
 def _rot(skel: dict[str, Any], side: dict[str, Any]) -> float:
-    """How far a part frame is turned about +Z from the program axes: a block's quarter turns, a gear's tooth phase."""
+    """How far a part frame is turned about its own Z: a block's quarter turns, a gear's tooth phase."""
     it = skel["items"][side["item"]]
     return float(it.get("rot") or 0) + float(it.get("phase") or 0)
 
 
-def _local(skel: dict[str, Any], side: dict[str, Any], xy: list[float]) -> list[float]:
-    """A program-frame (X, Y) in the part frame of one side: minus the copy position, turned back by its rotation
-    (quarter turns of a block, a gear's tooth phase)."""
+def item_R(it: dict[str, Any]) -> list[list[float]]:
+    """Part frame -> program frame of a skeleton item (its axis, then its turn about its own Z)."""
+    return frames.item_rotation(it.get("ax") or "z", float(it.get("rot") or 0) + float(it.get("phase") or 0))
+
+
+def _part_pt(skel: dict[str, Any], side: dict[str, Any], p: list[float]) -> list[float]:
+    it = skel["items"][side["item"]]
+    c = it["copies"][side["copy"]]
+    return frames.apply(frames.transpose(item_R(it)), [float(p[k]) - float(c[k]) for k in range(3)])
+
+
+def _part_vec(skel: dict[str, Any], side: dict[str, Any], v: list[float]) -> list[float]:
+    return frames.apply(frames.transpose(item_R(skel["items"][side["item"]])), v)
+
+
+def _lax(v: list[float]) -> str:
+    return "xyz"[max(range(3), key=lambda k: abs(v[k]))]
+
+
+def to_canon(lax: str, p: list[float]) -> list[float]:
+    """Part frame -> canonical frame of a feature along part axis ``lax``."""
+    return frames.apply(frames.transpose(CANON[lax]), p)
+
+
+def from_canon(lax: str, p: list[float]) -> list[float]:
+    """Canonical frame of a feature along part axis ``lax`` -> part frame."""
+    return frames.apply(CANON[lax], p)
+
+
+def _axial(skel: dict[str, Any], side: dict[str, Any], d: dict[str, Any], a2: Any, t0: float,
+           t1: float | None = None) -> dict[str, Any]:
+    """An interface's axis line (2-D ``a2`` across its axis, from ``t0`` to ``t1`` along it) as a feature of one side:
+    ``c`` (and ``z0``, ``z1``) in the canonical frame of the part axis it lies along (``ax`` when not Z)."""
+    ax = ax_of(d)
+    lax = _lax(_part_vec(skel, side, unit(ax)))
+    q0 = to_canon(lax, _part_pt(skel, side, point3(ax, a2, t0)))
+    out: dict[str, Any] = {"c": [_r2(q0[0]), _r2(q0[1])]}
+    if t1 is not None:
+        q1 = to_canon(lax, _part_pt(skel, side, point3(ax, a2, t1)))
+        z0, z1 = sorted((q0[2], q1[2]))
+        out.update(z0=_r2(z0), z1=_r2(z1))
+    if lax != "z":
+        out["ax"] = lax
+    return out
+
+
+def _plane(skel: dict[str, Any], side: dict[str, Any], d: dict[str, Any], t: float, sign: int) -> dict[str, Any]:
+    """A plane across the interface's axis at ``t``, normal ``sign`` along it, as a face of one side: ``z`` and ``n``
+    in the canonical frame of the part axis it faces along."""
+    ax = ax_of(d)
+    nl = _part_vec(skel, side, [sign * x for x in unit(ax)])
+    lax = _lax(nl)
     c = skel["items"][side["item"]]["copies"][side["copy"]]
-    v = [xy[0] - c[0], xy[1] - c[1]]
-    r = _rot(skel, side)
-    if r:
-        q = round(r / 90)
-        if abs(r - 90 * q) < 1e-9:
-            q %= 4
-            v = [v[0], v[1]] if q == 0 else [v[1], -v[0]] if q == 1 else [-v[0], -v[1]] if q == 2 else [-v[1], v[0]]
-        else:
-            cs, sn = math.cos(math.radians(r)), math.sin(math.radians(r))
-            v = [cs * v[0] + sn * v[1], -sn * v[0] + cs * v[1]]
-    return [_r2(v[0]), _r2(v[1])]
+    i, j = PLANE[ax]
+    q = to_canon(lax, _part_pt(skel, side, point3(ax, [c[i], c[j]], t)))
+    out: dict[str, Any] = {"z": _r2(q[2]), "n": 1 if to_canon(lax, nl)[2] > 0 else -1}
+    if lax != "z":
+        out["ax"] = lax
+    return out
 
 
-def _ldir(skel: dict[str, Any], side: dict[str, Any], d: list[float]) -> list[float]:
-    """A program-frame direction in the XY plane, in the part frame of one side."""
-    c = skel["items"][side["item"]]["copies"][side["copy"]]
-    p = _local(skel, side, [c[0] + d[0], c[1] + d[1]])
-    return [p[0], p[1]]
+def _dir2(skel: dict[str, Any], side: dict[str, Any], d: dict[str, Any], v2: Any, lax: str) -> list[float]:
+    """A direction across the interface's axis (2-D) in the canonical frame of the side's feature axis."""
+    q = to_canon(lax, _part_vec(skel, side, point3(ax_of(d), v2, 0.0)))
+    return [_r2(q[0]), _r2(q[1])]
 
 
-def _lz(skel: dict[str, Any], side: dict[str, Any], z: float) -> float:
-    return _r2(z - skel["items"][side["item"]]["copies"][side["copy"]][2])
+def _local(skel: dict[str, Any], side: dict[str, Any], xy: list[float], d: dict[str, Any] | None = None) -> list[float]:
+    """A point of an interface's pattern (2-D across its axis) in the canonical frame of one side (Phase 4/5: the
+    program-frame (X, Y) in the part frame)."""
+    dd = d or {}
+    t = float(dd.get("plane_z") or 0.0) if dd else skel["items"][side["item"]]["copies"][side["copy"]][2]
+    return _axial(skel, side, dd, xy, t)["c"]
+
+
+def _side_word(fc: dict[str, Any]) -> str:
+    if fc.get("ax"):
+        return f" ({'+' if fc['n'] > 0 else '-'}{fc['ax'].upper()} side)"
+    return " (top)" if fc["n"] > 0 else " (bottom)"
+
+
+def _sgn(d: dict[str, Any]) -> int:
+    """The sign, along the interface's axis, of the normal of side a's face (+1: a's face looks along +axis)."""
+    n = d.get("normal") or unit(ax_of(d))
+    return 1 if float(n[AXIS_INDEX[ax_of(d)]]) >= 0 else -1
 
 
 def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[dict[str, Any]]:
-    """What one side of an interface must carry, in its part frame."""
+    """What one side of an interface must carry, in its part frame. Features along a part axis other than Z carry
+    ``ax`` and are written in that axis' canonical frame (``CANON``): ``c`` across the axis, ``z`` along it."""
     side = f[which]
     d = f["data"]
     tol = d.get("position_tol", POS_TOL)
     out: list[dict[str, Any]] = []
+    horiz = ax_of(d) != "z"
     if f["kind"] == "hole_pattern":
-        n = 1 if which == "a" else -1
-        out.append({"type": "face", "z": _lz(skel, side, d["plane_z"]), "n": n, "tol": tol,
-                    "label": "mounting face" + (" (top)" if n > 0 else " (bottom)")})
+        sa = _sgn(d)
+        fc = _plane(skel, side, d, d["plane_z"], sa if which == "a" else -sa)
+        out.append({"type": "face", **fc, "tol": tol, "label": "mounting face" + _side_word(fc)})
+        tp = d.get("tapped") if which == "a" else None
         for k, xy in enumerate(d["positions"]):
-            out.append({"type": "hole", "c": _local(skel, side, xy), "d": d["d"], "tol": tol, "label": f"hole {k + 1}"})
+            if tp:  # blind, tapped from the mounting face into side a
+                g = _axial(skel, side, d, xy, d["plane_z"], d["plane_z"] - sa * float(tp["depth"]))
+                out.append({"type": "hole", **g, "d": tp["d"], "blind": True, "thread": tp["thread"], "tol": tol,
+                            "label": f"tapped hole {k + 1} {tp['thread']} × {tp['depth']:g} deep"})
+            else:
+                out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"], "tol": tol,
+                            "label": f"hole {k + 1}"})
     elif f["kind"] == "shaft_bore":
-        bore_side = "a"
-        if which == bore_side:
-            out.append({"type": "hole", "c": _local(skel, side, d["axis"]), "d": d["d"], "fit": d["fit"].split("/")[0],
+        g = _axial(skel, side, d, d["axis"], d["z"][0])
+        if which == "a":
+            out.append({"type": "hole", **g, "d": d["d"], "fit": d["fit"].split("/")[0],
                         "tol": tol, "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]}"})
         else:
-            out.append({"type": "boss", "c": _local(skel, side, d["axis"]), "d": d["d"], "fit": d["fit"].split("/")[1],
+            out.append({"type": "boss", **g, "d": d["d"], "fit": d["fit"].split("/")[1],
                         "tol": tol, "label": f"shaft Ø{d['d']:g} {d['fit'].split('/')[1]}"})
         if d.get("flush_z") is not None:
-            out.append({"type": "face", "z": _lz(skel, side, d["flush_z"]), "n": -1, "tol": tol,
+            out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
                         "label": "end face flush with the bottom"})
     elif f["kind"] == "bearing_seat":
-        c = _local(skel, side, d["axis"])
         if which == "a":  # the housing: a seat per bearing (Ø D, housing fit, depth B) and the shaft clearance
             for st in d["seats"]:
-                z0, z1 = _lz(skel, side, st["z"][0]), _lz(skel, side, st["z"][1])
-                out.append({"type": "seat", "c": c, "d": d["D"], "fit": d["housing_fit"], "z0": z0, "z1": z1,
-                            "tol": tol, "label": f"bearing seat Ø{d['D']:g} {d['housing_fit']} ({st['face']})"})
-                top = st["face"] == "top"
-                out.append({"type": "face", "z": z0 if top else z1, "n": 1 if top else -1, "tol": tol,
+                g = _axial(skel, side, d, d["axis"], st["z"][0], st["z"][1])
+                out.append({"type": "seat", **g, "d": d["D"], "fit": d["housing_fit"], "tol": tol,
+                            "label": f"bearing seat Ø{d['D']:g} {d['housing_fit']} ({st['face']})"})
+                op = int(st.get("open") or (1 if st["face"] == "top" else -1))
+                fc = _plane(skel, side, d, st["z"][0] if op > 0 else st["z"][1], op)
+                out.append({"type": "face", **fc, "tol": tol,
                             "label": f"bearing shoulder ({st['face']}), seat depth {d['B']:g}"})
-            lo = d["seats"][1]["z"][1] if len(d["seats"]) > 1 else d["z"][0]
-            hi = d["seats"][0]["z"][0]
+            opens = [(int(st.get("open") or (1 if st["face"] == "top" else -1)), st["z"]) for st in d["seats"]]
+            lo = max([z[1] for o, z in opens if o < 0] or [d["z"][0]])
+            hi = min([z[0] for o, z in opens if o > 0] or [d["z"][1]])
             if hi - lo > 0.5:
-                out.append({"type": "seat", "c": c, "d": d["clearance_d"], "z0": _lz(skel, side, lo),
-                            "z1": _lz(skel, side, hi), "tol": tol, "label": f"shaft clearance Ø{d['clearance_d']:g}"})
-            out.append({"type": "face", "z": _lz(skel, side, d["flush_z"]), "n": -1, "tol": tol,
-                        "label": "bottom face, shaft end flush with it"})
+                out.append({"type": "seat", **_axial(skel, side, d, d["axis"], lo, hi), "d": d["clearance_d"], "tol": tol,
+                            "label": f"shaft clearance Ø{d['clearance_d']:g}"})
+            out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
+                        "label": ("outer face (-Y wall), shaft end flush with it" if horiz
+                                  else "bottom face, shaft end flush with it")})
         else:  # the shaft: the bearing journal through the housing, end flush with its bottom
-            out.append({"type": "boss", "c": c, "d": d["d"], "fit": d["shaft_fit"], "z0": _lz(skel, side, d["z"][0]),
-                        "z1": _lz(skel, side, d["z"][1]), "tol": tol,
-                        "label": f"bearing journal Ø{d['d']:g} {d['shaft_fit']}"})
-            out.append({"type": "face", "z": _lz(skel, side, d["flush_z"]), "n": -1, "tol": tol,
-                        "label": "end face flush with the bottom"})
+            out.append({"type": "boss", **_axial(skel, side, d, d["axis"], d["z"][0], d["z"][1]), "d": d["d"],
+                        "fit": d["shaft_fit"], "tol": tol, "label": f"bearing journal Ø{d['d']:g} {d['shaft_fit']}"})
+            out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
+                        "label": "end face flush with the " + ("-Y wall" if horiz else "bottom")})
     elif f["kind"] == "key":
         on = "hub" if which == "a" else "shaft"
         z = d["hub_z"] if on == "hub" else d["z"]
         depth = d["t2"] if on == "hub" else d["t1"]
-        out.append({"type": "keyway", "on": on, "c": _local(skel, side, d["axis"]), "d": d["d"], "b": d["b"],
-                    "depth": depth, "dir": _ldir(skel, side, d["dir"]), "z0": _lz(skel, side, z[0]),
-                    "z1": _lz(skel, side, z[1]), "tol": tol,
+        g = _axial(skel, side, d, d["axis"], z[0], z[1])
+        out.append({"type": "keyway", "on": on, **g, "d": d["d"], "b": d["b"], "depth": depth,
+                    "dir": _dir2(skel, side, d, d["dir"], g.get("ax") or "z"), "tol": tol,
                     "label": f"keyway {d['b']:g} × {depth:g} ({on}, {d['standard']})"})
     elif f["kind"] == "dowel":
         for k, xy in enumerate(d["positions"]):
-            out.append({"type": "hole", "c": _local(skel, side, xy), "d": d["d"], "fit": d["fit"].split("/")[0],
-                        "tol": tol, "label": f"dowel hole {k + 1} Ø{d['d']:g} {d['fit'].split('/')[0]}"})
+            out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"],
+                        "fit": d["fit"].split("/")[0], "tol": tol,
+                        "label": f"dowel hole {k + 1} Ø{d['d']:g} {d['fit'].split('/')[0]}"})
     elif f["kind"] == "face":
-        n = 1 if which == "a" else -1
-        out.append({"type": "face", "z": _lz(skel, side, d["plane_z"]), "n": n, "tol": tol,
-                    "label": "seating face" + (" (top)" if n > 0 else " (bottom)")})
+        sa = _sgn(d)
+        fc = _plane(skel, side, d, d["plane_z"], sa if which == "a" else -sa)
+        out.append({"type": "face", **fc, "tol": tol, "label": "seating face" + _side_word(fc)})
     elif f["kind"] == "gear_mesh":
         z = d["teeth_a"] if which == "a" else d["teeth_b"]
         out.append({"type": "gear", "module": d["module"], "teeth": z, "c": [0.0, 0.0], "tol": tol,
@@ -1067,7 +1417,7 @@ def _near(a: Any, b: Any) -> bool:
 
 
 def _same_feature(x: dict[str, Any], y: dict[str, Any]) -> bool:
-    if x["type"] != y["type"]:
+    if x["type"] != y["type"] or x.get("ax") != y.get("ax"):
         return False
     if x["type"] == "face":
         return x["n"] == y["n"] and _near(x["z"], y["z"])
@@ -1078,24 +1428,33 @@ def _same_feature(x: dict[str, Any], y: dict[str, Any]) -> bool:
         return same_c and x["on"] == y["on"] and _near(x["z0"], y["z0"])
     if x["type"] == "seat":
         return same_c and _near(x["d"], y["d"]) and _near(x["z0"], y["z0"])
+    if x.get("z0") is not None or y.get("z0") is not None:  # blind holes at different depths are different holes
+        return same_c and _near(x["d"], y["d"]) and x.get("z0") is not None and y.get("z0") is not None \
+            and _near(x["z0"], y["z0"])
     return same_c and _near(x["d"], y["d"])
 
 
 def body_spec(shape: str, size: list[float], features: list[dict[str, Any]], bore: float | None = None,
-              name: str = "") -> dict[str, Any]:
+              name: str = "", cavity: dict[str, Any] | None = None) -> dict[str, Any]:
     """The solid that carries a set of ICD features in its part frame (placeholders, and the simulated agents'
-    parts): the envelope with through holes, bearing seats (counterbores / bores over a Z range), journals (a
-    shaft turned down over a Z range) and keyways."""
-    holes = [{"c": f["c"], "d": f["d"]} for f in features if f["type"] == "hole"]
-    if bore and not any(_near(h["c"][0], 0) and _near(h["c"][1], 0) for h in holes):
+    parts): the envelope with through (or blind, over a range) holes, bearing seats (counterbores / bores over a
+    range), journals (a shaft turned down over a range), keyways and a housing's cavity. Features along X or Y carry
+    ``ax`` (canonical frame, see ``CANON``)."""
+    def keep(f: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+        return {**{k: f[k] for k in keys if f.get(k) is not None}, **({"ax": f["ax"]} if f.get("ax") else {})}
+
+    holes = [keep(f, ("c", "d", "z0", "z1")) for f in features if f["type"] == "hole"]
+    if bore and not any(_near(h["c"][0], 0) and _near(h["c"][1], 0) and not h.get("ax") for h in holes):
         holes.append({"c": [0.0, 0.0], "d": bore})
-    seats = [{"c": f["c"], "d": f["d"], "z0": f["z0"], "z1": f["z1"]} for f in features if f["type"] == "seat"]
-    journals = [{"c": f["c"], "d": f["d"], "z0": f["z0"], "z1": f["z1"]} for f in features
+    seats = [keep(f, ("c", "d", "z0", "z1")) for f in features if f["type"] == "seat"]
+    journals = [keep(f, ("c", "d", "z0", "z1")) for f in features
                 if f["type"] == "boss" and f.get("z0") is not None and shape == "cylinder" and f["d"] < size[0] - 1e-6]
-    keyways = [{k: f[k] for k in ("on", "c", "d", "b", "depth", "dir", "z0", "z1")} for f in features
-               if f["type"] == "keyway"]
-    return {"shape": shape, "size": size, "holes": holes, "seats": seats, "journals": journals, "keyways": keyways,
-            "name": name}
+    keyways = [keep(f, ("on", "c", "d", "b", "depth", "dir", "z0", "z1")) for f in features if f["type"] == "keyway"]
+    out = {"shape": shape, "size": size, "holes": holes, "seats": seats, "journals": journals, "keyways": keyways,
+           "name": name}
+    if cavity:
+        out["pockets"] = [{"min": cavity["min"], "max": cavity["max"]}]
+    return out
 
 
 def placeholder_spec(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str) -> dict[str, Any]:
@@ -1105,7 +1464,7 @@ def placeholder_spec(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str)
     if it["role"] == "gear":  # a gear's placeholder is its pitch cylinder: meshing placeholders touch, never clash
         p = it["module"] * it["teeth"]
         size = [p, p, size[2]]
-    return body_spec(it["shape"], size, item_features(skel, ifs, item), it.get("bore"), it["name"])
+    return body_spec(it["shape"], size, item_features(skel, ifs, item), it.get("bore"), it["name"], it.get("cavity"))
 
 
 def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
@@ -1114,9 +1473,13 @@ def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
     for f in ifs:
         d = f["data"]
         if f["kind"] == "bearing_seat" and d.get("bearing_item") == item:
-            at = [[d["axis"][0], d["axis"][1], st["z"][0]] for st in d["seats"]]
-            return {"code": "bearing", "params": {"SERIES": int(d["designation"])}, "at": at, "interface": f["id"],
-                    "title": f"Ball bearing {d['designation']}", "standard": "ISO 15", "what": "bearing seats"}
+            ax = ax_of(d)
+            at = [[_r2(x) for x in point3(ax, d["axis"], st["z"][0])] for st in d["seats"]]
+            out = {"code": "bearing", "params": {"SERIES": int(d["designation"])}, "at": at, "interface": f["id"],
+                   "title": f"Ball bearing {d['designation']}", "standard": "ISO 15", "what": "bearing seats"}
+            if ax != "z":  # the bearing's own Z (its width, from its base face) along the shaft axis
+                out["R"] = CANON[ax]
+            return out
         if f["kind"] == "dowel" and d.get("pin_item") == item:
             at = [[x, y, _r2(d["plane_z"] - d["length"] / 2)] for x, y in d["positions"]]
             return {"code": "dowel", "params": {"D": d["d"], "L": d["length"]}, "at": at, "interface": f["id"],
@@ -1131,11 +1494,12 @@ def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
     that leaves no rim, a gear bore or keyway through the teeth."""
     out: list[str] = []
     for i, it in skel["items"].items():
-        L, W, _H = it["size"]
+        L, _W, _H = it["size"]
         feats = item_features(skel, ifs, i)
         holes = [f for f in feats if f["type"] in ("hole", "seat")]
         if it.get("bore"):
             holes.append({"c": [0.0, 0.0], "d": it["bore"], "label": "bore"})
+        cav = it.get("cavity")
         for h in holes:
             r = h["d"] / 2
             x, y = h["c"]
@@ -1143,7 +1507,8 @@ def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
                 out.append(f"{it['name']}: {h.get('label', 'hole')} needs a positive diameter.")
                 continue
             if it["shape"] == "box":
-                if abs(x) + r > L / 2 - 1.0 or abs(y) + r > W / 2 - 1.0:
+                half = [abs(v) / 2 for v in to_canon(h.get("ax") or "z", it["size"])]
+                if abs(x) + r > half[0] - 1.0 or abs(y) + r > half[1] - 1.0:
                     out.append(f"{it['name']}: {h.get('label', 'hole')} Ø{h['d']:g} at ({x:g}, {y:g}) leaves less "
                                "than 1 mm of wall to the edge of its envelope.")
             else:
@@ -1153,8 +1518,23 @@ def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
                 if rim < 1.0 and it["role"] != "shaft":
                     out.append(f"{it['name']}: {h.get('label', 'hole')} Ø{h['d']:g} leaves {max(rim, 0):.1f} mm of "
                                "material (at least 1 mm needed).")
+            if cav and h["type"] == "hole":  # a hole must not break into the gear cavity
+                lax = h.get("ax") or "z"
+                lo_c = to_canon(lax, cav["min"])
+                hi_c = to_canon(lax, cav["max"])
+                bx = sorted((lo_c[0], hi_c[0]))
+                by = sorted((lo_c[1], hi_c[1]))
+                bz = sorted((lo_c[2], hi_c[2]))
+                across = bx[0] - r - 1.0 < x < bx[1] + r + 1.0 and by[0] - r - 1.0 < y < by[1] + r + 1.0
+                along = h.get("z0") is None or (h["z0"] < bz[1] + 1.0 and h["z1"] > bz[0] - 1.0)
+                if across and along:
+                    out.append(f"{it['name']}: {h.get('label', 'hole')} Ø{h['d']:g} breaks into the gear cavity.")
         for n, a in enumerate(holes):
             for b in holes[n + 1:]:
+                if a.get("ax") != b.get("ax"):
+                    continue
+                if a.get("z0") is not None and b.get("z0") is not None and (a["z1"] <= b["z0"] or b["z1"] <= a["z0"]):
+                    continue  # one behind the other along the axis (seats / tapped holes in opposite walls)
                 if _near(a["c"][0], b["c"][0]) and _near(a["c"][1], b["c"][1]):
                     continue  # concentric: a seat over a clearance bore, a bore that is also a hole
                 gap = math.hypot(a["c"][0] - b["c"][0], a["c"][1] - b["c"][1]) - (a["d"] + b["d"]) / 2
@@ -1187,9 +1567,14 @@ def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
             if zone(d["D"], d["housing_fit"]) is None or zone(d["d"], d["shaft_fit"]) is None:
                 out.append(f"{f['id']}: fit {d['housing_fit']} / {d['shaft_fit']} is not in the ISO 286 table used here.")
             host = skel["items"][f["a"]["item"]]
-            if d["count"] * d["B"] > host["size"][2] + 1e-6:
+            deep = host["size"][AXIS_INDEX[ax_of(d)]]
+            if d["count"] * d["B"] > deep + 1e-6:
                 out.append(f"{f['id']}: {d['count']} bearings {d['designation']} ({d['B']:g} wide) don't fit in the "
-                           f"{host['size'][2]:g} mm deep {host['name']}.")
+                           f"{deep:g} mm deep {host['name']}.")
+            wall = (host.get("cavity") or {}).get("wall")
+            if wall is not None and d["B"] + 1.0 > wall + 1e-6:
+                out.append(f"{f['id']}: the {d['B']:g} mm wide bearing {d['designation']} needs a wall of at least "
+                           f"{d['B'] + 1:g} mm; the {host['name']} walls are {wall:g} mm.")
     return out
 
 
@@ -1369,6 +1754,23 @@ def _fmt_xy(c: list[float]) -> str:
     return f"({c[0]:g}, {c[1]:g})"
 
 
+_ACROSS = {"z": ("X", "Y", 0, 1), "y": ("X", "Z", 0, 2), "x": ("Y", "Z", 1, 2)}
+
+
+def _at(x: dict[str, Any]) -> str:
+    """Where a feature's axis is, in part-frame words: "the axis at (X, Y) (a, b)" or, along Y, "the axis along Y
+    at (X, Z) (a, b)"."""
+    lax = x.get("ax") or "z"
+    u, v, i, j = _ACROSS[lax]
+    q = from_canon(lax, [x["c"][0], x["c"][1], 0.0])
+    where = f"({u}, {v}) ({_r2(q[i]):g}, {_r2(q[j]):g})"
+    return f"the axis at {where}" if lax == "z" else f"the axis along {lax.upper()} at {where}"
+
+
+def _span(x: dict[str, Any]) -> str:
+    return f"from {(x.get('ax') or 'z').upper()} {x['z0']:g} to {x['z1']:g}"
+
+
 def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
     """The ICD for one part, in plain words plus a machine-readable ``fw-icd`` block (part frame)."""
     it = skel["items"].get(item)
@@ -1380,6 +1782,9 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
     turn = (f"turned {int(it['rot'])}° about +Z from the program axes" if it.get("rot")
             else f"turned {it['phase']:g}° about +Z from the program axes (tooth phasing for its mesh: a tooth is "
                  "centred on +X of the part frame)" if it.get("phase") else "axes parallel to the program axes")
+    if it.get("ax"):
+        turn = (f"its +Z laid along program +{it['ax'].upper()} (a horizontal shaft line in the gearbox; model it "
+                "along Z as usual)" + ("" if turn.startswith("axes") else f", then {turn}"))
     head = (f"Interfaces (ICD v{icd['version']}, approved). Model this part in its part frame: origin at the centre "
             f"of its envelope, +Z up, {turn}. Envelope: {shape}; the part must stay inside it.")
     lines = [head]
@@ -1396,36 +1801,63 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
         bits = []
         for x in feats:
             if x["type"] == "face":
-                bits.append(f"{x['label']} at Z {x['z']:g} (normal {'+' if x['n'] > 0 else '−'}Z, flatness "
+                A = (x.get("ax") or "z").upper()
+                bits.append(f"{x['label']} at {A} {x['z']:g} (normal {'+' if x['n'] > 0 else '−'}{A}, flatness "
                             f"{d.get('flatness', FLATNESS):g})")
             elif x["type"] == "hole":
                 pass
             elif x["type"] == "boss":
-                span = f" from Z {x['z0']:g} to {x['z1']:g}" if x.get("z0") is not None else ""
-                bits.append(f"{x['label']} on the axis at (X, Y) {_fmt_xy(x['c'])}{span}")
+                span = f" {_span(x)}" if x.get("z0") is not None else ""
+                bits.append(f"{x['label']} on {_at(x)}{span}")
             elif x["type"] == "seat":
-                bits.append(f"{x['label']} on the axis at (X, Y) {_fmt_xy(x['c'])}, from Z {x['z0']:g} to {x['z1']:g}")
+                bits.append(f"{x['label']} on {_at(x)}, {_span(x)}")
             elif x["type"] == "keyway":
+                lax = x.get("ax") or "z"
+                u, v, i, j = _ACROSS[lax]
+                dv = from_canon(lax, [x["dir"][0], x["dir"][1], 0.0])
                 bits.append(f"{x['label']}: {x['b']:g} wide, {x['depth']:g} deep from the "
-                            f"{'bore' if x['on'] == 'hub' else 'shaft surface'}, on the {_fmt_xy(x['dir'])} side of the "
-                            f"axis at (X, Y) {_fmt_xy(x['c'])}, from Z {x['z0']:g} to {x['z1']:g}")
+                            f"{'bore' if x['on'] == 'hub' else 'shaft surface'}, on the ({u}, {v}) "
+                            f"({_r2(dv[i]):g}, {_r2(dv[j]):g}) side of {_at(x)}, {_span(x)}")
             elif x["type"] == "gear":
                 bits.append(f"{x['label']}, pressure angle {d['pressure_angle']:g}°, face width {d['face_width']:g}, "
                             f"centre distance {d['centre_distance']:g} to its mate")
         holes = [x for x in feats if x["type"] == "hole"]
-        if holes:
+
+        def where(h: dict[str, Any]) -> str:
+            lax = h.get("ax") or "z"
+            _u, _v, i, j = _ACROSS[lax]
+            q = from_canon(lax, [h["c"][0], h["c"][1], 0.0])
+            return f"({_r2(q[i]):g}, {_r2(q[j]):g})"
+
+        if holes and holes[0].get("thread"):
+            h0 = holes[0]
+            lax = h0.get("ax") or "z"
+            u, v, _i, _j = _ACROSS[lax]
+            bits.append(f"{len(holes)} × {h0['thread']} tapped holes (tap drill Ø{h0['d']:g}, blind, "
+                        f"{abs(h0['z1'] - h0['z0']):g} deep from the mounting face, along {lax.upper()}) at ({u}, {v}) "
+                        + ", ".join(where(h) for h in holes))
+        elif holes:
             if f["kind"] == "shaft_bore":
-                bits.append(f"{holes[0]['label']} through, axis at (X, Y) {_fmt_xy(holes[0]['c'])}")
+                bits.append(f"{holes[0]['label']} through, {_at(holes[0])}")
             elif f["kind"] == "dowel":
                 bits.append(f"{len(holes)} × Ø{holes[0]['d']:g} {holes[0].get('fit') or ''} dowel holes through for "
                             f"{d['standard']} pins Ø{d['d']:g} × {d['length']:g}, at (X, Y) "
                             + ", ".join(_fmt_xy(h["c"]) for h in holes))
             else:
-                bits.append(f"{len(holes)} × Ø{holes[0]['d']:g} through ({d['fastener']} clearance) at (X, Y) "
-                            + ", ".join(_fmt_xy(h["c"]) for h in holes))
+                lax = holes[0].get("ax") or "z"
+                u, v, _i, _j = _ACROSS[lax]
+                bits.append(f"{len(holes)} × Ø{holes[0]['d']:g} through ({d['fastener']} clearance"
+                            + (f", along {lax.upper()}" if lax != "z" else "") + f") at ({u}, {v}) "
+                            + ", ".join(where(h) for h in holes))
         if f["kind"] == "bearing_seat":
             bits.insert(0, f"{d['count']} × {d['bearing']} (bore {d['d']:g}, OD {d['D']:g}, width {d['B']:g})")
         lines.append(f"- {f['id']} {f['name']}: " + "; ".join(bits) + f" (position tolerance ±{d.get('position_tol', POS_TOL):g}).")
+    cav = it.get("cavity")
+    if cav:
+        lines.append(f"- Gear cavity (keep clear, the gears run there): X {cav['min'][0]:g} to {cav['max'][0]:g}, "
+                     f"Y {cav['min'][1]:g} to {cav['max'][1]:g}, Z {cav['min'][2]:g} up to the top face (open, the "
+                     f"lid closes it); side walls {cav['wall']:g}, end walls {cav['end_wall']:g}, floor "
+                     f"{cav['floor']:g} mm.")
     if len(lines) == 1:
         lines.append("- No interfaces: this part only has to fit its envelope.")
     lines.append("Do not change an interface on your own. If one can't work, keep designing to the ICD and raise a "
@@ -1435,6 +1867,11 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
             "features": [{k: v for k, v in x.items() if k not in ("also",)} for x in item_features(skel, icd["interfaces"], item)]}
     if it.get("bore"):
         data["bore"] = it["bore"]
+    if cav:
+        data["cavity"] = {"min": cav["min"], "max": cav["max"]}
+    if any(x.get("ax") for x in data["features"]):
+        data["frames"] = ("features with \"ax\" run along that part axis and are written turned so that axis is "
+                          "their Z: ax y -> part (X, Y, Z) = (c0, z, -c1); ax x -> (z, c1, -c0)")
     if it["role"] == "gear":
         data["gear"] = {"module": it["module"], "teeth": it["teeth"], "face_width": it["face_width"]}
     lines.append("```fw-icd\n" + json.dumps(data, separators=(",", ":")) + "\n```")
