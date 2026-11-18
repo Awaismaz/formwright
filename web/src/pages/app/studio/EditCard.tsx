@@ -6,7 +6,8 @@ import { Button } from "@/components/ui";
 import { impactChange } from "./agentEdit";
 import { ImpactDetails } from "./ImpactPanel";
 
-const OP_LABEL: Record<AgentEdit["op"], string> = { fillet: "Fillet", chamfer: "Chamfer", shell: "Shell", hole: "Hole Wizard", params: "Modify dimensions" };
+const OP_LABEL: Record<AgentEdit["op"], string> = { fillet: "Fillet", chamfer: "Chamfer", shell: "Shell", hole: "Hole Wizard", params: "Modify dimensions",
+  extrude: "Extrude depth", pattern: "Pattern", multi: "Several changes" };
 
 /** DS-035: the agent's small edit in the chat. It opens the real PropertyManager pre-filled (automatically when it
  *  arrives); before anything is applied, the impact on assemblies using this part is shown here (ASM-018). */
@@ -28,14 +29,16 @@ export default function EditCard({ project, edit, usedIn, active, onOpen }: {
       {edit.op === "params" && edit.params && <ul className="mt-0.5 text-[12px] text-muted">{Object.entries(edit.params).map(([k, r]) =>
         <li key={k}>{r.label}: {r.from} → <b className="text-text">{r.to}</b>{r.unit ? ` ${r.unit}` : ""}</li>)}</ul>}
       {n > 0 && <div className="text-[12px] text-muted">{n} {edit.targets!.kind === "edge" ? "edge" : "face"}{n > 1 ? "s" : ""} highlighted in the viewer</div>}
+      {edit.op === "multi" && <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-[12px] text-muted" data-testid="edit-steps">
+        {(edit.steps ?? []).map((s, i) => <li key={i}><span className="text-text">{OP_LABEL[s.op]}</span>: {s.summary}</li>)}</ol>}
       {usedIn > 0 && active && <div className="mt-1.5 rounded border border-border bg-panel px-2 py-1.5">
         {q.isLoading ? <span className="flex items-center gap-1.5 text-[12px] text-muted"><Loader2 className="h-3 w-3 animate-spin" />Checking {usedIn} assembl{usedIn > 1 ? "ies" : "y"} on a trial rebuild…</span>
           : q.data ? <ImpactDetails impact={q.data} compact />
           : q.error ? <span className="text-[12px] text-muted">{(q.error as Error).message}</span> : null}
       </div>}
       {active && <div className="mt-2 flex items-center gap-2">
-        <Button size="sm" icon={<PanelLeftOpen className="h-3.5 w-3.5" />} onClick={() => onOpen(edit)}>Open in PropertyManager</Button>
-        <span className="text-[11px] text-muted">Nothing changes until you press OK</span>
+        <Button size="sm" icon={<PanelLeftOpen className="h-3.5 w-3.5" />} onClick={() => onOpen(edit)}>{edit.op === "multi" ? `Open step 1 of ${edit.steps?.length ?? 0}` : "Open in PropertyManager"}</Button>
+        <span className="text-[11px] text-muted">{edit.op === "multi" ? "One panel per change, in order; nothing changes until you press OK" : "Nothing changes until you press OK"}</span>
       </div>}
     </div>
   );

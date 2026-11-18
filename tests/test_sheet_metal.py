@@ -349,3 +349,171 @@ def test_agent_wording_hides_sheet_metal_helper_names() -> None:
     out = scrub("I used fw.base_flange, then `fw.edge_flange` twice and fw.hem on the back edge.")
     assert "fw." not in out and "base_flange" not in out and "edge_flange" not in out
     assert "fw.edge_flange" in prompt.CAD_AGENT_INSTRUCTIONS and "fw.base_flange" in prompt.CAD_AGENT_INSTRUCTIONS
+
+
+# ----------------------------------------------------------------------------- follow-ups: corners, cuts through bends, jog
+def _box_corner(corner: str, relief: str, gap: float = 0.2) -> tuple[sm.Sheet, object, dict]:
+    s, part = _plate(100, 60, 2.0, 2.0, 0.44, relief=relief, relief_ratio=0.5, corner=corner, corner_gap=gap)
+    s, part = sm.flange(s, part, (0, 30, 2.0), 25, 90)  # top edge, full length
+    s, part = sm.flange(s, part, (50, 0, 2.0), 25, 90)  # right edge: meets the first flange at a corner
+    return s, part, sm.flatten(s, part)
+
+
+@pytest.mark.parametrize(("corner", "relief"), [("closed", "rect"), ("closed", "obround"), ("open", "rect"),
+                                                 ("open", "none")])
+def test_corner_relief_where_adjacent_flanges_meet(corner: str, relief: str) -> None:
+    from build123d import Align, Box, Pos
+
+    w, d, t, r, k, ln, g = 100.0, 60.0, 2.0, 2.0, 0.44, 25.0, 0.2
+    s, part, fl = _box_corner(corner, relief, g)
+    sb, ba, ls = r + t, _ba(90, r, k, t), ln - (r + t)
+    cw = 0.5 * t  # relief width = ratio x T (relief "none": half the thickness so the bends part)
+    relief_area = {"rect": cw * cw, "obround": math.pi * cw * cw / 4, "none": 0.0}[relief]
+    base = w * d - sb * w - sb * (d - sb) - relief_area
+    bend1 = (w - (sb + cw)) * ba  # first flange's bend cut back to the second bend start + relief
+    bend2 = (d - sb) * ba
+    if corner == "closed":  # first wall carried on to the gap from the second wall's inside face
+        wall1, wall2 = ls * (w - t - g), ls * (d - sb + r + t)  # second wall reaches the first wall's outer face
+    else:
+        wall1, wall2 = ls * (w - (sb + cw)), ls * (d - sb)
+    assert fl["area"] == pytest.approx(base + bend1 + bend2 + wall1 + wall2, rel=1e-9)
+    assert fl["exact"] and not fl["notes"] and len(fl["local"].solids()) == 1  # type: ignore[attr-defined]
+    assert part.is_valid and len(part.solids()) == 1  # type: ignore[attr-defined]
+    assert part.volume == pytest.approx(sm.model_volume(s), rel=1e-9)  # type: ignore[attr-defined]
+    # flat size is unchanged by the corner: W - s + BA + straight in each direction
+    assert fl["size"] == pytest.approx([w - sb + ba + ls, d - sb + ba + ls], abs=1e-6)
+    # the first bend's line in the flat stops at the relief
+    line = fl["bends"][0]["line"]
+    assert abs(line[0][0] - line[1][0]) == pytest.approx(w - (sb + cw), abs=1e-6)
+    if corner == "closed":  # folded: the gap between the first wall's end and the second wall's inside face is g
+        x_in = w / 2 - t
+        probe = Pos(x_in - g + 1e-3, d / 2 - t + 1e-3, sb + 1) * Box(g - 2e-3, t - 2e-3, ln - sb - 2,
+                                                                    align=(Align.MIN, Align.MIN, Align.MIN))
+        assert (part & probe).volume == pytest.approx(0, abs=1e-9)  # type: ignore[operator]
+        solid = Pos(x_in - g - 1e-3, d / 2 - t + 1e-3, sb + 1) * Box(1e-3, t - 2e-3, 1,
+                                                                   align=(Align.MAX, Align.MIN, Align.MIN))
+        assert (part & solid).volume == pytest.approx(solid.volume, rel=1e-6)  # type: ignore[operator]
+        bb = part.bounding_box()  # type: ignore[attr-defined]
+        assert [bb.max.X, bb.max.Y, bb.max.Z] == pytest.approx([w / 2, d / 2, ln], abs=1e-6)  # closed box corner
+
+
+def test_three_sided_tray_corners_at_both_ends() -> None:
+    w, d, t, r, k, ln, g = 120.0, 80.0, 1.5, 1.5, 0.4, 20.0, 0.2
+    s, part = _plate(w, d, t, r, k)
+    s, part = sm.flange(s, part, (0, d / 2, t), ln, 90)
+    s, part = sm.flange(s, part, (0, -d / 2, t), ln, 90)
+    s, part = sm.flange(s, part, (w / 2, 0, t), ln, 90)  # meets both: two corners
+    fl = sm.flatten(s, part)
+    sb, ba, ls, cw = r + t, _ba(90, r, k, t), ln - (r + t), 0.5 * t
+    base = w * d - 2 * sb * w - sb * (d - 2 * sb) - 2 * cw * cw
+    bends = 2 * (w - (sb + cw)) * ba + (d - 2 * sb) * ba
+    walls = 2 * ls * (w - t - g) + ls * (d - 2 * sb + 2 * (r + t))
+    assert fl["area"] == pytest.approx(base + bends + walls, rel=1e-9)
+    assert part.is_valid and len(part.solids()) == 1 and len(fl["local"].solids()) == 1  # type: ignore[attr-defined]
+
+
+def test_cuts_through_a_bend_are_unbent_into_the_flat() -> None:
+    from build123d import Align, Box, Cylinder, Pos, Rot
+
+    w, d, t, r, k, ln = 100.0, 60.0, 2.0, 2.0, 0.44, 25.0
+    s, part = _plate(w, d, t, r, k)
+    s, part = sm.flange(s, part, (0, d / 2, t), ln, 90)
+    sb, ba = r + t, _ba(90, r, k, t)
+    full = sm.flatten(s, part)["area"]
+    # a window 10 wide from 3 mm before the bend, through the bend, 6 mm up the wall: flat hole 10 x (3 + BA + 6)
+    a, b, wd = 3.0, 6.0, 10.0
+    win = Pos(-wd / 2, d / 2 - sb - a, -1) * Box(wd, 20, sb + b + 1, align=(Align.MIN, Align.MIN, Align.MIN))
+    fl = sm.flatten(s, part - win)  # type: ignore[operator]
+    assert fl["area"] == pytest.approx(full - wd * (a + ba + b), rel=1e-9)
+    assert not fl["notes"] and len(fl["local"].solids()) == 1
+    xs = {round(e[p][0], 6) for e in fl["outline"] if e["type"] == "line" for p in ("a", "b")}
+    assert -wd / 2 in xs and wd / 2 in xs  # the window's sides are in the outline
+    # a radial hole (radius rho) drilled through the middle of the bend: its trace on the neutral surface
+    # (radius rn = R + K T) is rho^2 >= rn^2 sin^2(s/rn) + y^2, area = integral of 2 sqrt(rho^2 - rn^2 sin^2(s/rn)) ds
+    rho, rn = 1.2, r + k * t
+    hole = Pos(0, d / 2 - sb, t + r) * Rot(45, 0, 0) * Cylinder(rho, 40, align=(Align.CENTER, Align.CENTER, Align.MAX))
+    smax, n = rn * math.asin(rho / rn), 4000
+    trace = sum(2 * math.sqrt(max(0.0, rho ** 2 - (rn * math.sin((-smax + (i + 0.5) * 2 * smax / n) / rn)) ** 2))
+                for i in range(n)) * 2 * smax / n
+    fl = sm.flatten(s, part - hole)  # type: ignore[operator]
+    assert full - fl["area"] == pytest.approx(trace, rel=5e-3)  # sampled outline of the unbent hole
+    assert not fl["notes"] and len(fl["local"].solids()) == 1
+
+
+@pytest.mark.parametrize(("angle", "offset", "flip"), [(90.0, 12.0, False), (60.0, 8.0, False), (90.0, 10.0, True)])
+def test_jog_flat_length_and_offset(angle: float, offset: float, flip: bool) -> None:
+    from build123d import Cylinder, Pos
+
+    w, d, t, r, k, dist = 100.0, 60.0, 2.0, 2.0, 0.44, 20.0
+    s, part = _plate(w, d, t, r, k)
+    part = part - Pos(40, 0, 0) * Cylinder(3, 10)  # a hole in the end that moves rides along
+    s, part = sm.jog(s, part, (w / 2, 0, t), dist, offset, angle, flip=flip)
+    th = math.radians(angle)
+    m = (offset - (t + 2 * r) * (1 - math.cos(th))) / math.sin(th)  # offset = (T + 2R)(1 - cos a) + m sin a
+    ba = _ba(angle, r, k, t)
+    fl = sm.flatten(s, part)
+    assert fl["size"] == pytest.approx([w + 2 * ba + m, d], abs=1e-6)
+    assert fl["area"] == pytest.approx(w * d - math.pi * 9 + d * (2 * ba + m), rel=1e-9)
+    assert any(e["type"] == "circle" and e["r"] == pytest.approx(3) for e in fl["outline"])
+    bb = part.bounding_box()  # type: ignore[attr-defined]
+    shift = (2 * r + t) * math.sin(th) + m * math.cos(th)  # the moved end starts this far past the jog line
+    assert bb.max.X == pytest.approx(w / 2 + shift, abs=1e-6)
+    assert [bb.min.Z, bb.max.Z] == pytest.approx([-offset, t] if flip else [0, offset + t], abs=1e-6)
+    assert [b["kind"] for b in fl["bends"]] == ["jog", "jog"]
+    assert fl["bends"][0]["direction"] != fl["bends"][1]["direction"]
+    assert part.is_valid and len(part.solids()) == 1  # type: ignore[attr-defined]
+    # flanges still go on the moved end's free edge after the jog
+    s, part = sm.flange(s, part, (w / 2 + shift, 0, (-offset if flip else offset) + t), 10, 90)
+    assert len(sm.flatten(s, part)["bends"]) == 3
+
+
+def test_jog_errors_are_plain() -> None:
+    s, part = _plate(100, 60, 2, 2, 0.44)
+    with pytest.raises(ValueError, match="jog offset must be more than"):
+        sm.jog(s, part, (50, 0, 2), 20, 5.0)  # 90 deg: needs more than T + 2R = 6
+    s2, p2 = sm.flange(s, part, (0, 30, 2), 20, 90)
+    with pytest.raises(ValueError, match="a bend is already on the side that moves"):
+        sm.jog(s2, p2, (50, 0, 2), 20, 10)  # the moving end holds part of the flange's bend
+    with pytest.raises(ValueError, match="cross the sheet once"):
+        sm.jog(s, part, (50, 0, 2), 150, 10)  # the line misses the sheet
+
+
+def test_studio_corner_and_jog_features(app_client: TestClient) -> None:  # noqa: F811
+    c = app_client
+    signup(c, "sheetjog@x.com")
+    pid = c.post("/api/projects", json={"name": "Hand tray"}).json()["id"]
+    t, r, k, g = 2.0, 2.0, 0.44, 0.5
+    base = {"op": "sm_base", "name": "Base-Flange1", "plane": TOP, "profiles": [_rect(-50, -30, 50, 30)], "t": t,
+            "r": r, "k": k, "relief": {"type": "rect", "ratio": 0.5}, "corner": {"type": "closed", "gap": g}}
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": {**base, "corner": {"type": "mitre"}}}).status_code == 422
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": base}).status_code == 200
+    # a jog on the right end first: 20 mm in from the edge, raised 12 mm
+    jog = {"op": "sm_jog", "name": "Jog1", "edge": [50, 0, t], "edge_ref": {"kind": "line", "dir": [0, 1, 0]},
+           "distance": 20, "offset": 12, "angle": 90}
+    for bad in ({**jog, "angle": 120}, {**jog, "distance": 0}, {**jog, "offset": -1}):
+        assert c.post(f"/api/projects/{pid}/manual", json={"feature": bad}).status_code == 422
+    rr = c.post(f"/api/projects/{pid}/manual", json={"feature": {**jog, "offset": 5}})
+    assert rr.status_code == 422 and "jog offset must be more than" in rr.json()["detail"]
+    assert c.post(f"/api/projects/{pid}/manual", json={"feature": jog}).status_code == 200
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    ba, m = _ba(90, r, k, t), 12 - (t + 2 * r)
+    assert st["ok"] and st["sheet_metal"]["flat"]["size"] == pytest.approx([100 + 2 * ba + m, 60], abs=1e-6)
+    assert st["fingerprint"]["bbox"] == pytest.approx([100 + 2 * r + t, 60, 12 + t], abs=1e-6)
+    # flanges on the left and top edges of the staying piece: they meet at a closed corner (relief cut)
+    for fe in ({"op": "sm_flange", "name": "Edge-Flange1", "edge": [-50, 0, t], "edge_ref": {"kind": "line", "dir": [0, 1, 0]},
+                "length": 20, "angle": 90},
+               {"op": "sm_flange", "name": "Edge-Flange2", "edge": [-10, 30, t], "edge_ref": {"kind": "line", "dir": [1, 0, 0]},
+                "length": 20, "angle": 90, "inset": [5, 0]}):
+        rr = c.post(f"/api/projects/{pid}/manual", json={"feature": fe})
+        assert rr.status_code == 200, rr.text
+    st = c.get(f"/api/projects/{pid}/files/status.json").json()
+    assert st["ok"] and not st["manual_errors"] and st["sheet_metal"]["corner"] == {"type": "closed", "gap": g}
+    assert st["sheet_metal"]["bend_count"] == 4 and not st["sheet_metal"]["notes"]
+    # the top flange: the staying piece is 80 long, the left flange took sb, 5 mm offset at the jog end
+    sb, cw = r + t, 0.5 * t
+    top = next(b for b in st["sheet_metal"]["bends"] if b["name"] == "Edge-Flange2")
+    assert top["span"] == pytest.approx(80 - sb - 5, abs=1e-6)
+    # the left flange's bend was cut back for the relief: its bend line is (60 - sb) - (sb + cw) long
+    left = next(b for b in st["sheet_metal"]["bends"] if b["name"] == "Edge-Flange1")
+    (x0, y0), (x1, y1) = left["line"]
+    assert math.dist((x0, y0), (x1, y1)) == pytest.approx(60 - (sb + cw), abs=1e-6)

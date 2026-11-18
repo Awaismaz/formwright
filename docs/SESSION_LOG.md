@@ -34,6 +34,56 @@ Branch `wip/quality-fixtures` (worktree `fw-wt/quality-fixtures`), not merged. P
 ### Next
 - Merge `wip/quality-fixtures`; optionally seed FX-04..06 as demo assemblies; EVAL-004 FX-02/03 part fixtures in the
   same `specs/fixtures/` form.
+## 2026-11-19 (c) — Studio follow-ups: sheet-metal corners / cuts through bends / jog, fw-edit depth / pattern / multi, impact on tree actions (CAD-026, DS-035, ASM-018)
+
+Branch `wip/studio-followups` (worktree `fw-wt/studio-followups`). Report: docs/reports/studio-followups/README.md. PD-63.
+
+### Done
+- Sheet metal (`sheetmetal.py`): automatic corner relief where a new flange's edge ends on an existing flange's bend
+  start line (earlier flange cut back to the new bend start + w, w = ratio·T; w × w square or radius-w circle at the
+  bend-line corner); closed corners (default, gap 0.2 mm, two 90° flanges the same way: walls carried round) or open;
+  `Bend.ext` keeps the model volume exact so the flat stays on its exact path. Cuts through bends are traced on the
+  neutral surface and unbent into the flat (no more "not shown" note for them). Jog (`sm_jog`, `fw.jog`, ribbon button +
+  PropertyManager with the live m / flat-growth line); jogs reuse `flange()` with a given child region / solid. Base
+  flange sketch editor: corner type + gap. Agent prompt: jog + corners; scrub covers `fw.jog`. Miter flange not built.
+- fw-edit (`agent/edits.py`): `extrude` (depth / end of an existing hand-made extrude or cut), `pattern` (count, spacing,
+  circular angle; feature and hole patterns), several edits per block (≤ 8, all validated first, one PM step each in
+  order; the Studio opens the next after OK + rebuild; Cancel drops the rest; chat card lists the steps; impact of the
+  whole `sequence`). Design state lists extrude depths and pattern counts/spacing.
+- Impact (ASM-018): `trial_source` kinds suppress / delete / reorder / design_suppress / design_delete / sequence;
+  `ImpactIn` widened. Tree suppress/unsuppress/delete/move (hand-made and agent steps) and Ctrl+K feature / suppress
+  commands check first when the part is in an assembly and show the same Apply anyway / Back panel (modal).
+
+### Verified how
+- New tests: `test_sheet_metal.py` +11 (corner closed/open × rect/obround/none area, size, bend-line length and the
+  folded gap probe; tray with two corners; window 10 × (3 + BA + 6); radial hole vs the integrated neutral trace (0.5 %);
+  jog 90°/60°/flipped; jog errors; Studio corner + jog API), `test_studio_intel.py` +5 (depth/pattern/multi parse + errors;
+  replayed one-turn two-step edit applied = 24000 − 720 − 80π; trial_source per tree action; fixture assembly suppress /
+  delete pin hole = break + 117π, reorder = 27π, sequence = 108π + break, suppress boss = clean), vitest +4.
+- Gate: ruff clean; pytest test_sheet_metal, test_studio_intel, test_studio, test_studio_fixes, test_agent,
+  test_ai_quality, test_drawings, test_drawing_depth, test_drawings_2d, test_llm_providers, test_assembly: 223 passed
+  (11 min, under walkthrough load); tsc clean; vitest 130 passed; vite build OK.
+- Browser walkthrough (puppeteer-core 25.18.1, port 8851, throwaway data dir, replay cassette, 0 model calls): 11
+  screenshots in docs/reports/studio-followups/, 0 console/page errors (parts A+B and C each finished clean). Observed: jog flat 113.047787 × 60 (= 100 + 2·BA + 4), tray
+  4 bends, closed corner, no flat notes; multi-edit volume 23,028.672588 (= 24000 − 720 − 80π); tree / Ctrl+K gate 367.6
+  mm³ = 117π. Fixed from it: the next agent step never opened when the
+  viewer loaded the rebuilt geometry before the panel's OK callback ran, or before the new build's feature list arrived
+  (the queue now records the geometry when a step opens and waits for the feature list). Seen once: right after a
+  replayed build the tree loaded with no features until a reload (existing tree query, not changed here; noted).
+  Under heavy load the agent's edit sometimes arrived as history and did not auto-open (existing rule; the card's
+  button opens it).
+
+### Not done / limitations
+- No miter flange or sketched bend; closed corners only for 90°/90° same direction; corners not treated next to hems,
+  jogs or flanges that already carry flanges; jog only across a whole panel, before flanges on the moving end.
+- Unbent hole outlines in bends are sampled polylines (DXF gets short lines, not arcs).
+- fw-edit still has no drafts / sketch geometry; script (agent-made) features change only through parameters.
+- Impact does not preview rollback-bar moves or renames. If the trial build fails the action runs and reports its own error.
+- After step 1 of a multi edit the chat card still says "Open step 1 of n" (the queue drives the next panels).
+
+### Next
+- Merge `wip/studio-followups`; founder try-out of a closed-corner tray with a fabricator's K-factor; one live agent run
+  to confirm the model emits multi-step fw-edit blocks (PD-09 subscription).
 
 ## 2026-11-19 (a) — Coordinator: batches 23-28 merged + pushed
 

@@ -658,10 +658,15 @@ def where_used(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
 
 
 class ImpactIn(BaseModel):
-    kind: Literal["feature", "edit", "params"]
+    kind: Literal["feature", "edit", "params", "suppress", "delete", "reorder", "design_suppress", "design_delete",
+                  "sequence"]
     feature: dict[str, Any] | None = None
     id: str | None = Field(default=None, max_length=40)
     values: dict[str, float] | None = None
+    suppressed: bool | None = None
+    ids: list[str] | None = Field(default=None, max_length=500)
+    name: str | None = Field(default=None, max_length=120)
+    changes: list[dict[str, Any]] | None = Field(default=None, max_length=8)
 
 
 def _programs_using(ctx: Ctx, project_id: str) -> list[dict[str, Any]]:
@@ -716,7 +721,7 @@ async def impact_preview(project_id: str, body: ImpactIn, ctx: Ctx = Depends(asm
     model = ws / "model.py"
     if not model.is_file():
         raise HTTPException(404, "There is no design to change yet")
-    src, strict = trial_source(model.read_text(encoding="utf-8"), ws, body.model_dump())
+    src, strict = trial_source(model.read_text(encoding="utf-8"), ws, body.model_dump(exclude_none=True))
     trial = ws / ".fw" / "impact" / uuid.uuid4().hex[:12]
     key = None
     try:

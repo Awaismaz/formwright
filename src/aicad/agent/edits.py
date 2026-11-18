@@ -21,6 +21,12 @@ Accepted forms (everything is validated here; anything unusable is dropped with 
 - ``feature``: the id or name of an existing hand-made feature to edit instead (fillet r, chamfer d, shell t,
   hole d or size); targets are optional then (the feature keeps its picks).
 - ``op`` params: ``params`` = {NAME: value} over the design's editable parameters (limits enforced).
+- ``op`` extrude: the depth of an existing hand-made extrude or extruded cut (``feature`` required): ``distance``
+  and optionally ``end`` (blind / mid / through; through all is for cuts).
+- ``op`` pattern: an existing pattern (a feature pattern, or a hole feature's linear / circular pattern; ``feature``
+  required): ``count`` and/or ``spacing`` (linear, along the same direction) or ``angle`` (circular, total angle).
+- Several edits in one block: ``{"summary": ..., "edits": [{...}, {...}]}`` (or a JSON list) becomes one review card
+  with one PropertyManager step per edit, applied in order (at most 8; every step is checked before any opens).
 
 Targets are resolved deterministically on the current build's exact topology (``out/topo.json``), so the UI can
 highlight exactly what OK will change.
@@ -39,6 +45,9 @@ _E_BLOCK = re.compile(r"```fw-edit\s*\n(.*?)\n?```", re.DOTALL)
 SIDES: dict[str, tuple[int, int]] = {"top": (2, 1), "bottom": (2, -1), "right": (0, 1), "left": (0, -1),
                                      "back": (1, 1), "front": (1, -1)}
 FEATURE_OPS = ("fillet", "chamfer", "shell", "hole")
+EDIT_ONLY_OPS = ("extrude", "pattern")  # change an existing hand-made feature's depth / count / spacing
+DEPTH_OPS = ("sketch", "extrude")  # the hand-made features an "extrude" edit can change
+MAX_STEPS = 8
 SIZE_KEY = {"fillet": "r", "chamfer": "d", "shell": "t"}
 HOLE_TYPES = ("clearance", "tapped", "cbore", "csk", "simple")
 MAX_TARGETS = 200
@@ -270,7 +279,99 @@ def _find_feature(manual: list[dict[str, Any]], ref: Any) -> dict[str, Any]:
 # ----------------------------------------------------------------------------- the block
 def parse_edit(raw: Any, ws: Path, clean: Callable[[str], str] = lambda s: s,
                validate: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Turn a raw fw-edit object into a PropertyManager edit for the UI. Raises EditError with a plain reason."""
+    """Turn a raw fw-edit object (or several, see the module notes) into a PropertyManager edit for the UI. Raises
+    EditError with a plain reason."""
+    steps_raw = raw if isinstance(raw, list) else raw.get("edits") if isinstance(raw, dict) else None
+    if steps_raw is not None:
+        if not isinstance(steps_raw, list) or not steps_raw:
+            raise EditError("The proposed edits weren't readable.")
+        if len(steps_raw) > MAX_STEPS:
+            raise EditError(f"That is more than {MAX_STEPS} changes at once: ask for them in smaller groups.")
+        steps = []
+        for i, s in enumerate(steps_raw, 1):
+            if isinstance(s, list) or (isinstance(s, dict) and "edits" in s):
+                raise EditError("The proposed edits weren't readable.")
+            try:
+                steps.append(_parse_one(s, ws, clean, validate))
+            except EditError as e:
+                raise EditError(f"Step {i}: {e}") from None
+        if len(steps) == 1:
+            return steps[0]
+        summary = raw.get("summary") if isinstance(raw, dict) else None
+        summary = clean(str(summary).strip())[:160] if isinstance(summary, str) and summary.strip() else \
+            "; ".join(s["summary"] for s in steps)[:160]
+        return {"op": "multi", "summary": summary, "build_id": steps[0]["build_id"], "targets": None, "feature": None,
+                "feature_id": None, "params": None, "values": {}, "steps": steps}
+    return _parse_one(raw, ws, clean, validate)
+
+
+def _vec_len(v: Any) -> float:
+    try:
+        return math.hypot(*[float(c) for c in v])
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _edit_only(op: str, raw: dict[str, Any], base: dict[str, Any], out: dict[str, Any]) -> dict[str, Any]:
+    """An extrude depth or pattern count / spacing change merged into the existing feature ``base``."""
+    feat = dict(base)
+    if op == "extrude":
+        if base.get("op") not in DEPTH_OPS:
+            raise EditError(f"“{base.get('name')}” is a {base.get('op')}, not an extrude or extruded cut.")
+        end = str(raw.get("end") or base.get("end") or "blind").strip().lower()
+        end = {"through all": "through", "through_all": "through", "mid-plane": "mid", "midplane": "mid"}.get(end, end)
+        if end not in ("blind", "mid", "through"):
+            raise EditError("End condition must be blind, mid-plane or through all.")
+        if end == "through" and base.get("mode") != "cut":
+            raise EditError("Through all applies to cuts only.")
+        v = raw.get("distance", raw.get("depth", raw.get("value")))
+        if v is None and end != "through":
+            raise EditError("What depth? Give the new distance in mm.")
+        feat["end"] = end
+        if v is not None:
+            feat["distance"] = _num(v, "Depth" if base.get("mode") == "cut" else "Extrude distance", 0.001, 1e5)
+        out["values"] = {"distance": feat.get("distance"), "end": end}
+        what = "Cut depth" if base.get("mode") == "cut" else "Extrude distance"
+        out["summary"] = out["summary"] or (f"{what} of “{base.get('name')}”: through all" if end == "through"
+                                            else f"{what} of “{base.get('name')}” to {feat['distance']:g} mm")
+        return feat
+    # pattern: a feature pattern, or a hole feature's own pattern
+    is_hole = base.get("op") == "hole"
+    if base.get("op") != "pattern" and not (is_hole and int(base.get("count") or 1) > 1):
+        raise EditError(f"“{base.get('name')}” is not a pattern.")
+    circular = base.get("kind") == "circular" or base.get("pattern") == "circular"
+    vals: dict[str, Any] = {}
+    if raw.get("count") is not None:
+        feat["count"] = int(_num(raw["count"], "Number of instances", 2, 100 if is_hole else 200))
+        if float(raw["count"]) != feat["count"]:
+            raise EditError("The number of instances must be a whole number.")
+        vals["count"] = feat["count"]
+    if raw.get("spacing") is not None:
+        if circular:
+            raise EditError("A circular pattern has a total angle, not a spacing.")
+        step = base.get("step") or [0, 0, 0]
+        n0 = _vec_len(step)
+        if n0 < 1e-9:
+            raise EditError(f"“{base.get('name')}” has no direction to space along.")
+        sp = _num(raw["spacing"], "Spacing", 0.001, 1e5)
+        feat["step"] = [round(float(c) / n0 * sp, 9) for c in step]
+        vals["spacing"] = sp
+    if raw.get("angle") is not None:
+        if not circular or is_hole:
+            raise EditError("Only a circular feature pattern has a total angle.")
+        feat["angle"] = _num(raw["angle"], "Total angle", 0.01, 360)
+        vals["angle"] = feat["angle"]
+    if not vals:
+        raise EditError("What should change in the pattern: the number of instances, the spacing or the angle?")
+    out["values"] = vals
+    bits = [f"{vals['count']} instances" if "count" in vals else "", f"spacing {vals['spacing']:g} mm" if "spacing" in vals else "",
+            f"total angle {vals['angle']:g}°" if "angle" in vals else ""]
+    out["summary"] = out["summary"] or f"“{base.get('name')}”: " + ", ".join(b for b in bits if b)
+    return feat
+
+
+def _parse_one(raw: Any, ws: Path, clean: Callable[[str], str] = lambda s: s,
+               validate: Callable[[dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise EditError("The proposed edit wasn't readable.")
     status = _read(ws / "out" / "status.json") or {}
@@ -301,8 +402,20 @@ def parse_edit(raw: Any, ws: Path, clean: Callable[[str], str] = lambda s: s,
         out["summary"] = summary or "Change " + ", ".join(f"{r['label']} to {r['to']:g}{(' ' + r['unit']) if r['unit'] else ''}"
                                                           for r in rows.values())
         return out
+    if op in ("depth", "cut", "boss"):
+        op = "extrude"
+    out["op"] = op
+    if op in EDIT_ONLY_OPS:
+        if raw.get("feature") in (None, ""):
+            raise EditError(f"Which {'extrude' if op == 'extrude' else 'pattern'}? Name the feature to change.")
+        base = dict(_find_feature(_manual(ws), raw["feature"]))
+        out["feature_id"] = base["id"]
+        feat = _edit_only(op, raw, base, out)
+        out["feature"] = _validated(feat, validate)
+        return out
     if op not in FEATURE_OPS:
-        raise EditError("Only fillets, chamfers, shells, holes and parameter changes open in the PropertyManager.")
+        raise EditError("Only fillets, chamfers, shells, holes, extrude depths, patterns and parameter changes open "
+                        "in the PropertyManager.")
     manual = _manual(ws)
     base: dict[str, Any] = {}
     if raw.get("feature") not in (None, ""):
@@ -362,13 +475,7 @@ def parse_edit(raw: Any, ws: Path, clean: Callable[[str], str] = lambda s: s,
             preset["dy"] = _num(raw.get("dy", raw.get("dx", 10)), "Edge distance Y", 0.01, 1e5)
             feat["place"] = {"mode": "corners", "face": {"point": feat.get("point")}, "dx": preset["dx"], "dy": preset["dy"]}
         out["values"] = {"hole": preset}
-    if validate is not None:
-        try:
-            feat = validate(feat)
-        except EditError:
-            raise
-        except Exception as e:  # noqa: BLE001 - the validator's 422 detail is already plain language
-            raise EditError(str(getattr(e, "detail", e))[:300]) from None
+    feat = _validated(feat, validate)
     out["feature"] = feat
     if not out["summary"]:
         n = len((out["targets"] or {}).get("picks") or [])
@@ -376,6 +483,17 @@ def parse_edit(raw: Any, ws: Path, clean: Callable[[str], str] = lambda s: s,
                 "shell": f"Shell {feat.get('t', 0):g} mm", "hole": "Hole"}[op]
         out["summary"] = f"{'Edit' if base else 'Add'} {what}" + (f" on {n} {'edges' if op in ('fillet', 'chamfer') else 'face(s)'}" if n else "")
     return out
+
+
+def _validated(feat: dict[str, Any], validate: Callable[[dict[str, Any]], dict[str, Any]] | None) -> dict[str, Any]:
+    if validate is None:
+        return feat
+    try:
+        return validate(feat)
+    except EditError:
+        raise
+    except Exception as e:  # noqa: BLE001 - the validator's 422 detail is already plain language
+        raise EditError(str(getattr(e, "detail", e))[:300]) from None
 
 
 def _read(p: Path) -> Any:
@@ -427,7 +545,13 @@ def design_state(ws: Path, limit: int = 1200) -> str | None:
                        for k, v in (st.get("editable_params") or {}).items() if isinstance(v, (int, float)))
     feats = []
     for f in _manual(ws)[:20]:
-        size = next((f"{k}={f[k]:g}" for k in ("r", "d", "t") if isinstance(f.get(k), (int, float))), "")
+        size = next((f"{k}={f[k]:g}" for k in ("r", "d", "t", "distance") if isinstance(f.get(k), (int, float))), "")
+        if f.get("op") in DEPTH_OPS and f.get("mode") == "cut":
+            size = f"cut {size}".strip()
+        if isinstance(f.get("count"), int) and f.get("count", 1) > 1:
+            size = f"{size} count={f['count']}".strip()
+            if f.get("step"):
+                size += f" spacing={_vec_len(f['step']):g}"
         feats.append(f"{f.get('id')} “{f.get('name')}” {f.get('op')} {size}".strip())
     bb = st.get("bbox_minmax")
     parts = []

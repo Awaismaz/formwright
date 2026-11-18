@@ -90,3 +90,11 @@ Every expected value is a hand formula (volume decompositions with centroids, pl
 predicate). After a deliberate change run `uv run python -m aicad.fixtures --write` or `tests/test_fixtures_asm.py`
 fails on the stale `assembly.json`. The solver's `Result.dof` sums freedoms per instance; a group that moves as one
 (shaft + key + gear) counts once per member there, so compare mechanism freedoms as 6n − rank (see `harness.run`).
+Follow-ups (corners, jog, cuts through bends): a corner relief shortens the *earlier* bend through `Bend.ext` (lo, hi)
+and edits that wall's panel region, so `model_volume` stays exact and the flat keeps its fast exact path; anything
+the model doesn't know (a cut through a bend) makes `flatten` intersect the part with each panel slab and trace each
+bend's cut on the neutral surface (`Face.revolve` of a line at radius R + K·T: build123d's `revolve()` of an Edge
+returns an empty Part). Chain wire edges by matching endpoints (`_wire_points`): `BRepTools_WireExplorer` orientation
+plus `Edge.position_at` double-reverses edges on revolved faces. Make 2D faces counter-clockwise before extruding
+(a clockwise polygon face extrudes downwards). Jogs reuse `flange()` with `child_region` / `child_solid`.
+

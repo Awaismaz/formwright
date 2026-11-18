@@ -4,7 +4,7 @@ import type { Pick, Topo, V3 } from "@/viewer/types";
 
 /** DS-035: how an agent edit opens the real PropertyManager (pure, so it is unit-tested). */
 export type PmOpen =
-  | { kind: "feature"; op: "fillet" | "chamfer" | "shell" | "hole"; editing: ManualFeature | null; preset: Record<string, unknown>; selection: Pick[]; note?: string }
+  | { kind: "feature"; op: ManualFeature["op"]; editing: ManualFeature | null; preset: Record<string, unknown>; selection: Pick[]; note?: string }
   | { kind: "params"; rows: NonNullable<AgentEdit["params"]> }
   | { kind: "error"; message: string };
 
@@ -48,7 +48,22 @@ export function targetPicks(edit: AgentEdit, topo: Topo | null, buildId?: string
 /** Map an agent edit onto the PropertyManager: the op, the feature being edited (with the new values merged in), the
  *  preset for a new feature, and the selection to highlight. */
 export function prefillPm(edit: AgentEdit, topo: Topo | null, manual: ManualFeature[], buildId?: string | number | null): PmOpen {
+  if (edit.op === "multi") return edit.steps?.length ? prefillPm(edit.steps[0]!, topo, manual, buildId) : { kind: "error", message: "No change to make" };
   if (edit.op === "params") return edit.params && Object.keys(edit.params).length ? { kind: "params", rows: edit.params } : { kind: "error", message: "No parameter to change" };
+  if (edit.op === "extrude" || edit.op === "pattern") {
+    // changes to an existing hand-made feature: its own panel (the sketch editor for a sketched extrude), new values merged in
+    const e = manual.find(m => m.id === edit.feature_id);
+    if (!e) return { kind: "error", message: "That feature is no longer in the feature tree" };
+    const v = edit.values;
+    let merged: ManualFeature = { ...e };
+    if (edit.op === "extrude") merged = { ...merged, ...(v.end ? { end: v.end } : {}), ...(v.distance != null ? { distance: v.distance } : {}) };
+    else {
+      if (v.count != null) merged = { ...merged, count: v.count };
+      if (v.spacing != null && e.step) { const n = Math.hypot(...e.step) || 1; merged = { ...merged, step: e.step.map(c => +(c / n * v.spacing!).toFixed(9)) as [number, number, number] }; }
+      if (v.angle != null) merged = { ...merged, angle: v.angle };
+    }
+    return { kind: "feature", op: e.op, editing: merged, preset: {}, selection: [] };
+  }
   const op = edit.op;
   const { picks, lost } = targetPicks(edit, topo, buildId);
   const note = lost ? `The model changed since the suggestion: ${lost} ${edit.targets?.kind === "edge" ? "edge" : "face"}${lost > 1 ? "s" : ""} could not be found. Pick ${lost > 1 ? "them" : "it"} again.` : undefined;
@@ -71,8 +86,17 @@ export function prefillPm(edit: AgentEdit, topo: Topo | null, manual: ManualFeat
   return { kind: "feature", op, editing: null, preset, selection: picks, note };
 }
 
+/** The PropertyManager steps of an agent edit: several for a multi-step block, else the edit itself. */
+export function agentSteps(edit: AgentEdit): AgentEdit[] {
+  return edit.op === "multi" ? edit.steps ?? [] : [edit];
+}
+
 /** The impact-preview request for an edit as the agent proposed it (the card in the chat). */
 export function impactChange(edit: AgentEdit): ImpactChange | null {
+  if (edit.op === "multi") {
+    const changes = (edit.steps ?? []).map(impactChange);
+    return changes.length && changes.every(Boolean) ? { kind: "sequence", changes: changes as ImpactChange[] } : null;
+  }
   if (edit.op === "params") {
     const values = Object.fromEntries(Object.entries(edit.params ?? {}).map(([k, r]) => [k, r.to]));
     return Object.keys(values).length ? { kind: "params", values } : null;
@@ -80,4 +104,26 @@ export function impactChange(edit: AgentEdit): ImpactChange | null {
   if (!edit.feature) return null;
   return edit.feature_id ? { kind: "edit", id: edit.feature_id, feature: edit.feature as Record<string, unknown> }
     : { kind: "feature", feature: edit.feature as Record<string, unknown> };
+}
+
+/** A feature-tree or typed-command action as an impact-preview request (ASM-018 follow-up): suppress / unsuppress,
+ *  delete, move up or down, and the same on the design agent's own steps. */
+export type TreeAction =
+  | { kind: "toggle"; feature: ManualFeature } | { kind: "delete"; feature: ManualFeature }
+  | { kind: "move"; ids: string[]; id: string; by: -1 | 1 }
+  | { kind: "design_suppress"; name: string; suppressed: boolean } | { kind: "design_delete"; name: string };
+
+export function treeChange(a: TreeAction): ImpactChange | null {
+  switch (a.kind) {
+    case "toggle": return { kind: "suppress", id: a.feature.id, suppressed: !a.feature.suppressed };
+    case "delete": return { kind: "delete", id: a.feature.id };
+    case "move": {
+      const ids = [...a.ids]; const i = ids.indexOf(a.id), j = i + a.by;
+      if (i < 0 || j < 0 || j >= ids.length) return null;
+      [ids[i], ids[j]] = [ids[j]!, ids[i]!];
+      return { kind: "reorder", ids };
+    }
+    case "design_suppress": return { kind: "design_suppress", name: a.name, suppressed: a.suppressed };
+    case "design_delete": return { kind: "design_delete", name: a.name };
+  }
 }

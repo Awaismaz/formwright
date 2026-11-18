@@ -110,7 +110,7 @@ def estimate(project_id: str, chars: int = 0, ctx: Ctx = Depends(verified_ctx)) 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
 OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
-       "sketch2d", "sweep", "loft", "thread", "sm_base", "sm_flange", "sm_hem"}
+       "sketch2d", "sweep", "loft", "thread", "sm_base", "sm_flange", "sm_hem", "sm_jog"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -228,7 +228,7 @@ def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
     out["reverse"] = bool(f.get("reverse"))
 
 
-REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread", "sm_flange", "sm_hem"}  # picks stored with the body's box, to follow size changes
+REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread", "sm_flange", "sm_hem", "sm_jog"}  # picks stored with the body's box, to follow size changes
 
 
 def _edge_ref(r: Any) -> dict[str, Any]:
@@ -407,10 +407,23 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         if rel.get("type", "rect") not in ("rect", "obround", "none"):
             raise HTTPException(422, "Relief type must be rectangular, obround or none")
         out["relief"] = {"type": str(rel.get("type", "rect")), "ratio": _num(rel.get("ratio", 0.5), "relief ratio", 0.05, 5)}
+        cor = f.get("corner") or {}
+        if cor.get("type", "closed") not in ("closed", "open"):
+            raise HTTPException(422, "Corner type must be closed or open")
+        out["corner"] = {"type": str(cor.get("type", "closed")), "gap": _num(cor.get("gap", 0.2), "corner gap", 0, 50)}
         out["reverse"] = bool(f.get("reverse"))
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sm_jog":  # two opposite bends that raise the end of the sheet at the picked edge
+        out["edge"] = _pt(f.get("edge"), "edge")
+        if f.get("edge_ref") is not None:
+            out["edge_ref"] = _edge_ref(f["edge_ref"])
+        out["distance"] = _num(f.get("distance"), "jog distance from the edge", 0.01, 1e5)
+        out["offset"] = _num(f.get("offset"), "jog offset", 0.01, 1e5)
+        out["angle"] = _num(f.get("angle", 90), "jog angle", 1, 90)
+        out["r"] = _num(f["r"], "bend radius", 0, 1e3) if f.get("r") is not None else None
+        out["flip"] = bool(f.get("flip"))
     elif op in ("sm_flange", "sm_hem"):
         out["edge"] = _pt(f.get("edge"), "edge")
         if f.get("edge_ref") is not None:
@@ -606,13 +619,62 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
             "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
+TRIAL_STEPS = 8
+
+
 def trial_source(src: str, ws: Path, change: dict[str, Any]) -> tuple[str, set[str]]:
     """The model source as it would be after a pending Studio change, without touching the workspace (ASM-018 trial
     builds). ``change``: {"kind": "feature", "feature"} (a new manual feature), {"kind": "edit", "id", "feature"}
-    (changed fields of one), or {"kind": "params", "values"}. Returns (source, ids whose failure rejects it)."""
+    (changed fields of one), {"kind": "params", "values"}, the feature-tree actions {"kind": "suppress", "id",
+    "suppressed"}, {"kind": "delete", "id"}, {"kind": "reorder", "ids"}, {"kind": "design_suppress" | "design_delete",
+    "name"} (a step of the design: deleting is checked to equal suppressing, so both preview as suppressed), or
+    {"kind": "sequence", "changes": [...]} applied in order (the agent's multi-step edits). Returns (source, ids whose
+    failure rejects it)."""
+    from aicad.agent.runner import suppressed_features
     from aicad.platform.routers.projects import current_editable, rewrite_params
 
     kind = change.get("kind")
+    if kind == "sequence":
+        steps = change.get("changes")
+        if not isinstance(steps, list) or not 1 <= len(steps) <= TRIAL_STEPS:
+            raise HTTPException(422, f"Preview 1–{TRIAL_STEPS} changes at a time")
+        strict: set[str] = set()
+        for step in steps:
+            if not isinstance(step, dict) or step.get("kind") == "sequence":
+                raise HTTPException(422, "Unknown change")
+            src, ids = trial_source(src, ws, step)
+            strict |= ids
+        return src, strict
+    if kind in ("design_suppress", "design_delete"):
+        name = str(change.get("name") or "")
+        if not name:
+            raise HTTPException(422, "Which feature?")
+        current = suppressed_features(src)
+        on = kind == "design_delete" or change.get("suppressed", True) is not False
+        names = [*current, name] if on and name not in current else [n for n in current if on or n != name]
+        return write_suppressed(src, names), set()
+    if kind in ("suppress", "delete", "reorder"):
+        feats = read_manual(src)
+        if kind == "reorder":
+            ids = [str(x) for x in change.get("ids") or []]
+            by = {f["id"]: f for f in feats}
+            if sorted(ids) != sorted(by):
+                raise HTTPException(422, "Reorder must list every feature exactly once")
+            new_feats = [by[i] for i in ids]
+        else:
+            fid = str(change.get("id") or "")
+            if not any(f["id"] == fid for f in feats):
+                raise HTTPException(404, "Feature not found")
+            if kind == "delete":
+                users = [f["name"] for f in feats if fid in (f.get("profile"), f.get("path"), *(f.get("sections") or []))]
+                if users:
+                    name = next(f["name"] for f in feats if f["id"] == fid)
+                    raise HTTPException(422, f"“{name}” is used by {', '.join(users)}. Delete or edit {users[0]} first.")
+                new_feats = [f for f in feats if f["id"] != fid]
+            else:
+                new_feats = [{**f, "suppressed": bool(change.get("suppressed", True))} if f["id"] == fid else f
+                             for f in feats]
+        return write_manual(src, normalize_rollback(sync_planes(new_feats))), set()
     if kind == "params":
         values = change.get("values")
         if not isinstance(values, dict) or not values:
