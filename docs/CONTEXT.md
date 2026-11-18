@@ -138,7 +138,7 @@ docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.
 **Batch 23-25 merged + pushed (2026-11-18 night):** drawing depth (threads, detail views, GD&T only from explicit
 input / ICD, STEP→drawing; PD-58), engineering hygiene (IO matrix, SBOM, run record, repeatability; PD-56), studio
 intelligence (agent fills the PropertyManager, change-impact preview, datasheet pack; PD-57). Full suite 623 passed.
-**In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/sheet-metal`, `wip/office-phase6`.
+**In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/office-phase6`.
 Unmerged = unfinished. Agent platform (WORKLIST 28: LLM provider layer, Export for SOLIDWORKS, Blender IO) merged; PD-59. Parked decisions now PD-35…PD-58.
 **`wip/agent-platform` finished (2026-11-18, not merged):** LLMProvider abstraction + stub / Messages API providers
 (AGT-001, AGT-013), "Export for SOLIDWORKS" STEP pathway with disclosure (CAD-070), Blender exports in the IO matrix
@@ -151,6 +151,8 @@ presses OK (normal manual-feature / parameter path, no agent code). ASM-018 ever
 assembly is previewed first (`POST /api/m/assembly/impact/{project}`: trial rebuild in the warm worker + in-memory
 assembly copies; broken mates, moves, refits, new clashes; nothing committed); Mesh Studio has a per-part datasheet
 shot list that goes stale on revision and re-renders (queues) in one click. Defaults PD-57.
+
+**Sheet metal (merged 2026-11-18, CAD-026 / MFG-011):** `src/aicad/sheetmetal.py` keeps a panel + bend model next to the solid; Studio ops `sm_base` / `sm_flange` / `sm_hem`, helpers `fw.base_flange/edge_flange/hem`; every build writes `out/flat.topo.json|dxf|json` and `status.sheet_metal`; Drawing Studio adds a flat-pattern sheet (`flat_sheet.*`), the Manufacturing Advisor reads the model (SHM-03..05). Defaults PD-60.
 
 **Next:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.

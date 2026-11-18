@@ -76,3 +76,10 @@ STEP/STL/3MF are mm, Z up, model frame; GLB is metres, +Y up (`export_gltf` turn
 ## API doubts
 Read the installed source, not memory: `uv run python -c "import build123d, inspect; print(inspect.getsourcefile(build123d))"`.
 Upstream docs: https://build123d.readthedocs.io (the in-app agent may fetch only that host).
+
+## Sheet metal (CAD-026)
+`src/aicad/sheetmetal.py` keeps an immutable panel + bend model in `fw._STATE["sheet"]` (cached with the base script by
+the runner, so never mutate it: every op returns a new `Sheet`). Flanges are found on the model's panels, not on B-rep
+edges, by transforming the picked point into each panel frame (z = 0 bottom, z = T top). The flat pattern is built from
+the same model (BA = θ·(R + K·T)); test flat sizes against the bend-deduction formula, never against the built flat.
+A `Location` transforms points via `(loc * Location(v)).position` (`loc * Vector` raises).

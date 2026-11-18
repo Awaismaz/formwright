@@ -162,13 +162,16 @@ def summary_counts(findings: list[dict[str, Any]], scr: dict[str, dict[str, Any]
 
 
 def analyse_shape(shape: Shape, shop: ShopProfile, inputs: Inputs, topo: dict[str, Any] | None = None,
-                  status_material: str | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+                  status_material: str | None = None, meta: dict[str, Any] | None = None,
+                  sheet_model: dict[str, Any] | None = None) -> dict[str, Any]:
     g = PartGeom(shape, topo)
-    return analyse_geom(g, shop, inputs, status_material, meta)
+    return analyse_geom(g, shop, inputs, status_material, meta, sheet_model)
 
 
 def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material: str | None = None,
-                 meta: dict[str, Any] | None = None) -> dict[str, Any]:
+                 meta: dict[str, Any] | None = None, sheet_model: dict[str, Any] | None = None) -> dict[str, Any]:
+    """``sheet_model``: the part's sheet-metal model (CAD-026). The part is then sheet metal of that thickness
+    whatever the geometric screen says, and the flat size and bend count come from the model."""
     mat, mat_how = resolve_material(inputs.material, status_material)
     acc = F.accessibility(g, shop.max_tool_reach_mm, shop.max_flank_mm)
     th = F.thickness(g)
@@ -176,11 +179,16 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
     ctx = R.Ctx(g=g, shop=shop, metal=bool(mat["metal"]), acc=acc, thick=th, holes=hs,
                 corners=F.corners(g, acc, hs), sharp=F.sharp_internal_corners(g, acc), pockets=F.pockets(g, acc),
                 turn=F.turning(g), sheet=F.sheet_like(g, th), material=mat)
+    if sheet_model and sheet_model.get("flat") and not sheet_model.get("flat_error"):
+        geo = ctx.sheet
+        ctx.sheet = F.Sheet(True, float(sheet_model["thickness"]), geo.frac if geo and geo.sheet_like else 1.0,
+                             model=True)
+        ctx.sheet_model = sheet_model
     sheet = ctx.sheet
     ctx.mould_acc = F.accessibility(g, 1e9, 1e9)
     ctx.pull = R.choose_pull(g, ctx.mould_acc)
     findings, summary = R.run(ctx)
-    lines = C.models(g, shop, mat, acc, hs, ctx.turn, sheet, inputs.tolerance)
+    lines = C.models(g, shop, mat, acc, hs, ctx.turn, sheet, inputs.tolerance, ctx.sheet_model)
     unit_costs = {k: C.unit_cost(v, inputs.quantity) for k, v in lines.items()}
     draft_faces = sum(len(f["faces"]) for f in findings if f["rule"] == "MLD-01")
     mould_uc = sum(len(f["faces"]) for f in findings if f["rule"] == "MLD-02")
@@ -215,7 +223,10 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
             "turning": {"turnable": ctx.turn.turnable, "axis": ctx.turn.axis_name,
                         "revolved_pct": round(100 * ctx.turn.revolved_frac, 1),
                         "max_diameter": round(ctx.turn.max_d, 3), "length": round(ctx.turn.length, 3)},
-            "sheet": {"sheet_like": sheet.sheet_like, "thickness": sheet.thickness, "pct": round(100 * sheet.frac, 1)},
+            "sheet": {"sheet_like": sheet.sheet_like, "thickness": sheet.thickness, "pct": round(100 * sheet.frac, 1),
+                      **({"model": True, "flat_size": ctx.sheet_model["flat"]["size"],
+                          "bend_count": ctx.sheet_model.get("bend_count", 0),
+                          "k_factor": ctx.sheet_model.get("k_factor")} if ctx.sheet_model else {})},
             "holes": [{"d": round(h.d, 4), "depth": round(h.depth, 4), "ld": round(h.ld, 3), "through": h.through,
                        "faces": g.fids(h.faces)} for h in hs],
             "pockets": [{"depth": round(p.depth, 3), "width": round(p.width, 3), "direction": p.direction,
@@ -258,7 +269,7 @@ def analyse_workspace(ws: Path, shop: ShopProfile, inputs: Inputs, material_code
         topo = json.loads((out / "topo.json").read_text(encoding="utf-8"))
     g = PartGeom.from_step(out / "part.step", topo)
     meta = {**deliverables.build_stamp(ws, status), "fingerprint": status.get("fingerprint"), "part": status.get("part")}
-    res = analyse_geom(g, shop, inputs, status.get("material"), meta)
+    res = analyse_geom(g, shop, inputs, status.get("material"), meta, status.get("sheet_metal"))
     res["cache_key"] = key
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".tmp")

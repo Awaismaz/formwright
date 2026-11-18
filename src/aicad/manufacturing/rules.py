@@ -70,6 +70,8 @@ class Ctx:
     pull: str | None = None
     sheet: F.Sheet | None = None
     material: dict[str, Any] = field(default_factory=dict)
+    #: sheet-metal model of the part (CAD-026, ``status["sheet_metal"]``): flat size and the bend table
+    sheet_model: dict[str, Any] | None = None
 
 
 @dataclass
@@ -654,8 +656,10 @@ def r_sheet_scope(c: Ctx) -> list[Finding]:
     return [Finding(
         "SHM-00", "sheet_metal", "info", f"Screening only: {f2(t)} mm sheet, bends checked",
         f"constant {f2(t)} mm thickness over {f2(100 * sh.frac, 0)} % of the surface",  # type: ignore[union-attr]
-        "—", "Inside bend radius against the material table and the formed outer radius are checked. The flat "
-        "pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed.",
+        "—", "Inside bend radius against the material table and the formed outer radius are checked. "
+        + ("The flat pattern and bend count come from the sheet-metal model (SHM-03); bend reliefs, hole-to-bend "
+           "distances, grain direction and springback are not analysed." if sh.model else  # type: ignore[union-attr]
+           "The flat pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed."),
         "Ask your fabricator to review the flat pattern before ordering.", S.BEND_SOURCE, [], t)]
 
 
@@ -706,6 +710,70 @@ def r_bend_outer(c: Ctx) -> list[Finding]:
         "radius plus the thickness. A rounded inside with a sharp outside is a machined or welded shape, not a bend.",
         f"Model the bend with an outside radius of R{f2(r + t)} (inside R{f2(r)} + {f2(t)} mm), or plan the part as "
         "machined.", "Sheet-metal geometry (constant thickness through a bend)", [f.i for f, _r in missing], r)]
+
+
+def _model_applies(c: Ctx) -> bool:
+    return bool(c.sheet_model and c.sheet_model.get("flat"))
+
+
+MIN_FLANGE_T = 4.0  # flange at least 4 × thickness long (common press-brake practice: the die opening)
+
+
+def r_flat_pattern(c: Ctx) -> list[Finding]:
+    sm = c.sheet_model or {}
+    fl = sm["flat"]
+    t = float(sm["thickness"])
+    n = int(sm.get("bend_count") or 0)
+    return [Finding(
+        "SHM-03", "sheet_metal", "info", f"Flat pattern {f2(fl['size'][0])} × {f2(fl['size'][1])} mm, {n} bend{'s' if n != 1 else ''}",
+        f"{f2(t)} mm sheet, K = {f2(float(sm['k_factor']), 3)}, blank area {f2(float(fl['area_mm2']), 0)} mm², "
+        f"cut length {f2(float(fl['perimeter_mm']), 0)} mm", "—",
+        "The flat pattern is developed from the sheet-metal model with bend allowance BA = angle × (R + K × T). The "
+        "real allowance depends on the press brake, tooling and material, so the flat size is as good as the K-factor.",
+        "Send the flat-pattern DXF with the K-factor to your fabricator and ask them to confirm it.",
+        "Sheet-metal model (bend allowance from the K-factor)", [], float(n))]
+
+
+def r_flange_length(c: Ctx) -> list[Finding]:
+    sm = c.sheet_model or {}
+    t = float(sm["thickness"])
+    lim = MIN_FLANGE_T * t
+    short = []
+    for b in sm.get("bends") or []:
+        if b.get("kind") == "hem":
+            continue
+        ln = b.get("outer_length") if b.get("outer_length") is not None else b.get("straight")
+        if ln is not None and float(ln) < lim - 1e-9:
+            short.append((b, float(ln)))
+    if not short:
+        return []
+    worst = min(ln for _b, ln in short)
+    names = ", ".join(f"B{b['n']} {b['name']} ({f2(ln)} mm)" for b, ln in short[:4])
+    return [Finding(
+        "SHM-04", "sheet_metal", "warning", f"{len(short)} flange{'s' if len(short) > 1 else ''} shorter than "
+        f"{f2(MIN_FLANGE_T, 0)} × the thickness", names, f"≥ {f2(lim)} mm ({f2(MIN_FLANGE_T, 0)} × T)",
+        "A flange has to rest on both shoulders of the press-brake die while it bends; flanges shorter than about "
+        "four thicknesses slip into the die and come out short or twisted.",
+        f"Lengthen the flange to at least {f2(lim)} mm, or ask your fabricator about their minimum for this tooling.",
+        "Common press-brake practice (die opening about 6–8 × T)", [], worst,
+        target={"kind": "length", "to": S.nice_up(lim), "why": f"≥ {f2(lim)} mm flange"})]
+
+
+def r_radius_vs_thickness(c: Ctx) -> list[Finding]:
+    sm = c.sheet_model or {}
+    t = float(sm["thickness"])
+    tight = [b for b in sm.get("bends") or [] if b.get("kind") != "hem" and float(b["radius"]) < t - 1e-9]
+    if not tight:
+        return []
+    r = min(float(b["radius"]) for b in tight)
+    return [Finding(
+        "SHM-05", "sheet_metal", "warning", f"Inside bend radius R{f2(r)} is below the sheet thickness",
+        f"{len(tight)} bend{'s' if len(tight) > 1 else ''} with R < T ({f2(t)} mm)", f"inside radius ≥ T = R{f2(t)}",
+        "An inside radius below the thickness strains the outside of the bend hard: many alloys and tempers crack, "
+        "and the bend allowance becomes less predictable.",
+        f"Use an inside radius of at least R{f2(t)} unless your fabricator confirms a tighter one for this material.",
+        "Rule of thumb for formed sheet (R ≥ T)", [], r,
+        target={"kind": "radius", "to": S.nice_up(t), "why": f"≥ R{f2(t)} (the thickness)"})]
 
 
 # ----------------------------------------------------------------------------- moulding / casting
@@ -807,6 +875,9 @@ RULES: list[Rule] = [
     Rule("SHM-00", "Sheet-metal screening scope", "sheet_metal", r_sheet_scope, _sheet_applies),
     Rule("SHM-01", "Minimum inside bend radius (material table)", "sheet_metal", r_bend_radius, _sheet_applies),
     Rule("SHM-02", "Formed outer radius on bends", "sheet_metal", r_bend_outer, _sheet_applies),
+    Rule("SHM-03", "Flat pattern and bend count (sheet-metal model)", "sheet_metal", r_flat_pattern, _model_applies),
+    Rule("SHM-04", "Minimum flange length (4 × T)", "sheet_metal", r_flange_length, _model_applies),
+    Rule("SHM-05", "Inside bend radius vs thickness", "sheet_metal", r_radius_vs_thickness, _model_applies),
     Rule("MLD-00", "Moulding / casting screening scope", "moulding_casting", r_mould_scope),
     Rule("MLD-01", "Draft angle", "moulding_casting", r_draft),
     Rule("MLD-02", "Undercuts for a two-part mould", "moulding_casting", r_mould_undercut),

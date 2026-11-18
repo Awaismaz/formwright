@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowRightToLine, ArrowUpFromLine, Check, Circle as CircleIcon, CircleDashed, CopyPlus, Equal, FlipHorizontal2,
   Grid2x2, Hexagon, Lock, MousePointer2, Pencil, Pill, Radius, RectangleHorizontal, Redo2, RotateCw, Ruler, Scissors, SeparatorVertical, Spline,
-  Fence, SquareDashed, Trash2, TriangleRight, Undo2, X,
+  Fence, PanelBottom, SquareDashed, Trash2, TriangleRight, Undo2, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -17,9 +17,9 @@ import type { Topo, V3 } from "@/viewer/types";
 type ToolT = "select" | "line" | "centerline" | "rect" | "circle" | "arc" | "slot" | "polygon" | "dim" | "angle" | "trim" | "extend" | "fillet";
 type Sel = { kind: "pt" | "ent"; id: string };
 type NoId<T> = T extends unknown ? Omit<T, "id"> : never;
-export type SketchKind = "extrude" | "revolve" | "rib" | "sketch";
+export type SketchKind = "extrude" | "revolve" | "rib" | "sketch" | "sheet";
 export interface SketchPreset { feature?: SketchKind; mode?: "add" | "cut" }
-const OP_OF: Record<SketchKind, ManualFeature["op"]> = { extrude: "sketch", revolve: "revolve", rib: "rib", sketch: "sketch2d" };
+const OP_OF: Record<SketchKind, ManualFeature["op"]> = { extrude: "sketch", revolve: "revolve", rib: "rib", sketch: "sketch2d", sheet: "sm_base" };
 
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const crossV = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -75,7 +75,14 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   // Focus and select the value once the click that placed the dimension has finished (its mousedown would blur it).
   useEffect(() => { if (!dimEdit) return; const t = setTimeout(() => { dimInput.current?.focus(); dimInput.current?.select(); }, 0); return () => clearTimeout(t); }, [dimEdit?.cid]); // eslint-disable-line react-hooks/exhaustive-deps
   const [mode, setMode] = useState<"add" | "cut">(editing?.mode ?? preset?.mode ?? "add");
-  const [kind, setKind] = useState<SketchKind>(editing ? (editing.op === "revolve" ? "revolve" : editing.op === "rib" ? "rib" : editing.op === "sketch2d" ? "sketch" : "extrude") : preset?.feature ?? "extrude");
+  const [kind, setKind] = useState<SketchKind>(editing ? (editing.op === "revolve" ? "revolve" : editing.op === "rib" ? "rib" : editing.op === "sketch2d" ? "sketch" : editing.op === "sm_base" ? "sheet" : "extrude") : preset?.feature ?? "extrude");
+  // sheet metal (CAD-026): the base flange carries the part's sheet parameters
+  const smE = editing?.op === "sm_base" ? editing : null;
+  const [smT, setSmT] = useState(String(smE?.t ?? 2));
+  const [smR, setSmR] = useState(String(smE?.r ?? smE?.t ?? 2));
+  const [smK, setSmK] = useState(String(smE?.k ?? 0.44));
+  const [smRelief, setSmRelief] = useState<"rect" | "obround" | "none">(smE?.relief?.type ?? "rect");
+  const [smRatio, setSmRatio] = useState(String(smE?.relief?.ratio ?? 0.5));
   const [ribT, setRibT] = useState(String(editing?.op === "rib" ? editing.t ?? 5 : 5));
   const [ribFlip, setRibFlip] = useState(!!editing?.flip);
   const [end, setEnd] = useState<"blind" | "mid" | "through">(editing?.end ?? "blind");
@@ -349,17 +356,24 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   const prof = useMemo(() => profiles(sk), [sk]);
   const centerline = sk.entities.find(e => e.type === "line" && e.construction) as Extract<SEntity, { type: "line" }> | undefined;
   const finish = async () => {
+    if (kind === "sheet" && hasBody && !smE) { toast.error("A base flange starts a sheet-metal part: use it on a new part, before any other solid feature."); return; }
     if (kind === "sketch" ? !prof.loops.length && !prof.chains.length : kind === "rib" ? !prof.chains.length : !prof.loops.length) {
       if (kind === "sketch") { toast.error("The sketch is empty: draw a profile or a path."); return; }
       toast.error(kind === "rib" ? "A rib needs an open profile: a line or chain of lines/arcs that runs between walls of the part."
         : "Draw at least one closed profile (lines/arcs meeting end-to-end, or a circle)."); return;
     }
-    const base = kind === "sketch" ? "Sketch" : kind === "rib" ? "Rib" : kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
+    const base = kind === "sketch" ? "Sketch" : kind === "sheet" ? "Base-Flange" : kind === "rib" ? "Rib" : kind === "revolve" ? (mode === "cut" ? "Cut-Revolve" : "Revolve") : (mode === "cut" ? "Cut-Extrude" : "Boss-Extrude");
     const common = { name: editing && editing.op === OP_OF[kind] ? editing.name : nextName(base, existing),
       suppressed: editing?.suppressed ?? false, plane, plane_ref: planeRef?.id ?? null, editor: sk };
     let feature: Record<string, unknown>;
     if (kind === "sketch") {
       feature = { op: "sketch2d", ...common, profiles: prof.loops, chains: prof.chains };
+    } else if (kind === "sheet") {
+      const t = Number(smT), r = Number(smR), k = Number(smK), ratio = Number(smRatio);
+      if (!(t > 0)) { toast.error("Enter a positive sheet thickness"); return; }
+      if (!(r >= 0)) { toast.error("Enter a bend radius of 0 or more"); return; }
+      if (!(k >= 0 && k <= 1)) { toast.error("The K-factor is between 0 and 1 (0.3–0.5 is usual)"); return; }
+      feature = { op: "sm_base", ...common, profiles: prof.loops, t, r, k, relief: { type: smRelief, ratio: ratio > 0 ? ratio : 0.5 }, reverse };
     } else if (kind === "rib") {
       const t = Number(ribT); if (!(t > 0)) { toast.error("Enter a positive rib thickness"); return; }
       feature = { op: "rib", ...common, chains: prof.chains, t, flip: ribFlip };
@@ -500,14 +514,26 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
           <Tip content={hasBody ? "Thicken an open profile into a rib that runs to the walls of the part" : "A rib needs an existing solid"} side="top">
             <button disabled={!hasBody} onClick={() => setKind("rib")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", kind === "rib" ? "bg-primary text-white" : "text-muted")}><Fence className="h-3.5 w-3.5" />Rib</button>
           </Tip>
+          <Tip content={hasBody && !smE ? "A base flange starts a sheet-metal part (use it on a new part)" : "Sheet metal: thicken the closed profile into a sheet and set its thickness, bend radius, K-factor and reliefs"} side="top">
+            <button disabled={hasBody && !smE} onClick={() => setKind("sheet")} data-kind="sheet" className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", kind === "sheet" ? "bg-primary text-white" : "text-muted")}><PanelBottom className="h-3.5 w-3.5" />Base Flange</button>
+          </Tip>
         </div>
-        {kind !== "rib" && kind !== "sketch" && <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
+        {kind !== "rib" && kind !== "sketch" && kind !== "sheet" && <div className="inline-flex overflow-hidden rounded border border-border text-[12.5px]">
           <button onClick={() => setMode("add")} className={cx("flex items-center gap-1 px-2.5 py-1", mode === "add" ? "bg-primary text-white" : "text-muted")}><ArrowUpFromLine className="h-3.5 w-3.5" />Boss</button>
           <Tip content={hasBody ? "Remove material" : "A cut needs an existing solid. Start with a boss."} side="top">
             <button disabled={!hasBody} onClick={() => setMode("cut")} className={cx("flex items-center gap-1 px-2.5 py-1 disabled:opacity-40", mode === "cut" ? "bg-primary text-white" : "text-muted")}><ArrowDownToLine className="h-3.5 w-3.5" />Cut</button>
           </Tip>
         </div>}
-        {kind === "sketch" ? null : kind === "rib" ? <>
+        {kind === "sketch" ? null : kind === "sheet" ? <>
+          <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={smT} onChange={e => setSmT(e.target.value)} className="h-8 w-16 text-right" inputMode="decimal" aria-label="Sheet thickness" />mm</label>
+          <Tip content="Default inside bend radius for the part's flanges" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">Bend R<Input value={smR} onChange={e => setSmR(e.target.value)} className="h-8 w-14 text-right" inputMode="decimal" aria-label="Bend radius" />mm</label></Tip>
+          <Tip content="Neutral fibre position as a fraction of the thickness: bend allowance = angle × (R + K × T). Ask your fabricator for theirs (0.3–0.5 is usual)" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">K-factor<Input value={smK} onChange={e => setSmK(e.target.value)} className="h-8 w-14 text-right" inputMode="decimal" aria-label="K-factor" /></label></Tip>
+          <select value={smRelief} onChange={e => setSmRelief(e.target.value as typeof smRelief)} className="h-8 rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="Bend relief">
+            <option value="rect">Rectangular relief</option><option value="obround">Obround relief</option><option value="none">No relief (tear)</option>
+          </select>
+          {smRelief !== "none" && <Tip content="Relief width as a multiple of the thickness" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">×T<Input value={smRatio} onChange={e => setSmRatio(e.target.value)} className="h-8 w-12 text-right" inputMode="decimal" aria-label="Relief ratio" /></label></Tip>}
+          <Tip content="Thicken to the other side of the sketch plane" side="top"><button onClick={() => setReverse(!reverse)} className={cx("rounded border p-1.5", reverse ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
+        </> : kind === "rib" ? <>
           <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={ribT} onChange={e => setRibT(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" aria-label="Rib thickness" />mm</label>
           <Tip content="Try the other side of the profile first (the side closed off by the part is used)" side="top"><button onClick={() => setRibFlip(!ribFlip)} className={cx("rounded border p-1.5", ribFlip ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Flip material side"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
         </> : kind === "extrude" ? <>

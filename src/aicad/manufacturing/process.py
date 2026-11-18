@@ -134,7 +134,9 @@ def rank(g: PartGeom, shop: ShopProfile, mat: dict[str, Any], quantity: int, tol
                 score += 15
                 conf = "medium"
                 pros.append(f"Constant {sheet.thickness:g} mm thickness over {100 * sheet.frac:.0f} % of the surface")
-                cons.append("Bend radius and outer radius are checked; the flat pattern, bend reliefs and "
+                cons.append("Flat pattern and bends come from the sheet-metal model; bend reliefs and hole-to-bend "
+                            "distances are not analysed" if sheet.model else
+                            "Bend radius and outer radius are checked; the flat pattern, bend reliefs and "
                             "hole-to-bend distances are not analysed")
         elif p in ("fdm", "sla", "sls"):
             pr = shop.printers(p)

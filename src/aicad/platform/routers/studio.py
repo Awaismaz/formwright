@@ -110,7 +110,7 @@ def estimate(project_id: str, chars: int = 0, ctx: Ctx = Depends(verified_ctx)) 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
 OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
-       "sketch2d", "sweep", "loft", "thread"}
+       "sketch2d", "sweep", "loft", "thread", "sm_base", "sm_flange", "sm_hem"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -228,7 +228,7 @@ def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
     out["reverse"] = bool(f.get("reverse"))
 
 
-REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread"}  # picks stored with the body's box, to follow size changes
+REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread", "sm_flange", "sm_hem"}  # picks stored with the body's box, to follow size changes
 
 
 def _edge_ref(r: Any) -> dict[str, Any]:
@@ -395,6 +395,46 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sm_base":  # sheet metal (CAD-026): a closed sketch thickened into a sheet, plus the sheet parameters
+        out["plane"] = _sketch_plane(f.get("plane") or {})
+        out["profiles"] = _profiles(f.get("profiles") or [])
+        if f.get("plane_ref"):
+            out["plane_ref"] = str(f["plane_ref"])[:40]
+        out["t"] = _num(f.get("t"), "sheet thickness", 0.05, 50)
+        out["r"] = _num(f["r"], "bend radius", 0, 1e3) if f.get("r") is not None else out["t"]
+        out["k"] = _num(f.get("k", 0.44), "K-factor", 0, 1)
+        rel = f.get("relief") or {}
+        if rel.get("type", "rect") not in ("rect", "obround", "none"):
+            raise HTTPException(422, "Relief type must be rectangular, obround or none")
+        out["relief"] = {"type": str(rel.get("type", "rect")), "ratio": _num(rel.get("ratio", 0.5), "relief ratio", 0.05, 5)}
+        out["reverse"] = bool(f.get("reverse"))
+        editor = f.get("editor")
+        if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
+            out["editor"] = json.loads(json.dumps(editor))
+    elif op in ("sm_flange", "sm_hem"):
+        out["edge"] = _pt(f.get("edge"), "edge")
+        if f.get("edge_ref") is not None:
+            out["edge_ref"] = _edge_ref(f["edge_ref"])
+        out["length"] = _num(f.get("length"), "flange length" if op == "sm_flange" else "hem length", 0.01, 1e5)
+        out["flip"] = bool(f.get("flip"))
+        if op == "sm_flange":
+            out["angle"] = _num(f.get("angle", 90), "flange angle", 0.1, 180)
+            out["r"] = _num(f["r"], "bend radius", 0, 1e3) if f.get("r") is not None else None
+            if f.get("position", "inside") not in ("inside", "outside", "bend_outside"):
+                raise HTTPException(422, "Position must be material inside, material outside or bend outside")
+            out["position"] = str(f.get("position", "inside"))
+            if f.get("length_ref", "outer") not in ("outer", "tangent"):
+                raise HTTPException(422, "Flange length is measured to the outer virtual sharp or the bend tangent")
+            out["length_ref"] = str(f.get("length_ref", "outer"))
+            ins = f.get("inset") or [0, 0]
+            if not isinstance(ins, (list, tuple)) or len(ins) != 2:
+                raise HTTPException(422, "End offsets: expected [start, end]")
+            out["inset"] = [_num(v, "end offset", 0, 1e5) for v in ins]
+        else:
+            if f.get("position", "inside") not in ("inside", "outside"):
+                raise HTTPException(422, "A hem sits material inside or material outside")
+            out["position"] = str(f.get("position", "inside"))
+            out["gap"] = _num(f["gap"], "hem gap", 0.01, 1e3) if f.get("gap") is not None else None
     elif op == "sweep":
         out["profile"], out["path"] = str(f.get("profile") or "")[:40], str(f.get("path") or "")[:40]
         if not out["profile"] or not out["path"]:

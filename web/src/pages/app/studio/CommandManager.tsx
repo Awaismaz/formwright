@@ -3,6 +3,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, ChevronDown, ChevronUp, Circle, CircleDotDashed, Cone, Cuboid, Diamond, Drill, Fence, FlipHorizontal2,
   Focus, GitCompare, Grid3x3, Layers2, Maximize, MousePointer2, PackageOpen, PenLine, Pyramid, RectangleHorizontal, RefreshCcwDot, Rotate3d,
   RotateCw, Route, Ruler, Scale, Scissors, ShieldCheck, ScanSearch, Spline, SquareDashed, Squircle, Triangle, Upload, Wrench, Hexagon, Ellipsis, Lock,
+  PanelBottom, CornerRightUp, Undo2, FoldHorizontal, FileDown,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "@/components/ui";
@@ -10,8 +11,8 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft" | "thread"; preset?: Record<string, unknown> }
-  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib" | "sketch"; mode?: "add" | "cut" } }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft" | "thread" | "sm_flange" | "sm_hem"; preset?: Record<string, unknown> }
+  | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib" | "sketch" | "sheet"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
   | { kind: "import" } | { kind: "toolbox" } | { kind: "similar" } | { kind: "normal" };
@@ -24,7 +25,7 @@ interface Btn {
   status?: MakeModule["status"]; locked?: boolean;
 }
 
-const TABS = ["Features", "Sketch", "Evaluate", "View", "Library", "Make"] as const;
+const TABS = ["Features", "Sketch", "Sheet Metal", "Evaluate", "View", "Library", "Make"] as const;
 type Size = "full" | "mid" | "icon";
 const WIDTH: Record<Size, number> = { full: 76, mid: 62, icon: 42 };
 const SEP = 13, MORE = 46;
@@ -38,7 +39,10 @@ export interface MakeModule {
   locked?: boolean;
 }
 
-export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [], canNormal = false, touch = false }: {
+/** Sheet metal state for the Sheet Metal tab (CAD-026). */
+export interface SheetTab { has: boolean; flat: boolean; onFlat: () => void; onDxf: () => void }
+
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [], canNormal = false, touch = false, sheet }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
   left?: ReactNode; right?: ReactNode; make?: MakeModule[]; onMake?: (code: string) => void; library?: MakeModule[];
   /** a planar face is selected (enables Normal To) */
@@ -46,6 +50,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
   /** phones/tablets (UX-018): title row and tabs on separate rows, and the ribbon scrolls sideways instead of
    * folding commands into "More" (a swipe beats a menu on touch) */
   touch?: boolean;
+  /** sheet metal: whether the part is sheet metal, the flat-pattern toggle and the DXF download */
+  sheet?: SheetTab;
 }) {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
   const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
@@ -86,6 +92,14 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     ], [
       { id: "rect", label: "Quick Rectangle", icon: <RectangleHorizontal className="h-5 w-5" />, tip: "Quick rectangle boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "rect" } }, needsBody: true },
       { id: "circ", label: "Quick Circle", icon: <Circle className="h-5 w-5" />, tip: "Quick circular boss/cut on a picked face", cmd: { kind: "feature", op: "extrude", preset: { kind: "circle" } }, needsBody: true },
+    ]],
+    "Sheet Metal": [[
+      { id: "smbase", label: "Base Flange", icon: <PanelBottom className="h-5 w-5" />, tip: disabled ? "Sketch a closed profile, then thicken it into a sheet: thickness, default bend radius, K-factor and relief type are set here for the whole part" : "A base flange starts a sheet-metal part: use it on a new part", cmd: { kind: "sketch", preset: { feature: "sheet" } }, disabled: !disabled && !sheet?.has },
+      { id: "smflange", label: "Edge Flange", icon: <CornerRightUp className="h-5 w-5" />, tip: sheet?.has ? "Bend a flange up from a straight edge of the sheet: length, angle, bend radius, position, end offsets" : "Needs a sheet-metal part: start it with a Base Flange", cmd: { kind: "feature", op: "sm_flange" }, needsBody: true, disabled: !sheet?.has },
+      { id: "smhem", label: "Hem", icon: <Undo2 className="h-5 w-5 rotate-90" />, tip: sheet?.has ? "Fold an edge back on itself (open hem with a gap)" : "Needs a sheet-metal part: start it with a Base Flange", cmd: { kind: "feature", op: "sm_hem" }, needsBody: true, disabled: !sheet?.has },
+    ], [
+      { id: "smflat", label: sheet?.flat ? "Fold" : "Flatten", icon: <FoldHorizontal className="h-5 w-5" />, tip: sheet?.flat ? "Show the folded part again" : "Show the flat pattern (bend allowance from the K-factor)", onClick: () => sheet?.onFlat(), active: !!sheet?.flat, disabled: !sheet?.has },
+      { id: "smdxf", label: "Flat DXF", icon: <FileDown className="h-5 w-5" />, tip: "Download the flat pattern as DXF: outline at true size, bend lines (UP / DOWN layers) and bend notes", onClick: () => sheet?.onDxf(), disabled: !sheet?.has },
     ]],
     Evaluate: [[
       { id: "measure", label: "Measure", icon: <Ruler className="h-5 w-5" />, tip: "Snap measurement (Esc clears)", cmd: { kind: "tool", tool: "measure" }, active: activeTool === "measure" },

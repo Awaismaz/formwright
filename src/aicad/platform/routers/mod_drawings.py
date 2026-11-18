@@ -41,11 +41,14 @@ from aicad.platform.services import audit, org_modules, track
 router = APIRouter(prefix="/api/m/drawings", tags=["drawings"])
 
 CODE = "drawings"
-FILES = {"sheet.svg": "image/svg+xml", "sheet.pdf": "application/pdf", "sheet.dxf": "application/dxf"}
+FILES = {"sheet.svg": "image/svg+xml", "sheet.pdf": "application/pdf", "sheet.dxf": "application/dxf",
+         # sheet metal (CAD-026): the flat-pattern sheet (one monochrome copy)
+         "flat.svg": "image/svg+xml", "flat.pdf": "application/pdf", "flat.dxf": "application/dxf"}
 #: (file, copy) -> stored file. The issue copy (monochrome, no tag legend) is the export default (MAKE-09).
 COPIES = {("sheet.svg", "review"): "sheet.svg", ("sheet.svg", "issue"): "sheet_issue.svg",
           ("sheet.pdf", "review"): "sheet_review.pdf", ("sheet.pdf", "issue"): "sheet.pdf",
-          ("sheet.dxf", "review"): "sheet.dxf", ("sheet.dxf", "issue"): "sheet.dxf"}
+          ("sheet.dxf", "review"): "sheet.dxf", ("sheet.dxf", "issue"): "sheet.dxf",
+          **{(f"flat.{x}", c): f"flat_sheet.{x}" for x in ("svg", "pdf", "dxf") for c in ("review", "issue")}}
 
 
 class Tolerance(BaseModel):
@@ -316,15 +319,16 @@ def drawing_file(project_id: str, name: str, download: bool = False, copy: str |
         raise HTTPException(404)
     if copy not in (None, "issue", "review"):
         raise HTTPException(422, "copy must be issue or review")
-    which = copy or ("review" if name == "sheet.svg" and not download else "issue")
+    which = copy or ("review" if name in ("sheet.svg", "flat.svg") and not download else "issue")
     f = workspace_for(p) / "drawings" / COPIES[(name, which)]
     if not f.is_file():
         raise HTTPException(404, "Generate the drawing first")
     headers = {"Cache-Control": "no-store"}
-    if download or name != "sheet.svg":
+    if download or name not in ("sheet.svg", "flat.svg"):
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in p.name.removeprefix("Demo · "))[:60] or "part"
-        suffix = "_review" if which == "review" and name != "sheet.dxf" else ""
-        headers["Content-Disposition"] = f'attachment; filename="{safe}_drawing{suffix}{Path(name).suffix}"'
+        suffix = "_review" if which == "review" and name.startswith("sheet.") and name != "sheet.dxf" else ""
+        kind = "_flat_pattern" if name.startswith("flat.") else "_drawing"
+        headers["Content-Disposition"] = f'attachment; filename="{safe}{kind}{suffix}{Path(name).suffix}"'
         track(ctx.db, "download", ctx.user, p.org_id, file=f"drawing/{name}")
         ctx.db.commit()
     return FileResponse(f, media_type=FILES[name], headers=headers)

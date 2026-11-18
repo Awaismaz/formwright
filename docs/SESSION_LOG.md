@@ -57,6 +57,59 @@ stub and replay only.
 
 ### Decision parked
 - PD-59 (provider routing, Messages API defaults, SOLIDWORKS export defaults).
+## 2026-11-18 (y) — Sheet metal: base flange, edge flange, hem, flat pattern + DXF, drawing sheet, DFM (CAD-026, MFG-011)
+
+Branch `wip/sheet-metal` (worktree `fw-wt/sheet-metal`). Report + screenshots: docs/reports/sheet-metal/. PD-60. No live
+model calls.
+
+### Done
+- Kernel `src/aicad/sheetmetal.py`: immutable panel + bend model kept next to the solid; base flange (closed sketch
+  region + T), edge flange on a picked straight sheet edge (length outer virtual sharp / tangent, angle 0–180°, own R,
+  position material inside / outside / bend outside, flip, end offsets with rectangular / obround reliefs), open hem;
+  flat pattern solid (+ placed over the base), outline entities, bend centre lines, DXF (OUTLINE, BEND_UP / BEND_DOWN
+  dashed, BEND_NOTES "UP 90° R2", NOTES). Cuts made in panels after the flanges carry into the flat (common with each
+  panel prism); material outside panels / cut through bends is reported, not drawn.
+- `fw`: manual ops `sm_base` / `sm_flange` / `sm_hem` (validated in `studio.validate_feature`, picks in REF_OPS so they
+  follow size and thickness edits), helpers `fw.base_flange/edge_flange/hem` for model scripts; runner caches the
+  sheet state with the base, writes `out/flat.topo.json|dxf|json` and `status.sheet_metal` (served files; flat DXF in
+  DOWNLOADS as `<part>_flat.dxf`).
+- Studio: Sheet Metal ribbon tab (Base Flange, Edge Flange, Hem, Flatten/Fold, Flat DXF); Base Flange mode in the
+  sketcher (T, bend R, K, relief type / ratio, reverse); flange / hem PropertyManager with live BA; viewer chip
+  Folded / Flat pattern with flat size; tree Flat-Pattern node with the bend table; Files tab flat DXF.
+- Drawing Studio: sheet 2 = flat pattern (`drawing/flat.py`: outline at a standard scale, bend centre lines + labels,
+  overall size, bend table, BA / K notes; SVG / PDF / DXF with the outline in model space at true size); sheet switcher
+  and downloads in the UI; `drawing.json.flat_pattern`.
+- Manufacturing Advisor: a part with a sheet model is sheet metal of its T; SHM-03 flat size + bend count, SHM-04
+  flange < 4·T, SHM-05 R < T (warnings, advisory); sheet cost line from the flat blank / outline / bends.
+- Agent prompt: Sheet metal section; scrub hides `fw.base_flange/edge_flange/hem/sheet`; Benny's practice note now
+  uses the tools.
+- Fixed on the way: `runner.finalize()` rewrote status.json non-atomically (an HTTP 500 on `/recognition` seen in the
+  walkthrough while it ran).
+
+### Verified how
+- `tests/test_sheet_metal.py` (15): flat lengths vs hand formulas (bend deduction form for 90°, 60° material outside,
+  120° bend outside tangent, 135° inside, K ∈ {0, 0.33, 0.44, 0.5}, ΔK shift = θ·ΔK·T, U-channel + return flange, hem,
+  relief areas, hole after flanges), folded bbox / volume, DXF layers / perimeter / notes, Studio lifecycle (thickness
+  edit re-resolves the flange, suppress, 422s, clean error for a non-sheet edge), a sheet model script passing
+  CHK-02/03/04/05/07/08 (determinism), drawing sheet (CHK-12 on sheet 1, flat DXF true size), DFM rules, scrub.
+- Browser walkthrough (puppeteer-core, port 8831, throwaway data dir): base flange 100×60×2 → 12 000 mm³; flange 25 mm
+  → flat Y 81.524 (formula 81.5239); 45° outside flange on the now-56 mm edge; hem; folded bbox 111.44×60×25, gating
+  checks pass; flat 114.78×92.43, bends UP 90° R2 BA 4.524 / UP 45° R2 2.262 / UP 180° R1 5.906; flat.dxf 200 with
+  UP/DOWN layers; drawing CHK-12 passed, flat sheet 2:1, 3 bends; Advisor SHM-03 + SHM-01 (hem R1 below the steel
+  table, correct). Screenshots 01–08 reviewed; one HTTP 500 (finalize race, fixed above).
+- Gate: ruff clean; web tsc, 121 vitest, vite build OK; targeted pytest (sheet metal, manufacturing, drawings,
+  drawing depth, studio ×3, agent, io round-trip, office: 195 passed; `test_datasheet_shots_go_stale_and_requeue` failed once under load and passed alone).
+
+### Not done / limitations
+- No automatic corner relief / closed corners (adjacent flanges just touch), no sketched bend, jog, miter flange,
+  flanges on curved edges or partial edges other than end offsets; holes through a bend are not in the flat.
+- The main drawing sheet draws the folded part as before; the flat pattern is a separate sheet.
+
+### Next
+- Merge `wip/sheet-metal`; then corner reliefs and sketched bends if the founder wants more sheet-metal depth.
+
+### Decision required
+- PD-60 (sheet-metal defaults: K 0.44, R = T, 4·T flange rule, position conventions).
 
 ---
 

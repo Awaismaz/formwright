@@ -146,6 +146,20 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   starts; class defaults to 6H inside a hole, 6g on a shaft). Drawings call it out ("4X M6×1-6H ▽12") and the STEP
   file carries it. Never model a helix. Sizes and pitches: ISO 261 (coarse by default).
 
+## Sheet metal
+- Bent sheet parts (brackets, covers, trays, enclosures) are built with the sheet-metal tools, never as machined
+  solids: `part = fw.base_flange(width=W, height=D, thickness=T, radius=R, k=0.44)` (or `points=[(u, v), ...]` for
+  any polygon; `plane=` a build123d Plane, default XY) starts the part, then
+  `part = fw.edge_flange(part, (x, y, z), L, angle=90, position="inside", name="Front flange")` on a point of a
+  straight top or bottom edge of the sheet (it folds towards that face's side; `flip=True` reverses it;
+  position "inside" / "outside" / "bend_outside"; L is measured from the outer virtual sharp unless
+  `length_ref="tangent"`; `inset=(a, b)` shortens it from the edge ends and cuts reliefs), and
+  `part = fw.hem(part, (x, y, z), L, gap=T)` folds an edge back. Each call is one recorded feature.
+- Flanges on adjacent edges: make the first pair first; the next edges are then already shorter (no overlap).
+- The flat pattern (bend allowance BA = angle × (R + K × T)), its DXF and the bend table are produced
+  automatically. EXPECTED for a sheet part: bbox from the outer dimensions; volume = panels × T + each bend's
+  angle/2 × ((R+T)² − R²) × its length (hand formula). Use an inside radius ≥ T unless the user says otherwise.
+
 ## Toolbox (standard components) and imported parts
 - `from aicad import toolbox` gives deterministic generators: `shape, expected = toolbox.build(code, **params)`.
   Codes: hex_bolt(D, L), shcs(D, L), hex_nut(D), washer(D), standoff(D, AF, L), dowel(D, L), bearing(SERIES),

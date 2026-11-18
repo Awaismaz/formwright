@@ -4,6 +4,7 @@
 - edges_near / faces_near  select topology by location (stable across rebuilds, unlike indices)
 - apply_manual(part, ops)  apply user-authored manual features (fillet, chamfer, hole, sketch extrude/cut)
 - thread(part, point, ...) cosmetic thread on a hole or cylinder (metadata only; the geometry is unchanged)
+- base_flange / edge_flange / hem   sheet metal (CAD-026); the flat pattern is made by the runner
 
 State is per build: the runner calls reset() before executing a script.
 """
@@ -43,8 +44,9 @@ from build123d import (
 )
 
 from aicad import refplane as _refplane
+from aicad import sheetmetal as _sm
 
-_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None, "manual_errors": [], "threads": []}
+_STATE: dict[str, Any] = {"log": [], "manual": 0, "base": None, "manual_errors": [], "threads": [], "sheet": None}
 
 
 def reset() -> None:
@@ -54,6 +56,7 @@ def reset() -> None:
     _STATE["suppressed"] = set()
     _STATE["manual_errors"] = []
     _STATE["threads"] = []
+    _STATE["sheet"] = None
 
 
 def set_base(folder: Any) -> None:
@@ -433,7 +436,7 @@ def sketch_region(profiles: list[dict[str, Any]]) -> Any:
 
 
 TOOL_OPS = {"sketch", "extrude", "revolve", "hole", "sweep", "loft"}
-BASE_OPS = {"sketch", "extrude", "revolve", "sweep", "loft"}  # can create the first solid of a hand-modelled part
+BASE_OPS = {"sketch", "extrude", "revolve", "sweep", "loft", "sm_base"}  # can create the first solid of a hand-modelled part
 SKETCH_USERS = {"sweep": ("profile", "path"), "loft": ("sections",)}  # features that consume sketch nodes (by id)
 NON_GEOMETRIC = _refplane.NON_GEOMETRIC
 ref_plane = _refplane.ref_plane
@@ -761,6 +764,8 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
         return part
     if op == "thread":
         return _cosmetic_thread(part, f)
+    if op in SHEET_OPS:
+        return _sheet_op(part, f)
     if op == "pattern":
         for src in _sources(f, done, "patterned"):
             axes = _hole_axes(part, src) if src["op"] == "hole" and src.get("thread") else None
@@ -1016,3 +1021,122 @@ def threads() -> list[dict[str, Any]]:
 def manual_errors() -> list[dict[str, Any]]:
     """Manual features that failed to rebuild in the last build (rebuild errors shown in the feature tree)."""
     return list(_STATE.get("manual_errors") or [])
+
+
+# ----------------------------------------------------------------------------- sheet metal (CAD-026)
+SHEET_OPS = {"sm_base", "sm_flange", "sm_hem"}
+
+
+def sheet() -> Any:
+    """The sheet-metal model of the last build (None for a part that is not sheet metal)."""
+    return _STATE.get("sheet")
+
+
+def _sheet_frame(spec: dict[str, Any], t: float, reverse: bool) -> Location:
+    loc = Location(_plane(spec))
+    return loc * Pos(0, 0, -t) if reverse else loc
+
+
+def _sheet_edge(part: Any, f: dict[str, Any]) -> dict[str, Any]:
+    """The sheet edge a flange or hem was picked on, carried along with the body's size like other picks."""
+    sh = _STATE.get("sheet")
+    if sh is None:
+        raise ValueError("an edge flange needs a sheet-metal part: start it with a Base Flange")
+    ref = f.get("edge_ref") or {}
+    direction = ref.get("dir") if ref.get("kind") == "line" else None
+    p = _v(f["edge"])
+    e = _sm.find_edge(sh, p, direction)
+    if e is None and f.get("ref_bbox") and part is not None:
+        for q in _remaps(p, f["ref_bbox"], _bbox6(part)):
+            e = _sm.find_edge(sh, q, direction)
+            if e is not None:
+                break
+    if e is None:
+        raise ValueError("the picked edge was not found: pick a long edge on the top or bottom face of the sheet "
+                         "(the geometry may have changed)")
+    return e
+
+
+def _sheet_op(part: Any, f: dict[str, Any]) -> Any:
+    op = f["op"]
+    name = str(f.get("name") or op)
+    if op == "sm_base":
+        if part is not None:
+            raise ValueError("a base flange starts a sheet-metal part, so it must be the first solid feature")
+        t = float(f["t"])
+        region = sketch_region(f["profiles"])
+        rel = f.get("relief") or {}
+        sh, solid = _sm.base(region, _sheet_frame(f["plane"], t, bool(f.get("reverse"))), t,
+                             float(f["r"]) if f.get("r") is not None else None, float(f.get("k", 0.44)),
+                             str(rel.get("type", "rect")), float(rel.get("ratio", 0.5)), name)
+        _STATE["sheet"] = sh
+        return solid
+    e = _sheet_edge(part, f)
+    if op == "sm_hem":
+        gap = float(f.get("gap") or _STATE["sheet"].t)
+        sh, part = _sm.flange(_STATE["sheet"], part, f["edge"], float(f["length"]), 180.0, gap / 2,
+                              bool(f.get("flip")), str(f.get("position", "inside")), "tangent", (0.0, 0.0), name,
+                              kind="hem", edge=e)
+    else:
+        ins = f.get("inset") or [0, 0]
+        sh, part = _sm.flange(_STATE["sheet"], part, f["edge"], float(f["length"]), float(f.get("angle", 90)),
+                              float(f["r"]) if f.get("r") is not None else None, bool(f.get("flip")),
+                              str(f.get("position", "inside")), str(f.get("length_ref", "outer")),
+                              (float(ins[0]), float(ins[1])), name, edge=e)
+    _STATE["sheet"] = sh
+    return part
+
+
+def base_flange(points: list[Any] | None = None, *, thickness: float, width: float | None = None,
+                height: float | None = None, radius: float | None = None, k: float = 0.44, plane: Any = None,
+                relief: str = "rect", relief_ratio: float = 0.5, reverse: bool = False,
+                name: str = "Base-Flange") -> Any:
+    """Model-script helper: start a sheet-metal part. The profile is a polygon ``points`` [(u, v), ...] or a
+    ``width`` × ``height`` rectangle centred on the plane origin, on ``plane`` (a build123d Plane, default XY),
+    thickened by ``thickness`` along the plane normal (``reverse`` = the other way). ``radius`` is the default
+    inside bend radius (default = thickness), ``k`` the K-factor. Returns the part (recorded as a feature)."""
+    pl = plane if plane is not None else Plane.XY
+    if points:
+        region = Polygon(*[(float(u), float(v)) for u, v in points], align=None)
+    elif width and height:
+        region = Rectangle(float(width), float(height))
+    else:
+        raise ValueError("base_flange needs points or width and height")
+    loc = Location(pl) * Pos(0, 0, -float(thickness)) if reverse else Location(pl)
+    sh, solid = _sm.base(region.faces()[0] if len(region.faces()) == 1 else region, loc, float(thickness), radius,
+                         k, relief, relief_ratio, name)
+    _STATE["sheet"] = sh
+    return feature(name, solid)
+
+
+def edge_flange(part: Any, edge_point: Any, length: float, angle: float = 90.0, radius: float | None = None,
+                flip: bool = False, position: str = "inside", length_ref: str = "outer",
+                inset: tuple[float, float] = (0.0, 0.0), name: str = "Edge-Flange") -> Any:
+    """Model-script helper: an edge flange on the straight sheet edge through ``edge_point`` (a point on a top or
+    bottom edge of the sheet). It bends towards that face's side (``flip`` reverses it). ``position``: "inside"
+    (material inside), "outside" or "bend_outside"; ``length_ref``: "outer" (from the outer virtual sharp) or
+    "tangent"; ``inset`` shortens it from the edge ends (reliefs are cut)."""
+    if name in _STATE.get("suppressed", set()):
+        return feature(name, part)
+    sh, part = _sm.flange(_STATE["sheet"] if _STATE.get("sheet") else _no_sheet(), part, edge_point, length, angle,
+                          radius, flip, position, length_ref, inset, name)
+    _STATE["sheet"] = sh
+    return feature(name, part)
+
+
+def hem(part: Any, edge_point: Any, length: float, gap: float | None = None, flip: bool = False,
+        position: str = "inside", name: str = "Hem") -> Any:
+    """Model-script helper: an open hem (180° bend, inside radius gap/2, default gap = thickness) of straight
+    ``length`` on the sheet edge through ``edge_point``."""
+    if name in _STATE.get("suppressed", set()):
+        return feature(name, part)
+    sh = _STATE["sheet"] if _STATE.get("sheet") else _no_sheet()
+    g = float(gap) if gap is not None else sh.t
+    sh, part = _sm.flange(sh, part, edge_point, length, 180.0, g / 2, flip, position, "tangent", (0.0, 0.0), name,
+                          kind="hem")
+    _STATE["sheet"] = sh
+    return feature(name, part)
+
+
+def _no_sheet() -> Any:
+    raise ValueError("an edge flange or hem needs a sheet-metal part: start it with base_flange")
