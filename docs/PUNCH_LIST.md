@@ -17,7 +17,7 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 |---|---|
 | Done | 165 |
 | In Progress | 23 |
-| Backlog | 90 |
+| Backlog | 91 |
 | Blocked | 10 |
 | Superseded | 8 |
 | **Total** | **296** |
@@ -262,6 +262,7 @@ Plan: `docs/plans/CHIEF_DESIGNER.md`.
 | CD-014 | Design Office | Program deliverables: drawings (Drew), DFM (Forge), BOM, release pack | P2 | Backlog | M4 | LT | Eng | CD-011 |  | — |  |
 | CD-015 | Design Office | Estimate calibration from completed tickets; timeline (Gantt-lite) | P2 | Backlog | M4 | LT | Eng | CD-004 | Estimate error shrinks across runs | — |  |
 | CD-016 | Design Office | Program token budget per ticket/program with 80 %/100 % stops and spend on cards | P1 | Backlog | M4 | LT | Eng | CD-006 |  | — | PD-36 |
+| CD-017 | Design Office | **Agent avatars + state animations**: illustrated SVG avatar per agent (tool + character, own colour); role-specific 'working' animation (Mill cutter + chips, Chuck spinning jaws, Axel meshing gears, Gage caliper closing, Smithy hammer sparks…); shared idle/review/blocked/done/hand-off states; reduced-motion fallback; used on board, roster, cards and Studio chat | P1 | Backlog | M4 | LT | Eng | CD-003 | Every agent has avatar + all states; reduced motion respected | — | Founder request 2026-11-18; plan §3.1 |
 
 ### Native CAD Bridge — SOLIDWORKS pilot, then Onshape, Inventor, Creo (founder-requested 2026-11-18)
 

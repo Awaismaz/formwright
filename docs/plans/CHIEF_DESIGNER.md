@@ -96,6 +96,35 @@ instructions, allowed tools, default model/effort, a tool-glyph avatar and a col
 | **Ortho** | Drawings | orthographic projection | "Ortho is dimensioning sheet 2 of 5" |
 | **Smithy** | Manufacturing review | the blacksmith's shop | "Smithy flagged a 0.5 mm wall as too thin to mill" |
 
+### 3.1 Avatars and working animations (founder requirement 2026-11-18)
+
+Every agent has an illustrated avatar: a round badge in the agent's colour carrying its tool, with a small face
+or character. Avatars are animated by **state**, so you can see who is working at a glance on the board, the
+roster, ticket cards and the Studio chat. Everything is SVG and CSS (no video), and has a static fallback when the
+system asks for reduced motion.
+
+| Agent | Avatar | "Working" animation |
+|---|---|---|
+| Archie | compass + blueprint | compass swings an arc across a blueprint |
+| Mill | end mill over a block | the cutter spins and chips fly off |
+| Chuck | three-jaw chuck | the chuck spins and a curl of swarf peels away |
+| Axel | gear pair | the gears mesh at the correct ratio |
+| Benny | sheet with a bend line | the sheet folds to 90° and springs back |
+| Molly | mould halves | the halves close, a fill shimmer, then eject |
+| Hex | hex nut on a bolt | the nut spins down the thread; a drawer of parts slides out while searching |
+| Fitz | two parts with a dowel | the parts slide together and click |
+| Gage | caliper | the jaws close on a part and the readout ticks |
+| Ortho | pen and drawing sheet | the pen draws a view and a dimension line |
+| Smithy | anvil and hammer | the hammer strikes and sparks fly |
+
+States, shared by all agents:
+- **idle:** gentle breathing.
+- **working:** the role-specific animation above, plus a progress ring around the badge.
+- **waiting for review:** a pulsing outline.
+- **blocked / changes requested:** an amber shake once, then still.
+- **done:** a check pops on the badge.
+- **hand-off:** the avatar slides from one agent's lane to the next on the board.
+
 Engagement: live present-tense status lines on cards (plain engineering language, never internals); visible
 hand-offs ("Chuck → Gage for inspection", "Gage → Fitz: approved for assembly"); a "fitted" moment when a
 placeholder turns solid; program milestones with a short celebration and summary ("All interfaces frozen",
