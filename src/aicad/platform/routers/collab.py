@@ -585,7 +585,7 @@ def _link_from(token: str) -> tuple[Any, ShareLink, Project]:
 
 
 SHARE_FILES = {"model.glb": "model/gltf-binary", "topo.json": "application/json", "status.json": "application/json",
-               "views.png": "image/png", "thumb.png": "image/png"}
+               "views.png": "image/png", "thumb.png": "image/png", "flat.topo.json": "application/json"}
 
 
 @router.get("/share/{token}")

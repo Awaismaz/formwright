@@ -38,8 +38,10 @@ router = APIRouter(prefix="/api", tags=["projects"])
 FILES = {"model.glb": "model/gltf-binary", "status.json": "application/json", "part.step": "application/step",
          "part.stl": "model/stl", "views.png": "image/png", "thumb.png": "image/png",
          "topo.json": "application/json",
-         "part.3mf": "model/3mf", "recognition.json": "application/json"}
-DOWNLOADS = {"part.step", "part.stl", "part.3mf"}
+         "part.3mf": "model/3mf", "recognition.json": "application/json",
+         # sheet metal (CAD-026): flat pattern for the viewer toggle, the DXF download and the bend table
+         "flat.topo.json": "application/json", "flat.dxf": "application/dxf", "flat.json": "application/json"}
+DOWNLOADS = {"part.step", "part.stl", "part.3mf", "flat.dxf"}
 
 TEMPLATES = [
     {"code": "plate", "name": "Mounting plate", "icon": "square",
@@ -524,7 +526,7 @@ async def project_file(project_id: str, name: str, ctx: Ctx = Depends(verified_c
     headers = {"Cache-Control": "no-store"}
     if name in DOWNLOADS:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in p.name)[:60] or "part"
-        headers["Content-Disposition"] = f'attachment; filename="{safe}{Path(name).suffix}"'
+        headers["Content-Disposition"] = f'attachment; filename="{safe}{"_flat" if name == "flat.dxf" else ""}{Path(name).suffix}"'
         track(ctx.db, "download", ctx.user, p.org_id, file=name)
         ctx.db.commit()
     return FileResponse(f, media_type=FILES[name], headers=headers)

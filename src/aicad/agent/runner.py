@@ -113,6 +113,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
         fw._STATE["log"] = list(cached["log"])
         fw._STATE["last"] = cached.get("last")
         fw._STATE["threads"] = list(cached.get("threads") or [])
+        fw._STATE["sheet"] = cached.get("sheet")  # immutable model: safe to share with the cache
     else:
         sys.path.insert(0, folder)
         try:
@@ -127,7 +128,8 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
                     del sys.modules[name]
         if "result" not in ns:
             raise ScriptRejected("script must assign the final build123d shape to a variable named `result`")
-        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last"), "threads": fw.threads()}
+        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last"), "threads": fw.threads(),
+                             "sheet": fw.sheet()}
         while len(_BASE_CACHE) > _CACHE_MAX:
             _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
     ns["__fw_base__"] = ns["result"]
@@ -138,6 +140,7 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
     ns["__fw_manual__"] = fw.manual_count()
     ns["__fw_manual_errors__"] = fw.manual_errors()
     ns["__fw_threads__"] = fw.threads()
+    ns["__fw_sheet__"] = fw.sheet()
     ns["__cache_hit__"] = cached is not None
     return ns
 
@@ -264,6 +267,38 @@ def _thread_sidecar(out: Path, threads: list[dict[str, Any]] | None) -> None:
                                 indent=1, sort_keys=True), encoding="utf-8")
     else:
         f.unlink(missing_ok=True)
+
+
+FLAT_FILES = ("flat.topo.json", "flat.dxf", "flat.json")
+
+
+def sheet_outputs(shape: Any, sheet: Any, out: Path, material: str | None = None) -> dict[str, Any] | None:
+    """Sheet metal (CAD-026): the flat pattern of the built part as ``flat.topo.json`` (the viewer's Flat pattern
+    toggle), ``flat.dxf`` (true size, bend lines + notes) and ``flat.json`` (outline + bend table for drawings and the
+    Manufacturing Advisor). Returns the ``status["sheet_metal"]`` summary; a part that is not sheet metal clears them."""
+    from aicad import sheetmetal as sm
+    from aicad.topo import export_topology
+
+    if sheet is None:
+        for n in FLAT_FILES:
+            (out / n).unlink(missing_ok=True)
+        return None
+    try:
+        flat = sm.flatten(sheet, shape)
+    except Exception as e:  # noqa: BLE001 - the folded part is still valid; say why there is no flat
+        for n in FLAT_FILES:
+            (out / n).unlink(missing_ok=True)
+        from aicad import fw
+
+        return {"thickness": sheet.t, "radius": sheet.r, "k_factor": sheet.k, "bend_count": len(sheet.bends),
+                "flat_error": fw.plain(e)}
+    summary = sm.summary(sheet, flat)
+    export_topology(flat["world"], out / "flat.topo.json")
+    sm.write_dxf(flat, summary, out / "flat.dxf", material if material and material != "unspecified" else None)
+    (out / "flat.json").write_text(json.dumps({"format": "formwright-flat-pattern/1", "units": "mm", **summary,
+                                               "outline": flat["outline"]}, indent=1, sort_keys=True),
+                                   encoding="utf-8")
+    return summary
 
 
 def _exports(shape: Any, out: Path, threads: list[dict[str, Any]] | None = None) -> tuple[Any, Path]:
@@ -399,6 +434,7 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
                       for e in ns.get("__fw_log__", [])],
             manual_errors=ns.get("__fw_manual_errors__") or [],
             threads=ns.get("__fw_threads__") or [],
+            sheet_metal=sheet_outputs(shape, ns.get("__fw_sheet__"), out, str(ns.get("MATERIAL") or "")),
             bbox_minmax=_bbox_minmax(shape),
             fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
             env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp", "cadquery-ocp-novtk")},
