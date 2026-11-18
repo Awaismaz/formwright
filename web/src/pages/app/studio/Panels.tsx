@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { BuildStatus, CheckResult, ManualFeature, Project, RepairItem } from "@/lib/types";
+import type { BuildStatus, CheckResult, Impact, ManualFeature, Project, RepairItem } from "@/lib/types";
 import { ago, cx, num } from "@/lib/format";
 import { Badge, Button, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Toggle, Tip } from "@/components/ui";
 import type { Topo } from "@/viewer/types";
@@ -13,6 +13,7 @@ import ChangeNotice from "./ChangeNotice";
 import HandoffCard from "./HandoffCard";
 import { ImportProvenance, PartExportDialog } from "@/components/NativeExport";
 import VariantsBar from "./Variants";
+import ImpactPanel from "./ImpactPanel";
 
 /* ------------------------------------------------------------------ checks */
 const CHECK_TITLE: Record<string, string> = { "CHK-02": "Valid solid", "CHK-03": "Closed (watertight)", "CHK-04": "Overall size", "CHK-05": "Volume",
@@ -64,7 +65,9 @@ export function ChecksPanel({ status }: { status?: BuildStatus }) {
 }
 
 /* ------------------------------------------------------------------ parameters (smart) */
-export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo }: { project: Project; status?: BuildStatus; onChanged: () => void;
+export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, usedIn = 0 }: { project: Project; status?: BuildStatus; onChanged: () => void;
+  /** assemblies using this part: a change is previewed on them first (ASM-018) */
+  usedIn?: number;
   /** a design feature's name: its parameter group is highlighted (Edit from the tree) */
   focus?: string | null;
   /** response of a successful change (undo info, features that need repair) */
@@ -72,6 +75,7 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo }
   const q = useQuery({ queryKey: ["params", project.id, status?.build_id], queryFn: () => api.get<{ editable: Record<string, number> }>(`/api/projects/${project.id}/params`) });
   const [vals, setVals] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState<{ values: Record<string, number>; impact: Impact } | null>(null);
   const [auto, setAuto] = useState(() => { try { return localStorage.getItem("fw_params_auto") !== "0"; } catch { return true; } });
   const timer = useRef<number | null>(null);
   useEffect(() => { setVals({}); }, [status?.build_id]);
@@ -80,12 +84,19 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo }
   const shown: Record<string, unknown> = status?.params ?? {};
   const dirty = Object.entries(vals).filter(([k, v]) => v !== "" && Number(v) !== editable[k]);
 
-  const apply = async (values: Record<string, number>) => {
+  const apply = async (values: Record<string, number>, force = false) => {
     if (!Object.keys(values).length) return;
     if (Object.values(values).some(v => !Number.isFinite(v))) { toast.error("Enter valid numbers"); return; }
-    setBusy(true);
     const bad = Object.entries(values).map(([k, v]) => { const m = meta[k] ?? {}; return (m.min !== undefined && v < m.min) || (m.max !== undefined && v > m.max) ? `${m.label ?? k} must be ${m.min}–${m.max}${m.unit ? ` ${m.unit}` : ""}` : null; }).find(Boolean);
     if (bad) { toast.error(bad); return; }
+    setBusy(true);
+    if (usedIn > 0 && !force) { // ASM-018: preview the change on the assemblies first (trial rebuild, nothing applied)
+      try {
+        const imp = await api.post<Impact>(`/api/m/assembly/impact/${project.id}`, { kind: "params", values });
+        if ((imp.issues ?? 0) > 0) { setPending({ values, impact: imp }); setBusy(false); return; }
+      } catch (e) { if (e instanceof ApiError && e.status === 422) { toast.error(e.message); setVals({}); setBusy(false); return; } }
+    }
+    setPending(null);
     try {
       const r = await api.post<{ revision: number; rev_before?: number | null; build_s?: number; repairs?: RepairItem[] }>(`/api/projects/${project.id}/params`, { values });
       const label = Object.keys(values).map(k => meta[k]?.label ?? k).join(", ");
@@ -124,6 +135,7 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo }
         <p className="text-[12px] text-muted">Edits rebuild without AI or tokens and are kept only if checks pass.</p>
         <label className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted">Auto <Toggle checked={auto} onChange={v => { setAuto(v); try { localStorage.setItem("fw_params_auto", v ? "1" : "0"); } catch { /* */ } }} /></label>
       </div>
+      {pending && <ImpactPanel impact={pending.impact} busy={busy} onApply={() => void apply(pending.values, true)} onBack={() => { setPending(null); setVals({}); }} />}
       {focus && <p className="rounded-md bg-primary-soft px-2.5 py-1.5 text-[12px] text-primary">{focusGroup ? `Parameters of “${focus}”: ${focusGroup}` : `“${focus}” has no parameter group of its own; all design parameters are below.`}</p>}
       {groups.map(([g, keys]) => (
         <div key={g} ref={g === focusGroup ? focusRef : undefined} className={cx(g === focusGroup && "rounded-lg ring-2 ring-primary/40 ring-offset-2 ring-offset-panel")}>

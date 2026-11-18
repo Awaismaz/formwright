@@ -121,8 +121,33 @@ export interface AgentBrief { title: string | null; requirements: string[]; assu
 /** AGT-006: the agent's structured self-review; `gates` comes from the checks, never from the agent. */
 export interface AgentReview { items: { text: string; basis: string; kind: "observed" | "uncertain" | "overridden" }[]; gates: { ok: boolean | null; failed: string[]; build_id?: string | null } }
 
+/** DS-035: a small edit the agent hands to the PropertyManager (validated and resolved on the server). */
+export interface AgentEdit {
+  op: "fillet" | "chamfer" | "shell" | "hole" | "params"; summary: string; build_id?: string | number | null;
+  feature_id: string | null; feature: Partial<ManualFeature> & Record<string, unknown> | null;
+  targets: { kind: "edge" | "face"; picks: { id: number; point: [number, number, number] }[] } | null;
+  params: Record<string, { from: number; to: number; label: string; unit: string }> | null;
+  values: { size?: number; hole?: { type?: "simple" | "clearance" | "tapped" | "cbore" | "csk"; size?: number; d?: number; mode?: "corners"; dx?: number; dy?: number } };
+}
+
+/** ASM-018: what a pending Studio change would do to the assemblies using the part (nothing committed). */
+export interface ImpactAssembly {
+  id: string; name: string; instances: number; behind: number; program?: string | null; error?: string;
+  mates: { id: string; type: string; status: "breaks" | "follows"; text: string }[];
+  moved: { id: string; name: string; mm: number; deg: number }[];
+  refit: { id: string; name: string; why: string }[];
+  clashes: { a: string; b: string; a_name: string; b_name: string; volume_mm3: number; was_mm3: number }[];
+  resolved: { a_name: string; b_name: string; volume_mm3: number }[];
+  breaks: number;
+}
+export interface Impact {
+  assemblies: ImpactAssembly[]; headline: string; checked: boolean; issues?: number;
+  programs: { id: string; name: string; tickets: string[] }[]; datasheet: { shots: number };
+}
+export type ImpactChange = { kind: "feature"; feature: Record<string, unknown> } | { kind: "edit"; id: string; feature: Record<string, unknown> } | { kind: "params"; values: Record<string, number> };
+
 export type AgentEvent =
-  | { type: "hello"; busy: boolean }
+  | { type: "hello"; busy: boolean; backlog?: number }
   | { type: "user"; text: string; t: number; mode?: "build" | "discuss" | "brief" }
   | { type: "text"; text: string; t: number }
   | { type: "system"; model: string; auth: string }
@@ -137,4 +162,5 @@ export type AgentEvent =
   | { type: "brief"; brief: AgentBrief }
   | ({ type: "review" } & AgentReview)
   | { type: "recognition"; component: string | null }
+  | { type: "edit"; edit: AgentEdit; t?: number }
   | { type: "reset" };

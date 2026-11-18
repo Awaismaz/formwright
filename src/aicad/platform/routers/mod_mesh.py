@@ -203,6 +203,53 @@ def export(pid: str, body: ExportIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, 
     return out
 
 
+@router.get("/projects/{pid}/shots")
+def shots(pid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    """The project's datasheet pack: saved shots, each stale once the part revised (ASM-018)."""
+    return service.shots_view(workspace_for(_project(ctx, pid)), _base(pid))
+
+
+class ShotIn(RenderIn):
+    pass
+
+
+@router.post("/projects/{pid}/shots")
+def add_shot(pid: str, body: ShotIn, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    ctx.require_role("engineer")
+    ws = workspace_for(_project(ctx, pid))
+    try:
+        service.add_shot(ws, body.options(), ctx.user.id)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    return service.shots_view(ws, _base(pid))
+
+
+@router.delete("/projects/{pid}/shots/{sid}")
+def remove_shot(pid: str, sid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    ctx.require_role("engineer")
+    ws = workspace_for(_project(ctx, pid))
+    if not service.remove_shot(ws, sid):
+        raise HTTPException(404, "Shot not found")
+    return service.shots_view(ws, _base(pid))
+
+
+@router.post("/projects/{pid}/shots/rerender")
+def rerender_shots(pid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
+    """One click: queue a render for every stale shot of the datasheet pack."""
+    ctx.require_role("engineer")
+    p = _project(ctx, pid)
+    ws = workspace_for(p)
+    org = ctx.require_org()
+    try:
+        queued = service.rerender_stale(ws, p.name, org.id, ctx.user.id, _base(pid))
+    except (FileNotFoundError, jobs.QueueFull, runner.BlenderError, ValueError) as e:
+        raise _err(e) from e
+    if queued:
+        audit(ctx.db, "mesh.datasheet_rerender", ctx.user, org.id, target=pid, shots=len(queued))
+        ctx.db.commit()
+    return {**service.shots_view(ws, _base(pid)), "queued": queued}
+
+
 @router.get("/projects/{pid}/jobs/{jid}")
 def job(pid: str, jid: str, ctx: Ctx = Depends(mesh_ctx)) -> dict[str, Any]:
     v = service.job_view(workspace_for(_project(ctx, pid)), jid, _base(pid))

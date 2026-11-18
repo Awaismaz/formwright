@@ -46,3 +46,10 @@ export interface ProjectInfo {
   mesh: null | { triangles: number; vertices: number; tolerance_mm: number; bbox_mm: number[]; volume_mm3: number; checks: MeshCheck[] };
   disclosure: string; renders: Job[]; exports: Job[]; previews: Job[];
 }
+
+/** ASM-018 living datasheet pack: saved shots, each stale once the part revised (re-render queues it). */
+export interface Shot {
+  id: string; label: string; options: Partial<Settings> & { quality?: string }; added_at: string; build_id: number | string | null;
+  revision: number | null; stale: boolean; job: { id: string; state: JobState; progress: number | null; files: Job["files"] } | null;
+}
+export interface Shots { shots: Shot[]; stale: number; build_id: number | string | null; revision: number | null; queued?: { shot: string; job: string; state: string }[] }

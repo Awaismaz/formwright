@@ -1,0 +1,303 @@
+{
+ "version": 1,
+ "turns": [
+  {
+   "match": "^Build the base plate",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Base plate\"\nMATERIAL = \"Aluminium 6061-T6\"\nL = 120.0  # length\nW = 80.0  # width\nT = 10.0  # thickness\nHOLES = 4  # mounting holes (0 or 4)\nHOLE_D = 6.6  # clearance hole\nPARAMS = dict(L=L, W=W, T=T, HOLES=HOLES, HOLE_D=HOLE_D)\npart = Box(L, W, T, align=(Align.CENTER, Align.CENTER, Align.MIN))\nfor x, y in [(50, 30), (-50, 30), (-50, -30), (50, -30)][:HOLES]:\n    part -= Pos(x, y, T / 2) * Cylinder(HOLE_D / 2, T + 2)\nresult = part\nEXPECTED = {\"bbox\": [L, W, T], \"solids\": 1}\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Base plate built: 120 \u00d7 80 \u00d7 10 mm with four \u00d86.6 holes."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "^Build the block",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Block\"\nMATERIAL = \"Steel 1045\"\nresult = Box(40, 30, 20, align=(Align.CENTER, Align.CENTER, Align.MIN))\nEXPECTED = {\"bbox\": [40, 30, 20], \"volume\": 24000, \"solids\": 1}\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Block built: 40 \u00d7 30 \u00d7 20 mm."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "^Build the pin",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Pin\"\nMATERIAL = \"Steel 1045\"\nresult = Cylinder(3, 30)\nEXPECTED = {\"bbox\": [6, 6, 30], \"solids\": 1}\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Pin built: \u00d86 \u00d7 30 mm."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "remove the mounting holes",
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "usage": {
+      "input_tokens": 60,
+      "output_tokens": 40
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "That is a parameter change: set the hole count to 0.\n```fw-edit\n{\"summary\": \"Remove the four mounting holes\", \"op\": \"params\", \"params\": {\"HOLES\": 0}}\n```"
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 1,
+     "duration_ms": 900,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "chamfer",
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "usage": {
+      "input_tokens": 60,
+      "output_tokens": 40
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "I'll open a 1 mm chamfer on the top edges.\n```fw-edit\n{\"summary\": \"Chamfer the top edges 1 mm\", \"op\": \"chamfer\", \"d\": 1, \"edges\": \"top\"}\n```"
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 1,
+     "duration_ms": 900,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  }
+ ]
+}

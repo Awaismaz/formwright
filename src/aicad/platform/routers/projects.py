@@ -789,34 +789,16 @@ class ParamsIn(BaseModel):
 _ASSIGN = r"^(?P<name>{name})(?P<sp>\s*=\s*)(?P<val>-?\d+(?:\.\d+)?)(?P<rest>\s*(?:#.*)?)$"
 
 
-@router.get("/projects/{project_id}/params")
-def get_params(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return {"editable": current_editable(workspace_for(_project(ctx, project_id)))}
-
-
-@router.post("/projects/{project_id}/params")
-async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Deterministic parameter edit: rewrite declared parameters in model.py and rebuild (no AI, no tokens).
-    The edit is kept only if the rebuilt part passes its checks; otherwise the previous model and outputs
-    are restored from a snapshot."""
+def rewrite_params(src: str, editable: dict[str, Any], meta_all: dict[str, Any],
+                   values: dict[str, float]) -> tuple[str, dict[str, dict[str, Any]]]:
+    """The model source with declared parameters set to new values (limits from PARAM_META enforced), and what
+    changed. Pure: used by the parameter edit and by the change-impact trial (ASM-018)."""
     import math
     import re
 
-    p = _project(ctx, project_id)
-    if ctx.role == "viewer":
-        raise HTTPException(403)
-    s = _sessions.get(p.id)
-    if s and s.busy:
-        raise HTTPException(409, "Agent is busy")
-    ws = workspace_for(p)
-    f = ws / "model.py"
-    if not f.is_file():
-        raise HTTPException(404, "No model yet")
-    src = f.read_text(encoding="utf-8")
-    editable = current_editable(ws)
     new = src
-    changes = {}
-    for name, val in body.values.items():
+    changes: dict[str, dict[str, Any]] = {}
+    for name, val in values.items():
         if name not in editable:
             raise HTTPException(422, f"{name} is not an editable design parameter. Ask the design agent instead.")
         if not math.isfinite(val):
@@ -824,7 +806,7 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         was_int = isinstance(editable[name], int) and not isinstance(editable[name], bool)
         if was_int and not float(val).is_integer():
             raise HTTPException(422, f"{name} must be a whole number")
-        meta = (_read_status(ws).get("param_meta") or {}).get(name) or {}
+        meta = meta_all.get(name) or {}
         if "min" in meta and val < meta["min"] or "max" in meta and val > meta["max"]:
             raise HTTPException(422, f"{meta.get('label') or name} must be between {meta.get('min', '−∞')} and "
                                      f"{meta.get('max', '∞')}{' ' + meta['unit'] if meta.get('unit') else ''} "
@@ -837,6 +819,32 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
         if not n:
             raise HTTPException(422, f"{name} is written in a form that can't be edited here. Ask the design agent.")
         changes[name] = {"from": editable[name], "to": val}
+    return new, changes
+
+
+@router.get("/projects/{project_id}/params")
+def get_params(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    return {"editable": current_editable(workspace_for(_project(ctx, project_id)))}
+
+
+@router.post("/projects/{project_id}/params")
+async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Deterministic parameter edit: rewrite declared parameters in model.py and rebuild (no AI, no tokens).
+    The edit is kept only if the rebuilt part passes its checks; otherwise the previous model and outputs
+    are restored from a snapshot."""
+
+    p = _project(ctx, project_id)
+    if ctx.role == "viewer":
+        raise HTTPException(403)
+    s = _sessions.get(p.id)
+    if s and s.busy:
+        raise HTTPException(409, "Agent is busy")
+    ws = workspace_for(p)
+    f = ws / "model.py"
+    if not f.is_file():
+        raise HTTPException(404, "No model yet")
+    src = f.read_text(encoding="utf-8")
+    new, changes = rewrite_params(src, current_editable(ws), _read_status(ws).get("param_meta") or {}, body.values)
     if not changes:
         return {"ok": True, "changed": {}}
     from aicad.platform.plain import build_error
@@ -930,6 +938,12 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
                    "mode": mode}
     if shown and files:
         shown += "\n\n[Reference image attached]"
+    if mode == "build" and not shown and len(body.prompt) <= 600:
+        from aicad.agent.edits import design_state
+
+        state = design_state(ws)  # DS-035: a small edit can come back as a PropertyManager edit in one short turn
+        if state:
+            shown, text = text, text + "\n\n" + state
     t = asyncio.create_task(s.send(text, shown=shown, mode=mode))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
@@ -968,7 +982,7 @@ async def agent_events(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> Str
 
     async def gen():  # type: ignore[no-untyped-def]
         try:
-            yield f"data: {json.dumps({'type': 'hello', 'busy': s.busy})}\n\n"
+            yield f"data: {json.dumps({'type': 'hello', 'busy': s.busy, 'backlog': len(backlog)})}\n\n"
             for ev in backlog:
                 yield f"data: {json.dumps(ev, default=str)}\n\n"
             while True:

@@ -9,13 +9,17 @@ interface Used { id: string; name: string; instances: number; stale: number; bro
 
 /** "In n assemblies" chip for the Design Studio header (AMI-10): where this part is used, and whether those
  * assemblies still show an older build or have broken mates. Renders nothing without the module or any use. */
-export function WhereUsed({ projectId, buildId }: { projectId: string; buildId?: string | number | null }) {
+export function useWhereUsed(projectId: string, buildId?: string | number | null, enabled = true): Used[] {
   const q = useQuery({
     queryKey: ["asm-where-used", projectId, buildId],
     queryFn: () => api.get<{ items: Used[] }>(`/api/m/assembly/where-used/${projectId}`),
-    retry: false, staleTime: 30_000,
+    retry: false, staleTime: 30_000, enabled,
   });
-  const items = q.data?.items ?? [];
+  return q.data?.items ?? [];
+}
+
+export function WhereUsed({ projectId, buildId }: { projectId: string; buildId?: string | number | null }) {
+  const items = useWhereUsed(projectId, buildId);
   if (!items.length) return null;
   const behind = items.filter(a => a.stale > 0 || a.broken_mates > 0);
   const first = behind[0] ?? items[0]!;

@@ -58,6 +58,9 @@ mm↔px from the sketcher's cursor readout and waiting for builds. Copy both nex
 - Studio panel state persists in `localStorage` (`fw_studio_left`, `fw_studio_chat`).
 - The viewer renders WebGL. Headless Chrome needs `--use-angle=swiftshader` or `--enable-unsafe-swiftshader`
   (set in the template), otherwise the canvas stays blank.
+- The Studio chat sends with **Ctrl+Enter** (Enter is a newline). Agent turns without tokens: start the server with
+  `FW_AGENT_REPLAY=<cassette.json>` (turns matched by regex on the prompt; a build turn carries `files` + `rebuild`).
+  Example cassette and flow: `docs/reports/studio-intel/README.md`.
 - Live design-agent runs spend the founder's Claude subscription (PD-09). Do them only when the change is agent-side,
   and say in the session log that one was run.
 
