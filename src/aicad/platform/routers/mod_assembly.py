@@ -25,6 +25,8 @@ Viewers can open assemblies, the BOM and the last exported STEP; changes need th
   GET    /api/m/assembly/assemblies/{id}/files/assembly.step
   POST   /api/m/assembly/assemblies/{id}/fasteners/propose   fastener auto-fit proposal for a hole / pattern
   POST   /api/m/assembly/assemblies/{id}/fasteners/accept    insert the proposed stacks
+  POST   /api/m/assembly/assemblies/{id}/smart/plan          Hex + Fitz: description -> components + placement plan
+  POST   /api/m/assembly/assemblies/{id}/smart/run           Fitz inserts, places and mates the approved plan
   GET    /api/m/assembly/parts/{key}/topo                    exact topology of a part snapshot (viewer)
 """
 
@@ -40,13 +42,13 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from aicad import toolbox
-from aicad.assembly import AssemblyInputError, service, solver, store
+from aicad import similarity, toolbox
+from aicad.assembly import AssemblyInputError, fitz, librarian, service, solver, store
 from aicad.platform.config import get_settings
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
 from aicad.platform.routers.projects import _thumb, wait_finalized, workspace_for
-from aicad.platform.services import audit, org_modules, track
+from aicad.platform.services import audit, debit, org_modules, track
 
 router = APIRouter(prefix="/api/m/assembly", tags=["assembly"])
 CODE = "assembly"
@@ -876,3 +878,160 @@ def part_topo(key: str, ctx: Ctx = Depends(asm_ctx)) -> FileResponse:
     if not f.is_file():
         raise HTTPException(404, "Part not found")
     return FileResponse(f, media_type="application/json", headers={"Cache-Control": "private, max-age=86400"})
+
+
+# ----------------------------------------------------------------------------- smart assembly (ASM-010 / ASM-019)
+class SmartPlanIn(BaseModel):
+    text: str = Field(min_length=2, max_length=2000)
+    ai: bool = False      # let Hex ask the AI about the lines it could not read (metered)
+
+
+class SmartRunIn(BaseModel):
+    items: list[dict[str, Any]] = Field(min_length=1, max_length=40)
+
+
+def _part_candidates(ctx: Ctx) -> list[dict[str, Any]]:
+    """The workspace's own parts Hex may reuse: projects with a verified build (shape signature when available)."""
+    rows = ctx.db.scalars(select(Project).where(Project.org_id == ctx.require_org().id, Project.archived.is_(False))
+                          .order_by(Project.updated_at.desc())).all()
+    out = []
+    for p in rows:
+        ws = workspace_for(p)
+        st = _status(ws)
+        if not st.get("ok") or not (ws / "out" / "part.step").is_file():
+            continue
+        out.append({"id": p.id, "name": p.name, "description": p.description or "", "sig": similarity.signature(ws)})
+    return out
+
+
+@router.post("/assemblies/{aid}/smart/plan")
+async def smart_plan(aid: str, body: SmartPlanIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Hex reads the description (Toolbox first, then your parts, zero tokens) and Fitz proposes where each item goes
+    and in which order. Nothing is changed; the plan is shown for approval. With ``ai`` Hex asks the AI only about
+    the lines it could not read; the tokens used are returned and charged like any other AI step."""
+    _editor(ctx)
+    doc = _doc(ctx, aid)
+    root = _root(ctx)
+    cands = _part_candidates(ctx)
+    try:
+        res = fitz.plan(root, doc, body.text, cands)
+    except (AssemblyInputError, toolbox.ToolboxError) as e:
+        raise _err(e) from e
+    if not res["items"]:
+        raise HTTPException(409, "Describe at least one component, e.g. “4 M6x25 bolts with washers and nuts”.")
+    tokens = 0
+    if body.ai and res["unresolved"]:
+        from aicad.platform import metering
+        from aicad.platform.routers.billing import tokens_for_cost
+
+        org = ctx.require_org()
+        unlimited = ctx.god_on("bypass_tokens")
+        if not unlimited and org.token_balance <= 0:
+            raise HTTPException(402, {"message": "Your workspace has no tokens left for an AI reading. Top up, or "
+                                                 "edit the line so Hex can read it.", "cta": "/app/billing#tokens"})
+        clauses = librarian.split(body.text)
+        idx = [int(i[1:]) - 1 for i in res["unresolved"] if i[1:].isdigit()]
+        idx = [k for k in idx if 0 <= k < len(clauses)]
+        budget = None if unlimited else max(0, org.token_balance) * metering.USD_PER_TOKEN
+        try:
+            text, usd = await librarian.ask_ai([clauses[k] for k in idx],
+                                               [service.clean_name(c["name"]) for c in cands], budget)
+        except Exception as e:
+            raise HTTPException(503, "The AI reading isn't available right now. Edit the line so Hex can read it, "
+                                     "or design the part in the Studio.") from e
+        tokens = tokens_for_cost(usd) if usd else 0
+        got = librarian.read_ai(text, len(idx), cands)
+        res = fitz.plan(root, doc, body.text, cands, ai={idx[j]: v for j, v in got.items()})
+        if tokens and not unlimited:
+            debit(ctx.db, org, tokens, "usage", "Assembly Studio · Hex AI reading", ctx.user, ref=aid)
+        track(ctx.db, "assembly_smart_ai", ctx.user, org.id, tokens=tokens, lines=len(idx), read=len(got))
+        ctx.db.commit()
+        res["ai_lines"] = len(idx)
+        res["ai_read"] = len(got)
+    res["tokens"] = tokens
+    names = service.display_names(doc)
+    res["parts_in_assembly"] = [{"id": i["id"], "name": names[i["id"]]} for i in doc["instances"] if not i.get("group")]
+    return res
+
+
+_ACTIONS = set(fitz.ORDER)
+
+
+def _clean_items(ctx: Ctx, doc: dict[str, Any], raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-validate an edited plan: Toolbox parameters through normalize, projects in this workspace, instances in
+    this assembly. Anything else is a 409 with a plain message."""
+    ids = {i["id"] for i in doc["instances"]}
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in raw:
+        iid = str(r.get("id") or "")[:12]
+        if not iid or iid in seen:
+            raise AssemblyInputError("Each plan item needs its own id.")
+        seen.add(iid)
+        action = r.get("action")
+        source = r.get("source")
+        if action not in _ACTIONS or source not in ("toolbox", "project", "new"):
+            raise AssemblyInputError("Unknown plan item.")
+        try:
+            qty = int(r.get("qty") or 1)
+            order = int(r.get("order") or 0)
+        except (TypeError, ValueError):
+            raise AssemblyInputError("Quantity must be a whole number.") from None
+        if not 1 <= qty <= librarian.MAX_QTY:
+            raise AssemblyInputError(f"Quantity must be between 1 and {librarian.MAX_QTY}.")
+        it: dict[str, Any] = {"id": iid, "action": action, "source": source, "qty": qty,
+                              "qty_explicit": bool(r.get("qty_explicit", True)), "enabled": bool(r.get("enabled", True)),
+                              "order": order, "title": str(r.get("title") or "Component")[:200]}
+        if source == "toolbox":
+            code = r.get("code")
+            if code not in toolbox.COMPONENTS:
+                raise AssemblyInputError("Unknown Toolbox component.")
+            it["code"] = code
+            it["params"] = toolbox.normalize(code, r.get("params") or {})
+            if action != "fasten":
+                it["title"] = toolbox.spec(code).title(it["params"])
+            else:
+                f = r.get("fasten") or {}
+                size = f.get("size")
+                length = f.get("length")
+                if size is not None and (not isinstance(size, int | float) or int(size) not in toolbox.METRIC):
+                    raise AssemblyInputError("Unsupported thread size.")
+                it["fasten"] = {"style": f.get("style") if f.get("style") in ("hex_bolt", "shcs") else "hex_bolt",
+                                "washers": f.get("washers") if f.get("washers") in ("both", "head", "none") else "both",
+                                "size": int(size) if size is not None else None,
+                                "length": float(length) if isinstance(length, int | float) else None}
+        elif source == "project":
+            it["project_id"] = _project(ctx, str(r.get("project_id") or "")).id
+        if r.get("inst"):
+            if r["inst"] not in ids:
+                raise AssemblyInputError("A part of this plan is no longer in the assembly. Plan again.")
+            it["inst"] = r["inst"]
+        t = r.get("target") or None
+        if isinstance(t, dict) and t.get("inst") in ids:
+            it["target"] = {"inst": t["inst"]}
+        elif isinstance(t, dict) and isinstance(t.get("item"), str):
+            it["target"] = {"item": t["item"][:12]}
+        out.append(it)
+    return out
+
+
+@router.post("/assemblies/{aid}/smart/run")
+async def smart_run(aid: str, body: SmartRunIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Fitz inserts the approved items in order, places and mates them, then runs the exact interference check."""
+    org_id = ctx.require_org().id
+
+    async def project_part(pid: str) -> str:
+        return await _project_part(ctx, _project(ctx, pid))
+
+    async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
+        items = _clean_items(ctx, doc, body.items)
+        return {"_extra": await fitz.execute(root, org_id, doc, items, project_part)}
+
+    view = await _mutate(ctx, aid, fn, solve=False)
+    r = view.get("result") or {}
+    audit(ctx.db, "assembly.smart_assembled", ctx.user, org_id, target=aid, inserted=r.get("inserted"),
+          stacks=r.get("fastener_stacks"))
+    track(ctx.db, "assembly_smart_run", ctx.user, org_id, inserted=r.get("inserted"),
+          clashes=len(r.get("clashes") or []))
+    ctx.db.commit()
+    return view

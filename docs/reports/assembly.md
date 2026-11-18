@@ -115,3 +115,68 @@ tint competing with picks in the Mate and Fasten tabs.
 On the Studio's Make tab, add **"Assemble"** (module code `assembly`, lucide icon `boxes`), linking to
 `/app/modules/assembly?project=<id>`. It opens that project's assembly, or creates one with the part fixed at the
 origin. Suggested subtitle: "Mate with other parts, check clashes, fit ISO fasteners".
+
+## Smart assembly: Hex and Fitz (ASM-010, ASM-019), 2026-11-18
+
+Phase 1 of the Design Office plan (docs/plans/CHIEF_DESIGNER.md §2.3, §6). Branch `wip/smart-assembly`.
+
+**What it does.** A new **Describe** tab (the default for an empty assembly). You type what goes in, e.g.
+"bolt the motor bracket onto the base plate with 4 M6 bolts, washers and nuts, and two Ø8 dowel pins into the base
+plate". **Hex** (librarian) reads it with zero tokens, and **Fitz** (assembly) proposes where each item goes and in
+which order. The confirmation list shows, per item: the component, its source (Toolbox / Your part / New design), the
+confidence, the quantity, editable parameters (fastener size and washers, bearing designation, dowel Ø and length…),
+Hex's status line ("Hex found Hex bolt ISO 4017 M6×25 in the Toolbox") and Fitz's intended placement and mates.
+Nothing changes until **Approve**. Fitz then inserts, places and mates the parts, runs the exact interference check and
+reports, e.g. "Fitz fixed 1 base part, mated 4/4 bolts, placed and mated 3 parts, 0 clashes". The agents show as round
+badges (Hex: a nut on a bolt, amber; Fitz: two parts and a dowel, blue). The badges animate while working and are
+static when the system asks for reduced motion (`web/src/components/AgentBadge.tsx`).
+
+| Piece | How |
+|---|---|
+| Hex: reading (`assembly/librarian.py`) | Splits the text into items. Accessories stay with their fastener ("bolts with washers and nuts"); "with 4 M6 bolts" starts a new item. Reads the quantity (digits, words, "x6", "a pair of"), a target hint ("for the plate holes", "on the shaft", "onto the base plate") and an own-parts hint ("from my projects", "our"). Toolbox reading is deterministic: M-size × length, `62xx/60xx` bearings, Ø × L dowels, Ø shafts, gears via `toolbox.match`, nuts, washers and standoffs. Every value goes through `toolbox.normalize`. Values that were not written are marked "(default)". |
+| Hex: your parts | Verified projects of the workspace, matched by name words (description words count half) and, for size queries ("the 120x80 plate"), by `similarity.size_match`. Order of preference: a designation (M6, 6204, Ø8) always means the Toolbox; an own-parts hint means your parts; otherwise a strong name match beats a generic Toolbox noun ("the motor bracket" → your Motor Bracket, not the Toolbox L-bracket). When nothing is found the item is a **New design**, with a "Design it in the Studio" button that creates a project and opens the Studio chat with the line. |
+| Hex: AI fallback (opt-in) | Used only for lines the parser could not read, and only when you press "Read with AI (uses tokens)". It is one text-only turn of the design agent's model with no tools (`librarian.ask_ai`, the only model call; tests replace it). The answer is never trusted: codes must exist, parameters must pass `toolbox.normalize`, and parts must be existing project names. Tokens are shown on the plan and charged like any AI step (God mode's bypass is respected); an empty balance gives 402. |
+| Fitz: plan (`assembly/fitz.py`) | A target resolves to an instance in the assembly, to another item of the plan, or to one of your parts that the text names ("onto the base plate" adds Base Plate as the base). Insertion order: base → mount → seat → dowel → fasten → place. A bearing without a size is sized from the shaft seat (bore = seat Ø, 62xx first). A gear's bore follows the seat unless it was written. |
+| Fitz: mount | Hole-pattern match. On each part, the face where its holes open (the outermost along the axis, preferring the face looking up); then a rigid in-plane fit of the hole centres. The two b holes farthest apart anchor the fit, every hole must land within 0.02 mm on a compatible hole, and the smallest turn wins. Then a coincident mate and 2 concentric mates. With no match the part is placed beside the assembly with "mate it by hand". |
+| Fitz: seat | Shaft seats are convex full cylinders. Hole faces are excluded, angular coverage comes from the topo mesh, and separate stretches on one axis are separate seats (so the demo shaft's two Ø20 journals are two seats). Each end is either a shoulder (a flat face looking along the seat) or a free end. Every free shoulder is used first (coincident), then free ends (flush). A seat shorter than the part is noted. |
+| Fitz: dowels | Free holes within 0.05 mm of the pin Ø (a hole that already holds a dowel or bolt is skipped). Concentric mate plus an aligned distance mate, so half the pin (or the hole depth, if less) is in the hole. |
+| Fitz: fasteners | ASM-013/015 auto-fit (`service.accept`) on the target part's free holes of the asked size. A hole lined up with another part's hole is fitted from the smaller one, so the stack passes both. Without a target: lined-up pairs first, then the base part. If the measured grip needs a different length from the one written, the log says so ("You asked for length 25; the measured grip needs L ≥ 26.4 mm, so 30 mm was used"). |
+| API | `POST /api/m/assembly/assemblies/{id}/smart/plan` {text, ai} → the plan (no change). `POST …/smart/run` {items} → the view + `result` {log, summary, clashes, counts}. The edited plan is re-validated on the server (`_clean_items`: Toolbox params, org projects, instances of this assembly). Viewers get 403. |
+
+**Tests** (`tests/test_assembly_ai.py`, 21 tests, about 40 s, no model calls):
+- A 12-case Toolbox fixture set (bolts, cap screws, bearings, dowels, nuts, washers, shaft, gear, standoffs);
+  accessories + target; splitting; company parts vs Toolbox vs new design; AI answer validation; bearing for a seat.
+- Kernel/API, plate + bracket. Plate 160 × 80 × 10 (4 × Ø6.6 + 2 × Ø8), bracket base 120 × 80 × 6 with the same
+  pattern, all from one sentence. Bracket at z = 10 exactly, 4 of 4 holes; 4 × M6×30 (grip 16 → L ≥ 26.4); 2 dowels
+  with their ends at z = 20. Every mate ok, 0 interference, and the AI stub is never called.
+- Stepped shaft (Ø20 / Ø30 / Ø20) + "2 6204 bearings": z 16..30 and z 90..104 (turned over). A third bearing goes
+  flush with a free end. 0 interference.
+- Empty assembly + "bolt the motor bracket onto the base plate with 4 M6 bolts": base plate fixed, bracket mounted,
+  4 stacks.
+- AI fallback: runs only on request and only for the unread line; tokens debited exactly; a bad edit is refused (422).
+- Frontend: `smart.test.ts` (2 tests).
+
+**Walkthrough** (port 8793, throwaway data dir, God mode, seeded demos, puppeteer-core 25.18.1):
+1. Demo stepped shaft + "2 bearings on the shaft". Hex picked a 6204 from the Ø20 seat, and Fitz seated one against
+   each shoulder: 0 clashes. A first run had put both on the same journal (one at the shoulder, one at the free end).
+   Fixed by splitting seats per stretch and using every free shoulder first.
+2. Demo mounting plate + "4 M6x25 bolts with washers and nuts for the plate holes; two Ø8 dowel pins; a gearbox
+   housing". The plan said "No free Ø8 hole found" for the dowels and "New design" for the housing. Result: "Fitz
+   mated 4/4 bolts, 2 left to mate by hand, 0 clashes" (M6×25, grip 10).
+3. Empty assembly, with the test fixtures written into the scratch workspace, + the sentence above. Base Plate added as
+   the base, Motor Bracket mounted (4 of 4 holes), 2 dowels, 4 × M6×30. Check: 35 pairs, no interference, minimum
+   clearance 0.2 mm. BOM: 20 parts, 6 lines, 1.082 kg.
+
+0 console or page errors. Fixes made from the screenshots:
+- The fifth tab was clipped in the 360 px panel: tab icons are now hidden and the padding is tighter.
+- Warning results showed a "done" tick.
+- For a fastener with no length, Hex's line read "M5×30"; it now says "length to suit the grip".
+- "with M5 bolts" did not start a new item.
+
+**Limits.**
+- Mounting needs matching hole patterns: no face-only or slot mounting, no pins into slots.
+- One interface per item, and Fitz does not invent mates beyond the ones above.
+- Fits are nominal. A Ø8 dowel in a Ø8 hole and a 6204 on a Ø20 seat are line-to-line; press fits, tolerances and
+  bearing retention (circlips, nuts) are not modelled.
+- The AI fallback maps a line to one component; it does not plan placements.
+- The plan is not saved: plan again after editing the assembly.

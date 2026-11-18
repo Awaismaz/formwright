@@ -126,3 +126,25 @@ export interface RefreshResult {
   refreshed: number; references_kept: number; references_followed: number; references_lost: number;
   broken_mates: string[]; stacks_to_check: number;
 }
+
+/** Smart assembly (ASM-010 / ASM-019): one line of Hex's reading, with Fitz's intended placement. */
+export type SmartAction = "base" | "mount" | "seat" | "dowel" | "fasten" | "place" | "design";
+export interface SmartItem {
+  id: string; text: string; qty: number; qty_explicit: boolean; enabled: boolean; order: number;
+  source: "toolbox" | "project" | "new"; kind?: string; action: SmartAction; title: string;
+  code?: string; params?: Record<string, number> | null; read?: string[]; standard?: string;
+  fasten?: { style: "hex_bolt" | "shcs"; washers: "both" | "head" | "none"; size: number | null; length: number | null };
+  project_id?: string; inst?: string; auto?: boolean; ai?: boolean;
+  target?: { inst?: string; item?: string } | null; target_name?: string | null;
+  confidence: "high" | "medium" | "low"; found: string; plan: string; reasons?: string[];
+  alternatives?: { id: string; name: string; score: number }[];
+}
+export interface SmartPlan {
+  items: SmartItem[]; unresolved: string[]; tokens: number; ai_used: boolean; ai_lines?: number; ai_read?: number;
+  parts_in_assembly: { id: string; name: string }[];
+}
+export interface SmartLog { agent: "Hex" | "Fitz"; text: string; tone: "ok" | "warn" | "muted" }
+export interface SmartResult {
+  log: SmartLog[]; summary: string; clashes: Clash[]; inserted: number; mated: number; placed_loose: number;
+  fastener_stacks: number; fastener_asked: number;
+}

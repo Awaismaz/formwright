@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Wrench,
+  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Button, EmptyState, Input, PageLoader, StatusBadge, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
-import type { AsmView, Clash, FitPlan, HoleFix, Mate, RefreshResult, V3 } from "./types";
+import type { AsmView, Clash, FitPlan, HoleFix, Mate, RefreshResult, SmartItem, V3 } from "./types";
 import type { AsmPick, FaceMark } from "./viewer";
 import { Viewport, topoCache } from "./Viewport";
 import { Tree } from "./Tree";
@@ -17,10 +17,11 @@ import { FastenPanel, holeLabel, type FitOpts } from "./FastenPanel";
 import { BomPanel, CheckPanel, plural } from "./CheckPanel";
 import { PairPanel } from "./PairPanel";
 import { InsertDialog } from "./InsertDialog";
+import { SmartPanel } from "./SmartPanel";
 import { Segmented, SolveChip, mm } from "./bits";
 
 const BASE = "/api/m/assembly";
-type TabKey = "mate" | "fasten" | "check" | "bom";
+type TabKey = "describe" | "mate" | "fasten" | "check" | "bom";
 
 export default function Workspace({ aid, onClose }: { aid: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -30,6 +31,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const setView = useCallback((v: AsmView) => qc.setQueryData(key, v), [qc, key]);
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>("mate");
+  const [tabSet, setTabSet] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [picks, setPicks] = useState<AsmPick[]>([]);
   const [choice, setChoice] = useState<MateChoice>("auto");
@@ -89,6 +91,9 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const describe = useCallback((p: AsmPick) => view ? describePick(view, p,
     (part, id) => topoCache.get(part)?.faces[id], (part, id) => topoCache.get(part)?.edges[id]) : "", [view]);
 
+  useEffect(() => {   // an empty assembly opens on "Describe": say what goes in and Fitz builds it
+    if (view && !tabSet) { setTabSet(true); if (view.instances.length === 0 && view.can_edit) setTab("describe"); }
+  }, [view, tabSet]);
   if (q.isLoading) return <PageLoader />;
   if (q.error || !view) {
     const e = q.error as ApiError | null;
@@ -177,6 +182,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
       } else toast.error("STEP exported, but the re-import check did not match. Check the file before use.");
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
   };
+  const smartRun = (items: SmartItem[]) => run("smart", () => api.post<AsmView>(`${A}/smart/run`, { items }));
   const insert = async (body: Record<string, unknown>) => {
     const v = await run("insert", () => api.post<AsmView>(`${A}/instances`, body), v => {
       const id = (v.result as { instance?: string } | undefined)?.instance;
@@ -374,7 +380,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
           {view.instances.length === 0 ? (
             <div className="flex h-full items-center justify-center p-8">
               <EmptyState icon={<Boxes className="h-5 w-5" />} title="Empty assembly" body="Insert a verified project part (it comes in fixed at the origin), then Toolbox components or more parts."
-                action={view.can_edit ? <Button icon={<Plus className="h-4 w-4" />} onClick={() => setInsertOpen(true)}>Insert component</Button> : undefined} />
+                action={view.can_edit ? <div className="flex flex-wrap justify-center gap-2"><Button icon={<Plus className="h-4 w-4" />} onClick={() => setInsertOpen(true)}>Insert component</Button>
+                  <Button variant="secondary" icon={<Sparkles className="h-4 w-4" />} onClick={() => setTab("describe")}>Describe what goes in</Button></div> : undefined} />
             </div>
           ) : (
             <Viewport view={view} picking={picking} picks={picks} marks={marks} selected={selected} ghost={ghost}
@@ -391,13 +398,17 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
         </section>
         <aside className="min-h-0 overflow-y-auto border-l border-border bg-panel">
           <Tabs value={tab} onValueChange={v => setTab(v as TabKey)}>
-            <TabList className="sticky top-0 z-10 bg-panel px-2">
+            <TabList className="sticky top-0 z-10 gap-0 overflow-x-auto bg-panel px-1 [&_svg]:hidden">
+              <Tab value="describe" compact title="Add components by description: Hex finds them, Fitz mates them"><Sparkles className="h-3.5 w-3.5" />Describe</Tab>
               <Tab value="mate" compact><Link2 className="h-3.5 w-3.5" />Mate</Tab>
               <Tab value="fasten" compact><Wrench className="h-3.5 w-3.5" />Fasten</Tab>
               <Tab value="check" compact><ScanSearch className="h-3.5 w-3.5" />Check{view.analysis && !view.analysis.stale && view.analysis.interference.count > 0 &&
                 <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{view.analysis.interference.count}</span>}</Tab>
               <Tab value="bom" compact><ClipboardList className="h-3.5 w-3.5" />BOM</Tab>
             </TabList>
+            <TabPanel value="describe">
+              <SmartPanel view={view} aid={aid} onRun={smartRun} busy={busy === "smart"} />
+            </TabPanel>
             <TabPanel value="mate">
               <MatePanel view={view} choice={choice} onChoice={setChoice} picks={picks} onClearPick={k => setPicks(p => p.filter((_, j) => j !== k))}
                 value={mval} onValue={setMval} flip={mflip} onFlip={setMflip} onAdd={addMate} busy={busy === "add-mate"} describe={describe}
