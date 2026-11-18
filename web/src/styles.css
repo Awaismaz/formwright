@@ -107,3 +107,6 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
   body:has(.fw-print) [role="dialog"] .fw-crop { overflow: hidden !important; }
   @page { size: A4; margin: 0; }
 }
+
+@keyframes fw-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { [style*="fw-spin"] { animation: none !important; } }

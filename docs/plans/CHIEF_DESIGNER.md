@@ -78,26 +78,26 @@ The Checker is an independent reviewer with its own instructions. It can send wo
 
 ## 3. The company (agent roster)
 
-Names are mechanical (tools, machines, shop terms), so the specialty is obvious at a glance and the office feels
-like a real shop (founder direction 2026-11-18). Each is a configured agent role: instructions, allowed tools,
-default model/effort, a tool-glyph avatar and a colour.
+Names read like people but carry a mechanical pun, so each specialty is obvious and the office feels alive
+(founder direction 2026-11-18: "Mill" and "Chuck" kept; component names rejected). Each is a configured agent role:
+instructions, allowed tools, default model/effort, a tool-glyph avatar and a colour.
 
-| Name | Role | Why the name | Example status line |
+| Name | Role | Wordplay | Example status line |
 |---|---|---|---|
-| **Datum** | Chief Designer | every part is referenced to its datums | "Datum is splitting the gearbox into 3 sub-assemblies" |
+| **Archie** | Chief Designer | Archimedes, the original engineer | "Archie is splitting the gearbox into 3 sub-assemblies" |
 | **Mill** | Machined (prismatic) parts | the milling machine | "Mill is pocketing the motor plate" |
-| **Chuck** | Turned parts | lathe chuck | "Chuck is turning the Ø25 output shaft" |
-| **Torque** | Gears, pulleys, drives | power transmission | "Torque is cutting 40 teeth, m3" |
-| **Brake** | Sheet metal (after CAD-026) | press brake | "Brake is bending the cover, 4 flanges" |
-| **Sprue** | Plastic / moulded parts | moulding sprue | "Sprue is adding 1.5° draft to the housing" |
-| **Spanner** | Librarian: Toolbox + company parts | reaches for the right standard part | "Spanner found 6204 bearing in Toolbox (0 tokens)" |
-| **Dowel** | Assembly | dowels locate parts precisely | "Dowel mated 14/18 parts, 0 clashes" |
-| **Caliper** | Checker (independent) | measures everything, trusts nothing | "Caliper sent Bracket back: bore Ø25.4 ≠ ICD Ø25 H7" |
-| **Scribe** | Drawings | marks out and documents | "Scribe is dimensioning sheet 2 of 5" |
-| **Anvil** | Manufacturing review | shop-floor reality check | "Anvil flagged a 0.5 mm wall as too thin to mill" |
+| **Chuck** | Turned parts | the lathe chuck | "Chuck is turning the Ø25 output shaft" |
+| **Axel** | Gears, pulleys, drives | axle | "Axel is hobbing 40 teeth, m3" |
+| **Benny** | Sheet metal (after CAD-026) | bend | "Benny is bending the cover, 4 flanges" |
+| **Molly** | Plastic / moulded parts | mould | "Molly is adding 1.5° draft to the housing" |
+| **Hex** | Librarian: Toolbox + company parts | hex bolts, the standard-parts shelf | "Hex found a 6204 bearing in the Toolbox (0 tokens)" |
+| **Fitz** | Assembly | makes things fit | "Fitz mated 14/18 parts, 0 clashes" |
+| **Gage** | Checker (independent) | gauge | "Gage sent Bracket back: bore Ø25.4 ≠ ICD Ø25 H7" |
+| **Ortho** | Drawings | orthographic projection | "Ortho is dimensioning sheet 2 of 5" |
+| **Smithy** | Manufacturing review | the blacksmith's shop | "Smithy flagged a 0.5 mm wall as too thin to mill" |
 
 Engagement: live present-tense status lines on cards (plain engineering language, never internals); visible
-hand-offs ("Chuck → Caliper for inspection", "Caliper → Dowel: approved for assembly"); a "fitted" moment when a
+hand-offs ("Chuck → Gage for inspection", "Gage → Fitz: approved for assembly"); a "fitted" moment when a
 placeholder turns solid; program milestones with a short celebration and summary ("All interfaces frozen",
 "First article assembled", "Released"); a shop-floor roster with each agent's state and track record (parts
 delivered, first-pass approval rate, average time vs estimate). Parallel instances show as Mill #1, Mill #2.
@@ -132,25 +132,25 @@ delivered, first-pass approval rate, average time vs estimate). Parallel instanc
   existing `AgentSession` on its project, given the ticket brief + ICD excerpt + specialist instructions.
   - Milestones are derived from agent events (build results, checks).
   - Events stream to the board over server-sent events (SSE), like the Studio chat.
-- **Datum** is an agent session with planning tools (in-process tools, like `build_model` today): `write_brief`,
-  `define_interface`, `create_item`, `create_ticket`, `set_priority`, `decide_change_request`. Datum plans; it
+- **Archie** is an agent session with planning tools (in-process tools, like `build_model` today): `write_brief`,
+  `define_interface`, `create_item`, `create_ticket`, `set_priority`, `decide_change_request`. Archie plans; it
   does not write CAD.
-- **Spanner** is mostly deterministic: Toolbox `match` + `similarity` search, with the agent consulted only when
+- **Hex** is mostly deterministic: Toolbox `match` + `similarity` search, with the agent consulted only when
   ambiguous.
-- **Dowel** uses the assembly service: place placeholder → mate by ICD name → swap in the real part on Done →
+- **Fitz** uses the assembly service: place placeholder → mate by ICD name → swap in the real part on Done →
   interference.
-- **Caliper:** the deterministic checks plus ICD conformance measurement (new, deterministic), plus an AI review
+- **Gage:** the deterministic checks plus ICD conformance measurement (new, deterministic), plus an AI review
   note.
 
 ## 6. Delivery plan (phases, each shippable)
 
 | Phase | Delivers | Punch list |
 |---|---|---|
-| **1. Smart assembly** | Assembly from a description: Spanner picks Toolbox / company parts automatically, Dowel places and mates them, fastener auto-fit; "Add components by description" in Assembly Studio | ASM-010, ASM-019 |
-| **2. Program + board** | Program model, Datum brief → tree → tickets (brief gate), Jira board with live cards, estimates, roll-up progress, roster | CD-001…CD-005 |
-| **3. Parallel build** | Orchestrator with concurrency cap, specialist part agents on tickets, critical-path priority, Caliper review loop, comments to agents | CD-006…CD-009 |
+| **1. Smart assembly** | Assembly from a description: Hex picks Toolbox / company parts automatically, Fitz places and mates them, fastener auto-fit; "Add components by description" in Assembly Studio | ASM-010, ASM-019 |
+| **2. Program + board** | Program model, Archie brief → tree → tickets (brief gate), Jira board with live cards, estimates, roll-up progress, roster | CD-001…CD-005 |
+| **3. Parallel build** | Orchestrator with concurrency cap, specialist part agents on tickets, critical-path priority, Gage review loop, comments to agents | CD-006…CD-009 |
 | **4. Interfaces + parallel assembly** | Skeleton + ICD, placeholder bodies, mates by ICD names, swap-in, change requests | CD-010…CD-013 |
-| **5. Deliverables + learning** | Program drawings/BOM/DFM/release pack (Scribe, Anvil), estimate calibration, budgets, timeline | CD-014…CD-016 |
+| **5. Deliverables + learning** | Program drawings/BOM/DFM/release pack (Ortho, Smithy), estimate calibration, budgets, timeline | CD-014…CD-016 |
 
 ## 7. Risks and decisions
 
@@ -158,7 +158,7 @@ delivered, first-pass approval rate, average time vs estimate). Parallel instanc
   configurable. This sharpens PD-09: an API key is needed before this runs for anyone but you.
 - **Cost:** a program can spend many tokens. Each program gets a budget with stops at 80 % and 100 %, and the board
   shows spend per ticket.
-- **Divergence between agents:** mitigated by the ICD, Caliper's ICD conformance check and change requests.
+- **Divergence between agents:** mitigated by the ICD, Gage's ICD conformance check and change requests.
 - **Estimates:** honest ranges, recalibrated from real runs, and labelled as estimates.
 
 Parked for the founder (with the default used until decided):

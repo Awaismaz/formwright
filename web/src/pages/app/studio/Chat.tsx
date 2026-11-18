@@ -13,6 +13,7 @@ import { agentDescriptor, describe } from "@/viewer/measure";
 import type { Pick, Topo } from "@/viewer/types";
 import { pickKey } from "@/viewer/types";
 import type { TbMatch } from "./Toolbox";
+import ShopStatus, { phaseFor } from "./ShopStatus";
 
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
@@ -73,13 +74,6 @@ function NoAi({ lines }: { lines: string[] }) {
 }
 
 /** Elapsed time while the agent works, so slow is distinguishable from stuck (STU-17). */
-function Elapsed({ since }: { since: number }) {
-  const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, []);
-  const s = Math.max(0, Math.round((Date.now() - since) / 1000));
-  return <span className="tabular-nums">{Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}</span>;
-}
-
 async function toAtt(f: File): Promise<Att> {
   if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) throw new Error(`${f.name}: use PNG, JPEG, WebP or GIF`);
   if (f.size > 6 * 1024 * 1024) throw new Error(`${f.name}: larger than 6 MB`);
@@ -245,8 +239,12 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
                 <>·<button onClick={() => undo(i.ev.rev_before as number)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><Undo2 className="h-3 w-3" />Undo this change</button></>}
             </div>);
         })}
-        {busy && <div className="flex items-center gap-2 px-1 text-[12px] text-primary"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Working… {since > 0 && <Elapsed since={since} />}
-          {(() => { const t = [...items].reverse().find(x => x.kind === "tool"); return t && t.kind === "tool" && t.state === "run" ? <span className="truncate text-muted">· {t.brief}</span> : null; })()}</div>}
+        {busy && (() => {
+          const last = items[items.length - 1];
+          const t = [...items].reverse().find(x => x.kind === "tool");
+          const step = t && t.kind === "tool" ? { name: t.name, brief: t.brief, running: t.state === "run" } : null;
+          return <ShopStatus phase={phaseFor(step, last?.kind === "agent")} since={since} step={step?.running ? step.brief : null} />;
+        })()}
       </div>
       <div className={cx("border-t border-border p-3", drag && "bg-primary-soft")} data-tour="prompt"
         onDragOver={e => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
