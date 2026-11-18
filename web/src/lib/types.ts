@@ -144,11 +144,15 @@ export interface AgentReview { items: { text: string; basis: string; kind: "obse
 
 /** DS-035: a small edit the agent hands to the PropertyManager (validated and resolved on the server). */
 export interface AgentEdit {
-  op: "fillet" | "chamfer" | "shell" | "hole" | "params"; summary: string; build_id?: string | number | null;
+  op: "fillet" | "chamfer" | "shell" | "hole" | "params" | "extrude" | "pattern" | "multi"; summary: string; build_id?: string | number | null;
   feature_id: string | null; feature: Partial<ManualFeature> & Record<string, unknown> | null;
   targets: { kind: "edge" | "face"; picks: { id: number; point: [number, number, number] }[] } | null;
   params: Record<string, { from: number; to: number; label: string; unit: string }> | null;
-  values: { size?: number; hole?: { type?: "simple" | "clearance" | "tapped" | "cbore" | "csk"; size?: number; d?: number; mode?: "corners"; dx?: number; dy?: number } };
+  values: { size?: number; hole?: { type?: "simple" | "clearance" | "tapped" | "cbore" | "csk"; size?: number; d?: number; mode?: "corners"; dx?: number; dy?: number };
+    /** extrude / cut depth edits */ distance?: number | null; end?: "blind" | "mid" | "through";
+    /** pattern edits */ count?: number; spacing?: number; angle?: number };
+  /** several edits proposed together: one PropertyManager step each, in order */
+  steps?: AgentEdit[];
 }
 
 /** ASM-018: what a pending Studio change would do to the assemblies using the part (nothing committed). */
@@ -165,7 +169,10 @@ export interface Impact {
   assemblies: ImpactAssembly[]; headline: string; checked: boolean; issues?: number;
   programs: { id: string; name: string; tickets: string[] }[]; datasheet: { shots: number };
 }
-export type ImpactChange = { kind: "feature"; feature: Record<string, unknown> } | { kind: "edit"; id: string; feature: Record<string, unknown> } | { kind: "params"; values: Record<string, number> };
+export type ImpactChange = { kind: "feature"; feature: Record<string, unknown> } | { kind: "edit"; id: string; feature: Record<string, unknown> } | { kind: "params"; values: Record<string, number> }
+  | { kind: "suppress"; id: string; suppressed: boolean } | { kind: "delete"; id: string } | { kind: "reorder"; ids: string[] }
+  | { kind: "design_suppress"; name: string; suppressed: boolean } | { kind: "design_delete"; name: string }
+  | { kind: "sequence"; changes: ImpactChange[] };
 
 export type AgentEvent =
   | { type: "hello"; busy: boolean; backlog?: number }

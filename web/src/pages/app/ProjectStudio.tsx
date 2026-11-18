@@ -5,7 +5,7 @@ import { ArrowLeft, Box, Boxes, Camera, Check, CircleHelp, Download, Factory, Fi
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { AgentEdit, BuildStatus, Catalog, ManualFeature, Project, RepairItem } from "@/lib/types";
+import type { AgentEdit, BuildStatus, Catalog, Impact, ImpactChange, ManualFeature, Project, RepairItem } from "@/lib/types";
 import { cx, num } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -26,7 +26,8 @@ import { SimilarPartsDialog } from "@/components/SimilarParts";
 import { useWhereUsed, WhereUsed } from "./modules/assembly/WhereUsed";
 import { DatasheetChip } from "./modules/mesh/DatasheetChip";
 import ParamEditPM from "./studio/ParamEditPM";
-import { prefillPm } from "./studio/agentEdit";
+import { agentSteps, prefillPm, treeChange } from "./studio/agentEdit";
+import ImpactPanel from "./studio/ImpactPanel";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 import StudioCommands, { SHORTCUTS } from "./studio/StudioCommands";
 import CollabBar, { CollabBanner, NewBranchDialog } from "@/components/collab/CollabBar";
@@ -68,6 +69,10 @@ export default function ProjectStudio() {
   const [pm, setPmS] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
   const [paramPm, setParamPm] = useState<{ rows: NonNullable<AgentEdit["params"]>; summary: string; n: number } | null>(null);
   const setPm = (v: typeof pm) => { setPmS(v); if (v) setParamPm(null); };
+  /** DS-035 follow-up: the remaining PropertyManager steps of a multi-step agent edit (next opens after OK + rebuild) */
+  const [agentQueue, setAgentQueue] = useState<{ steps: AgentEdit[]; total: number; waitTopo?: Topo | null } | null>(null);
+  /** ASM-018 follow-up: a tree action / typed command whose trial rebuild found problems in assemblies */
+  const [gate, setGate] = useState<{ impact: Impact; label: string; run: () => void } | null>(null);
   const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset; planeRef?: ManualFeature } | null>(null);
   const [planeOffset, setPlaneOffset] = useState("0");
   const [dialog, setDialog] = useState<"import" | "toolbox" | "similar" | null>(null);
@@ -194,15 +199,44 @@ export default function ProjectStudio() {
   };
   /** DS-035: an edit proposed by the design agent opens the real PropertyManager, pre-filled, targets highlighted. */
   const openAgentEdit = (edit: AgentEdit) => {
-    if (readOnly) { toast.error("You can view this part but not change it"); return; }
+    const steps = agentSteps(edit);
+    if (!steps.length) { toast.error("No change to make"); return; }
+    setAgentQueue(steps.length > 1 ? { steps: steps.slice(1), total: steps.length } : null);
+    openAgentStep(steps[0]!, steps.length > 1 ? `Step 1 of ${steps.length}: ` : "");
+  };
+  const openAgentStep = (edit: AgentEdit, prefix = "") => {
+    if (readOnly) { toast.error("You can view this part but not change it"); setAgentQueue(null); return; }
     const r = prefillPm(edit, topo, manual.data?.features ?? [], st?.build_id);
-    if (r.kind === "error") { toast.error(r.message); return; }
+    if (r.kind === "error") { toast.error(r.message); setAgentQueue(null); return; }
     openLeft();
     setSk(null);
-    if (r.kind === "params") { setPm(null); setParamPm({ rows: r.rows, summary: edit.summary, n: Date.now() }); return; }
-    setPm({ op: r.op, editing: r.editing, preset: { ...r.preset, agent: edit.summary, n: Date.now() } });
+    if (r.kind === "params") { setPm(null); setParamPm({ rows: r.rows, summary: prefix + edit.summary, n: Date.now() }); return; }
+    if (r.op === "sketch" || r.op === "revolve") { openPm(r.op, r.editing); toast(`${prefix}${edit.summary}: check the values, then OK`); return; }
+    setPm({ op: r.op as FeatureOp, editing: r.editing, preset: { ...r.preset, agent: prefix + edit.summary, n: Date.now() } });
     setTool("select"); setSelection(r.selection);
     if (r.note) toast.warning(r.note);
+  };
+  /** OK on one step of a multi-step agent edit: the next step opens once the rebuilt geometry has loaded. */
+  const agentStepDone = () => setAgentQueue(q => (q && q.steps.length ? { ...q, waitTopo: topo } : null));
+  useEffect(() => {
+    const q = agentQueue;
+    if (!q || q.waitTopo === undefined || !topo || topo === q.waitTopo) return;
+    const [next, ...rest] = q.steps;
+    setAgentQueue(rest.length ? { steps: rest, total: q.total } : null);
+    if (next) openAgentStep(next, `Step ${q.total - rest.length} of ${q.total}: `);
+  }, [topo, agentQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Tree actions and typed commands preview their impact on the assemblies using this part first (trial rebuild,
+   *  nothing applied); problems open the same Apply anyway / Back panel as the PropertyManager. */
+  const guarded = async (change: ImpactChange | null, label: string, run: () => void) => {
+    if (!change || usedIn <= 0) { run(); return; }
+    const t = toast.loading(`Checking ${usedIn} assembl${usedIn > 1 ? "ies" : "y"} on a trial rebuild…`);
+    let ok = true;
+    try {
+      const r = await api.post<Impact>(`/api/m/assembly/impact/${id}`, change);
+      if ((r.issues ?? 0) > 0) { ok = false; setGate({ impact: r, label, run }); }
+    } catch { /* the change itself reports what is wrong */ }
+    finally { toast.dismiss(t); }
+    if (ok) run();
   };
   // Sketch: as soon as a face is picked, open the sketcher on it
   useEffect(() => {
@@ -325,11 +359,11 @@ export default function ProjectStudio() {
           {pm ? (
             <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} manual={mf} onBusy={setManualBusy}
               repair={repairOf(pm.editing)}
-              onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); setRedo([]); refresh(); setTool("orbit"); }}
-              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} usedIn={usedIn} sheet={sheetInfo} />
+              onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); setRedo([]); refresh(); setTool("orbit"); agentStepDone(); }}
+              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); setAgentQueue(null); }} usedIn={usedIn} sheet={sheetInfo} />
           ) : paramPm ? (
             <ParamEditPM key={paramPm.n} project={p} rows={paramPm.rows} summary={paramPm.summary} usedIn={usedIn}
-              onDone={() => { setParamPm(null); setRedo([]); refresh(); }} onCancel={() => setParamPm(null)} />
+              onDone={() => { setParamPm(null); setRedo([]); refresh(); agentStepDone(); }} onCancel={() => { setParamPm(null); setAgentQueue(null); }} />
           ) : (
             <Tabs value={tab} onValueChange={t => { setTab(t); if (t !== "params") setParamFocus(null); }} className="flex min-h-0 flex-1 flex-col" data-tour="feature-tree">
               <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]">
@@ -343,7 +377,8 @@ export default function ProjectStudio() {
                   onAskRepair={(f, why) => { openChat();
                     setChatRequest({ id: Date.now(), text: `The feature “${f.name}” that I added by hand no longer rebuilds after my last change (${why}). Repair only that feature so it fits the current geometry, keeping its intent and everything else unchanged, then rebuild and check.` }); }}
                   onPickFeature={n => { setFeatureChips(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n])); openChat(); }}
-                  onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`, undefined, true)}
+                  onSuppressDesign={(n, sup) => void guarded(treeChange({ kind: "design_suppress", name: n, suppressed: sup }), `${sup ? "Suppress" : "Restore"} “${n}”`,
+                    () => void manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`, undefined, true))}
                   onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onSketchOn={f => openSketchOnRef(f, sk?.phase === "pick" ? sk.preset : undefined)}
                   onRename={(f, name) => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { name } }), `Renamed to ${name}`, l => l.map(x => (x.id === f.id ? { ...x, name } : x)))}
@@ -354,9 +389,12 @@ export default function ProjectStudio() {
                     const pl = { origin: f.plane.origin, normal: f.plane.normal, x_dir: f.plane.x_dir ?? xDirFor(f.plane.normal) };
                     setSketch(f.op === "sketch2d" ? { origin: [0, 0, 0], normal: [0, 0, 1], xDir: [1, 0, 0], kind: "lines", lines: sketchLines(pl, f.profiles, f.chains), cx: 0, cy: 0 }
                       : planePreview(f.plane.origin, f.plane.normal, topo)); }}
-                  onToggle={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? `${f.name} unsuppressed` : `${f.name} suppressed`, l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)), true)}
-                  onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
-                  onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true)} /></TabPanel>
+                  onToggle={f => void guarded(treeChange({ kind: "toggle", feature: f }), `${f.suppressed ? "Unsuppress" : "Suppress"} “${f.name}”`,
+                    () => void manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? `${f.name} unsuppressed` : `${f.name} suppressed`, l => l.map(x => (x.id === f.id ? { ...x, suppressed: !x.suppressed } : x)), true))}
+                  onMove={(f, d) => { const ch = treeChange({ kind: "move", ids: mf.map(x => x.id), id: f.id, by: d < 0 ? -1 : 1 }); if (!ch || ch.kind !== "reorder") return; const ids = ch.ids;
+                    void guarded(ch, `Move “${f.name}” ${d < 0 ? "up" : "down"}`, () => void manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!))); }}
+                  onDelete={f => void guarded(treeChange({ kind: "delete", feature: f }), `Delete “${f.name}”`,
+                    () => void manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true))} /></TabPanel>
                 <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
                 <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} usedIn={usedIn} /></fieldset></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
@@ -440,7 +478,7 @@ export default function ProjectStudio() {
           {sk?.phase === "edit" && (
             <SketchEditor key={sk.editing?.id ?? "new"} project={p} topo={fp ? topo : null} plane={sk.plane} faceId={sk.faceId} editing={sk.editing}
               preset={sk.preset} hasBody={!!fp} existing={mf} planeRef={sk.planeRef}
-              onDone={() => { setSk(null); refresh(); }} onCancel={() => setSk(null)} />)}
+              onDone={() => { setSk(null); refresh(); agentStepDone(); }} onCancel={() => { setSk(null); setAgentQueue(null); }} />)}
           {st?.error && (
             <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-danger/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
               <b className="text-danger">Last build failed</b> — showing the last successful geometry.{project.data?.agent?.busy ? " The agent is working on it." : ""}
@@ -478,7 +516,8 @@ export default function ProjectStudio() {
           <Button variant="secondary" onClick={() => setDelTarget(null)}>Cancel</Button>
           <Button variant="danger" icon={<Trash2 className="h-4 w-4" />} disabled={!!p.agent?.busy || manualBusy} onClick={() => {
             const n = delTarget!; setDelTarget(null); setFeatureChips(c => c.filter(x => x !== n));
-            void manualCall(() => api.post(`/api/projects/${id}/design-features/delete`, { name: n }), `${n} deleted`);
+            void guarded(treeChange({ kind: "design_delete", name: n }), `Delete “${n}”`,
+              () => void manualCall(() => api.post(`/api/projects/${id}/design-features/delete`, { name: n }), `${n} deleted`));
           }}>Delete</Button></>}>
         <p className="text-[13px] text-muted">The result is checked to be identical to suppressing it. If anything else would change, nothing is deleted and
           the feature stays suppressed. Then you can ask the design agent to remove it. Undo with <b>Revisions</b>.</p>
@@ -487,10 +526,16 @@ export default function ProjectStudio() {
       <SimilarPartsDialog projectId={p.id} open={dialog === "similar"} onClose={() => setDialog(null)} />
       <StudioCommands open={palette} onOpenChange={setPalette} topo={topo} selection={selection} manual={mf} designFeatures={(st?.features ?? []).filter(f => f.kind === "feature").map(f => f.name)}
         viewer={viewerApi} onPm={(op, preset) => openPm(op, null, preset)}
-        onFeature={(f, label) => manualCall(() => api.post(`/api/projects/${id}/manual`, { feature: f }), `${label} added`, undefined, true)}
-        onSuppress={f => manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? `${f.name} unsuppressed` : `${f.name} suppressed`, undefined, true)}
-        onSuppressDesign={n => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: true }), `${n} suppressed`, undefined, true)}
+        onFeature={(f, label) => void guarded({ kind: "feature", feature: f }, label, () => void manualCall(() => api.post(`/api/projects/${id}/manual`, { feature: f }), `${label} added`, undefined, true))}
+        onSuppress={f => void guarded(treeChange({ kind: "toggle", feature: f }), `${f.suppressed ? "Unsuppress" : "Suppress"} “${f.name}”`,
+          () => void manualCall(() => api.patch(`/api/projects/${id}/manual/${f.id}`, { feature: { suppressed: !f.suppressed } }), f.suppressed ? `${f.name} unsuppressed` : `${f.name} suppressed`, undefined, true))}
+        onSuppressDesign={n => void guarded(treeChange({ kind: "design_suppress", name: n, suppressed: true }), `Suppress “${n}”`,
+          () => void manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: true }), `${n} suppressed`, undefined, true))}
         onUndo={() => void undo()} onRedo={() => void redoNow()} onTool={t => { setPm(null); setSk(null); setTool(t); }} onShortcuts={() => setKeys(true)} />
+      <Modal open={!!gate} onOpenChange={o => !o && setGate(null)} title={gate ? `${gate.label}?` : ""}
+        description="This part is used in assemblies. The change was tried on a trial rebuild first: nothing is applied yet.">
+        {gate && <ImpactPanel impact={gate.impact} onApply={() => { const g = gate; setGate(null); g.run(); }} onBack={() => setGate(null)} />}
+      </Modal>
       <Modal open={keys} onOpenChange={setKeys} title="Keyboard shortcuts">
         <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-[13px]">{SHORTCUTS.map(([k, d]) => <div key={k} className="contents"><dt><span className="kbd">{k}</span></dt><dd className="text-muted">{d}</dd></div>)}</dl>
         <p className="mt-3 text-[12px] text-muted">Mouse: middle- or left-drag rotates, Ctrl+middle or right-drag pans, the wheel zooms at the cursor.</p>

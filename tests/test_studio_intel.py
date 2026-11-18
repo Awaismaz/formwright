@@ -399,3 +399,188 @@ def test_datasheet_shots_go_stale_and_requeue(app: TestClient, monkeypatch: pyte
     assert c.post(f"/api/m/mesh/projects/{pid}/shots/rerender").json()["queued"] == []  # nothing stale: nothing queued
     sid = sh["shots"][0]["id"]
     assert c.delete(f"/api/m/mesh/projects/{pid}/shots/{sid}").json()["shots"] == []
+
+
+# ------------------------------------------------------------------ fw-edit: depths, patterns, several steps (follow-ups)
+POCKET = {"id": "c1", "op": "extrude", "name": "Pocket", "suppressed": False,
+          "plane": {"origin": [-20.0, 0.0, 10.0], "normal": [0.0, 0.0, 1.0]},
+          "sketch": {"kind": "rect", "w": 6.0, "h": 6.0, "cx": 0.0, "cy": 0.0}, "distance": 3.0, "mode": "cut",
+          "end": "blind", "reverse": False}
+LPAT = {"id": "p1", "op": "pattern", "name": "LPattern1", "suppressed": False, "source": ["c1"], "count": 3,
+        "kind": "linear", "step": [15.0, 0.0, 0.0]}
+HOLES2 = {"id": "h1", "op": "hole", "name": "Holes", "suppressed": False, "point": [0.0, 12.0, 10.0],
+          "normal": [0.0, 0.0, 1.0], "d": 4.0, "depth": None, "count": 2, "step": [10.0, 0.0, 0.0]}
+
+
+def _pocket_src() -> str:
+    from aicad.platform.routers.studio import write_manual
+
+    return write_manual(BOX, [POCKET, LPAT, HOLES2])
+
+
+@pytest.fixture(scope="module")
+def pocket_ws(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    ws = tmp_path_factory.mktemp("pockets")
+    _build(ws, _pocket_src())
+    st = json.loads((ws / "out" / "status.json").read_text())
+    # 3 pockets 6 x 6 x 3 and two Ø4 through holes in the 60 x 40 x 10 box
+    assert st["fingerprint"]["volume"] == pytest.approx(24000 - 3 * 108 - 2 * math.pi * 4 * 10, rel=1e-9)
+    return ws
+
+
+def test_extrude_depth_and_pattern_edits(pocket_ws: Path) -> None:
+    from aicad.platform.routers.studio import validate_feature
+
+    e = parse_edit({"op": "extrude", "feature": "Pocket", "distance": 5}, pocket_ws, validate=validate_feature)
+    assert e["op"] == "extrude" and e["feature_id"] == "c1" and e["feature"]["distance"] == 5
+    assert e["feature"]["sketch"] == POCKET["sketch"] and e["values"] == {"distance": 5.0, "end": "blind"}
+    assert e["summary"] == "Cut depth of “Pocket” to 5 mm"
+    t = parse_edit({"op": "cut", "feature": "c1", "end": "through all"}, pocket_ws, validate=validate_feature)
+    assert t["feature"]["end"] == "through" and t["summary"] == "Cut depth of “Pocket”: through all"
+    p = parse_edit({"op": "pattern", "feature": "LPattern1", "count": 4, "spacing": 12}, pocket_ws,
+                   validate=validate_feature)
+    assert p["feature"]["count"] == 4 and p["feature"]["step"] == [12.0, 0.0, 0.0] and p["feature"]["source"] == ["c1"]
+    assert p["values"] == {"count": 4, "spacing": 12.0} and p["summary"] == "“LPattern1”: 4 instances, spacing 12 mm"
+    h = parse_edit({"op": "pattern", "feature": "Holes", "spacing": 20}, pocket_ws, validate=validate_feature)
+    assert h["feature"]["step"] == [20.0, 0.0, 0.0] and h["feature"]["count"] == 2 and h["feature"]["d"] == 4
+    for bad, why in (({"op": "extrude", "distance": 5}, "Name the feature"),
+                     ({"op": "extrude", "feature": "LPattern1", "distance": 5}, "not an extrude"),
+                     ({"op": "pattern", "feature": "Pocket", "count": 3}, "is not a pattern"),
+                     ({"op": "pattern", "feature": "p1", "count": 2.5}, "whole number"),
+                     ({"op": "pattern", "feature": "p1", "angle": 90}, "circular feature pattern"),
+                     ({"op": "pattern", "feature": "p1"}, "number of instances, the spacing"),
+                     ({"op": "extrude", "feature": "Pocket", "distance": -1}, "between")):
+        with pytest.raises(EditError, match=why):
+            parse_edit(bad, pocket_ws, validate=validate_feature)
+    st = design_state(pocket_ws) or ""
+    assert "c1 “Pocket” extrude cut distance=3" in st and "p1 “LPattern1” pattern count=3 spacing=15" in st
+
+
+def test_several_edits_in_one_block(pocket_ws: Path) -> None:
+    from aicad.platform.routers.studio import validate_feature
+
+    block = {"summary": "Deeper pockets, four of them", "edits": [
+        {"op": "extrude", "feature": "Pocket", "distance": 5},
+        {"op": "pattern", "feature": "LPattern1", "count": 4, "spacing": 12},
+        {"op": "chamfer", "d": 1, "edges": "bottom"}]}
+    e = parse_edit(block, pocket_ws, validate=validate_feature)
+    assert e["op"] == "multi" and e["summary"] == "Deeper pockets, four of them"
+    assert [s["op"] for s in e["steps"]] == ["extrude", "pattern", "chamfer"]
+    assert len(e["steps"][2]["targets"]["picks"]) == 4
+    # a JSON list works too; one bad step rejects the block with the step number
+    with pytest.raises(EditError, match=r"^Step 2: .*not a pattern"):
+        parse_edit([{"op": "extrude", "feature": "Pocket", "distance": 5}, {"op": "pattern", "feature": "Pocket", "count": 2}],
+                   pocket_ws, validate=validate_feature)
+    with pytest.raises(EditError, match="more than 8 changes"):
+        parse_edit({"edits": [{"op": "params", "params": {"H": 12}}] * 9}, pocket_ws)
+    one = parse_edit([{"op": "params", "params": {"H": 12}}], pocket_ws)
+    assert one["op"] == "params"  # a single step is just that edit
+    text, edit, note = extract_edit("Two changes.\n" + _fence(block), pocket_ws, scrub)
+    assert text == "Two changes." and edit and edit["op"] == "multi" and note is None
+
+
+def test_replayed_multi_edit_applies_step_by_step(app: TestClient, tmp_path: Path,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    """One replayed turn proposes two edits; each goes through the normal manual-feature edit (one PropertyManager
+    step each) and the volume follows the hand formula."""
+    from test_ai_quality import _wait_idle
+
+    reply = "Two changes, one panel each.\n" + _fence({"summary": "Deeper pockets, four of them", "edits": [
+        {"op": "extrude", "feature": "Pocket", "distance": 5},
+        {"op": "pattern", "feature": "LPattern1", "count": 4, "spacing": 12}]})
+    f = tmp_path / "cassette.json"
+    f.write_text(json.dumps({"turns": [_cassette_turn(reply)]}))
+    monkeypatch.setenv("FW_AGENT_REPLAY", str(f))
+    c = app
+    signup(c, "multi@x.com")
+    pid, ws = _project(c, "Pocket box", _pocket_src())
+    assert c.post(f"/api/projects/{pid}/agent/chat", json={"prompt": "make the pockets 5 deep and four of them, 12 apart"}).status_code == 200
+    hist = _wait_idle(pid)
+    res = next(e for e in hist if e["type"] == "result")
+    assert res["turns"] == 1 and not [e for e in hist if e["type"] == "tool"]
+    edit = next(e for e in hist if e["type"] == "edit")["edit"]
+    assert edit["op"] == "multi" and [s["op"] for s in edit["steps"]] == ["extrude", "pattern"]
+    for step in edit["steps"]:
+        r = c.patch(f"/api/projects/{pid}/manual/{step['feature_id']}", json={"feature": step["feature"]})
+        assert r.status_code == 200, r.text
+    st = json.loads((ws / "out" / "status.json").read_text())
+    assert st["fingerprint"]["volume"] == pytest.approx(24000 - 4 * 6 * 6 * 5 - 2 * math.pi * 4 * 10, rel=1e-9)
+
+
+# ------------------------------------------------------------------ impact preview for tree actions (follow-ups)
+def test_trial_source_for_tree_actions(tmp_path: Path) -> None:
+    from fastapi import HTTPException
+
+    from aicad.agent.runner import suppressed_features
+    from aicad.platform.routers.studio import read_manual, trial_source
+
+    src = _pocket_src()
+    new, strict = trial_source(src, tmp_path, {"kind": "suppress", "id": "h1", "suppressed": True})
+    assert strict == set() and next(f for f in read_manual(new) if f["id"] == "h1")["suppressed"] is True
+    new, _ = trial_source(src, tmp_path, {"kind": "delete", "id": "h1"})
+    assert [f["id"] for f in read_manual(new)] == ["c1", "p1"]
+    new, _ = trial_source(src, tmp_path, {"kind": "reorder", "ids": ["h1", "c1", "p1"]})
+    assert [f["id"] for f in read_manual(new)] == ["h1", "c1", "p1"]
+    new, _ = trial_source(src, tmp_path, {"kind": "sequence", "changes": [
+        {"kind": "suppress", "id": "c1"}, {"kind": "delete", "id": "h1"}]})
+    assert [(f["id"], f["suppressed"]) for f in read_manual(new)] == [("c1", True), ("p1", False)]
+    new, _ = trial_source(src, tmp_path, {"kind": "design_suppress", "name": "Boss"})
+    assert suppressed_features(new) == ["Boss"]
+    new, _ = trial_source(new, tmp_path, {"kind": "design_suppress", "name": "Boss", "suppressed": False})
+    assert suppressed_features(new) == []
+    for bad, code in (({"kind": "reorder", "ids": ["c1"]}, 422), ({"kind": "delete", "id": "zz"}, 404),
+                      ({"kind": "sequence", "changes": []}, 422),
+                      ({"kind": "sequence", "changes": [{"kind": "sequence", "changes": []}]}, 422)):
+        with pytest.raises(HTTPException) as ei:
+            trial_source(src, tmp_path, bad)
+        assert ei.value.status_code == code
+
+
+def test_impact_preview_for_suppress_delete_reorder(app: TestClient, tmp_path: Path) -> None:
+    """Fixture: the plate's pin hole is a hand-made through hole drilled after a 10 x 10 x 3 boss over it; the pin is
+    concentric with it. Suppressing or deleting the hole breaks the mate and the pin clashes with plate + boss
+    (π·3²·13); reordering it before the boss leaves the boss over the hole (π·3²·3), nothing breaks."""
+    from aicad.assembly import xform
+    from aicad.platform.routers.studio import write_manual
+
+    boss = {"id": "b1", "op": "extrude", "name": "Boss", "suppressed": False,
+            "plane": {"origin": [50.0, 30.0, 10.0], "normal": [0.0, 0.0, 1.0]},
+            "sketch": {"kind": "rect", "w": 10.0, "h": 10.0, "cx": 0.0, "cy": 0.0}, "distance": 3.0, "mode": "add",
+            "end": "blind", "reverse": False}
+    hole = {"id": "h1", "op": "hole", "name": "Pin hole", "suppressed": False, "point": [50.0, 30.0, 13.0],
+            "normal": [0.0, 0.0, 1.0], "d": 6.6, "depth": None}
+    c = app
+    signup(c, "treeimpact@x.com")
+    pay = c.post("/api/billing/checkout", json={"product_code": "addon_assembly"}).json()["payment_id"]
+    c.post(f"/api/billing/payments/{pay}/simulate", json={"outcome": "success"})
+    plate_pid, plate_ws = _project(c, "Base plate", write_manual(PLATE.replace("HOLES = 4", "HOLES = 0"), [boss, hole]))
+    pin_pid, _ = _project(c, "Pin", PIN)
+    v = c.post("/api/m/assembly/assemblies", json={"project_id": plate_pid}).json()
+    aid, plate = v["assembly"]["id"], v["instances"][0]["id"]
+    pin = c.post(f"/api/m/assembly/assemblies/{aid}/instances", json={"project_id": pin_pid}).json()["result"]["instance"]
+    c.patch(f"/api/m/assembly/assemblies/{aid}/instances/{pin}", json={"T": xform.to12(xform.translate((50, 30, 5)))})
+    data, org = tmp_path / "data", c.get("/api/auth/me").json()["org"]["id"]
+    r = c.post(f"/api/m/assembly/assemblies/{aid}/mates", json={
+        "type": "concentric", "a": {"inst": plate, "kind": "face", "id": _axis(c, aid, plate, 50, 30, 3.3, data, org)},
+        "b": {"inst": pin, "kind": "face", "id": _axis(c, aid, pin, 0, 0, 3, data, org)}})
+    assert r.status_code == 200, r.text
+    model_before = (plate_ws / "model.py").read_text()
+
+    def imp(change: dict[str, Any]) -> dict[str, Any]:
+        r = c.post(f"/api/m/assembly/impact/{plate_pid}", json=change)
+        assert r.status_code == 200, r.text
+        return r.json()["assemblies"][0]
+
+    for change in ({"kind": "suppress", "id": "h1", "suppressed": True}, {"kind": "delete", "id": "h1"},
+                   {"kind": "sequence", "changes": [{"kind": "edit", "id": "b1", "feature": {"distance": 2}},
+                                                    {"kind": "delete", "id": "h1"}]}):
+        a = imp(change)
+        assert a["breaks"] == 1 and len(a["clashes"]) == 1 and {a["clashes"][0]["a"], a["clashes"][0]["b"]} == {plate, pin}
+        h = 12 if change["kind"] == "sequence" else 13  # the sequence also lowered the boss to 2 mm
+        assert a["clashes"][0]["volume_mm3"] == pytest.approx(math.pi * 9 * h, rel=1e-4)
+    a = imp({"kind": "reorder", "ids": ["h1", "b1"]})
+    assert a["breaks"] == 0 and len(a["clashes"]) == 1
+    assert a["clashes"][0]["volume_mm3"] == pytest.approx(math.pi * 9 * 3, rel=1e-4)
+    a = imp({"kind": "suppress", "id": "b1", "suppressed": True})  # the boss goes, the hole stays: harmless
+    assert a["breaks"] == 0 and a["clashes"] == []
+    assert (plate_ws / "model.py").read_text() == model_before  # nothing committed

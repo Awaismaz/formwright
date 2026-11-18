@@ -394,7 +394,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
         {typeof pre.agent === "string" && <div className="flex gap-2 rounded-lg border border-accent/40 bg-accent/5 p-2.5 text-[12px]" data-agent-edit>
           <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-          <span><b>Suggested by the design agent:</b> {pre.agent}. Check the highlighted {needsEdges ? "edges" : "faces"} and the values, then OK. Nothing changes until you do.</span></div>}
+          <span><b>Suggested by the design agent:</b> {pre.agent}. {selection.length ? `Check the highlighted ${needsEdges ? "edges" : "faces"} and the values, then OK.` : "Check the values, then OK."} Nothing changes until you do.</span></div>}
         {impact && <ImpactPanel impact={impact.data} busy={busy} onApply={() => void submit(true)} onBack={() => setImpact(null)} />}
         {repair && <div className="flex gap-2 rounded-lg border border-warning/50 bg-warning/10 p-2.5 text-[12px]" data-repair-note>
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />

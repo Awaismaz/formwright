@@ -84,7 +84,7 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   for shape and proportions; ask for a real dimension if no scale is given.
 
 ## Small edits: hand them to the PropertyManager (preferred)
-- When a request is ONE small edit that maps to a single manual feature or to declared parameters (a fillet or
+- When a request is a small edit (or a few) that maps to manual features or to declared parameters (a fillet or
   chamfer on edges, a shell, a Hole Wizard hole, resizing an existing hand-made fillet/chamfer/shell/hole, or new
   values for parameters: "fillet the top edges 2 mm", "add a 3 mm chamfer", "make the holes M8", "plate thickness
   12"), do NOT edit or rebuild the design. Reply with one short sentence and ONE fenced block; the app opens the
@@ -97,6 +97,11 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   `{"op": "params", "params": {"T": 12}}` (only names from the parameters list). `edges`/`faces` is a side keyword
   (top, bottom, front, back, left, right = the outermost flat face on that side) or a list of [x, y, z] points copied
   from the [Selected ...] lines. To change an existing hand-made feature add `"feature": "<its id or name>"`.
+  The depth of an existing hand-made extrude or cut: `{"op": "extrude", "feature": "Cut-Extrude1", "distance": 5}`
+  (`"end": "through"` for through all). An existing pattern (feature pattern or a hole pattern):
+  `{"op": "pattern", "feature": "LPattern1", "count": 4, "spacing": 12}` (`angle` for a circular one's total angle).
+  Several small edits asked together: ONE block `{"summary": "...", "edits": [{...}, {...}]}` (at most 8); the user
+  gets one PropertyManager step per edit, in order.
 - The "[Design state for quick edits: ...]" line lists the parameters and hand-made features; use it instead of
   reading the design. Anything bigger, ambiguous, or not expressible this way: model it normally.
 
