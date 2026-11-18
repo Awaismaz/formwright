@@ -19,6 +19,8 @@ import {
   usedPoints, type Anno, type DEnt, type Dim, type DraftDoc, type GdtSymbol, type Layer, type Snap, type SnapOpts,
 } from "./geom";
 import { contentPrims, FILLS, LINE_STYLES, primBox, TEXT_COLORS, type Prim } from "./prims";
+import { FileButtons } from "@/components/NativeExport";
+import { moduleExportUrl } from "@/lib/native";
 import { DraftSidePanel, type ToolOpts } from "./DraftPanels";
 
 export type ToolId = "select" | "line" | "centerline" | "rect" | "circle" | "arc" | "slot" | "polygon" | "centermark" | "offset" | "trim" | "extend"
@@ -648,6 +650,7 @@ function Editor({ initial, onBack }: { initial: DraftState; onBack: () => void }
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="draft-editor">
       <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null}
+        files={<FileButtons ext="fwdrw" saveUrl={moduleExportUrl("draft", state.id)} saveName={`${name || "drawing"}.fwdrw`} />}
         actions={<div className="flex items-center gap-1.5">
           <Button size="sm" variant={dirty ? "primary" : "secondary"} loading={saving} disabled={!state.can_edit || !!preview} icon={<Save className="h-3.5 w-3.5" />} onClick={() => void save()} data-testid="draft-save">
             {dirty ? "Save revision" : `Saved · rev ${state.rev}`}</Button>

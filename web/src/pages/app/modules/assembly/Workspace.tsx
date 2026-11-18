@@ -18,6 +18,7 @@ import { BomPanel, CheckPanel, plural } from "./CheckPanel";
 import { PairPanel } from "./PairPanel";
 import { InsertDialog } from "./InsertDialog";
 import { SmartPanel } from "./SmartPanel";
+import { FileButtons } from "@/components/NativeExport";
 import { Segmented, SolveChip, mm } from "./bits";
 
 const BASE = "/api/m/assembly";
@@ -326,6 +327,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
               className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2"><Camera className="h-4 w-4" />Render</Link></Tip>}
           {exp && !exp.stale && <a href={exp.url} className="inline-flex h-8 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-[12.5px] font-medium hover:bg-panel2" data-testid="step-download">
             <Download className="h-4 w-4" />STEP</a>}
+          <FileButtons ext="fwasm" saveUrl={view.instances.length ? `/api/native/assemblies/${aid}/export` : null} saveName={`${view.assembly.name}.fwasm`} />
           {view.can_edit && <Tip content="Assembly STEP (AP214) with sub-assemblies, part names and placements; re-imported to verify" side="bottom">
             <Button size="sm" variant="secondary" icon={<FileBox className="h-4 w-4" />} loading={busy === "export"} disabled={!view.instances.length} onClick={exportStep} data-testid="export-step">
               {exp && !exp.stale ? "Re-export" : "Export STEP"}</Button></Tip>}

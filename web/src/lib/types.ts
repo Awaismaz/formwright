@@ -110,6 +110,7 @@ export interface Project {
   archived: boolean; builds: number; last_status: BuildStatus; thumbnail: string | null; created_by?: string | null;
   agent?: { busy: boolean; allowed: boolean; reason: string | null; cta: string | null; has_history: boolean };
   starter_prompt?: string | null;
+  access?: import("./collab").Access; branch?: string; workspace?: string | null;
 }
 
 export interface Template { code: string; name: string; icon: string; prompt: string }

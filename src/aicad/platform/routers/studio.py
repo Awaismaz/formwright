@@ -801,7 +801,7 @@ async def warm(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, A
     """Start the project's geometry engine ahead of the first build (called when the Studio opens)."""
     import asyncio
 
-    p = _project(ctx, project_id)
+    p = _project(ctx, project_id, "read")
     t = asyncio.create_task(worker.warm(p.org_id))
     _WARMING.add(t)
     t.add_done_callback(_WARMING.discard)
@@ -839,7 +839,7 @@ class CompareIn(BaseModel):
 
 @router.post("/projects/{project_id}/compare")
 async def compare(project_id: str, body: CompareIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    p = _project(ctx, project_id)
+    p = _project(ctx, project_id, "read")
     ws = workspace_for(p)
     await wait_finalized(p.id)
     a = ws / "revisions" / str(body.base) / "part.step"

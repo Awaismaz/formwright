@@ -4,6 +4,101 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (t) — Design Office Phase 4: skeleton + ICD, placeholders, swap-in, change requests (CD-010…013)
+
+Branch `wip/office-phase4` (worktree `fw-wt/office-phase4`). Report: docs/reports/design-office.md, Phase 4.
+
+### Done
+- CD-010 skeleton + ICD: deterministic layout engine (`office/icd.py`, datums A|B|C, roles block / shaft / hub / gear,
+  hole patterns, shaft/bore ISO 286 fits, seating faces, gear meshes, validity incl. ISO 7089 washer spacing); the
+  "Architecture and interfaces" gate is real (edit numbers, approve; Run waits for it); ICD page (table, detail,
+  measured rows, history, CRs); ICD excerpt + `fw-icd` block in the specialist prompt; Gage's deterministic ICD
+  conformance measurement (`office/conformance.py`) replaces the lexical size check for ICD programs.
+- CD-011 placeholders (`assembly/placeholder.py`, worker op), program assembly built at ICD approval (sub-assembly
+  documents + nested final), mates by interface name, swap-in on Gage approval (same instances, mates re-attached,
+  interference re-run, clashes → Changes requested on the part), level integration fits bolts into the ICD joints.
+- CD-012 change requests (agent `fw-change-request` block or engineer): Archie's rule + optional AI note; ICD
+  versioning; affected tickets reopened with the delta; placeholders regenerated; CR lane on the board.
+- CD-013 live program assembly view (Assembly tab): translucent placeholders, solid real parts, fitted drop + glow,
+  clashes, explode, per-item tooltip.
+- ASM-021 nested sub-assemblies in Assembly Studio (copy with a link; insert / refresh / remove; tree sections;
+  STEP sub-assembly nodes). Merged main (collaboration, native formats): `.fwprog` import keeps the ICD and asks for a
+  rebuild of the program assembly; `.fwasm` export of an assembly with placeholders is a clear 409.
+
+### Verified how
+- `tests/test_office_icd.py` 18 tests (hand-checked layout, ISO 286 limits, conformance on fixture parts with measured
+  values, placeholders, assembly from placeholders, swap-in keeps every mate, CR accept / reject / AI reject, rule
+  unit, tenant isolation); Phase 2/3 office suites updated and passing; vitest `office/icd.test.ts` 6 tests.
+- Full gate after merging main: pytest 563 passed, 1 failed (the budget test: the new washer rule rejected the layout's own 4-hole M3 pattern on a 30 x 20 block, so the generator now picks 2 holes / a larger PCD when washers would overlap; office suites rerun: 53 passed); ruff clean; tsc clean; vitest 110 passed; vite build ok.
+- Browser walkthrough (puppeteer-core 25.18.1, port 8804, throwaway data dir, `FW_OFFICE_FAKE_AGENTS=1`, 1.2 s
+  steps): program → ICD review + edit form → approve → placeholder assembly (4 placeholders, 7 mates by interface name,
+  0 clashes) with tooltip → Run → CR-1 (IF-01 Ø6.6 → 7) accepted, ICD v2 → parts swapped in (glow) → complete: 4 real
+  parts, 39 mates, 4 fastener stacks, 0 clashes; exploded; ICD history v2; final assembly nested in Assembly Studio
+  (Base / Drive sections, fully positioned, 18 free spins); phone width. 0 console / page errors. Screenshots:
+  docs/reports/design-office/phase4/. Fixes from the screenshots: cramped card header + stale "fitted" chip, stale
+  assembly summary, live view missing refreshes in an event burst, an integration that finished while a CR reopened
+  its parts (now goes back to the backlog). Server stopped, scratch data deleted.
+
+### Not done / limits
+- No live AI run (PD-48). Conceptual layout only (translations, row of stations); no bearing / key / dowel interfaces;
+  the office does not take Assembly Studio's per-document lock. See the report's Limitations.
+
+### Parked
+- PD-54 (Phase 4 defaults).
+
+### Next
+- Phase 5: drawings and release from the ICD (CD-014), richer layouts and interface kinds, calibration (CD-015).
+
+## 2026-11-18 (s) — Collaboration: teams, permissions, sharing, branches, merge requests (branch wip/collab)
+
+**Done** (PLT-010, PLT-017 review queue part, PLT-020…024, CAD-062):
+- Teams (Team page → Members | Teams): create/edit/delete, colour, members with team roles admin/editor/viewer.
+- One permission module (`src/aicad/platform/collab/permissions.py`): none/read/comment/edit/admin = max(workspace
+  baseline, owning-team role, grants), owners/admins always admin, viewers capped at comment, guests capped at edit and
+  never run the agent. `projects._project` delegates to it with the level taken from the HTTP method unless given, so
+  every project router (Studio, library, modules, native export) is covered; module `_project` helpers delegate;
+  project lists, search, recent revisions, module pickers and export-all are filtered. Permission changes are audited.
+- Sharing: Share dialog (people/teams/levels, general access, owning team, protect main), guests by email (reuses the
+  invite flow, role "guest", no seat), read-only links (HMAC-signed id, revocable, optional expiry) opening a public
+  viewer `/share/:token` (3D, parameters, checks, revisions, drawing), Shared with me on Projects, lock chips on cards.
+- Collaboration in the Studio: branch picker + presence avatars (SSE) + Share in the CommandManager tab row, Activity
+  tab (comments with @mentions → notifications; activity feed from the audit log + agent runs, per branch), soft lock
+  banner ("Ada is editing main (design agent running)" → Work on my own branch), View-only chip + locked commands.
+- Branches: main = existing workspace/history (no data moved); a branch is a sibling copy-on-write workspace forked
+  from any revision; the active branch per person/project is a cookie resolved by `workspace_for`, so all existing
+  endpoints work on branches unchanged; agent sessions keyed per branch.
+- Merge requests: page with 3D compare (main vs branch), parameter table (base / main / branch), feature and change
+  lists, checks, reviews (approve / request changes with note), discussion; fast-forward or 3-way (parameters per
+  name, manual features per id, source merge3 with parameters masked); conflicts side by side with take main / take
+  branch / design-agent proposal (optional, token-metered, faked in tests); rebuild + gating checks or refused;
+  protected main needs approvals; tags for releases on main.
+
+**Verified how.** `tests/test_collab.py` (13 tests: merge engine, additive migration on a pre-collab database,
+team CRUD, permission matrix, guest invite + read-only link + revoke + expiry, presence/comments/mentions/activity,
+branch isolation + soft lock + fast-forward + 3-way + refusal on failing checks, conflicts + reconcile (fake) +
+protected main + source conflict + tags), `web/src/lib/collab.test.ts` (12 vitest). Full gate below. Browser
+walkthrough (puppeteer-core 25.18.1, port 8803, throwaway data dir, two people in two browser contexts + an anonymous
+one): owner creates team "Drivetrain", makes the demo plate team-owned, protects main, creates a read-only link;
+Ada (engineer) opens the part (owner sees her avatar; protected-main banner), works on a copy `ada/thicker-plate`,
+changes thickness 10 → 12 (branch only; main still 10), opens merge request !1; owner opens it, 3D compare shows
++18,926 mm³ added / 0 removed, approves, merges (fast-forward) → main bbox 120 × 80 × 12, checks ok; activity feed
+lists branch/edit/MR/approve/merge; the anonymous link shows the viewer read-only (write via link 403, project API
+401). 0 console errors in the final runs. Fixes made from the walkthrough: compare output folder on branches
+(and a shorter compare path for long Windows data dirs), agent gate on protected main, MR title capitalised, inline
+review note instead of a browser prompt, approve disabled after approving.
+
+**Not done / limits.** Team ownership covers parts only (assemblies, 2D drafts, renders, Design Office programs stay
+workspace-scoped, PD-53); presence and locks are in memory (one app process); "their edits go to their own branch"
+is offered (409 + one click), not automatic; guests have no workspace home page (they land on the shared part and
+Projects → Shared with me); the review queue's part-catalogue columns (rest of PLT-017) are still open; no live
+design-agent reconcile was run.
+
+**Parked:** PD-50 (guest billing), PD-51 (permission defaults), PD-52 (branch/merge defaults), PD-53 (team
+ownership scope, presence scale).
+
+**Next:** guest landing page; team ownership for assemblies and Design Office programs; review-queue page across
+projects ("merge requests waiting for me").
+
 ## 2026-11-18 (r) — Coordinator summary of the autonomous run (handoff)
 
 Founder away; work run as parallel agents in git worktrees, merged + pushed one by one.
@@ -17,6 +112,35 @@ Founder away; work run as parallel agents in git worktrees, merged + pushed one 
 - In flight: office phase 3, landing hero v2 (gearbox story, phone + tablet, CAD section), PWA + mobile,
   native file formats in every module, collaboration (teams, permissions, sharing, branching).
 - Known flakes under machine load: warm-worker test, some Blender/mesh render tests — pass when run alone.
+## 2026-11-18 (r) — Native Formwright files for every module (IO-020…IO-025), branch wip/native-formats
+
+**Done.** One shared container (`src/aicad/native/`): deterministic signed zip, `manifest.json` with `kind`, sha256 of
+every entry, per-workspace HMAC signature, format versions + migration hook. Formats: `.fwpart` (full parametric
+model), `.fwasm` (parts embedded once, linked by fingerprint on import), `.fwdrw` (model drawing or 2D draft),
+`.fwprog`, `.fwrender` (Mesh Studio / AI Render), `.fwmfg`, `.fwcalc`, `.fwprint` (part setup or uploaded mesh),
+`.fwread` (Image-to-CAD), plus "Download all" (zip of .fwpart). API `/api/native/*` (`mod_native.py`,
+`native_modules.py`). Import: untrusted-input validation, tripwire + strict allow-list for foreign scripts, rebuild in
+the workspace's build worker, fingerprint comparison → "Verified identical" / differences / exact read-only fallback.
+UI: import dialog for every Formwright file (Home drop zone, Projects page Import + drag-drop, New project dialog,
+every module's "Open .ext"), "Save .ext" in every module header (shared `ModuleHeader`), Studio Files panel .fwpart
+with options + import provenance, `/app/open-file` route for the PWA file handler. Spec: `docs/FORMATS.md`.
+
+**Verified.** `tests/test_native_formats.py` (9 tests: container/zip-bomb/path attacks, determinism + signature,
+migration hook, script gate, part/assembly/drawing/program/archive round trips into a second workspace, tamper and
+malicious re-packs, fallback, all 8 module kinds); vitest `web/src/lib/native.test.ts` (6). Browser walkthrough
+(puppeteer-core 25.18.1, port 8802, throwaway data): workspace A saved Demo Mounting Plate .fwpart, an assembly
+(plate + L bracket, coincident mate) as .fwasm and a Manufacturing Advisor report as .fwmfg; a second account opened
+each: part "Verified identical" (volume 89,663.758238 mm³, 23 faces, 56 edges both sides), parameter Length 120 → 130
+rebuilt and verified (97,653.758 mm³); assembly both parts verified, same placement, mate ok; DFM report current.
+Screenshots reviewed (dialog title casing fixed; client event tracking removed: the server records exports/imports).
+
+**Not done / limits.** Mesh exports (GLB/OBJ/STL) and `.blend` scenes are never packed; uploaded-mesh repair state
+not carried; draft Save exports the last saved revision; assembly mates whose faces don't match the rebuilt part are
+dropped (counted); the PWA manifest `file_handlers` entries are listed in FORMATS.md for the PWA branch to add.
+
+**Decision parked.** PD-49 native file defaults.
+
+---
 
 ## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
 

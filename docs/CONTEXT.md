@@ -33,6 +33,9 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   goes inside `components/DesktopOnly.tsx`. Compact layouts: `lib/media.ts` (PHONE < 768, COMPACT < 1024).
 
 ## Architecture in one screen
+- Formwright files (IO-020…025): every module saves/opens its work as a signed, checksummed zip (`.fwpart .fwasm .fwdrw
+  .fwprog .fwrender .fwmfg .fwcalc .fwprint .fwread`), one container in `src/aicad/native/`, spec `docs/FORMATS.md`.
+  Imports are untrusted input; parts are rebuilt and verified against the exported fingerprint.
 - `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
   `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),
   `worker.py` (warm per-org build worker).
@@ -42,6 +45,11 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   draft; `toolbox.py` standard components; `checks.py` deterministic checks.
 - `src/aicad/platform/` — FastAPI app, models, routers (`projects`, `studio` = manual features/materials/compare,
   `library` = Toolbox/STEP import/recognition, auth, billing, admin, god, team, journey).
+- `src/aicad/platform/collab/` — collaboration: teams, **one permission module** (`require_project`, level by HTTP
+  method unless given), sharing/guests/read-only links, per-project branches (sibling copy-on-write workspaces, the
+  active branch per person via a cookie that `workspace_for` resolves), merge requests (3-way merge of parameters,
+  manual features and source). New project endpoints must go through `projects._project(ctx, id, need)`; new project
+  lists through `permissions.visible`. Details: docs/ARCHITECTURE.md §6.
 - `web/src/pages/app/ProjectStudio.tsx` — Studio shell; `studio/` CommandManager, FeatureManager (PropertyManager),
   SketchEditor (2D constraint sketcher, solver in `web/src/sketch/model.ts`), Chat, Panels, Toolbox, StepImport.
   Viewer engine in `web/src/viewer/` (Z-up, ortho default, B-rep edges, snapping, section caps).

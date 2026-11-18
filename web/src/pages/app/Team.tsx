@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MailPlus, MoreHorizontal, Trash2, UserMinus, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { canManage, useSession } from "@/lib/session";
 import type { Org, Role } from "@/lib/types";
 import { ago, date, money, PAGE } from "@/lib/format";
 import type { Catalog } from "@/lib/types";
+import TeamsTab from "./TeamsTab";
 import { Avatar, Badge, Button, Card, Field, Input, Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger, Modal, PageHeader, PageLoader, Progress } from "@/components/ui";
 
 interface TeamData {
@@ -34,6 +35,8 @@ export default function Team() {
   const [busy, setBusy] = useState(false);
   const [ask, setAsk] = useState<{ title: string; body: string; cta: string; danger?: boolean; run: () => Promise<unknown>; ok: string } | null>(null);
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
+  const [sp, setSp] = useSearchParams();
+  const tab = sp.get("tab") === "teams" ? "teams" : "members";
   if (!q.data) return <PageLoader />;
   const { org, members, invites, my_role } = q.data;
   const manage = canManage(my_role);
@@ -52,8 +55,13 @@ export default function Team() {
   };
   return (
     <div className={PAGE}>
-      <PageHeader title="Team" subtitle={`Members and roles for ${org.name}.`}
-        actions={manage && <Button icon={<MailPlus className="h-4 w-4" />} onClick={() => setOpen(true)}>Invite teammate</Button>} />
+      <PageHeader title="Team" subtitle={`Members, roles and teams for ${org.name}.`}
+        actions={manage && tab === "members" && <Button icon={<MailPlus className="h-4 w-4" />} onClick={() => setOpen(true)}>Invite teammate</Button>} />
+      <div className="mb-5 inline-flex rounded-lg border border-border bg-panel p-0.5 text-sm" role="tablist">
+        {(["members", "teams"] as const).map(t => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setSp(t === "teams" ? { tab: "teams" } : {}, { replace: true })}
+          className={tab === t ? "rounded bg-primary px-3 py-1 capitalize text-white" : "rounded px-3 py-1 capitalize text-muted"}>{t}</button>)}
+      </div>
+      {tab === "teams" ? <TeamsTab /> : <>
       <Card className="mb-6 flex flex-wrap items-center gap-6 p-5">
         <div className="flex items-center gap-3"><Users className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Seats</div><div className="text-xs text-muted">{org.seats_used} used{invites.length ? ` · ${invites.length} pending` : ""} of {org.seat_limit >= 1000 ? "unlimited" : org.seat_limit}</div></div></div>
         {org.seat_limit < 1000 && <Progress className="max-w-xs flex-1" value={org.seats_used + invites.length} max={org.seat_limit} tone={full ? "warning" : "primary"} />}
@@ -126,6 +134,7 @@ export default function Team() {
           {full && <p className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-xs">All seats are in use on your plan. {org.plan_code === "team" ? "Add a seat in Billing first." : "Upgrade to Team for 5 seats."}</p>}
         </div>
       </Modal>
+      </>}
     </div>
   );
 }

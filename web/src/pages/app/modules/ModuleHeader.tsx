@@ -5,6 +5,8 @@ import { Badge, StatusBadge, Tip } from "@/components/ui";
 import { IsoThumb } from "@/components/ProjectCard";
 import { ReleaseDialog, releaseChip, useDeliverables, type Deliverables } from "@/components/Release";
 import { ago, cx } from "@/lib/format";
+import { moduleExportUrl } from "@/lib/native";
+import { FileButtons } from "@/components/NativeExport";
 
 export type MakeCode = "drawings" | "manufacturing" | "engineering" | "print";
 
@@ -16,12 +18,22 @@ const OUTPUT: Record<MakeCode, string> = { drawings: "sheet", manufacturing: "an
  * revision, release state (opens the release gate) and this module's staleness from the one rule in aicad.deliverables.
  * Module-specific actions go on the right.
  */
-export function ModuleHeader({ code, icon, title, projectId, projectName, projects, onSwitch, actions, children }: {
+/** Save / open as a Formwright file, per module: the extension and the export of a part's work in that module. */
+const FILE: Record<MakeCode, { ext: string; url: (pid: string) => string }> = {
+  drawings: { ext: "fwdrw", url: pid => `/api/native/drawings/${pid}/export` },
+  manufacturing: { ext: "fwmfg", url: pid => moduleExportUrl("mfg", pid) },
+  engineering: { ext: "fwcalc", url: pid => moduleExportUrl("calc", pid) },
+  print: { ext: "fwprint", url: pid => moduleExportUrl("print", pid) },
+};
+
+export function ModuleHeader({ code, icon, title, projectId, projectName, projects, onSwitch, actions, children, files }: {
   code: MakeCode; icon: ReactNode; title: string;
   projectId: string | null; projectName?: string | null;
   /** Parts the user can switch to; omit to hide the switcher. `null` from onSwitch means "all parts" (the picker). */
   projects?: { id: string; name: string; disabled?: boolean }[]; onSwitch?: (id: string | null) => void;
   actions?: ReactNode; children?: ReactNode;
+  /** Replaces the default Save/Open file buttons (e.g. a 2D drawing or an uploaded mesh). */
+  files?: ReactNode;
 }) {
   const d = useDeliverables(projectId);
   const [rel, setRel] = useState(false);
@@ -49,7 +61,11 @@ export function ModuleHeader({ code, icon, title, projectId, projectName, projec
       </>}
       {projectId && d.data && <StatusChips code={code} d={d.data} onRelease={() => setRel(true)} />}
       {children}
-      {actions && <div className="ml-auto flex shrink-0 items-center gap-1.5">{actions}</div>}
+      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+        {files ?? <FileButtons ext={FILE[code].ext} saveUrl={projectId ? FILE[code].url(projectId) : null}
+          saveName={`${projectName ?? "part"}.${FILE[code].ext}`} openOnly={!projectId} />}
+        {actions}
+      </div>
       {projectId && <ReleaseDialog projectId={projectId} open={rel} onOpenChange={setRel} />}
     </div>
   );

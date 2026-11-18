@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArchiveRestore, Copy, ExternalLink, FolderKanban, LayoutGrid, List, MoreHorizontal, Pencil, Plus, Ruler,
-  ScanSearch, Search, Trash2, X,
+  Archive, ArchiveRestore, Copy, Download, ExternalLink, FileDown, FileUp, FolderKanban, LayoutGrid, List, Lock, MoreHorizontal,
+  Pencil, Plus, Ruler, ScanSearch, Search, Share2, Trash2, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -14,10 +14,26 @@ import { Button, EmptyState, Input, Menu, MenuContent, MenuItem, MenuSeparator, 
 import ProjectCard, { ProjectStatus } from "@/components/ProjectCard";
 import NewProjectDialog from "@/components/NewProjectDialog";
 import { MatchRow, SimilarPartsDialog, type Match } from "@/components/SimilarParts";
+import { can, LEVEL_TEXT } from "@/lib/collab";
+import ShareDialog from "@/components/collab/ShareDialog";
+import { PartExportDialog, saveNative } from "@/components/NativeExport";
+import { START_ACCEPT, startFromFile } from "@/components/StartBox";
 
 type Sort = "updated" | "name" | "size" | "created";
 const SORTS: [Sort, string][] = [["updated", "Last updated"], ["name", "Name"], ["size", "Size"], ["created", "Date created"]];
 const vol = (p: Project) => p.last_status?.fingerprint?.volume ?? -1;
+
+/** Team and access chips on a project card: who owns it, and a lock when you can only look. */
+function AccessChips({ p }: { p: Project }) {
+  const a = p.access;
+  if (!a) return null;
+  return (
+    <div className="pointer-events-none absolute left-2 top-2 flex flex-wrap gap-1">
+      {a.team && <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ background: a.team.color }}><Users className="h-3 w-3" />{a.team.name}</span>}
+      {!a.can_edit && <span className="inline-flex items-center gap-1 rounded bg-panel/90 px-1.5 py-0.5 text-[10.5px] font-medium text-muted" title={`You have ${LEVEL_TEXT[a.level].toLowerCase()} access`}><Lock className="h-3 w-3" />{a.can_comment ? "Comment" : "View"} only</span>}
+      {a.guest && <span className="rounded bg-accent px-1.5 py-0.5 text-[10.5px] font-semibold text-white">Guest</span>}
+    </div>);
+}
 
 export default function Projects() {
   const { me } = useSession();
@@ -34,7 +50,13 @@ export default function Projects() {
   const [confirm, setConfirm] = useState<Project | null>(null);
   const [renaming, setRenaming] = useState<{ p: Project; name: string } | null>(null);
   const [similar, setSimilar] = useState<string | null>(null);
-  const list = useQuery({ queryKey: ["projects", archived], queryFn: () => api.get<{ items: Project[] }>(`/api/projects?archived=${archived}`) });
+  const [exporting, setExporting] = useState<Project | null>(null);
+  const [drag, setDrag] = useState(false);
+  const [allBusy, setAllBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const list = useQuery({ queryKey: ["projects", archived], enabled: !!me?.org, queryFn: () => api.get<{ items: Project[] }>(`/api/projects?archived=${archived}`) });
+  const shared = useQuery({ queryKey: ["projects", "shared-with-me"], queryFn: () => api.get<{ items: Project[] }>("/api/shared-with-me") });
+  const [sharing, setSharing] = useState<string | null>(null);
 
   useEffect(() => { if (params.get("new") === "1") { setNewOpen(true); params.delete("new"); setParams(params, { replace: true }); } }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const s = params.get("q"); if (s) { setQ(s); params.delete("q"); setParams(params, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -55,6 +77,7 @@ export default function Projects() {
     };
     return [...rows].sort(by[sort]);
   }, [list.data, q, sizeQuery, sort]);
+  const sharedOnly = useMemo(() => (shared.data?.items ?? []).filter(s => !(list.data?.items ?? []).some(p => p.id === s.id)), [shared.data, list.data]);
   const refresh = () => qc.invalidateQueries({ queryKey: ["projects"] });
   const call = async (fn: () => Promise<unknown>, ok: string) => {
     try { await fn(); toast.success(ok); refresh(); } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
@@ -68,6 +91,16 @@ export default function Projects() {
     try { const d = await api.post<Project>(`/api/projects/${p.id}/duplicate`); toast.success(`Saved as “${d.name}”`, { action: { label: "Open", onClick: () => nav(`/app/projects/${d.id}`) } }); refresh(); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not duplicate"); }
   };
+  const onFile = async (f: File | undefined) => {
+    if (!f || viewer) return;
+    try { await startFromFile(f, nav, (list.data?.items ?? []).map(p => p.name)); refresh(); }
+    catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not open that file"); }
+  };
+  const downloadAll = async () => {
+    setAllBusy(true);
+    await saveNative("/api/native/projects/export-all", "projects.zip", "zip");
+    setAllBusy(false);
+  };
   const rename = async () => {
     if (!renaming?.name.trim()) return;
     await call(() => api.patch(`/api/projects/${renaming.p.id}`, { name: renaming.name.trim() }), "Project renamed");
@@ -78,13 +111,15 @@ export default function Projects() {
       <MenuTrigger asChild><button className="rounded p-1.5 text-muted hover:bg-text/5" aria-label={`Actions for ${p.name}`} onClick={e => e.preventDefault()}><MoreHorizontal className="h-4 w-4" /></button></MenuTrigger>
       <MenuContent>
         <MenuItem icon={<ExternalLink />} onSelect={() => window.open(`/app/projects/${p.id}`, "_blank", "noopener")}>Open in new tab</MenuItem>
-        {!viewer && <MenuItem icon={<Pencil />} onSelect={() => setRenaming({ p, name: p.name })}>Rename…</MenuItem>}
-        {!viewer && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
-        {p.builds > 0 && <MenuItem icon={<ScanSearch />} onSelect={() => setSimilar(p.id)}>Find similar parts</MenuItem>}
-        {!viewer && <><MenuSeparator />
+        {!viewer && can(p.access, "edit") && <MenuItem icon={<Pencil />} onSelect={() => setRenaming({ p, name: p.name })}>Rename…</MenuItem>}
+        {!viewer && !p.access?.guest && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
+        <MenuItem icon={<Share2 />} onSelect={() => setSharing(p.id)}>{can(p.access, "share") ? "Share…" : "Who has access"}</MenuItem>
+        {p.builds > 0 && <MenuItem icon={<FileDown />} onSelect={() => setExporting(p)}>Download as .fwpart…</MenuItem>}
+        {p.builds > 0 && !p.access?.guest && <MenuItem icon={<ScanSearch />} onSelect={() => setSimilar(p.id)}>Find similar parts</MenuItem>}
+        {!viewer && can(p.access, "edit") && <><MenuSeparator />
           {archived ? <MenuItem icon={<ArchiveRestore />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: false }), "Project restored")}>Restore</MenuItem>
             : <MenuItem icon={<Archive />} onSelect={() => call(() => api.patch(`/api/projects/${p.id}`, { archived: true }), "Project archived")}>Archive</MenuItem>}
-          <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirm(p)}>Delete…</MenuItem></>}
+          {can(p.access, "delete") && <MenuItem icon={<Trash2 />} danger onSelect={() => setConfirm(p)}>Delete…</MenuItem>}</>}
       </MenuContent>
     </Menu>
   );
@@ -92,9 +127,18 @@ export default function Projects() {
   const dims = bySize.data?.dims;
 
   return (
-    <div className={PAGE}>
+    <div className={cx(PAGE, drag && "rounded-xl ring-2 ring-primary/40")}
+      onDragOver={e => { if (!viewer && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDrag(false); }}
+      onDrop={e => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]); }}>
+      <input ref={fileRef} type="file" accept={START_ACCEPT} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
       <PageHeader title="Projects" subtitle="Each project holds a part: its model, checks, revisions, exports and design conversation."
-        actions={!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
+        actions={<>
+          <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={allBusy} onClick={() => void downloadAll()}
+            title="Every built project as Formwright parts (.fwpart) in one zip">Download all</Button>
+          {!viewer && <Button variant="secondary" icon={<FileUp className="h-4 w-4" />} onClick={() => fileRef.current?.click()}
+            title="Formwright files (.fwpart, .fwasm, .fwdrw, .fwprog), STEP, drawings or photos">Import</Button>}
+          {!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>}</>} />
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search by name, or by size: ${units === "in" ? "4.7 x 3.1 in" : "120x80x10"}`} className="px-9" aria-label="Search projects by name or size" />
@@ -129,7 +173,7 @@ export default function Projects() {
           action={q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button> : !archived && !viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
       ) : view === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {items.map(p => <div key={p.id} className="relative"><ProjectCard p={p} units={units} /><div className="absolute right-2 top-2 rounded bg-panel/90">{rowMenu(p)}</div></div>)}
+          {items.map(p => <div key={p.id} className="relative"><ProjectCard p={p} units={units} /><AccessChips p={p} /><div className="absolute right-2 top-2 rounded bg-panel/90">{rowMenu(p)}</div></div>)}
         </div>
       ) : (
         <div className="card overflow-x-auto">
@@ -157,6 +201,15 @@ export default function Projects() {
           </table>
         </div>
       )}
+      {!archived && !q && sharedOnly.length > 0 && (
+        <section className="mt-8" data-shared-with-me>
+          <h2 className="mb-3 flex items-center gap-2 text-[15px] font-semibold"><Share2 className="h-4 w-4 text-primary" />Shared with me</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {sharedOnly.map(p => <div key={p.id} className="relative"><ProjectCard p={p} units={units} /><AccessChips p={p} />
+              {p.workspace && p.workspace !== me?.org?.name && <span className="absolute bottom-[4.6rem] left-2 rounded bg-panel/90 px-1.5 text-[10.5px] text-muted">from {p.workspace}</span>}</div>)}
+          </div>
+        </section>)}
+      {sharing && <ShareDialog projectId={sharing} open onOpenChange={o => !o && setSharing(null)} />}
       <NewProjectDialog open={newOpen} onOpenChange={setNewOpen} />
       <Modal open={!!confirm} onOpenChange={o => !o && setConfirm(null)} title="Delete project?"
         description={<>“{confirm?.name}”, its model files, revisions and conversation will be permanently deleted.</>}
@@ -166,6 +219,7 @@ export default function Projects() {
         <Input autoFocus value={renaming?.name ?? ""} maxLength={120} onChange={e => renaming && setRenaming({ ...renaming, name: e.target.value })} onKeyDown={e => e.key === "Enter" && rename()} aria-label="Project name" />
       </Modal>
       {similar && <SimilarPartsDialog projectId={similar} open onClose={() => setSimilar(null)} />}
+      {exporting && <PartExportDialog open projectId={exporting.id} name={exporting.name} onOpenChange={o => { if (!o) setExporting(null); }} />}
     </div>
   );
 }

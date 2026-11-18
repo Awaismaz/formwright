@@ -35,6 +35,7 @@ def init_engine(url: str) -> Engine:
             cur.close()
     _Session = sessionmaker(bind=_engine, expire_on_commit=False)
     from aicad.platform import models  # noqa: F401  (register tables)
+    from aicad.platform.collab import tables  # noqa: F401  (collaboration tables, additive)
 
     Base.metadata.create_all(_engine)
     return _engine

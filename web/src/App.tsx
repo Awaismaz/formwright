@@ -19,11 +19,15 @@ import Settings from "@/pages/app/Settings";
 import Help from "@/pages/app/Help";
 import NotFound from "@/pages/NotFound";
 import NotFoundPanel from "@/components/NotFoundPanel";
+import NativeImportHost, { OpenFileRoute } from "@/components/NativeImport";
 
 const ProjectStudio = lazy(() => import("@/pages/app/ProjectStudio"));
 const Admin = lazy(() => import("@/pages/admin/Admin"));
 const Office = lazy(() => import("@/pages/app/office"));
 const Why = lazy(() => import("@/pages/marketing/Why"));
+const ShareView = lazy(() => import("@/pages/ShareView"));
+const MergeRequestPage = lazy(() => import("@/pages/app/MergeRequests"));
+const MergeRequestList = lazy(() => import("@/pages/app/MergeRequests").then(m => ({ default: m.MergeRequestList })));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useSession();
@@ -68,11 +72,15 @@ export default function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/invite" element={<AcceptInvite />} />
+        <Route path="/share/:token" element={<ShareView />} />
         <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
-        <Route path="/app" element={<RequireAuth><JourneyGate><AppLayout /></JourneyGate></RequireAuth>}>
+        <Route path="/app" element={<RequireAuth><JourneyGate><AppLayout /><NativeImportHost /></JourneyGate></RequireAuth>}>
           <Route index element={<Dashboard />} />
           <Route path="projects" element={<Projects />} />
+          <Route path="open-file" element={<OpenFileRoute />} />
           <Route path="projects/:id" element={<ProjectStudio />} />
+          <Route path="projects/:id/merge" element={<MergeRequestList />} />
+          <Route path="projects/:id/merge/:mid" element={<MergeRequestPage />} />
           <Route path="office/*" element={<Office />} />
           <Route path="modules" element={<Modules />} />
           <Route path="modules/:code" element={<ModulePage />} />

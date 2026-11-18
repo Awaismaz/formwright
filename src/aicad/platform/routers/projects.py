@@ -18,6 +18,7 @@ from aicad.agent import worker
 from aicad.agent.runner import editable_params
 from aicad.agent.session import AgentSession
 from aicad.platform import metering
+from aicad.platform.collab import branches, permissions
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory, utcnow
 from aicad.platform.deps import Ctx, in_grace, verified_ctx
@@ -155,16 +156,21 @@ def set_current_revision(ws: Path, n: int | None) -> None:
 
 
 # ------------------------------------------------------------------ agent sessions
-_sessions: dict[str, AgentSession] = {}
+_sessions: dict[str, AgentSession] = branches.BranchKeyed()  # one agent session per project branch
 _tasks: set[asyncio.Task[None]] = set()
 
 
-def workspace_for(p: Project) -> Path:
+def main_workspace(p: Project) -> Path:
     root = get_settings().workspaces_dir.resolve()
     ws = (root / p.org_id / p.id).resolve()
     if root not in ws.parents:
         raise HTTPException(400, "bad workspace")
     return ws
+
+
+def workspace_for(p: Project) -> Path:
+    """The workspace of the branch this request works on (main unless the person switched branch)."""
+    return branches.resolve_workspace(main_workspace(p), p.id)
 
 
 def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None = None, by: str | None = None) -> int | None:
@@ -198,7 +204,13 @@ def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None =
 
 
 def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
+    branch = branches.active_branch(project_id)  # a run's events always belong to the branch it started on
+
     def handle(ev: dict[str, Any]) -> None:
+        with branches.use_branch(project_id, branch):
+            _handle(ev)
+
+    def _handle(ev: dict[str, Any]) -> None:
         if ev.get("type") == "meter":
             spent = ev.get("spent_usd") or 0.0
             ev["tokens"] = metering.tokens_for_usd(spent) if spent else 0
@@ -309,19 +321,21 @@ def _finish_run(project_id: str) -> None:
         db.close()
 
 
-def get_session(p: Project, ctx: Ctx) -> AgentSession:
-    return session_for(p, ctx.user.id, ctx.god_on("bypass_tokens"))
+def get_session(p: Project, ctx: Ctx, drive: bool = True) -> AgentSession:
+    return session_for(p, ctx.user.id, ctx.god_on("bypass_tokens"), drive=drive)
 
 
-def session_for(p: Project, user_id: str, god_tokens: bool, client_factory: Any = None) -> AgentSession:
-    """The project's agent session (one per project), driven by ``user_id``. The Design Office runs part agents
-    through this too; ``client_factory`` swaps the model client (development fakes only)."""
+def session_for(p: Project, user_id: str, god_tokens: bool, client_factory: Any = None,
+                drive: bool = True) -> AgentSession:
+    """The project's agent session (one per project branch), driven by ``user_id``. The Design Office runs part
+    agents through this too; ``client_factory`` swaps the model client (development fakes only). ``drive=False``
+    (watching the event stream) doesn't take over token attribution."""
     s = _sessions.get(p.id)
     if s is None:
         s = AgentSession(workspace_for(p), on_event=_on_event(p.id, user_id, god_tokens), worker_key=p.org_id)
         s.run_id = None  # type: ignore[attr-defined]
         _sessions[p.id] = s
-    else:  # refresh who is driving (token attribution, god flags)
+    elif drive:  # refresh who is driving (token attribution, god flags)
         s.on_event = _on_event(p.id, user_id, god_tokens)
     if client_factory is not None and s.client_factory is not client_factory:
         s.client_factory = client_factory
@@ -329,11 +343,9 @@ def session_for(p: Project, user_id: str, god_tokens: bool, client_factory: Any 
     return s
 
 
-def _project(ctx: Ctx, project_id: str) -> Project:
-    p = ctx.db.get(Project, project_id)
-    if p is None or p.org_id != ctx.require_org().id:
-        raise HTTPException(404, "Project not found")
-    return p
+def _project(ctx: Ctx, project_id: str, need: str | None = None) -> Project:
+    """Every project endpoint goes through here: `permissions.require_project` (level by HTTP method unless given)."""
+    return permissions.require_project(ctx, project_id, need)
 
 
 def _thumb(p: Project) -> str | None:
@@ -385,8 +397,10 @@ def list_projects(archived: bool = False, ctx: Ctx = Depends(verified_ctx)) -> d
     org = ctx.require_org()
     rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(archived))
                           .order_by(Project.updated_at.desc())).all()
+    acc = permissions.access_map(ctx.db, ctx.user, rows)  # only what you can read
+    rows = [p for p in rows if acc[p.id].at_least("read")]
     names = {u.id: u.name for u in ctx.db.scalars(select(User).where(User.id.in_({r.created_by for r in rows})))}
-    return {"items": [project_dict(p, names.get(p.created_by or "")) for p in rows]}
+    return {"items": [{**project_dict(p, names.get(p.created_by or "")), "access": acc[p.id].as_dict()} for p in rows]}
 
 
 @router.post("/projects")
@@ -412,10 +426,11 @@ def create_project(body: ProjectIn, ctx: Ctx = Depends(verified_ctx)) -> dict[st
 @router.get("/projects/{project_id}")
 def get_project(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     p = _project(ctx, project_id)
-    allowed, reason, cta = can_run_agent(ctx)
+    allowed, reason, cta = permissions.agent_gate(ctx, p) or can_run_agent(ctx)
     s = _sessions.get(p.id)
-    return {**project_dict(p), "agent": {"busy": bool(s and s.busy), "allowed": allowed, "reason": reason,
-                                         "cta": cta, "has_history": bool(s and s.history)}}
+    return {**project_dict(p), "access": ctx.project_access.as_dict(), "branch": branches.active_branch(p.id),
+            "agent": {"busy": bool(s and s.busy), "allowed": allowed, "reason": reason,
+                      "cta": cta, "has_history": bool(s and s.history)}}
 
 
 @router.patch("/projects/{project_id}")
@@ -455,8 +470,8 @@ def duplicate_project(project_id: str, body: DuplicateIn | None = None,
                       ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """Save as: a new project with the same model, verified outputs, settings and revision history (no AI, no
     tokens). The design conversation is not copied; the copy starts a fresh one."""
-    src = _project(ctx, project_id)
-    if ctx.role == "viewer":
+    src = _project(ctx, project_id, "read")
+    if ctx.role == "viewer" or ctx.project_access.guest:
         raise HTTPException(403, "Viewers can't create projects")
     s = _sessions.get(src.id)
     if s and s.busy:
@@ -479,13 +494,12 @@ def duplicate_project(project_id: str, body: DuplicateIn | None = None,
 
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    p = _project(ctx, project_id)
-    if p.created_by != ctx.user.id:
-        ctx.require_role("admin")
+    p = _project(ctx, project_id, "admin")
     s = _sessions.pop(p.id, None)
     if s and s.busy:
         raise HTTPException(409, "Stop the agent before deleting")
-    ws = workspace_for(p)
+    ws = main_workspace(p)
+    branches.remove_all(ws)
     ctx.db.delete(p)
     audit(ctx.db, "project.deleted", ctx.user, p.org_id, target=p.id, name=p.name)
     ctx.db.commit()
@@ -544,8 +558,9 @@ def revisions(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, An
 def recent_revisions(limit: int = 6, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """Latest revisions across the workspace with why/who: the team's change feed."""
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
-                          .order_by(Project.updated_at.desc()).limit(40)).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+        select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+        .order_by(Project.updated_at.desc()).limit(40)).all())
     out = []
     for p in rows:
         root = workspace_for(p) / "revisions"
@@ -587,7 +602,7 @@ def _status_summary(st: dict[str, Any]) -> dict[str, Any]:
     return {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
 
 
-_finalizing: dict[str, asyncio.Task[None]] = {}
+_finalizing: dict[str, asyncio.Task[None]] = branches.BranchKeyed()
 
 
 async def _render_later(p: Project, ws: Path) -> None:
@@ -866,7 +881,7 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
 
 @router.post("/projects/{project_id}/agent/chat")
 async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    p = _project(ctx, project_id)
+    p = _project(ctx, project_id, "agent")
     text = body.prompt.strip()
     if not text:
         raise HTTPException(400, "Empty prompt")
@@ -880,6 +895,7 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
     s = get_session(p, ctx)
     if s.busy:
         raise HTTPException(409, "The agent is still working on the previous request")
+    s.driver, s.driver_name = ctx.user.id, ctx.user.name  # type: ignore[attr-defined]  (soft edit lock)
     org = ctx.require_org()
     unlimited = ctx.god_on("bypass_tokens")
     budget, why = metering.run_budget(ctx.db, org, ctx.user, body.budget_tokens, unlimited)
@@ -944,7 +960,7 @@ async def agent_reset(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict
 @router.get("/projects/{project_id}/agent/events")
 async def agent_events(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> StreamingResponse:
     p = _project(ctx, project_id)
-    s = get_session(p, ctx)
+    s = get_session(p, ctx, drive=False)
     ctx.db.close()  # do not hold a DB connection for the life of the stream
     q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     backlog = list(s.history)

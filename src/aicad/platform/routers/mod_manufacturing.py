@@ -19,6 +19,7 @@ from aicad.manufacturing import ADVICE_LEVELS, ANALYSER_VERSION, fixes, matlib
 from aicad.manufacturing import shop as shop_mod
 from aicad.manufacturing.analyze import DISCLAIMER, Inputs, analyse_workspace
 from aicad.manufacturing.cost import LABEL as COST_LABEL
+from aicad.platform.collab import permissions
 from aicad.platform.config import get_settings
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
@@ -113,8 +114,9 @@ def materials(ctx: Ctx = Depends(module_ctx)) -> dict[str, Any]:
 @router.get("/projects")
 def projects(ctx: Ctx = Depends(module_ctx)) -> dict[str, Any]:
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
-                          .order_by(Project.updated_at.desc())).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+        select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+        .order_by(Project.updated_at.desc())).all())
     items = []
     for p in rows:
         ws = workspace_for(p)

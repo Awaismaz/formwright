@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Circle, Coins, FlaskConical, Lock, MoreHorizontal, Pause, PartyPopper, Play, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Lock, MoreHorizontal, PartyPopper, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
@@ -15,6 +15,7 @@ import Interfaces from "./Interfaces";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import Tree from "./Tree";
+import { saveNative } from "@/components/NativeExport";
 import { budgetTone, fmtEta, fmtMinutes, orchestratorLabel, recentHandoffs } from "./model";
 import type { OfficeEvent, Program, Ticket } from "./types";
 
@@ -191,7 +192,8 @@ export default function ProgramPage() {
         <div className="flex items-center gap-3">
           <LiveStrip recent={recent} live={live} />
           {canEdit && <Menu><MenuTrigger asChild><Button variant="ghost" size="sm" aria-label="Program actions"><MoreHorizontal className="h-4 w-4" /></Button></MenuTrigger>
-            <MenuContent><MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Budget and agents…</MenuItem>
+            <MenuContent><MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/programs/${p.id}/export`, `${p.name}.fwprog`, "fwprog"); }}>Save as file (.fwprog)</MenuItem>
+            <MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Budget and agents…</MenuItem>
               <MenuItem danger icon={<Trash2 />} onSelect={() => setConfirm(true)}>Delete program</MenuItem></MenuContent></Menu>}
         </div>
       </div>

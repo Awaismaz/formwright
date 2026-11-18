@@ -563,7 +563,10 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             m = bolt_size(p["sub"], span, o)
             d = float(o.get("d") or CLEARANCE[m])
             inset = float(o.get("inset") or max(2 * d, 6.0))
-            count = int(o.get("count") or (4 if span > 2 * inset + d else 2))
+            wod = WASHER_OD.get(max(m, bolt_for_hole(d)), 2 * d)
+            # two rows only when the washers of neighbouring bolts fit side by side (the ICD's own rule)
+            count = int(o.get("count") or (4 if min(ks["L"], ks["W"]) - 2 * inset >= wod
+                                           and max(ks["L"], ks["W"]) - 2 * inset >= wod else 2))
             pts = grid(pos, ks["L"], ks["W"], d, count, inset)
             add("hole_pattern", (host, 0), (k, c), {
                 "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
@@ -598,7 +601,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 m = m if m in CLEARANCE else 5
                 d = float(o.get("d") or CLEARANCE[m])
                 count = int(o.get("count") or 4)
-                pcd = _r2(max(0.65 * D, (ks.get("bore") or 0) + 3 * d))
+                wod = WASHER_OD.get(max(m, bolt_for_hole(d)), 2 * d)
+                pcd = _r2(max(0.65 * D, (ks.get("bore") or 0) + 3 * d, wod / math.sin(math.pi / count) + 0.01))
                 add("hole_pattern", (host, 0), (k, c), {
                     "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
                     "count": count, "d": d, "pattern": "circular", "pcd": pcd, "centre": [_r2(pos[0]), _r2(pos[1])],

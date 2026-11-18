@@ -36,6 +36,11 @@ class InsufficientTokens(Exception):
 
 def audit(db: Session, action: str, actor: User | None = None, org_id: str | None = None,
           target: str | None = None, ip: str | None = None, **meta: Any) -> None:
+    if target and "branch" not in meta:  # project changes made on a branch say so in the activity feed
+        from aicad.platform.collab.branches import active_branch
+
+        if (b := active_branch(target)) != "main":
+            meta["branch"] = b
     db.add(AuditLog(actor_id=actor.id if actor else None, org_id=org_id, action=action, target=target,
                     meta=meta, ip=ip))
 

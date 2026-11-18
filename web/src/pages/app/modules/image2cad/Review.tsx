@@ -12,6 +12,8 @@ import { Badge, Button, Input, PageLoader, Tip } from "@/components/ui";
 import SourcePane, { type Pin } from "./SourcePane";
 import RoundTripCard from "./RoundTrip";
 import { about, covers } from "./Cost";
+import { FileButtons } from "@/components/NativeExport";
+import { moduleExportUrl } from "@/lib/native";
 import { BASE, KIND_LABEL, type Answer, type Dim, type Full, type Need, type RefAnswer, type Review, type ReviewState, type View } from "./types";
 
 const fmt = (v: number | null | undefined) => (v == null ? "?" : String(Math.round(v * 10000) / 10000));
@@ -64,13 +66,14 @@ function Pending({ f, onBack, onRetry }: { f: Full; onBack: () => void; onRetry:
   );
 }
 
-function Toolbar({ name, onBack, children }: { name: string; onBack: () => void; children?: ReactNode }) {
+function Toolbar({ name, onBack, children, uid }: { name: string; onBack: () => void; children?: ReactNode; uid?: string }) {
   return (
     <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-panel px-3">
       <Tip content="All uploads" side="bottom"><button onClick={onBack} aria-label="All uploads" className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-text"><ArrowLeft className="h-4 w-4" /></button></Tip>
       <Ruler className="h-4 w-4 shrink-0 text-primary" />
       <span className="truncate text-[14px] font-semibold">{name}</span>
       {children}
+      {uid && <span className={children ? "" : "ml-auto"}><FileButtons ext="fwread" saveUrl={moduleExportUrl("read", uid)} saveName={`${name}.fwread`} /></span>}
     </div>
   );
 }
@@ -154,7 +157,7 @@ function Workspace({ f, uid, targetProject, onBack }: { f: Full; uid: string; ta
 
   return (
     <div className="flex h-full flex-col">
-      <Toolbar name={f.upload.name} onBack={onBack}>
+      <Toolbar name={f.upload.name} onBack={onBack} uid={uid}>
         <Badge tone={read.method === "vector" ? "primary" : "accent"}>{read.method === "vector" ? <Type className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}{method}</Badge>
         {(read.pages ?? 1) > 1 && <Badge tone="warning">Page 1 of {read.pages} read</Badge>}
         <span className="ml-auto flex items-center gap-2 text-[12px] text-muted">{saving ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Saving</> : editable ? "Saved" : "View only"}</span>

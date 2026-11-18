@@ -47,6 +47,7 @@ from sqlalchemy import select
 
 from aicad import similarity, toolbox
 from aicad.assembly import AssemblyInputError, fitz, librarian, service, solver, store
+from aicad.platform.collab import permissions
 from aicad.platform.config import get_settings
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
@@ -106,10 +107,8 @@ def _err(e: Exception) -> HTTPException:
 
 
 def _project(ctx: Ctx, pid: str) -> Project:
-    p = ctx.db.get(Project, pid)
-    if p is None or p.org_id != ctx.require_org().id:
-        raise HTTPException(404, "Project not found")
-    return p
+    """A part used in an assembly: reading it is enough (the assembly is what changes)."""
+    return permissions.require_project(ctx, pid, "read")
 
 
 def _status(ws: Path) -> dict[str, Any]:
@@ -447,8 +446,9 @@ def for_project(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
 @router.get("/sources")
 def sources(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
-                          .order_by(Project.updated_at.desc())).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+        select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+        .order_by(Project.updated_at.desc())).all())
     projects = []
     for p in rows:
         ws = workspace_for(p)
@@ -929,8 +929,9 @@ class SmartRunIn(BaseModel):
 
 def _part_candidates(ctx: Ctx) -> list[dict[str, Any]]:
     """The workspace's own parts Hex may reuse: projects with a verified build (shape signature when available)."""
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == ctx.require_org().id, Project.archived.is_(False))
-                          .order_by(Project.updated_at.desc())).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+        select(Project).where(Project.org_id == ctx.require_org().id, Project.archived.is_(False))
+        .order_by(Project.updated_at.desc())).all())
     out = []
     for p in rows:
         ws = workspace_for(p)
