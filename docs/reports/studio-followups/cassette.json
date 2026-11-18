@@ -1,0 +1,271 @@
+{
+ "version": 1,
+ "turns": [
+  {
+   "match": "^Build the pocket box",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Box\"\nMATERIAL = \"Aluminium 6061-T6\"\nL = 60.0  # length\nW = 40.0  # width\nH = 10.0  # height\nPARAMS = dict(L=L, W=W, H=H)\nPARAM_META = {\"H\": {\"min\": 2, \"max\": 50, \"unit\": \"mm\", \"label\": \"Height\"}}\nresult = Box(L, W, H, align=(Align.CENTER, Align.CENTER, Align.MIN))\nEXPECTED = {\"bbox\": [L, W, H], \"volume\": L * W * H, \"solids\": 1}\n\n# --- Formwright manual features (managed by the app; edit them in the feature tree) ---\nfrom aicad import fw as _fw\n\nMANUAL_FEATURES = [{'id': 'c1',\n  'op': 'extrude',\n  'name': 'Pocket',\n  'suppressed': False,\n  'plane': {'origin': [-20.0, 0.0, 10.0], 'normal': [0.0, 0.0, 1.0]},\n  'sketch': {'kind': 'rect', 'w': 6.0, 'h': 6.0, 'cx': 0.0, 'cy': 0.0},\n  'distance': 3.0,\n  'mode': 'cut',\n  'end': 'blind',\n  'reverse': False},\n {'id': 'p1',\n  'op': 'pattern',\n  'name': 'LPattern1',\n  'suppressed': False,\n  'source': ['c1'],\n  'count': 3,\n  'kind': 'linear',\n  'step': [15.0, 0.0, 0.0]},\n {'id': 'h1',\n  'op': 'hole',\n  'name': 'Holes',\n  'suppressed': False,\n  'point': [0.0, 12.0, 10.0],\n  'normal': [0.0, 0.0, 1.0],\n  'd': 4.0,\n  'depth': None,\n  'count': 2,\n  'step': [10.0, 0.0, 0.0]}]\nresult = _fw.apply_manual(result, MANUAL_FEATURES)\n# --- end manual features ---\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Built the pocket box."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "^Build the base plate",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Base plate\"\nMATERIAL = \"Aluminium 6061-T6\"\nL = 120.0  # length\nW = 80.0  # width\nT = 10.0  # thickness\nHOLES = 0  # mounting holes (0 or 4)\nHOLE_D = 6.6  # clearance hole\nPARAMS = dict(L=L, W=W, T=T, HOLES=HOLES, HOLE_D=HOLE_D)\npart = Box(L, W, T, align=(Align.CENTER, Align.CENTER, Align.MIN))\nfor x, y in [(50, 30), (-50, 30), (-50, -30), (50, -30)][:HOLES]:\n    part -= Pos(x, y, T / 2) * Cylinder(HOLE_D / 2, T + 2)\nresult = part\nEXPECTED = {\"bbox\": [L, W, T], \"solids\": 1}\n\n# --- Formwright manual features (managed by the app; edit them in the feature tree) ---\nfrom aicad import fw as _fw\n\nMANUAL_FEATURES = [{'id': 'b1',\n  'op': 'extrude',\n  'name': 'Boss',\n  'suppressed': False,\n  'plane': {'origin': [50.0, 30.0, 10.0], 'normal': [0.0, 0.0, 1.0]},\n  'sketch': {'kind': 'rect', 'w': 10.0, 'h': 10.0, 'cx': 0.0, 'cy': 0.0},\n  'distance': 3.0,\n  'mode': 'add',\n  'end': 'blind',\n  'reverse': False},\n {'id': 'h1',\n  'op': 'hole',\n  'name': 'Pin hole',\n  'suppressed': False,\n  'point': [50.0, 30.0, 13.0],\n  'normal': [0.0, 0.0, 1.0],\n  'd': 6.6,\n  'depth': None}]\nresult = _fw.apply_manual(result, MANUAL_FEATURES)\n# --- end manual features ---\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Built the base plate with a boss and a pin hole."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "^Build the pin",
+   "rebuild": true,
+   "files": {
+    "model.py": "from build123d import *\nNAME = \"Pin\"\nMATERIAL = \"Steel 1045\"\nresult = Cylinder(3, 30)\nEXPECTED = {\"bbox\": [6, 6, 30], \"solids\": 1}\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Built the pin."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  },
+  {
+   "match": "pockets",
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "usage": {
+      "input_tokens": 60,
+      "output_tokens": 40
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Two changes, one panel each: the pocket depth, then the pattern.\n```fw-edit\n{\"summary\": \"Deeper pockets, four of them\", \"edits\": [{\"op\": \"extrude\", \"feature\": \"Pocket\", \"distance\": 5}, {\"op\": \"pattern\", \"feature\": \"LPattern1\", \"count\": 4, \"spacing\": 12}]}\n```"
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 1,
+     "duration_ms": 900,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  }
+ ]
+}

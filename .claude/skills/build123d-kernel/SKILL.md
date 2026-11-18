@@ -83,3 +83,11 @@ the runner, so never mutate it: every op returns a new `Sheet`). Flanges are fou
 edges, by transforming the picked point into each panel frame (z = 0 bottom, z = T top). The flat pattern is built from
 the same model (BA = θ·(R + K·T)); test flat sizes against the bend-deduction formula, never against the built flat.
 A `Location` transforms points via `(loc * Location(v)).position` (`loc * Vector` raises).
+Follow-ups (corners, jog, cuts through bends): a corner relief shortens the *earlier* bend through `Bend.ext` (lo, hi)
+and edits that wall's panel region, so `model_volume` stays exact and the flat keeps its fast exact path; anything
+the model doesn't know (a cut through a bend) makes `flatten` intersect the part with each panel slab and trace each
+bend's cut on the neutral surface (`Face.revolve` of a line at radius R + K·T: build123d's `revolve()` of an Edge
+returns an empty Part). Chain wire edges by matching endpoints (`_wire_points`): `BRepTools_WireExplorer` orientation
+plus `Edge.position_at` double-reverses edges on revolved faces. Make 2D faces counter-clockwise before extruding
+(a clockwise polygon face extrudes downwards). Jogs reuse `flange()` with `child_region` / `child_solid`.
+

@@ -70,7 +70,7 @@ export default function ProjectStudio() {
   const [paramPm, setParamPm] = useState<{ rows: NonNullable<AgentEdit["params"]>; summary: string; n: number } | null>(null);
   const setPm = (v: typeof pm) => { setPmS(v); if (v) setParamPm(null); };
   /** DS-035 follow-up: the remaining PropertyManager steps of a multi-step agent edit (next opens after OK + rebuild) */
-  const [agentQueue, setAgentQueue] = useState<{ steps: AgentEdit[]; total: number; waitTopo?: Topo | null } | null>(null);
+  const [agentQueue, setAgentQueue] = useState<{ steps: AgentEdit[]; total: number; topoAtOpen: Topo | null; done: boolean } | null>(null);
   /** ASM-018 follow-up: a tree action / typed command whose trial rebuild found problems in assemblies */
   const [gate, setGate] = useState<{ impact: Impact; label: string; run: () => void } | null>(null);
   const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset; planeRef?: ManualFeature } | null>(null);
@@ -201,7 +201,7 @@ export default function ProjectStudio() {
   const openAgentEdit = (edit: AgentEdit) => {
     const steps = agentSteps(edit);
     if (!steps.length) { toast.error("No change to make"); return; }
-    setAgentQueue(steps.length > 1 ? { steps: steps.slice(1), total: steps.length } : null);
+    setAgentQueue(steps.length > 1 ? { steps: steps.slice(1), total: steps.length, topoAtOpen: topo, done: false } : null);
     openAgentStep(steps[0]!, steps.length > 1 ? `Step 1 of ${steps.length}: ` : "");
   };
   const openAgentStep = (edit: AgentEdit, prefix = "") => {
@@ -216,15 +216,17 @@ export default function ProjectStudio() {
     setTool("select"); setSelection(r.selection);
     if (r.note) toast.warning(r.note);
   };
-  /** OK on one step of a multi-step agent edit: the next step opens once the rebuilt geometry has loaded. */
-  const agentStepDone = () => setAgentQueue(q => (q && q.steps.length ? { ...q, waitTopo: topo } : null));
+  /** OK on one step of a multi-step agent edit: the next step opens once the rebuilt geometry has loaded (the
+   *  geometry differs from the one the step was opened on; it may load before or after this call). */
+  const agentStepDone = () => setAgentQueue(q => (q && q.steps.length ? { ...q, done: true } : null));
   useEffect(() => {
     const q = agentQueue;
-    if (!q || q.waitTopo === undefined || !topo || topo === q.waitTopo) return;
+    // ...and the feature list of the new build has loaded (the next step edits a feature from it)
+    if (!q || !q.done || !topo || topo === q.topoAtOpen || !manual.data || manual.isFetching) return;
     const [next, ...rest] = q.steps;
-    setAgentQueue(rest.length ? { steps: rest, total: q.total } : null);
+    setAgentQueue(rest.length ? { steps: rest, total: q.total, topoAtOpen: topo, done: false } : null);
     if (next) openAgentStep(next, `Step ${q.total - rest.length} of ${q.total}: `);
-  }, [topo, agentQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [topo, agentQueue, manual.data, manual.isFetching]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Tree actions and typed commands preview their impact on the assemblies using this part first (trial rebuild,
    *  nothing applied); problems open the same Apply anyway / Back panel as the PropertyManager. */
   const guarded = async (change: ImpactChange | null, label: string, run: () => void) => {
