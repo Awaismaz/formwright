@@ -4,6 +4,23 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (q) — "Why Formwright" buyer page (UX-021), branch wip/why-buy
+
+**Done**
+- New marketing page `/why` (`web/src/pages/marketing/Why.tsx`, lazy route in `App.tsx`; "Why Formwright" link in the shared marketing header and footer, `layouts/MarketingLayout.tsx`). Sections: hero (promise + 4 count-up stats + animated "one medium part" race card), cost of conventional work (BLS/SHRM-cited), 9 risk → fix cards, 5 worked examples with the arithmetic shown, interactive ROI calculator, hire-vs-buy, token explainer with per-token prices, FAQ, CTAs (trial / pricing / demo mailto), sources and disclaimer.
+- One pure cost model, `web/src/pages/marketing/why/roi.ts`: complexity profiles, cheapest top-up combination, ROI (conventional vs Formwright labour + plan + top-ups, savings, speed-up, payback in working days), hero stats computed from the calculator's default scenario (10 medium parts/mo, US$70/h, 25 % review, Pro: 28× sooner first model, 71 % lower cost, 3.6× parts per engineer-hour, ≈ US$60k/yr), worked-example costs, hire-vs-buy. Plans and packs are read live from `/api/billing/catalog` with catalog-mirroring fallbacks.
+- Motion: own reveal/count-up hooks (`why/motion.tsx`, independent of the landing components), bar transitions; everything settles to its end state under prefers-reduced-motion. Chart colours copper (conventional) vs Forge blue (Formwright), validated with the dataviz palette validator in light and dark (CVD ΔE ≥ 25, contrast ≥ 3:1); direct value labels and a legend.
+
+**Verified how**
+- `roi.test.ts`: 12 hand-computed cases (default scenario to the cent, Team offshore scenario, pack optimisation, no-payback case, worked examples, hire cost, formatting). `npx tsc --noEmit`, `npm test` (54 pass), `npx vite build` pass.
+- Browser walk (puppeteer-core 25.18.1, headless Chrome) on port 8800 with a throwaway data dir: desktop 1440, mobile 390, reduced motion, dark calculator; every section screenshotted; calculator scenarios: default, 20 simple/offshore/50 % review/Team (US$956/mo saving, matches the test), 40 complex/consultancy/Pro, 2 simple/offshore/80 % review (loss case). 0 console errors, 0 px horizontal overflow. Fixes from the screenshots: single-prefix money ranges, collapsed "73–73 %", token table layout, loss-case wording, FTE workload line.
+
+**Not done / limitations**
+- Salary/rate figures are well-known public figures cited by publication, not re-fetched this session; consultancy, offshore and CAD-seat ranges are labelled estimates. Conventional hours and per-part token counts are modelled estimates, labelled as such. Parked as PD-43.
+- The landing page button to `/why` is added by the landing agent (Landing.tsx not touched).
+
+**Next step**: founder review of the copy and the default scenario; legal review of savings claims before public launch.
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done
