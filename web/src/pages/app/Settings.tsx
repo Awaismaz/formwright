@@ -1,3 +1,4 @@
+import DesktopOnly from "@/components/DesktopOnly";
 import { useState } from "react";
 import { toast } from "sonner";
 import { KeyRound, Lock, Monitor, Moon, Sun } from "lucide-react";
@@ -88,7 +89,12 @@ export default function Settings() {
             <OpenAIKeyCard /><div className="border-t border-border pt-4"><ConsentCard /></div>
           </Section>}
           <Section title="API keys" desc="Automate designs from your own tools and scripts.">
-            <div className="flex items-start gap-3 rounded-lg border border-dashed border-border p-4 text-sm"><Lock className="mt-0.5 h-4 w-4 text-muted" /><div><Badge tone="preview">Preview</Badge><p className="mt-2 text-muted">A REST API and CAD plugins (SOLIDWORKS, Creo) are planned. Join early access from the Help page.</p></div></div>
+            <div className="flex items-start gap-3 rounded-lg border border-dashed border-border p-4 text-sm"><Lock className="mt-0.5 h-4 w-4 text-muted" /><div><Badge tone="preview">Preview</Badge><p className="mt-2 text-muted">A REST API is planned. Join early access from the Help page.</p></div></div>
+          </Section>
+          <Section title="CAD plugins" desc="Open and update Formwright parts from the CAD program on your computer.">
+            <DesktopOnly what="CAD plugins">
+              <div className="flex items-start gap-3 rounded-lg border border-dashed border-border p-4 text-sm"><Lock className="mt-0.5 h-4 w-4 text-muted" /><div><Badge tone="preview">Preview</Badge><p className="mt-2 text-muted">Plugins for SOLIDWORKS and Creo are planned. Join early access from the Help page.</p></div></div>
+            </DesktopOnly>
           </Section>
         </TabPanel>
       </Tabs>

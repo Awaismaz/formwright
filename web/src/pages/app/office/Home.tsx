@@ -29,16 +29,16 @@ function ProgramCard({ p }: { p: ProgramSummary }) {
   const done = (p.counts?.approved ?? 0) + (p.counts?.integrated ?? 0);
   return (
     <Link to={`/app/office/programs/${p.id}`} className="card group block p-4 transition hover:border-primary/40 hover:shadow-pop">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3 max-sm:gap-y-1.5">
         <AgentAvatar code="archie" size={38} state={p.status === "planning" ? "working" : p.status === "plan_review" ? "review" : p.status === "complete" ? "done" : "idle"} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-50px)]">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-semibold group-hover:text-primary">{p.name}</span>
             <span className="kbd">{p.key}</span>
           </div>
           <div className="mt-0.5 line-clamp-1 text-[12.5px] text-muted">{p.brief}</div>
         </div>
-        <Badge tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>
+        <Badge className="max-sm:ml-[50px]" tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>
           {STATUS_LABEL[p.status]}</Badge>
       </div>
       {p.rollup ? (

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell, ChevronsLeft, ChevronsRight, CircleHelp, Coins, CreditCard, FolderKanban, Home,
   LayoutGrid, Lock, LogOut, MailWarning, Menu as MenuIcon, Moon, Search, Settings as SettingsIcon, Shield, Sun, Users,
-  UserRound, X, Zap,
+  UserRound, WifiOff, X, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, setCurrentOrg } from "@/lib/api";
@@ -20,6 +20,8 @@ import GodPanel from "@/components/GodPanel";
 import CommandPalette from "@/components/CommandPalette";
 import { APP_TOUR, runTour } from "@/lib/tour";
 import { Building2 } from "lucide-react"; // Design Office nav entry
+import { useOnline } from "@/lib/pwa";
+import { InstallBanner, InstallMenuItem, InstallSidebarButton, useInstallAction } from "@/components/InstallApp";
 
 /** Below this a trial can't make another typical part: the banner and the notification say so. */
 export const LOW_TOKENS = 150;
@@ -110,6 +112,11 @@ function Banners() {
   const nav = useNavigate();
   const [sent, setSent] = useState(false);
   const out: React.ReactNode[] = [];
+  const online = useOnline();
+  if (!online) out.push(
+    <div key="offline" role="status" className="flex items-center justify-center gap-2 bg-chrome px-4 py-1.5 text-[13px] text-chrome-fg">
+      <WifiOff className="h-4 w-4 text-warning" /> You're offline. Your projects are safe; reconnect to keep designing.
+    </div>);
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
   if (me?.impersonating) out.push(
     <div key="imp" className="flex items-center justify-center gap-3 bg-accent px-4 py-1.5 text-[13px] text-white">
@@ -157,12 +164,14 @@ export default function AppLayout() {
   const qc = useQueryClient();
   const studio = /^\/app\/projects\/[^/]+\/?$/.test(loc.pathname);
   // the Design Studio starts with the sidebar collapsed (remembered separately) so the ribbon and viewer get the width (STU-09)
-  const [appCollapsed, setAppCollapsed] = useStored("fw_sidebar", false);
+  // tablets start with the icon rail so pages keep their width (UX-018); a choice the user made is kept
+  const [appCollapsed, setAppCollapsed] = useStored("fw_sidebar", typeof matchMedia === "function" && matchMedia("(max-width: 1023px)").matches);
   const [studioCollapsed, setStudioCollapsed] = useStored("fw_sidebar_studio", true);
   const [collapsed, setCollapsed] = studio ? [studioCollapsed, setStudioCollapsed] : [appCollapsed, setAppCollapsed];
   const [peek, setPeek] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const install = useInstallAction();
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
   const org = me?.org;
   const user = me?.user;
@@ -270,6 +279,7 @@ export default function AppLayout() {
         <Button size="sm" variant="accent" className="h-7 px-2.5" onClick={() => nav("/app/billing")}>Upgrade</Button>
       </div>
     )}
+    {install.can && <InstallSidebarButton onClick={() => void install.run()} collapsed={f} />}
     <button onClick={() => (workspace && collapsed === false ? setPeek(!peek) : setCollapsed(!collapsed))}
       className="hidden h-10 items-center justify-center gap-2 border-t border-white/[.06] text-[12px] text-chrome-muted hover:text-white md:flex"
       aria-label={f ? "Expand sidebar" : "Collapse sidebar"}>
@@ -278,7 +288,7 @@ export default function AppLayout() {
   </>);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="fw-app-shell flex h-full flex-col">
       <Banners />
       <div className="flex min-h-0 flex-1">
         {/* ---------------- sidebar: fixed rail on desktop, drawer on phones */}
@@ -287,7 +297,7 @@ export default function AppLayout() {
         </aside>
         {mobileOpen && <div className="fixed inset-0 z-50 flex md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-          <aside className="relative flex w-[264px] max-w-[85vw] flex-col bg-chrome text-chrome-fg shadow-pop animate-fade-in">{sidebar(false)}</aside>
+          <aside className="relative flex w-[264px] max-w-[85vw] flex-col bg-chrome pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] text-chrome-fg shadow-pop animate-fade-in">{sidebar(false)}</aside>
         </div>}
 
         {/* ---------------- main */}
@@ -325,19 +335,22 @@ export default function AppLayout() {
                   <MenuItem icon={<SettingsIcon />} onSelect={() => nav("/app/settings")}>Settings</MenuItem>
                   <MenuItem icon={dark ? <Sun /> : <Moon />} onSelect={() => setTheme(dark ? "light" : "dark")}>{dark ? "Light theme" : "Dark theme"}</MenuItem>
                   <MenuItem icon={<CircleHelp />} onSelect={() => nav("/app?tour=1")}>Restart guided tour</MenuItem>
+                  {install.can && <InstallMenuItem onSelect={() => void install.run()} />}
                   <MenuSeparator />
                   <MenuItem icon={<LogOut />} danger onSelect={() => logout().catch(() => toast.error("Sign out failed"))}>Sign out</MenuItem>
                 </MenuContent>
               </Menu>
             </div>
           </header>
+          {!workspace && <InstallBanner onInstall={() => void install.run()} />}
           <main className="min-h-0 flex-1 overflow-y-auto">
-            {workspace && <div className="border-b border-border bg-panel2 px-4 py-2 text-[12.5px] text-muted md:hidden">
-              The Studio and modules are built for a larger screen. You can review parts here; model and edit on a desktop.</div>}
+            {moduleMatch && <div className="border-b border-border bg-panel2 px-4 py-2 text-[12.5px] text-muted md:hidden">
+              This module is laid out for a larger screen. A tablet or desktop is more comfortable for it.</div>}
             <Outlet />
           </main>
         </div>
       </div>
+      {install.sheetEl}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} modules={catalog.data?.modules ?? []} />
     </div>
   );

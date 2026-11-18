@@ -97,7 +97,7 @@ export function Viewport(props: ViewportProps) {
   const hoverText = hover && describe ? describe(hover) : null;
   return (
     <div className="viewport-bg relative h-full min-h-[420px] w-full overflow-hidden">
-      <div ref={host} className="absolute inset-0" data-testid="asm-viewport" />
+      <div ref={host} className="absolute inset-0 [&>canvas]:!h-full [&>canvas]:!w-full" data-testid="asm-viewport" />
       <div className="absolute left-3 top-3 flex items-center gap-1 rounded-md border border-border bg-panel/95 p-0.5 shadow-card">
         {VIEWS.map(n => (
           <button key={n} type="button" onClick={() => eng.current?.setView(n)}
@@ -109,7 +109,7 @@ export function Viewport(props: ViewportProps) {
         </Tip>
       </div>
       {(hint || hoverText) && (
-        <div className="pointer-events-none absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate rounded-full border border-border bg-panel/95 px-3 py-1 text-[12px] text-muted shadow-card">
+        <div className="pointer-events-none absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate max-sm:top-14 max-sm:max-w-[85%] rounded-full border border-border bg-panel/95 px-3 py-1 text-[12px] text-muted shadow-card">
           {hoverText ?? hint}
         </div>
       )}

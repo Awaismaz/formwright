@@ -38,11 +38,14 @@ export interface MakeModule {
   locked?: boolean;
 }
 
-export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [], canNormal = false }: {
+export default function CommandManager({ onCommand, viewerRef, disabled, activeTool, left, right, make = [], onMake, library = [], canNormal = false, touch = false }: {
   onCommand: (c: Command) => void; viewerRef: { current: ViewerApi | null }; disabled: boolean; activeTool: string;
   left?: ReactNode; right?: ReactNode; make?: MakeModule[]; onMake?: (code: string) => void; library?: MakeModule[];
   /** a planar face is selected (enables Normal To) */
   canNormal?: boolean;
+  /** phones/tablets (UX-018): title row and tabs on separate rows, and the ribbon scrolls sideways instead of
+   * folding commands into "More" (a swipe beats a menu on touch) */
+  touch?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
   const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
@@ -120,8 +123,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
   }, [collapsed]);
   const count = shown.reduce((n, g) => n + g.length, 0);
   const need = (s: Size) => count * (WIDTH[s] + 2) + (shown.length - 1) * SEP;
-  const size: Size = need("full") <= avail ? "full" : need("mid") <= avail ? "mid" : "icon";
-  const fits = need(size) <= avail ? count : Math.max(1, Math.floor((avail - MORE - (shown.length - 1) * SEP) / (WIDTH.icon + 2)));
+  const size: Size = need("full") <= avail ? "full" : need("mid") <= avail || touch ? "mid" : "icon";
+  const fits = need(size) <= avail || touch ? count : Math.max(1, Math.floor((avail - MORE - (shown.length - 1) * SEP) / (WIDTH.icon + 2)));
   let k = 0;
   const visible = shown.map(g => g.filter(() => k++ < fits)).filter(g => g.length);
   const overflow = shown.flat().slice(fits);
@@ -142,25 +145,36 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
   const tipOf = (b: Btn) => (isDisabled(b) && b.needsBody ? "Needs a solid first: start with Extruded or Revolved Boss, ask the agent, use the Toolbox or import a STEP"
     : size === "icon" ? `${b.label}: ${b.tip}` : b.tip);
 
-  return (
-    <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager">
-      <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
-        {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
-        {TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
+  const tabButtons = TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
           <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }} data-tour={t === "Make" ? "make" : undefined}
             className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}
-            {t === "Make" && make.some(m => m.status?.tone === "warn") && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle" title="An output is out of date with the model" />}</button>))}
-        <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
-          {right}
-          <Tip content={collapsed ? "Show command bar" : "Hide command bar"} side="bottom">
-            <button onClick={toggle} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text" aria-label="Toggle command bar">
-              {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}</button>
-          </Tip>
+            {t === "Make" && make.some(m => m.status?.tone === "warn") && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle" title="An output is out of date with the model" />}</button>));
+  const rightSide = (
+    <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
+      {right}
+      <Tip content={collapsed ? "Show command bar" : "Hide command bar"} side="bottom">
+        <button onClick={toggle} className={cx("rounded text-muted hover:bg-text/5 hover:text-text", touch ? "p-2" : "p-1")} aria-label="Toggle command bar">
+          {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}</button>
+      </Tip>
+    </div>);
+
+  return (
+    <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager" data-touch={touch || undefined}>
+      {touch ? (<>
+        <div className="flex h-11 items-center gap-1 border-b border-border bg-panel2 px-2">
+          {left && <div className="flex min-w-0 flex-1 items-center gap-1.5">{left}</div>}
+          {rightSide}
         </div>
-      </div>
-      {!collapsed && <div ref={row} className={cx("flex items-stretch gap-1 overflow-hidden px-2 py-1", size === "icon" ? "h-[46px]" : "h-[66px]")} data-ribbon-size={size}>
+        {!collapsed && <div className="fw-hscroll flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">{tabButtons}</div>}
+      </>) : (
+      <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
+        {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
+        {tabButtons}
+        {rightSide}
+      </div>)}
+      {!collapsed && <div ref={row} className={cx("flex items-stretch gap-1 px-2 py-1", touch ? "fw-hscroll snap-x" : "overflow-hidden", size === "icon" ? "h-[46px]" : "h-[66px]")} data-ribbon-size={size}>
         {visible.map((g, gi) => (
-          <div key={gi} className="flex items-stretch gap-0.5">
+          <div key={gi} className={cx("flex shrink-0 items-stretch gap-0.5", touch && "snap-start")}>
             {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
             {g.map(b => b.menu ? (
               <Menu key={b.id}>

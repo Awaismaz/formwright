@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, Printer, Redo2, ScanLine, Sparkles, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Scale, SlidersHorizontal, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
+import { ArrowLeft, Box, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Printer, Redo2, Scale, ScanLine, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -26,6 +26,7 @@ import { SimilarPartsDialog } from "@/components/SimilarParts";
 import { WhereUsed } from "./modules/assembly/WhereUsed";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 import StudioCommands, { SHORTCUTS } from "./studio/StudioCommands";
+import { COMPACT, PHONE, useMedia } from "@/lib/media";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
 
@@ -71,6 +72,17 @@ export default function ProjectStudio() {
   const [chatOpen, setChatOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_chat") !== "0"; } catch { return true; } });
   const setLeftOpen = (v: boolean) => { setLeftOpenS(v); try { localStorage.setItem("fw_studio_left", v ? "1" : "0"); } catch { /* */ } };
   const setChatOpen = (v: boolean) => { setChatOpenS(v); try { localStorage.setItem("fw_studio_chat", v ? "1" : "0"); } catch { /* */ } };
+  // Phones and tablets (UX-018): the viewer keeps the whole width and the feature panel / design agent open over it,
+  // one at a time (phones switch with the bottom bar). The desktop open/closed preferences are left untouched.
+  const compact = useMedia(COMPACT);
+  const phone = useMedia(PHONE);
+  const [pane, setPane] = useState<"model" | "features" | "agent">("model");
+  const [chatMounted, setChatMounted] = useState(false); // keep the conversation alive while the agent sheet is closed
+  useEffect(() => { if (pane === "agent") setChatMounted(true); }, [pane]);
+  const showLeft = compact ? pane === "features" : leftOpen;
+  const showChat = compact ? pane === "agent" : chatOpen;
+  const openLeft = () => (compact ? setPane("features") : setLeftOpen(true));
+  const openChat = () => (compact ? setPane("agent") : setChatOpen(true));
   const [recognizing, setRecognizing] = useState(false);
   const [featureChips, setFeatureChips] = useState<string[]>([]);
   const [chatRequest, setChatRequest] = useState<{ id: number; text: string } | null>(null);
@@ -78,7 +90,7 @@ export default function ProjectStudio() {
   useState(() => { const ask = search.get("ask"); if (ask) try { sessionStorage.setItem(`fw_starter_${id}`, ask.slice(0, 4000)); } catch { /* */ } });
   useEffect(() => {
     if (!search.has("ask")) return;
-    setChatOpen(true);
+    openChat();
     const n = new URLSearchParams(search); n.delete("ask"); setSearch(n, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [delTarget, setDelTarget] = useState<string | null>(null);
@@ -113,12 +125,15 @@ export default function ProjectStudio() {
   useEffect(() => { if (p) setName(p.name); }, [p?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (id) api.post(`/api/projects/${id}/warm`).catch(() => {}); }, [id]);
   useEffect(() => {
-    if (!p || seenTour("studio")) return;
+    if (!p || seenTour("studio") || compact) return; // the tour walks the desktop layout
     const t = setTimeout(() => runTour(STUDIO_TOUR, "studio"), 900);
     return () => clearTimeout(t);
   }, [p?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (st?.build_id) setCompare(null); }, [st?.build_id]);
-  useEffect(() => { setHl([]); }, [topo]); // face ids highlighted from a previous build are meaningless now
+  useEffect(() => { setHl([]); }, [topo]);
+  // compact: a PropertyManager opens in the feature sheet; the sketcher and a finished feature show the model
+  useEffect(() => { if (!compact) return; if (pm) setPane("features"); else if (phone) setPane(v => (v === "features" ? "model" : v)); }, [pm, compact]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (compact && sk) setPane("model"); }, [sk, compact]); // face ids highlighted from a previous build are meaningless now
 
   const refresh = () => {
     for (const k of ["status", "project", "manual", "revisions", "params", "recognition"]) qc.invalidateQueries({ queryKey: [k, id] });
@@ -210,7 +225,7 @@ export default function ProjectStudio() {
       const r = await api.post<{ recognition: Recognition }>(`/api/projects/${id}/recognition/run`);
       qc.setQueryData(["recognition", id, status.data?.build_id], r);
       if (!ai) { toast.success("Features recognised from the exact geometry (no AI)"); return; }
-      if (!chatOpen) setChatOpen(true);
+      openChat();
       try { await api.post(`/api/projects/${id}/recognition/ai`); toast.success("Geometry analysed — the design agent is classifying the features (see chat)"); }
       catch (e) { toast.warning(e instanceof ApiError ? `Geometric recognition done. AI step unavailable: ${e.message}` : "Geometric recognition done; AI step unavailable"); }
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Recognition failed"); }
@@ -289,9 +304,9 @@ export default function ProjectStudio() {
                   recognition={recog.data?.recognition ?? null} recognizing={recognizing} onRecognize={recognize} onEdit={f => openPm(f.op, f)}
                   selectedFeatures={featureChips} agentBusy={!!p.agent?.busy} onDeleteDesign={setDelTarget}
                   onEditParams={n => { setParamFocus(n); setTab("params"); }}
-                  onAskRepair={(f, why) => { if (!chatOpen) setChatOpen(true);
+                  onAskRepair={(f, why) => { openChat();
                     setChatRequest({ id: Date.now(), text: `The feature “${f.name}” that I added by hand no longer rebuilds after my last change (${why}). Repair only that feature so it fits the current geometry, keeping its intent and everything else unchanged, then rebuild and check.` }); }}
-                  onPickFeature={n => { setFeatureChips(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n])); if (!chatOpen) setChatOpen(true); }}
+                  onPickFeature={n => { setFeatureChips(c => (c.includes(n) ? c.filter(x => x !== n) : [...c, n])); openChat(); }}
                   onSuppressDesign={(n, sup) => manualCall(() => api.post(`/api/projects/${id}/design-features/suppress`, { name: n, suppressed: sup }), sup ? `${n} suppressed` : `${n} restored`, undefined, true)}
                   onSketchPlane={n => (sk?.phase === "pick" ? openSketchOnPlane(n, sk.preset, Number(planeOffset)) : openSketchOnPlane(n))}
                   onSketchOn={f => openSketchOnRef(f, sk?.phase === "pick" ? sk.preset : undefined)}
@@ -318,27 +333,31 @@ export default function ProjectStudio() {
 
   return (
     <div className="flex h-full flex-col">
-      <CommandManager onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} library={libraryModules} onMake={code => navigate(`/app/modules/${code}?project=${id}`)} canNormal={!!selFace}
+      <CommandManager touch={compact} onCommand={onCommand} viewerRef={viewerApi} disabled={!fp} activeTool={tool} make={make} library={libraryModules} onMake={code => navigate(`/app/modules/${code}?project=${id}`)} canNormal={!!selFace}
         left={<div className="flex min-w-0 items-center gap-1.5" data-tour="studio-tabs">
-          <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className="rounded p-1 text-muted hover:bg-text/5" aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
+          <Tip content="Back to projects" side="bottom"><Link to="/app/projects" className={cx("rounded text-muted hover:bg-text/5", compact ? "p-2" : "p-1")} aria-label="Back to projects"><ArrowLeft className="h-4 w-4" /></Link></Tip>
           {editing ? <Input autoFocus value={name} onChange={e => setName(e.target.value)} className="h-7 w-48"
             onBlur={async () => { setEditing(false); if (name.trim() && name !== p.name) { await api.patch(`/api/projects/${p.id}`, { name }); refresh(); } }}
             onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
-            : <button onClick={() => setEditing(true)} className="max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
-          <ProjectStatus p={p} />
-          {owned.has("assembly") && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
+            : <button onClick={() => setEditing(true)} className="min-w-0 max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
+          {!phone && <ProjectStatus p={p} />}
+          {owned.has("assembly") && !phone && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
         </div>}
         right={<>
           <Tip content="Undo (Ctrl+Z)" side="bottom"><button onClick={() => void undo()} disabled={manualBusy || !!p.agent?.busy || !hasBuilds} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Undo"><Undo2 className="h-4 w-4" /></button></Tip>
           <Tip content="Redo (Ctrl+Y)" side="bottom"><button onClick={() => void redoNow()} disabled={manualBusy || !redo.length} className="mr-1 rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Redo"><Redo2 className="h-4 w-4" /></button></Tip>
-          <Tip content={leftOpen ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => setLeftOpen(!leftOpen)} className={cx("rounded p-1 hover:bg-text/5", leftOpen ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>
-          <Tip content={chatOpen ? "Hide design agent" : "Show design agent"} side="bottom"><button onClick={() => setChatOpen(!chatOpen)} className={cx("rounded p-1 hover:bg-text/5", chatOpen ? "text-primary" : "text-muted")} aria-label="Toggle design agent"><PanelRight className="h-4 w-4" /></button></Tip>
-          <Tip content="Studio tour · keyboard shortcuts (?)" side="bottom"><button onClick={() => runTour(STUDIO_TOUR, "studio")} className="rounded p-1 text-muted hover:bg-text/5"><CircleHelp className="h-4 w-4" /></button></Tip>
+          {!phone && <>
+          <Tip content={showLeft ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => (compact ? setPane(showLeft ? "model" : "features") : setLeftOpen(!leftOpen))} className={cx("rounded p-1 hover:bg-text/5", showLeft ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>
+          <Tip content={showChat ? "Hide design agent" : "Show design agent"} side="bottom"><button onClick={() => (compact ? setPane(showChat ? "model" : "agent") : setChatOpen(!chatOpen))} className={cx("rounded p-1 hover:bg-text/5", showChat ? "text-primary" : "text-muted")} aria-label="Toggle design agent"><PanelRight className="h-4 w-4" /></button></Tip>
+          {!compact && <Tip content="Studio tour · keyboard shortcuts (?)" side="bottom"><button onClick={() => runTour(STUDIO_TOUR, "studio")} className="rounded p-1 text-muted hover:bg-text/5"><CircleHelp className="h-4 w-4" /></button></Tip>}
+          </>}
           {fp && <Tip content="Download STEP (more formats in Files)" side="bottom"><a href={`/api/projects/${p.id}/files/part.step`} className="ml-1 inline-flex h-7 items-center gap-1.5 rounded bg-primary px-2.5 text-[12.5px] font-medium text-white hover:brightness-110"><Download className="h-3.5 w-3.5" />STEP</a></Tip>}
         </>} />
 
-      <div className="grid min-h-0 min-w-0 flex-1 max-md:!grid-cols-1" style={{ gridTemplateColumns: `${leftOpen ? "330px " : ""}minmax(0,1fr)${chatOpen ? " 370px" : ""}` }}>
-        {leftOpen && <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-panel">
+      <div className="relative grid min-h-0 min-w-0 flex-1" style={{ gridTemplateColumns: compact ? "minmax(0,1fr)" : `${leftOpen ? "330px " : ""}minmax(0,1fr)${chatOpen ? " 370px" : ""}` }}>
+        {showLeft && <aside data-studio-sheet="features" className={cx("flex min-h-0 min-w-0 flex-col overflow-hidden border-border bg-panel",
+          !compact ? "border-r" : phone ? (pm ? "absolute inset-x-0 bottom-0 z-20 h-[58%] rounded-t-xl border-t shadow-pop" : "absolute inset-0 z-20")
+            : "absolute inset-y-0 left-0 z-20 w-[360px] max-w-[85%] border-r shadow-pop")}>
           {sidePanel}
         </aside>}
         <div className="relative min-h-[320px] min-w-0 overflow-hidden" data-tour="viewer">
@@ -376,7 +395,7 @@ export default function ProjectStudio() {
               <b className="text-danger">Last build failed</b> — showing the last successful geometry.{project.data?.agent?.busy ? " The agent is working on it." : ""}
             </div>)}
           {!st?.error && repairs.length > 0 && !pm && (
-            <button onClick={() => { setLeftOpen(true); setTab("tree"); }} data-repair-banner
+            <button onClick={() => { openLeft(); setTab("tree"); }} data-repair-banner
               className="absolute left-1/2 top-14 z-10 flex max-w-md -translate-x-1/2 items-center gap-2 rounded-full border border-warning/50 bg-panel/95 px-3 py-1.5 text-[12.5px] shadow-card hover:border-warning">
               <TriangleAlert className="h-4 w-4 shrink-0 text-warning" />
               <span><b>{repairs.length === 1 ? `“${repairs[0]!.name}”` : `${repairs.length} features`}</b> no longer rebuild{repairs.length === 1 ? "s" : ""}: the rest of the part is built. Repair in the feature tree.</span>
@@ -391,14 +410,18 @@ export default function ProjectStudio() {
                 <div key={k} className="flex justify-between text-[11.5px]"><span>{st?.param_meta?.[k]?.label ?? k}</span><span className="tabular-nums">{String(v.from)} → {String(v.to)}</span></div>)}</div>}
             </div>)}
         </div>
-        {chatOpen && <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
-          features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} />}
+        {(compact ? chatMounted || showChat : chatOpen) && (() => {
+          const chat = <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
+            features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} />;
+          return compact ? <div data-studio-sheet="agent" className={cx("z-20 grid grid-rows-[minmax(0,1fr)] bg-panel", !showChat && "hidden",
+            phone ? "absolute inset-0" : "absolute inset-y-0 right-0 w-[400px] max-w-[85%] border-l border-border shadow-pop")}>{chat}</div> : chat;
+        })()}
       </div>
 
       <Modal open={!!delTarget} onOpenChange={o => !o && setDelTarget(null)} title={`Delete “${delTarget ?? ""}”?`}
         description="Removes this feature's step from the design, without AI and without tokens."
         footer={<><Button variant="ghost" className="mr-auto" disabled={!!p.agent?.busy} onClick={() => {
-            const n = delTarget!; setDelTarget(null); setFeatureChips(c => c.filter(x => x !== n)); if (!chatOpen) setChatOpen(true);
+            const n = delTarget!; setDelTarget(null); setFeatureChips(c => c.filter(x => x !== n)); openChat();
             setChatRequest({ id: Date.now(), text: `Delete the feature “${n}” from the design: remove its geometry and its step, keep everything else unchanged, then rebuild and check.` });
           }}>Ask the design agent instead</Button>
           <Button variant="secondary" onClick={() => setDelTarget(null)}>Cancel</Button>
@@ -423,7 +446,17 @@ export default function ProjectStudio() {
       {dialog === "import" && <StepImport project={p} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
       {dialog === "toolbox" && <Toolbox project={p} initial={tbInit} onClose={() => setDialog(null)} onDone={() => { setDialog(null); refresh(); }} />}
 
-      <div className="flex h-7 shrink-0 items-center gap-4 border-t border-border bg-panel2 px-3 text-[11.5px] text-muted">
+      {phone && <nav className="grid h-14 shrink-0 grid-cols-3 border-t border-border bg-panel" aria-label="Studio panels">
+        {([["features", <ListTree className="h-5 w-5" />, pm ? "Feature" : "Features"], ["model", <Box className="h-5 w-5" />, "Model"], ["agent", <Sparkles className="h-5 w-5" />, "Agent"]] as const).map(([k, icon, label]) => (
+          <button key={k} data-studio-pane={k} aria-pressed={pane === k} onClick={() => setPane(k)}
+            className={cx("relative flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium", pane === k ? "text-primary" : "text-muted")}>
+            {pane === k && <span className="absolute inset-x-6 top-0 h-0.5 rounded-b bg-primary" />}
+            {icon}{label}
+            {k === "agent" && p.agent?.busy && <span className="fw-ping absolute right-[calc(50%-18px)] top-2 h-2 w-2 rounded-full bg-accent" aria-label="The design agent is working" />}
+            {k === "features" && repairs.length > 0 && <span className="absolute right-[calc(50%-18px)] top-2 h-2 w-2 rounded-full bg-warning" aria-label="Features need repair" />}
+          </button>))}
+      </nav>}
+      <div className={cx("flex h-7 shrink-0 items-center gap-4 overflow-hidden whitespace-nowrap border-t border-border bg-panel2 px-3 text-[11.5px] text-muted", phone && "hidden")}>
         <span>{st?.part ?? p.name}</span>
         {st?.material && <span>{st.material === "unspecified" ? "No material" : st.material}</span>}
         {fp && <><span>{fp.bbox.map(n => n.toFixed(2)).join(" × ")} mm</span><span>{num(fp.volume, 1)} mm³</span><span>{fp.faces} faces</span></>}
