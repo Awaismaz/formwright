@@ -58,6 +58,55 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 - PD-39 Design Office Phase 2 defaults.
 
 ---
+## 2026-11-18 (p): AI quality: brief approval gate, replay provider, self-review, benchmark harness
+
+Branch `wip/ai-quality` (worktree), not merged.
+
+### Done
+- **CAD-028 brief gate.** A new part in Build mode first gets the agent's reading of the request (fenced `fw-brief`:
+  requirements, assumptions, open questions with defaults), parsed and validated server-side (`agent/blocks.py`) and
+  shown as an editable card (Edit / Approve & build, `studio/AgentCards.tsx`). Building is blocked by the same tool
+  guard as Discuss mode (mode `brief`). Approve sends the confirmed brief ("Approved design brief…") and the agent
+  builds. Setting: Settings → Preferences → "Confirm the brief before building new parts" (default on); "Skip once"
+  above the prompt for a single message. Brief runs are recorded as kind `brief`.
+- **AGT-002 replay provider.** `agent/replay.py`: `ReplayClient` plays recorded turns (messages + workspace files;
+  `rebuild` re-runs the real build so checks are fresh), `RecordingClient` records live turns (`FW_AGENT_RECORD`).
+  `FW_AGENT_REPLAY=<cassette>` drives the app with zero model calls (development only, refused in production).
+  `AgentSession.client_factory` is the injection point.
+- **AGT-006 self-review.** After a build the agent emits a fenced `fw-review` (observed / uncertain, each tied to a
+  CHK id or the render). The server reconciles it with `out/status.json`: the gate verdict comes from the checks;
+  observed findings on a failed gate, or "all checks pass" when they don't, are marked overridden. Chat shows a
+  collapsible "Self-review" with ✓ / ? / ✗ items and a checks-passed/failed pill.
+- **EVAL-003 harness.** `src/aicad/eval/`: 20 original prompts (4 each: plate, bracket, shaft, flange, enclosure)
+  with analytic bbox/volume/cylinder census and reference solutions; `aicad bench --dry | --replay DIR | --live
+  [--record DIR] [--only …] [--yes]`; report.json + report.md (pass, first-pass, ≤3 builds, gates, tokens, time).
+  Live mode prints the token estimate and refuses without confirmation.
+
+### Evidence
+- `tests/test_ai_quality.py` (9 tests): brief/review blocks valid+invalid, critique cannot pass a failed gate, guard
+  denies build/write/edit in `brief`, message round-trip + cassette path safety, replayed questions turn (no files
+  touched), replayed build turn (real rebuild, review gates ok), app flow brief → approve → build with a replayed
+  agent (builds 0 → 1), setting off / skip once / discuss bypass, benchmark dry run (3 cases) + negative scoring.
+- `aicad bench --dry`: 20/20 pass, first-pass 20/20, 31 s, 0 tokens (synthetic: validates harness + expectations).
+- Browser (studio-e2e, port 8795, throwaway data dir, `FW_AGENT_REPLAY` scripted cassette, puppeteer-core 24):
+  L-bracket prompt → "Brief first" line → brief card → Edit (added an assumption) → Approve & build → build
+  60 × 50 × 40 mm, 23,274.8 mm³, gates pass → Self-review (3 ✓, 1 ?, "Checks passed"); Settings toggle. 0 console
+  errors. Fixes from the screenshots: the per-message toggle moved out of the crowded send row; review header
+  compacted for the narrow chat; expanded review scrolls into view.
+- pytest full suite: 437 passed, 1 failed (`test_mesh.py::test_highlight_protection…`: a GPU render job ended
+  "failed" while several agents loaded the machine; passes alone in 19 s; Mesh Studio code is untouched here).
+  ruff clean, tsc clean, vitest 31 passed (+2 for the approval text), vite build ok.
+
+### Not done / limitations
+- No live agent run: the prompt additions (brief, self-review) are exercised only by replays. A real recorded
+  cassette is not in the repo yet. Live benchmark not run (PD-41).
+- The cylinder census counts holes and outer diameters alike (it is a census, not hole recognition).
+
+### Decisions parked
+PD-40 brief gate scope/default, PD-41 first live benchmark spend.
+
+### Next
+Founder: approve one live benchmark run with `--record` (PD-41); then commit the cassettes so CI re-scores them.
 
 ## 2026-11-18 (o) — Punch list reconciliation; Design Office (Chief Designer) plan
 

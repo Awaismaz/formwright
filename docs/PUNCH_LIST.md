@@ -1,6 +1,6 @@
 # Punch List
 
-Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/plans/CHIEF_DESIGNER.md`).
+Last updated: 2026-11-18 (AI quality: brief gate CAD-028, replay AGT-002, self-review AGT-006, benchmark EVAL-003).
 
 ## Legend
 
@@ -15,9 +15,9 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 
 | Status | Items |
 |---|---|
-| Done | 176 |
+| Done | 179 |
 | In Progress | 23 |
-| Backlog | 83 |
+| Backlog | 80 |
 | Blocked | 10 |
 | Superseded | 8 |
 | **Total** | **300** |
@@ -91,7 +91,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | CAD-025 | CAD | Shells, bosses, ribs, draft (enclosures, FX-04) | P2 | Done | M2 | LT | Eng | CAD-006 | FX-04 passes checks | Shell (DS-023), draft + rib (DS-026), bosses via sketch boss (DS-017) | Reconciled 2026-11-18 |
 | CAD-026 | CAD | Sheet metal features (flange, bend, flat pattern) | P2 | Backlog | M4 | LT | Eng | CAD-001 | Flat pattern length within K-factor tolerance | — | |
 | CAD-027 | CAD | Cosmetic threads + thread callouts | P1 | Backlog | M2 | LT | Eng | CAD-002 | Thread metadata in STEP/drawing | — | Modelled threads later |
-| CAD-028 | CAD | Approval gate: interpreted requirements echo-back before build | P0 | Backlog | M1 | MVP | Eng | AGT-003 | User sees assumptions; can edit before build | — | R-TEC-01 |
+| CAD-028 | CAD | Approval gate: interpreted requirements echo-back before build | P0 | Done | M1 | MVP | Eng | AGT-003 | User sees assumptions; can edit before build | New part + Build mode → the agent returns a fenced `fw-brief` (requirements · assumptions · open questions), parsed server-side (`agent/blocks.py`); editable card with Edit / Approve & build (`studio/AgentCards.tsx`); building blocked by the tool guard in mode `brief`; setting "Confirm the brief before building new parts" (default on) + "Skip once" per message; `tests/test_ai_quality.py` (gate → approve → build through the app with a replayed agent); browser walkthrough SESSION_LOG 2026-11-18 (p) | Brief runs are recorded as kind `brief` (keeps the learned new-part estimate clean); PD-40 |
 | CAD-030 | CAD | STEP import as reference geometry (clearly labelled non-parametric) | P1 | Done | M2 | LT | Eng | IO-005 | Imported solids marked "dumb solid" in UI and metadata | STEP import as exact 'Imported blank' + recognised features (DS-018/019) | Reconciled 2026-11-18 |
 | CAD-060 | CAD | Sketch entities + constraint solver evaluation (planegcs, SolveSpace, own) | P2 | Done | M5 | LT | Eng | LEG-004 | ADR with license-cleared choice | Decision: in-house Levenberg–Marquardt solver (`web/src/sketch/model.ts`, no GPL dependency); DS-017/026 + vitest | Reconciled 2026-11-18 |
 | CAD-061 | CAD | Feature tree UI-backed native history (edit any feature, regenerate) | P2 | Done | M5 | LT | Eng | CAD-007 | Edit mid-tree → valid regeneration in tests | Manual features edit/suppress/reorder/delete with regeneration (DS-010c); agent features suppress/delete (DS-027); `tests/test_studio.py`::test_manual_feature_lifecycle | Reconciled 2026-11-18 |
@@ -170,11 +170,11 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | AGT-001 | Agent | LLMProvider interface (structured output, vision, metering) | P0 | Backlog | M1 | MVP | Eng | ARC-011 | Typed interface + tests | — | ADR-009 |
-| AGT-002 | Agent | Recorded/replay provider for CI (zero paid calls) | P0 | Backlog | M1 | MVP | Eng | AGT-001 | CI passes offline | — | |
+| AGT-002 | Agent | Recorded/replay provider for CI (zero paid calls) | P0 | Done | M1 | MVP | Eng | AGT-001 | CI passes offline | `agent/replay.py`: `ReplayClient` (drop-in for the SDK client; recorded turns + workspace files; `rebuild` re-runs the real build) and `RecordingClient` (`FW_AGENT_RECORD`); `FW_AGENT_REPLAY` for demos/e2e (refused in production); `AgentSession.client_factory`; questions + build turns replayed in `tests/test_ai_quality.py` | No real recorded cassette in the repo yet (needs one live run, PD-41) |
 | AGT-003 | Agent | Requirement interpretation → Part Spec + assumptions + open questions | P0 | Superseded | M1 | MVP | Eng | AGT-001 | Schema-valid output on benchmark prompts | — | Superseded by ADR-013: interpretation + assumptions + choice questions by the agent (DS-022); approval gate stays as CAD-028 |
 | AGT-004 | Agent | Generate–check–render–critique–revise loop (shared orchestrator) | P0 | Done | M1 | MVP | Eng | AGT-003, EVAL-001 | Bounded; stops on criteria/limits; all artifacts saved | Loop run by the Agent SDK (ADR-013): generate → build → checks → render → revise, bounded by max_turns | Reconciled 2026-11-18 |
 | AGT-005 | Agent | Domain validator plug-in interface (CAD now, mesh later) | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CAD validators registered via interface | `src/aicad/agent/tools.py` build_model MCP tool; checks provider-neutral | Mesh validators later |
-| AGT-006 | Agent | Vision critique: observed vs uncertain findings, structured | P1 | In Progress | M1 | MVP | Eng | UX-003 | Structured output; never overrides gates | build_model returns 4-view PNG to agent (`agent/render.py`) | Critique is the agent's own; no structured findings schema yet |
+| AGT-006 | Agent | Vision critique: observed vs uncertain findings, structured | P1 | Done | M1 | MVP | Eng | UX-003 | Structured output; never overrides gates | After each build the agent emits a fenced `fw-review` (observed / uncertain, each tied to a CHK id or the render); parsed and reconciled server-side with `out/status.json`: gate verdict comes from the checks, a finding on a failed gate (or "all checks pass" when they don't) is marked overridden; collapsible "Self-review" in the chat; `tests/test_ai_quality.py` | Agent emission of the block not yet observed in a live run (prompt change only exercised by replays) |
 | AGT-007 | Agent | Revision on spec (not exported file) | P0 | Superseded | M1 | MVP | Eng | AGT-004 | Revisions are spec diffs | Agent revises model.py source, never the STEP | Superseded by ADR-013: revisions are model-source snapshots with parameter diffs (CAD-012) |
 | AGT-008 | Agent | Iteration/time/cost caps + human-approval stop | P0 | In Progress | M1 | MVP | Eng | AGT-004 | CHK-14 enforced | max_turns=80, 180 s build timeout, Stop button (interrupt) | No per-session cost cap under subscription auth |
 | AGT-009 | Agent | Run record: prompts (policy-permitting), model IDs, versions, costs, timings | P0 | Backlog | M1 | MVP | Eng | AGT-001 | `run.json` complete | — | |
@@ -186,7 +186,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | AGT-015 | Agent | Switch to API-key (or Anthropic-approved) auth before any non-founder user | P0 | Backlog | M2 | LT | Founder | LEG-005 | Pilot build refuses subscription auth | — | R-LIC-05 |
 | EVAL-001 | Eval | Deterministic check suite CHK-01..10, 12, 14 | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Each check unit-tested with pass and fail fixtures | `src/aicad/checks.py`: CHK-02..08 implemented + negative tests | CHK-01 (schema), 10, 12, 14 pending |
 | EVAL-002 | Eval | Metamorphic/property tests (hypothesis) | P0 | Done | M1 | MVP | Eng | CAD-008 | ≥50 random param sets, no crashes | `test_random_specs_build_valid_or_fail_cleanly` (80 seeded random specs, ≥50 built, volume/bbox/manifold asserted); `test_metamorphic_length_increase` | Seeded `random`, not hypothesis yet |
-| EVAL-003 | Eval | LLM benchmark: 20 original prompts, plate/bracket family | P0 | Backlog | M1 | MVP | Eng | AGT-004 | Report: first-pass & ≤3-iter rates, cost, latency | — | Opt-in (paid) |
+| EVAL-003 | Eval | LLM benchmark: 20 original prompts, plate/bracket family | P0 | In Progress | M1 | MVP | Eng | AGT-004 | Report: first-pass & ≤3-iter rates, cost, latency | `src/aicad/eval/` (20 prompts: plate/bracket/shaft/flange/enclosure, analytic bbox/volume/cylinder census + reference solutions); `aicad bench --dry / --replay DIR / --live [--record DIR]` → report.json + report.md (pass, first-pass, ≤3 builds, gates, tokens, time); dry run 20/20 in 31 s; `tests/test_ai_quality.py` | Live run not done: needs founder go-ahead for ≈5,000 tokens (PD-41) |
 | EVAL-004 | Eval | Golden fixtures FX-01..03 | P0 | In Progress | M1 | MVP | Eng | CAD-001 | Fixtures with provenance + expected values | FX-01 at `specs/fx01_plate.json` (provenance recorded) | FX-02, FX-03 pending |
 | EVAL-005 | Eval | Manual CAD interop check (SW 2025, Creo 11) | P0 | Backlog | M1 | MVP | Founder | IO-001 | Screenshots + measured dims logged | — | Downgraded to periodic interop spot check (ADR-012). Live viewer covers routine visual review but uses the same OCCT reader |
 | EVAL-006 | Eval | Render similarity metric (advisory) | P2 | Backlog | M2 | LT | Eng | UX-003 | Metric logged, not gating | — | |

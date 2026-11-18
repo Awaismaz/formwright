@@ -91,6 +91,11 @@ def _app(a: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["bench"]:  # EVAL-003 design-agent benchmark (its own options: aicad bench --help)
+        from aicad.eval.benchmark import main as bench
+
+        return bench(argv[1:])
     p = argparse.ArgumentParser(prog="aicad")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("build", "live"):
