@@ -18,6 +18,11 @@ The governing brief is `CLAUDE_CODE_AI_ENGINEERING_PLATFORM_MASTER_PROMPT.md`.
 4. Update `docs/CONTEXT.md` if a preference, decision or way of working changed.
 5. Run `pytest`, `ruff check src tests`, `cd web && npx tsc --noEmit && npm test && npx vite build`; commit and push.
 
+## Push rule (founder, 2026-11-18)
+Push to `origin main` after **every** merge into main (verify first). At the end of each batch of work, update
+`docs/CONTEXT.md`, `docs/PUNCH_LIST.md`, `docs/SESSION_LOG.md`, `docs/DECISIONS.md` and `docs/plans/WORKLIST.md`, then push.
+Never leave merged-but-unpushed commits.
+
 ## How to run and test
 - `unset VIRTUAL_ENV` before every `uv run` (a conda env leaks it on this machine).
 - App: `uv run aicad app --no-browser --port 8765` (serves the built SPA from `web/dist`). Frontend dev: `cd web && npm run dev`.
