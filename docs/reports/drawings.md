@@ -120,3 +120,69 @@ Fixes made after reviewing the screenshots:
 2. In the Studio Files panel: a "Drawing sheet (SVG / PDF / DXF)" row with the same link.
 3. In the project card menu on Projects: "Open in Drawing Studio".
 4. Optional: for a Live module that is still locked, `ModulePage` still shows the Preview "What it will do" sample. Consider live-module wording there.
+
+---
+
+## DRW-017 — 2D drafting without a model (branch `wip/drafting-2d`, 2026-11-18)
+
+Founder request: draw a drawing directly in 2D, without a 3D part, like a 2D CAD tool. Drawing Studio's picker now
+starts with **2D drawings** ("New 2D drawing" + the organisation's drafts); `?draft=<id>` opens the drafting editor.
+
+| Area | What it does |
+|---|---|
+| Document | Per organisation, JSON under `<data_dir>/drafts/<org>/<id>/` (`draft.json`, `revs/<n>.json` snapshot per save, `exports/<n>/`). Sheet ISO A4–A0 / ANSI A–E, landscape/portrait, ISO 5455 scale, first/third angle, mm/inch. Same frame, ISO 7200 title block, revision table and red NOT APPROVED banner as model drawings (`layout._info_blocks`, UNITS now from the sheet). Title block says "2D ONLY · NO MODEL"; drawing number `FW-D<id>`. |
+| Geometry | The Design Studio sketch model (`web/src/sketch`: points + line/circle/arc) plus an ISO 128-2 layer per entity: visible 01.2 (0.5), hidden 02.1, centre 04.1, dimension 01.1 (0.25), construction (0.13, never printed). |
+| Tools | Line/polyline, rectangle, circle, arc, slot, polygon, centre line, centre mark; offset, trim, extend, mirror, fillet, chamfer, move, copy, rotate, scale (the sketch tools in `web/src/sketch/tools.ts` are reused; chamfer, and move/rotate/scale with point splitting, are new); snaps endpoint / midpoint / centre / intersection / perpendicular / grid (+ nearest), ortho (F8), polar 15° (F10); typed input `x,y`, `@dx,dy`, `@len<ang`, or a length along the cursor; grips; box select; undo/redo. Hatch (ISO 45°) uses planar-face detection, so T-junctions and crossings work; boundary entities are split at the corners so the hatch stays associative, and closed loops inside are islands. Constraints are not used (optional per the brief). |
+| Dimensions | Linear (horizontal / vertical / aligned), radius, diameter, angle, ordinate; smart dimension, baseline and chain helpers. They reference point / entity ids, so they follow the geometry; the value is always **measured** (prefix/suffix allowed, the number can never be typed). Tolerances: ± symmetric, deviations (stacked, ISO 129), limits (computed from the measured value), ISO 286 fits (`H7`, `H7/g6`). ISO 129 layout: extension-line gap 1 / overshoot 2, closed arrows 2.6, text 3.5 (3.0 on A4 / ANSI A) above the line, readable from the bottom or right, arrows outside on short spans, horizontal shoulders on radial leaders. |
+| Annotations | Notes, leaders, balloons, surface-texture symbol (ISO 21920: any / removal required / prohibited, value as entered), GD&T frame (ISO 1101, 14 characteristics drawn as vectors, Ø zone, Ⓜ/Ⓛ, datums required where ISO 1101 needs them; the tolerance must be typed by the user and is never proposed), datum feature symbol, general notes, revision-table rows. |
+| Exports | SVG and PDF from the same primitives as the editor (`render.to_svg` / `to_pdf`; text rotation generalised from 0/90 to any angle). DXF (`draft_dxf.py`): model space at true size in drawing units (`$INSUNITS` mm/inch), real DIMENSION entities (linear / aligned / radial / angular / ordinate, ISO-style dimstyle `FW-ISO`, tolerances as dimstyle overrides), real HATCH (ANSI31), annotations; layers VISIBLE / HIDDEN (`ACAD_ISO02W100`) / CENTER (`ACAD_ISO04W100`) / DIMENSION / HATCH / TEXT / CONSTRUCTION (does not plot) / SHEET with lineweights; the sheet in paper-space layout "Sheet" with a viewport at the drawing scale. ezdxf audit: 0 errors. |
+| Assist | `POST .../drafts/{id}/assist`: deterministic first (`draft_templates.read_prompt` reads gaskets, washers and plates with holes, e.g. "draw a gasket Ø150 OD, Ø60 ID, 6 × Ø14 on PCD 120"). Otherwise one tool-less design-agent turn (`draft_assist.run_agent`, the only model call; mocked in tests, token-metered, gated by `can_run_agent`) that may only answer a template + parameters or basic shapes, which the same deterministic code validates and draws; sizes it lacks are listed as "not in your request". The result is previewed and placed for the user to edit; nothing is saved until they save. Templates (gasket, washer, plate with holes) are also in the New dialog (scale fitted to the part) and the Assist tab. |
+| Honesty | Header badge "2D only · no model", title-block source "2D ONLY · NO MODEL", Check tab: "Not linked to a model … no model-consistency check (CHK-12) runs". The only check is a **sheet layout check** (every dimension / centre mark / hatch still references geometry, everything inside the frame and clear of the title block, no overlapping dimension values); the API returns `model_check: null`. Approval stays "— (not approved)". |
+| API | `src/aicad/platform/routers/mod_drafting.py` (auto-discovered `mod_*`, so no shared-file edit): `GET/POST /api/m/drawings/drafts`, `GET /templates`, `POST /templates/{name}`, `POST /frame` (title-block primitives for the editor, so it looks identical to the export), `GET/PUT(POST)/DELETE /{id}` (save = next revision, 409 on a stale `base_rev`, 422 on an invalid document), `GET /{id}/revisions/{rev}`, `POST /{id}/assist`, `GET /{id}/files/sheet.{svg,pdf,dxf}?rev=&download=1`. Same entitlement as Drawing Studio (402), viewers read-only (403), other organisations 404. |
+
+### Files
+- New: `src/aicad/drawing/{draft,draft_dxf,draft_store,draft_templates,draft_assist}.py`,
+  `src/aicad/platform/routers/mod_drafting.py`, `tests/test_drawings_2d.py`,
+  `web/src/pages/app/modules/drawings/draft/{geom,prims,api}.ts`, `{DraftEditor,DraftPanels,DraftHome}.tsx`,
+  `geom.test.ts`.
+- Changed: `layout.py` (narrow 0.25 mm drafting styles `center_n` / `dim_n` / `hatch_n` / `construction`; UNITS cell
+  from meta; ANSI A uses the compact block), `render.py` (layer order constant; any text angle), drawings `index.tsx`
+  (picker strip + `?draft=` route). Model-drawing output is unchanged (`tests/test_drawings.py`: 28 passed).
+
+### Verified
+- `uv run pytest -q tests/test_drawings.py tests/test_drawings_2d.py`: 41 passed. `ruff check src tests` clean.
+- `npx tsc --noEmit`, `npm test` (vitest, 42 incl. 10 new), `npx vite build`.
+- Browser walkthrough (headless Chrome, port 8796, throwaway data dir, deleted afterwards): New 2D drawing → plate
+  120 × 80 by typed coordinates, 4 × Ø9 by centre + typed radius, centre marks and a centre line, smart / horizontal /
+  vertical dimensions, ±0.1 on the length from the panel, datum A, position frame Ø0.2 A, Ra 3.2 symbol → Save
+  (rev 2, values `120 ±0.1 | 80 | Ø9 | 15 | 15 | 90`, sheet check passed) → PDF / DXF / SVG downloads 200. A second
+  drawing from the assist ("draw a gasket Ø150 OD, Ø60 ID, 6 × Ø14 on PCD 120") → `Ø120 | 6X Ø14 | Ø150 | Ø60`.
+  A bush half-section on A4 2:1: fillet R4, chamfer, hatch on a T-junction cell, box select + mirror, smart dimension
+  between parallel lines (16), trim, revision-1 preview, undo/redo. 0 console errors. The exported DXF, re-rendered
+  with ezdxf's drawing add-on, matches the sheet (dimensions, hatch, frames).
+- Fixed from the screenshots: GD&T symbol primitives were untagged (missing from the DXF); DXF tolerance trailing
+  zeros (`±0.100`); radial DXF text is now horizontal outside; box select used a stale rectangle; smart dimension on
+  two parallel lines made an invalid angle (now their distance); the title-block label overlapped "DRAWING NO.";
+  panel tabs overflowed.
+
+### Known limits
+- Dimensions attach only to existing end points and centres (not midpoints / intersections); slanted parallel lines
+  need two end points. No dimension-driven geometry (constraints optional, not used).
+- Hatch is 45° only (spacing editable); islands must be clean closed loops. Text uses Helvetica metrics, so ISO 3098
+  lettering is approximated. No multi-sheet, no user layers (the five ISO layers only), no blocks / symbol libraries,
+  no spline / ellipse entities, no DXF / DWG import into a 2D drawing.
+- DXF DIMENSION entities are rendered by ezdxf; CAD programs that re-render dimensions from the dimstyle may place
+  text slightly differently. Not opened in SOLIDWORKS / AutoCAD in this session (ezdxf audit and re-render only).
+- Existing model-drawing DXF (IO-007) references a `HIDDEN` linetype that ezdxf's setup does not define; 2D drafting
+  defines its ISO linetypes explicitly. Worth aligning IO-007 the same way.
+- Undo history is per browser session; saving is explicit (Ctrl+S) and every save is a revision.
+
+### Parked decisions (defaults used)
+
+| # | Decision | Default used |
+|---|---|---|
+| DRW-PD-10 | Where 2D drawings live | Per organisation under `data/drafts/<org>/`, not tied to a project; same entitlement as Drawing Studio; no token charge except an AI assist turn. |
+| DRW-PD-11 | Line weights for 2D drafting | ISO 128 group 0.5: wide 0.5, narrow 0.25 (model drawings keep their 0.18 centre and dimension lines). |
+| DRW-PD-12 | Revisions | Every save is a numbered revision (snapshot); the printed REV is the last row of the user's revision table, else DRAFT. |
+| DRW-PD-13 | Construction geometry | Shown in the editor, never in SVG / PDF; in DXF on a non-plotting CONSTRUCTION layer. |
+| DRW-PD-14 | AI assist scope | Templates + basic shapes only, sizes only from the request; never tolerances, finish or GD&T. |

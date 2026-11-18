@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (AI quality: brief gate CAD-028, replay AGT-002, self-r
 
 | Status | Items |
 |---|---|
-| Done | 181 |
+| Done | 182 |
 | In Progress | 23 |
 | Backlog | 80 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **302** |
+| **Total** | **303** |
 
 Recomputed from the rows at every merge.
 
@@ -141,6 +141,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | DRW-014 | Drawing | BOM table on assembly drawings | P1 | In Progress | M3 | LT | Eng | ASM-008 | BOM matches assembly tree | BOM data exposed at /api/m/assembly/assemblies/{id}/bom | No drawing table yet |
 | DRW-015 | Drawing | Associative regeneration on model change + change tracking (rev table) | P1 | Done | M2 | LT | Eng | CAD-012 | Param change → drawing updates; rev row added | Out-of-date drawings regenerate; revision rows ('Regenerated: L 120→150'); byte-identical SVG for same model+options |  |
 | DRW-016 | Drawing | STEP-in → auto drawing (wedge W4 candidate) | P1 | Backlog | M2 | LT | Eng | IO-005, DRW-002 | Pilot-rated usefulness ≥ agreed bar | — | Inferred dims only, clearly labelled |
+| DRW-017 | Drawing | 2D drafting without a model: "New 2D drawing" document (per org, revisions) with drafting tools, associative ISO 129 dimensions, annotations, SVG/PDF/DXF export, templates + assist | P1 | Done | M2 | LT | Eng | DRW-004, DRW-005, IO-007 | Draw a plate with holes and dimensions in the browser, export PDF/DXF; DXF opens in CAD with ISO layers/linetypes; tenant-isolated; honest "no model" labelling | `tests/test_drawings_2d.py` (13: values/tolerances, associativity, validation, sheet check, gasket/plate/washer analytic positions, prompt reader, mocked AI, SVG/PDF/DXF parse-back incl. real DIMENSION/HATCH entities, ISO02W100/ISO04W100 linetypes, ezdxf audit 0 errors, API CRUD/revisions/409/422/403/other-org 404/exports); vitest `draft/geom.test.ts` (10: values, ISO 129 placement, snaps, ortho/polar, typed input, trim/offset/fillet/chamfer, move/copy/rotate, hatch incl. T-junction faces); browser walkthrough port 8796 (plate + dims + tolerance + datum + GD&T + Ra, PDF/DXF/SVG 200; bush half-section with fillet/chamfer/hatch/mirror; gasket from the assist), 0 console errors; docs/reports/drawings.md §DRW-017 | 2D-only sheets are labelled "2D ONLY · NO MODEL" (title block, header badge, Check tab): no CHK-12, only a sheet layout check. Limits in the report |
 
 ### ASM — assemblies
 
