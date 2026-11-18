@@ -167,3 +167,5 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-36 | Design Office default concurrency and program token budget | 3 parallel agents; budget set at program creation | Before CD-006 |
 | PD-37 | Mandatory gates in a program | Brief + ICD + release mandatory; per-part review optional | Before CD-002 |
 | PD-38 | Native CAD bridge target order after the SOLIDWORKS pilot | Onshape (no install), then Inventor, then Creo | When NCB-006 is done |
+| PD-39 | Brief approval gate scope (CAD-028) | Per-user setting, default on; only new parts (no builds) in Build mode; skipped after a brief is approved in the conversation, for module hand-offs (image → CAD) and recognition/rebuild; a brief turn is a normal metered run (kind `brief`) | Before pilots |
+| PD-40 | First live EVAL-003 benchmark run | Not run (harness verified with dry replays only). Live run of all 20 prompts ≈ 5,000 tokens typical, up to 8,000; scoring = gates + bbox/volume/cylinder census; record cassettes with `--record` so later re-scoring is free | When the founder approves the spend |

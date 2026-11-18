@@ -17,7 +17,6 @@ from urllib.parse import urlparse
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
-    ClaudeSDKClient,
     HookMatcher,
     ResultMessage,
     SystemMessage,
@@ -27,8 +26,10 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
+from aicad.agent.blocks import extract_brief, extract_review
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
+from aicad.agent.replay import make_client
 from aicad.agent.tools import make_cad_server
 
 BUILTIN_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "WebFetch"]
@@ -58,6 +59,15 @@ DISCUSS_PREFIX = (
     "to building.]\n\n"
 )
 
+BRIEF_PREFIX = (
+    "[Brief confirmation: this is a new design. Do not create, edit or build anything yet; those tools are disabled "
+    "until the user approves. Reply with one short sentence, then ONE fenced fw-brief block with your interpreted "
+    "requirements, the assumptions you would make, and the open questions whose answers would change the design. "
+    "The user edits and approves it, then you build.]\n\n"
+)
+LOCKED_MODES = {"discuss": "Discussion mode: the design must not be changed. Describe the plan instead.",
+                "brief": "The brief is awaiting the user's approval: do not build yet. Return the fw-brief block."}
+
 
 def make_guard(root: Path, mode_of: Any = None) -> Any:
     root = root.resolve()
@@ -66,8 +76,9 @@ def make_guard(root: Path, mode_of: Any = None) -> Any:
         name = input_data.get("tool_name", "")
         ti = input_data.get("tool_input", {}) or {}
         reason = None
-        if mode_of is not None and mode_of() == "discuss" and (name in ("Write", "Edit") or "build_model" in name):
-            reason = "Discussion mode: the design must not be changed. Describe the plan instead."
+        locked = LOCKED_MODES.get(mode_of()) if mode_of is not None else None
+        if locked and (name in ("Write", "Edit") or "build_model" in name):
+            reason = locked
         elif name in ("Read", "Write", "Edit", "Glob", "Grep"):
             for k in PATH_KEYS:
                 if ti.get(k) and not _inside(str(ti[k]), root):
@@ -216,12 +227,14 @@ class AgentSession:
         self.model = model
         self.on_event = on_event
         self.worker_key = worker_key
-        self.client: ClaudeSDKClient | None = None
+        self.client: Any = None  # ClaudeSDKClient, or a replay stand-in
         self.history: list[dict[str, Any]] = []
         self.last_prompt: str | None = None  # the request behind the next revision (change notices)
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.busy = False
-        self.mode = "build"  # "build" | "discuss" (no model changes; enforced by the tool guard)
+        self.mode = "build"  # "build" | "discuss" | "brief" (the last two: no model changes, enforced by the guard)
+        self.brief_approved = False  # CAD-028: the user approved a brief in this conversation
+        self.client_factory: Callable[[ClaudeAgentOptions], Any] = make_client  # replay/record in dev (AGT-002)
         self.session_id: str | None = None
         self.auth: str | None = None
         self.turn_meta: dict[str, Any] = {}
@@ -244,6 +257,7 @@ class AgentSession:
         try:
             st = json.loads((self._state_dir / "agent.json").read_text(encoding="utf-8"))
             self.session_id = st.get("session_id")
+            self.brief_approved = bool(st.get("brief_approved"))
         except (OSError, ValueError):
             pass
         try:
@@ -270,7 +284,8 @@ class AgentSession:
 
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
-            (self._state_dir / "agent.json").write_text(json.dumps({"session_id": self.session_id}), encoding="utf-8")
+            (self._state_dir / "agent.json").write_text(json.dumps({"session_id": self.session_id,
+                                                                          "brief_approved": self.brief_approved}), encoding="utf-8")
         except OSError:
             pass
 
@@ -301,10 +316,10 @@ class AgentSession:
         for q in list(self.subscribers):
             q.put_nowait(ev)
 
-    async def ensure_connected(self) -> ClaudeSDKClient:
+    async def ensure_connected(self) -> Any:
         if self.client is None:
             self.workspace.mkdir(parents=True, exist_ok=True)
-            self.client = ClaudeSDKClient(options=self.options())
+            self.client = self.client_factory(self.options())
             await self.client.connect()
             self._cost_base = 0.0  # a new agent process reports cost from zero
         return self.client
@@ -319,9 +334,9 @@ class AgentSession:
         if self.busy:
             raise RuntimeError("agent is busy")
         self.busy = True
-        self.mode = "discuss" if mode == "discuss" else "build"
-        if self.mode == "discuss":
-            shown, prompt = shown or prompt, DISCUSS_PREFIX + prompt
+        self.mode = mode if mode in ("discuss", "brief") else "build"
+        if self.mode != "build":
+            shown, prompt = shown or prompt, (DISCUSS_PREFIX if self.mode == "discuss" else BRIEF_PREFIX) + prompt
         self.publish({"type": "user", "text": shown or prompt, "mode": self.mode})
         self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)",
                                     shown or prompt)[0].strip()[:600]
@@ -374,10 +389,16 @@ class AgentSession:
                     if recog is not None:
                         self._save_recognition(recog)
                     text, questions = extract_questions(text)
+                    text, brief = extract_brief(text, scrub)
+                    text, review = extract_review(text, self._status() if "fw-review" in text else None, scrub)
                     if text.strip():
                         self.publish({"type": "text", "text": scrub(text)})
                     if questions:
                         self.publish({"type": "questions", "questions": questions})
+                    if brief:
+                        self.publish({"type": "brief", "brief": brief})
+                    if review:
+                        self.publish({"type": "review", **review})
                 elif isinstance(b, ToolUseBlock):
                     self._tool_names[b.id] = b.name
                     self.publish({"type": "tool", "id": b.id, "name": "build" if "build_model" in b.name else "step",
@@ -427,6 +448,15 @@ class AgentSession:
         if self.run_budget_usd is not None and spent >= self.run_budget_usd and not self._budget_hit:
             self._budget_hit = True
 
+    def _status(self) -> dict[str, Any] | None:
+        """The latest build's status: the gate truth a self-review is reconciled against."""
+        import json as _json
+
+        try:
+            return _json.loads((self.out_dir / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
     def _save_recognition(self, recog: dict[str, Any]) -> None:
         import json as _json
 
@@ -454,6 +484,7 @@ class AgentSession:
         self.client = None
         self.history.clear()
         self.session_id = None
+        self.brief_approved = False
         for f in ("chat.jsonl", "agent.json"):
             try:
                 (self._state_dir / f).unlink()

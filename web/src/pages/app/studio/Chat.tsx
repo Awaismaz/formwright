@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Coins, Hammer, MessagesSquare, ImagePlus, ListTree, Loader2, Lock, MousePointer2, RotateCcw, Send, Sparkles, Square, Undo2, X } from "lucide-react";
+import { Check, ClipboardCheck, Coins, Hammer, MessagesSquare, ImagePlus, ListTree, Loader2, Lock, MousePointer2, RotateCcw, Send, Sparkles, Square, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { AgentEvent, AgentQuestion, Project } from "@/lib/types";
+import type { AgentBrief, AgentEvent, AgentQuestion, AgentReview, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Markdown } from "@/lib/markdown";
 import { Button, Modal, Tip } from "@/components/ui";
@@ -14,13 +14,15 @@ import type { Pick, Topo } from "@/viewer/types";
 import { pickKey } from "@/viewer/types";
 import type { TbMatch } from "./Toolbox";
 import ShopStatus, { phaseFor } from "./ShopStatus";
+import { BriefCard, SelfReview } from "./AgentCards";
 
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
-  | { kind: "user"; text: string; mode?: "build" | "discuss" } | { kind: "agent"; text: string } | { kind: "error"; text: string }
+  | { kind: "user"; text: string; mode?: "build" | "discuss" | "brief" } | { kind: "agent"; text: string } | { kind: "error"; text: string }
   | { kind: "noai"; lines: string[] }
   | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string; ids?: string[]; done?: number }
-  | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] };
+  | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] }
+  | { kind: "brief"; brief: AgentBrief } | { kind: "review"; review: AgentReview };
 
 /** "5 edits" or "×3" for a collapsed run of identical steps. */
 function stepCount(brief: string, n: number): string {
@@ -54,6 +56,8 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
     });
     case "result": return [...items, { kind: "result", ev: ev as ResultEv }];
     case "questions": return [...items, { kind: "questions", questions: ev.questions }];
+    case "brief": return [...items, { kind: "brief", brief: ev.brief }];
+    case "review": return [...items, { kind: "review", review: { items: ev.items, gates: ev.gates } }];
     default: return items;
   }
 }
@@ -128,6 +132,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   const [mode, setModeS] = useState<"build" | "discuss">(() => { try { return (localStorage.getItem(`fw_chat_mode_${project.id}`) as "build" | "discuss") || "build"; } catch { return "build"; } });
   const setMode = (m: "build" | "discuss") => { setModeS(m); try { localStorage.setItem(`fw_chat_mode_${project.id}`, m); } catch { /* */ } };
   const [offer, setOffer] = useState<{ prompt: string; matches: TbMatch[] } | null>(null);
+  const [skipBrief, setSkipBrief] = useState(false); // CAD-028: build straight away, this message only
   const { me } = useSession();
   const nav = useNavigate();
   const [items, setItems] = useState<ChatItem[]>([]);
@@ -172,7 +177,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     }
   };
 
-  const send = async (override?: string, skipToolbox = false, forceMode?: "build" | "discuss") => {
+  const send = async (override?: string, skipToolbox = false, forceMode?: "build" | "discuss", briefApproved = false) => {
     const m = forceMode ?? mode;
     let t = (override ?? text).trim(); if ((!t && !atts.length) || busy) return;
     if (!t) t = "Model the part shown in the attached reference image(s).";
@@ -187,8 +192,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     if (selection.length && topo) t += "\n\n[Selected in viewer: " + selection.map((p, i) => `(${i + 1}) ${agentDescriptor(p, topo)}`).join("; ") + "]";
     if (features.length && !override) t += "\n\n[Selected feature(s) in the feature tree: " + features.map(f => `“${f}”`).join(", ") + "]";
     try {
-      await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, mode: m, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
+      await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, mode: m, skip_brief: skipBrief, brief_approved: briefApproved, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
       if (!override || skipToolbox) { if (!override || skipToolbox) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
+      setSkipBrief(false);
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
       if (e instanceof ApiError && e.status === 402) {
@@ -204,6 +210,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   };
   const lastResultIdx = items.map(i => i.kind).lastIndexOf("result");
   const blocked = agent && !agent.allowed;
+  const briefGate = mode === "build" && !(project.builds ?? 0) && me?.user?.preferences?.confirm_brief !== false
+    && !items.some(i => i.kind === "user" && /^Approved design brief/.test(i.text));
 
   return (
     <section className="flex min-h-0 flex-col border-r border-border bg-panel">
@@ -227,6 +235,9 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             {/\[Reference image/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ImagePlus className="mr-1 inline h-3 w-3" />with reference image</div>}</div>;
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;
           if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={n === items.length - 1 && !busy} onSubmit={a => send(a)} />;
+          if (i.kind === "brief") return <BriefCard key={n} brief={i.brief} active={!busy && !items.slice(n + 1).some(x => x.kind === "user")}
+            onApprove={a => { setMode("build"); void send(a, true, "build", true); }} />;
+          if (i.kind === "review") return <SelfReview key={n} review={i.review} />;
           if (i.kind === "error") return <div key={n} className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-danger">{i.text}</div>;
           if (i.kind === "noai") return <NoAi key={n} lines={i.lines} />;
           if (i.kind === "tool") return (
@@ -251,7 +262,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           const t = [...items].reverse().find(x => x.kind === "tool");
           const step = t && t.kind === "tool" ? { name: t.name, brief: t.brief, running: t.state === "run" } : null;
           const lastUser = [...items].reverse().find(x => x.kind === "user");
-          const talking = lastUser?.kind === "user" && lastUser.mode === "discuss";
+          const talking = lastUser?.kind === "user" && (lastUser.mode === "discuss" || lastUser.mode === "brief");
           return <ShopStatus phase={talking ? "discuss" : phaseFor(step, last?.kind === "agent")} since={since} step={step?.running ? step.brief : null} />;
         })()}
       </div>
@@ -281,6 +292,13 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
                   <img src={a.url} alt={a.name} className="h-12 w-12 rounded border border-border object-cover" />
                   <button onClick={() => setAtts(atts.filter((_, j) => j !== i))} className="absolute -right-1.5 -top-1.5 rounded-full bg-chrome p-0.5 text-white" aria-label="Remove image"><X className="h-3 w-3" /></button>
                 </span>))}
+            </div>)}
+          {briefGate && (
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] text-muted">
+              <ClipboardCheck className={cx("h-3.5 w-3.5", skipBrief ? "text-muted" : "text-primary")} />
+              <span>{skipBrief ? "This message builds straight away" : "Brief first: you approve before anything is built"}</span>
+              <button role="switch" aria-checked={!skipBrief} onClick={() => setSkipBrief(!skipBrief)} data-testid="brief-toggle"
+                className="ml-auto shrink-0 font-medium text-primary hover:underline">{skipBrief ? "Undo" : "Skip once"}</button>
             </div>)}
           <textarea value={text} onChange={e => setText(e.target.value)} rows={4}
             onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); addFiles(fs); } }}

@@ -15,3 +15,4 @@ web/dist/
 *.tmp.*
 .out_backup/
 web/*.tsbuildinfo
+bench-out/

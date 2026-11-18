@@ -87,6 +87,17 @@ class ChatIn(BaseModel):
     attachments: list[Attachment] = []
     budget_tokens: int | None = None  # stop this run at N tokens (default: the workspace's run budget)
     mode: str = "build"  # "build" or "discuss" (talk/plan only: the agent cannot change the model)
+    skip_brief: bool = False  # CAD-028: build a new design straight away this once
+    brief_approved: bool = False  # this message is the user's confirmed brief: build it
+
+
+def brief_gate(p: Project, user: User, s: AgentSession, body: ChatIn, mode: str, shown: str | None) -> bool:
+    """CAD-028: a new design (no builds yet, Build mode) first returns its interpreted brief for approval, unless the
+    user turned the setting off, skipped it for this message, or already approved a brief in this conversation.
+    Module hand-offs (``shown``) carry a brief the user already reviewed."""
+    if mode != "build" or p.builds or shown or body.skip_brief or body.brief_approved or s.brief_approved:
+        return False
+    return (user.preferences or {}).get("confirm_brief", True) is not False
 
 
 ALLOWED_ATTACH = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif"}
@@ -873,9 +884,12 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
         text += ("\n\n[Reference image(s) attached by the user: " + ", ".join(files) +
                  ". Read them before modelling. Treat them as references: do not assume a scale — ask for at least "
                  "one real dimension if none is given, and state what you inferred versus what you were told.]")
+    mode = "discuss" if body.mode == "discuss" else "build"
+    shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief
+    gate = brief_gate(p, ctx.user, s, body, mode, shown)
     kind = "change" if p.builds else "new"
     est = metering.estimate(ctx.db, org, kind, len(body.prompt))
-    run = AgentRun(org_id=org.id, project_id=p.id, user_id=ctx.user.id, kind=kind, template=p.template,
+    run = AgentRun(org_id=org.id, project_id=p.id, user_id=ctx.user.id, kind="brief" if gate else kind, template=p.template,
                    brief_chars=len(body.prompt), budget_tokens=budget, est_tokens=est["typical"], est_high=est["high"])
     ctx.db.add(run)
     ctx.db.flush()
@@ -883,10 +897,13 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
         metering.reserve(org.id, run.id, budget)
     s.run_id = run.id  # type: ignore[attr-defined]
     s.run_budget_usd = budget * metering.USD_PER_TOKEN if budget is not None else None
-    mode = "discuss" if body.mode == "discuss" else "build"
+    if gate:  # brief runs are their own kind so they don't skew the learned "new part" estimate
+        mode = "brief"
+    elif mode == "build" and body.brief_approved and not s.brief_approved:
+        s.brief_approved = True
+        s._persist_session()
     s.turn_meta = {"rev_before": latest_revision(ws), "attachments": files, "run_id": run.id, "budget_tokens": budget,
                    "mode": mode}
-    shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief
     if shown and files:
         shown += "\n\n[Reference image attached]"
     t = asyncio.create_task(s.send(text, shown=shown, mode=mode))

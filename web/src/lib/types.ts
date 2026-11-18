@@ -3,7 +3,7 @@ export type Role = "owner" | "admin" | "engineer" | "viewer";
 export interface User {
   id: string; email: string; name: string; email_verified: boolean; is_superadmin: boolean;
   onboarding: Record<string, unknown>; onboarding_completed: boolean; tour_completed: boolean;
-  preferences: { units?: "mm" | "in"; theme?: "light" | "dark" | "system"; notifications_email?: boolean };
+  preferences: { units?: "mm" | "in"; theme?: "light" | "dark" | "system"; notifications_email?: boolean; confirm_brief?: boolean };
   created_at: string;
   /** set while the email is unconfirmed: the end of the first-day grace */
   verify_by?: string | null;
@@ -113,10 +113,14 @@ export interface Project {
 export interface Template { code: string; name: string; icon: string; prompt: string }
 
 export interface AgentQuestion { id: string; question: string; options: string[]; multi: boolean; other: boolean; default: string | null }
+/** CAD-028: the agent's reading of a new design, approved (and edited) by the user before anything is built. */
+export interface AgentBrief { title: string | null; requirements: string[]; assumptions: string[]; questions: { question: string; default: string | null }[] }
+/** AGT-006: the agent's structured self-review; `gates` comes from the checks, never from the agent. */
+export interface AgentReview { items: { text: string; basis: string; kind: "observed" | "uncertain" | "overridden" }[]; gates: { ok: boolean | null; failed: string[]; build_id?: string | null } }
 
 export type AgentEvent =
   | { type: "hello"; busy: boolean }
-  | { type: "user"; text: string; t: number; mode?: "build" | "discuss" }
+  | { type: "user"; text: string; t: number; mode?: "build" | "discuss" | "brief" }
   | { type: "text"; text: string; t: number }
   | { type: "system"; model: string; auth: string }
   | { type: "tool"; id: string; name: string; brief: string }
@@ -127,5 +131,7 @@ export type AgentEvent =
   | { type: "error"; text: string }
   | { type: "busy"; value: boolean }
   | { type: "questions"; questions: AgentQuestion[] }
+  | { type: "brief"; brief: AgentBrief }
+  | ({ type: "review" } & AgentReview)
   | { type: "recognition"; component: string | null }
   | { type: "reset" };

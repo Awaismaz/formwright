@@ -53,6 +53,10 @@ export default function Settings() {
             <div className="inline-flex rounded-lg border border-border p-1">{(["mm", "in"] as const).map(u =>
               <button key={u} onClick={() => setPref({ units: u })} className={cx("rounded px-4 py-1.5 text-sm", (prefs.units ?? "mm") === u ? "bg-primary text-white" : "text-muted")}>{u === "mm" ? "Millimetres" : "Inches"}</button>)}</div>
           </Section>
+          <Section title="Design agent" desc="How the agent starts a new part.">
+            <div className="flex items-center justify-between gap-4"><div><div className="text-sm font-medium">Confirm the brief before building new parts</div><div className="text-xs text-muted">The agent first shows its reading of your request: requirements, assumptions and open questions. You edit and approve it before anything is built. You can skip it for a single message in the chat.</div></div>
+              <Toggle checked={prefs.confirm_brief !== false} onChange={v => setPref({ confirm_brief: v })} /></div>
+          </Section>
           <Section title="Notifications">
             <div className="flex items-center justify-between"><div><div className="text-sm font-medium">Email me about billing & usage</div><div className="text-xs text-muted">Failed payments and receipts. Run results and teammates' changes arrive in the bell.</div></div>
               <Toggle checked={prefs.notifications_email !== false} onChange={v => setPref({ notifications_email: v })} /></div>

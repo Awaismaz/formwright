@@ -254,7 +254,7 @@ async def ai_recognition(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> d
     where = f" and standard views are in {img} (read the image first)" if img else ""
     prompt = ("Recognise the features of this part.\n\n[Recognition data: the geometric analysis of the current model "
               f"is below{where}. {AI_RECOGNITION_ASK}\n```json\n{json.dumps(data)[:15000]}\n```]")
-    res = await agent_chat(project_id, ChatIn(prompt=prompt), ctx)
+    res = await agent_chat(project_id, ChatIn(prompt=prompt, skip_brief=True), ctx)
     return {**res, "build_id": rec.get("build_id")}
 
 
@@ -266,4 +266,4 @@ async def rebuild_parametric(project_id: str, ctx: Ctx = Depends(verified_ctx)) 
 
     p = _project(ctx, project_id)
     rec = _current_recognition(p) or (await run_recognition(project_id, ctx))["recognition"]
-    return await agent_chat(project_id, ChatIn(prompt=agent_prompt(rec)), ctx)
+    return await agent_chat(project_id, ChatIn(prompt=agent_prompt(rec), skip_brief=True), ctx)

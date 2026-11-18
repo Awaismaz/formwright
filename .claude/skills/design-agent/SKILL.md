@@ -13,7 +13,8 @@ contract with the others. Change them together.
 | Instructions | `src/aicad/agent/prompt.py` (`CAD_AGENT_INSTRUCTIONS`, appended to the `claude_code` preset) | workflow, model-script contract, honesty and talk rules |
 | Session | `src/aicad/agent/session.py` | `BUILTIN_TOOLS` + `CAD_TOOLS` allow-list, `permission_mode="dontAsk"`, `setting_sources=[]` (isolated from any developer `.claude`, including this repo's skills), PreToolUse `make_guard` (paths inside workspace; WebFetch only `build123d.readthedocs.io`), `MAX_TURNS=80`, resume by `session_id` |
 | UI wording | `session.py` `friendly_step`, `friendly_result`, `_SCRUB`, `scrub()` | no file names, tools, code, Python, library or model ids reach the UI (DS-014, CLAUDE.md rule) |
-| Structured blocks | `extract_questions` (fenced `fw-questions`), `extract_recognition` (fenced `fw-recognition`) | JSON in a fenced block; the block is stripped from the visible text and rendered as chips or tree data |
+| Structured blocks | `extract_questions` (`fw-questions`), `extract_recognition` (`fw-recognition`), `agent/blocks.py` `extract_brief` (`fw-brief`, CAD-028) and `extract_review` (`fw-review`, AGT-006: reconciled with `out/status.json`, can never pass a failed gate) | JSON in a fenced block; the block is stripped from the visible text and rendered as chips, tree data, the brief card or the Self-review panel |
+| Replay | `agent/replay.py` (`ReplayClient`, `RecordingClient`, `FW_AGENT_REPLAY` / `FW_AGENT_RECORD`, `AgentSession.client_factory`) | tests and demos replay recorded turns with zero model calls |
 | Build tool | `src/aicad/agent/tools.py` → `runner.py` via the warm `worker.py` | returns the "Overall gating checks: PASS/FAIL" text plus the 4-view render; `friendly_result` keys on that prefix |
 | Editable params | `runner.editable_params` / `param_meta` | only top-level `NAME = <number>` lines declared in `PARAMS`; PARAM_META limits enforced server-side |
 
@@ -33,12 +34,12 @@ contract with the others. Change them together.
 ## Tests (`tests/test_agent.py`, `tests/test_library.py`)
 Cover the runner (builds, wrong expectation, script errors, missing `result`), tripwire allow/deny, guard
 allow/deny, endpoints, editable params, warm worker recovery, block parsing. Add cases rather than relaxing them.
-No test may make a paid or subscription model call (AGT-002 replay provider is still backlog).
+No test may make a paid or subscription model call: drive agent turns with a replay cassette (AGT-002, see `tests/test_ai_quality.py`).
 
 ## Roadmap items this unblocks
 - **AGT-015 / PD-09** (before any non-founder user): API-key auth. `aicad app --api-key` exists; the production path
   must refuse subscription auth.
-- **EVAL-003**: an opt-in benchmark of about 20 original prompts (plate/bracket family) reporting first-pass and
-  ≤3-iteration pass rates, turns, time and tokens. Gate on CHK results, never on the agent's own claims. Keep prompts
-  and expected envelopes in the repo.
+- **EVAL-003**: `aicad bench` (`src/aicad/eval/`): 20 prompts with analytic expectations; `--dry` / `--replay DIR`
+  free, `--live [--record DIR]` spends tokens (estimate + confirmation first). Gate on CHK results and the
+  expectations, never on the agent's own claims.
 - **AGT-009**: a run record (model id, versions, timings, tokens) stored server-side, never shown to users.
