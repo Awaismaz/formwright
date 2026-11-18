@@ -28,7 +28,14 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Toolbox generators are deterministic and versioned (`aicad/toolbox.py`, `VERSION`); bump the version on any
   geometry change so old models stay reproducible.
 
+- Installable web app (UX-022): build-time service worker from `web/pwa/` (never caches `/api`); bump nothing by hand,
+  the build id follows the built files. Icons: `scripts/pwa_icons.py`. Anything needing locally installed software
+  goes inside `components/DesktopOnly.tsx`. Compact layouts: `lib/media.ts` (PHONE < 768, COMPACT < 1024).
+
 ## Architecture in one screen
+- Formwright files (IO-020…025): every module saves/opens its work as a signed, checksummed zip (`.fwpart .fwasm .fwdrw
+  .fwprog .fwrender .fwmfg .fwcalc .fwprint .fwread`), one container in `src/aicad/native/`, spec `docs/FORMATS.md`.
+  Imports are untrusted input; parts are rebuilt and verified against the exported fingerprint.
 - `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
   `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),
   `worker.py` (warm per-org build worker).
@@ -93,5 +100,33 @@ Trial workspaces can use every Live module.
 **Testing note:** with several agents running, a few slow tests (mesh render, change notice, param edit) can fail
 under load and pass alone. Run the full suite on a quiet machine before deciding a failure is real.
 
-## Where things stand
-See `docs/PUNCH_LIST.md` (DS-* rows for the Studio) and the latest `docs/SESSION_LOG.md` entry.
+## Where things stand (handoff, updated 2026-11-18 evening)
+
+**Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-46).
+
+**Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
+planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
+Fitz places + mates); chat shop-floor status animation; Discuss/Build chat modes; brief approval gate, self-review,
+record/replay agent, 20-prompt benchmark harness; sidebar fixes; animated landing page (v1); `/why` ROI page;
+AI Render Studio (OpenAI images with the user's own key — not yet run live); 2D drafting without a model; Mesh
+fixes (fail-fast output paths, degenerate triangles).
+
+**In flight on branches (git worktrees under `C:\Users\Awais\Desktop\fw-wt\`, branch `wip/<name>`), merged one by one:**
+- `wip/office-phase3` — Design Office orchestrator (auto-run agents on tickets, Gage checker, Fitz integration, budgets).
+- `wip/landing-hero` — landing hero = planetary-gearbox Design Office story, phone + tablet app mockups,
+  "Integrates with your CAD" section, "Why should I buy this" button, no "coming soon" labels.
+- `wip/pwa` — installable app (PWA) + mobile/tablet layout pass.
+- `wip/native-formats` — .fwpart/.fwasm/.fwdrw/.fwprog/.fwrender/.fwmfg/.fwcalc/.fwprint/.fwread save/open in every module.
+- `wip/collab` — teams, per-project permissions, sharing, presence/comments, branches + merge requests.
+If a branch exists on GitHub but not in main, it was not finished/merged yet: check its last commit and the
+work list before continuing it.
+
+**Next after these:** Design Office phase 4 (skeleton + ICD, placeholder bodies, mates by ICD name, change
+requests, live program assembly) and phase 5 (program deliverables, estimate calibration, timeline); then the
+remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
+
+**Process rules (founder):** push after every merge; update CONTEXT/PUNCH_LIST/SESSION_LOG/DECISIONS/WORKLIST at
+the end of each batch; when away, no questions — park decisions as PD rows; parallel agents in git worktrees
+(the built-in worktree isolation fails on this machine because of path casing — create worktrees manually with
+`git worktree add -b wip/<name> ../fw-wt/<name> main`).

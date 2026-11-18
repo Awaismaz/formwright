@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Modal, PageHeader, PageLoader, Progress } from "@/components/ui";
+import { FileButtons } from "@/components/NativeExport";
 import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE, useHome } from "./api";
 import { fmtEta } from "./model";
@@ -19,8 +20,9 @@ export function AutoRunNote({ className }: { className?: string }) {
   return (
     <div className={cx("flex items-start gap-2 rounded-lg border border-primary/20 bg-primary-soft/50 px-3 py-2 text-[12.5px] text-text", className)}>
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-      <span>Archie plans programs today. <b>Auto-run arrives with the orchestrator</b>: until then you move tickets on the board,
-        and <b>Start</b> opens the part in Design Studio with its brief ready to send.</span>
+      <span>Archie plans the program; press <b>Run</b> on a program and the office works its tickets: Hex reuses Toolbox and
+        company parts, specialists design each part in its own Design Studio project, Gage checks every part, Fitz assembles.
+        The Design Office is in Preview: estimates are estimates, and drawings, interfaces (ICD) and release come later.</span>
     </div>
   );
 }
@@ -29,16 +31,16 @@ function ProgramCard({ p }: { p: ProgramSummary }) {
   const done = (p.counts?.approved ?? 0) + (p.counts?.integrated ?? 0);
   return (
     <Link to={`/app/office/programs/${p.id}`} className="card group block p-4 transition hover:border-primary/40 hover:shadow-pop">
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3 max-sm:gap-y-1.5">
         <AgentAvatar code="archie" size={38} state={p.status === "planning" ? "working" : p.status === "plan_review" ? "review" : p.status === "complete" ? "done" : "idle"} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 max-sm:basis-[calc(100%-50px)]">
           <div className="flex items-center gap-2">
             <span className="truncate text-[15px] font-semibold group-hover:text-primary">{p.name}</span>
             <span className="kbd">{p.key}</span>
           </div>
           <div className="mt-0.5 line-clamp-1 text-[12.5px] text-muted">{p.brief}</div>
         </div>
-        <Badge tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>
+        <Badge className="max-sm:ml-[50px]" tone={p.status === "plan_review" ? "warning" : p.status === "complete" ? "success" : p.status === "planning" ? "primary" : "neutral"}>
           {STATUS_LABEL[p.status]}</Badge>
       </div>
       {p.rollup ? (
@@ -65,7 +67,8 @@ function RosterCard({ a }: { a: RosterAgent }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="text-[14px] font-semibold" style={{ color: a.colour }}>{a.name}</span>
-          {a.phase > 2 && <Badge className="ml-auto" tone="neutral">{a.phase === 3 ? "Auto-run soon" : "Later"}</Badge>}
+          {a.phase > 3 && <Badge className="ml-auto" tone="neutral">Later</Badge>}
+          {a.code === "benny" && <span className="ml-auto" title="Sheet-metal tools are not in the app yet: Benny designs sheet parts as solids and says so"><Badge tone="neutral">Solids only</Badge></span>}
         </div>
         <div className="truncate text-[11.5px] text-muted">{a.role}</div>
         <div className="mt-1 truncate text-[12px]">{a.line}</div>
@@ -87,6 +90,14 @@ function InboxRow({ i, canEdit }: { i: InboxItem; canEdit: boolean }) {
       qc.invalidateQueries({ queryKey: ["office-home"] });
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
   };
+  if (i.kind === "blocked") return (
+    <Link to={`/app/office/programs/${i.program_id}?ticket=${i.ticket_id}`} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
+      <AgentAvatar code={i.specialist ?? "gage"} state="blocked" size={30} still />
+      <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium"><span className="font-mono text-[11px] text-muted">{i.key}</span> {i.title}</div>
+        <div className="line-clamp-2 text-[11.5px] text-warning">{i.reason ?? "Needs your decision"}</div></div>
+      <ArrowRight className="h-4 w-4 shrink-0 text-muted" />
+    </Link>
+  );
   if (i.kind === "brief") return (
     <button onClick={() => nav(`/app/office/programs/${i.program_id}`)} className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left last:border-0 hover:bg-panel2">
       <AgentAvatar code="archie" state="review" size={30} />
@@ -144,7 +155,8 @@ export default function OfficeHome() {
     <div className={PAGE}>
       <PageHeader eyebrow={<Badge tone="preview">Preview</Badge>} title="Design Office"
         subtitle="Run a product like a design company: Archie plans the program, named specialists own the parts, you approve at the gates."
-        actions={d.can_edit && <Button icon={<Plus className="h-4 w-4" />} onClick={() => nav("/app/office/new")}>New program</Button>} />
+        actions={d.can_edit && <><FileButtons ext="fwprog" openOnly size="md" />
+          <Button icon={<Plus className="h-4 w-4" />} onClick={() => nav("/app/office/new")}>New program</Button></>} />
       <AutoRunNote className="mb-6" />
       <div className="grid gap-6 lg:grid-cols-3">
         <section className="space-y-3 lg:col-span-2">
@@ -169,7 +181,7 @@ export default function OfficeHome() {
               <div className="flex items-baseline justify-between"><span className="text-2xl font-semibold tabular-nums">{num(d.budget.spent)}</span>
                 <span className="text-[12px] text-muted">of {num(d.budget.tokens)} budgeted</span></div>
               <Progress className="mt-2" value={pct} tone={pct >= 100 ? "danger" : pct >= 80 ? "warning" : "primary"} />
-              <p className="mt-2 text-[11.5px] text-muted">Archie's planning plus Design Studio runs on linked parts, across all programs.</p>
+              <p className="mt-2 text-[11.5px] text-muted">Archie's planning, the part agents' Design Studio runs and Gage's reviews, across all programs.</p>
             </Card>
           </section>
         </aside>

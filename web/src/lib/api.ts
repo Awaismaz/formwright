@@ -17,25 +17,34 @@ export function setCurrentOrg(id: string | null) {
   try { id ? localStorage.setItem("fw_org", id) : localStorage.removeItem("fw_org"); } catch { /* storage unavailable */ }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** Workspace + CSRF headers for requests made outside `api` (raw uploads, blob downloads). */
+export function apiHeaders(method: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET") headers["X-FW-CSRF"] = "1";
   if (currentOrg) headers["X-Org"] = currentOrg;
+  return headers;
+}
+
+/** The API's error message from a failed response body (FastAPI `detail`, plain or {message}). */
+export function errorFrom(status: number, data: unknown): ApiError {
+  const d = (data as { detail?: unknown } | null)?.detail;
+  if (d && typeof d === "object" && "message" in (d as object)) {
+    const o = d as { message: string; cta?: string };
+    return new ApiError(status, o.message, o.cta);
+  }
+  if (Array.isArray(d)) return new ApiError(status, "Please check the form fields.");
+  return new ApiError(status, typeof d === "string" ? d : `Request failed (${status})`);
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers = apiHeaders(method);
+  if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, { method, headers, credentials: "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await res.text();
   let data: unknown = null;
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if (!res.ok) {
-    const d = (data as { detail?: unknown } | null)?.detail;
-    if (d && typeof d === "object" && "message" in (d as object)) {
-      const o = d as { message: string; cta?: string };
-      throw new ApiError(res.status, o.message, o.cta);
-    }
-    if (Array.isArray(d)) throw new ApiError(res.status, "Please check the form fields.");
-    throw new ApiError(res.status, typeof d === "string" ? d : `Request failed (${res.status})`);
-  }
+  if (!res.ok) throw errorFrom(res.status, data);
   return data as T;
 }
 

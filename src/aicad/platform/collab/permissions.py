@@ -17,7 +17,8 @@ Effective access = max(workspace baseline, owning-team role, explicit grants), t
 
 Routers call `require_project(ctx, project_id, need)`. When `need` is omitted it follows the HTTP method: reads
 (GET/HEAD) need ``read``, every other method needs ``edit``; endpoints override that where it differs (compare is a
-read, sharing/deleting need ``admin``, the agent needs ``agent`` = edit by a workspace member). A project you can't
+read, sharing/deleting need ``admin``, the agent needs ``agent`` = edit by a workspace member, a native ``.fwpart``
+export needs ``export`` = edit without the edit-lock checks; STEP/STL downloads stay reads). A project you can't
 read is reported as not found (no existence leak).
 """
 
@@ -184,6 +185,9 @@ def require_project(ctx: Any, project_id: str, need: str | None = None) -> Proje
     if need == "agent":
         if acc.guest or not acc.at_least("edit"):
             raise _deny(acc, need)
+    elif need == "export":  # a full native copy (model, history) of the part: edit access, no lock needed
+        if not acc.at_least("edit"):
+            raise _deny(acc, "edit")
     elif not acc.at_least(need):
         raise _deny(acc, need)
     if need in ("edit", "agent"):

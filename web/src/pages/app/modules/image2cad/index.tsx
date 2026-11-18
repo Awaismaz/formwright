@@ -9,6 +9,7 @@ import { Badge, PageLoader, StatusBadge } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
 import ReviewScreen from "./Review";
 import { CostStrip } from "./Cost";
+import { FileButtons } from "@/components/NativeExport";
 import { BASE, type Estimate, type UploadSummary } from "./types";
 
 const ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp";
@@ -81,6 +82,7 @@ function Home({ targetProject, onOpen }: { targetProject: string | null; onOpen:
           <div className="flex items-center gap-2"><h1 className="text-[22px] font-semibold tracking-tight">Image &amp; Drawing to CAD</h1><StatusBadge status="live" /></div>
           <p className="mt-0.5 text-sm text-muted">We never guess scale. You see exactly what was read and what is missing before anything is modelled.</p>
         </div>
+        <div className="ml-auto"><FileButtons ext="fwread" openOnly /></div>
       </div>
 
       <ol className="mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-muted" aria-label="How it works">

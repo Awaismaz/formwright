@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Circle, Lock, MoreHorizontal, PartyPopper, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Lock, MoreHorizontal, PartyPopper, Pause, Play, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
 import { useTitle } from "@/lib/title";
 import { Badge, Button, Card, EmptyState, Menu, MenuContent, MenuItem, MenuTrigger, Modal, PageLoader, Progress, Stat, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
-import { AutoRunNote, STATUS_LABEL } from "./Home";
+import { STATUS_LABEL } from "./Home";
 import { BASE, useProgram, useProgramEvents } from "./api";
 import Board from "./Board";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import Tree from "./Tree";
-import { fmtEta, fmtMinutes } from "./model";
+import { saveNative } from "@/components/NativeExport";
+import { budgetTone, fmtEta, fmtMinutes, orchestratorLabel, recentHandoffs } from "./model";
 import type { OfficeEvent, Program, Ticket } from "./types";
 
 function Gates({ p }: { p: Program }) {
@@ -58,6 +59,77 @@ function LiveStrip({ recent, live }: { recent: OfficeEvent[]; live: boolean }) {
   );
 }
 
+const TONE_CLS: Record<string, string> = {
+  neutral: "border-border bg-panel2 text-muted", primary: "border-primary/30 bg-primary-soft text-primary",
+  warning: "border-warning/40 bg-warning/10 text-warning", danger: "border-danger/40 bg-danger/10 text-danger",
+  success: "border-success/30 bg-success/10 text-success",
+};
+
+/** Run / Pause for the whole program, the office's state, and an honest note on what running means. */
+function RunBar({ p }: { p: Program }) {
+  const qc = useQueryClient();
+  const nav = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const o = p.orchestrator;
+  const st = orchestratorLabel(o, p.concurrency);
+  const running = o?.state === "running";
+  const canEdit = p.can_edit !== false;
+  const act = async (what: "run" | "pause") => {
+    setBusy(true);
+    try {
+      const v = await api.post<Program>(`${BASE}/programs/${p.id}/${what}`);
+      qc.setQueryData(["office-program", p.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      toast.success(what === "run" ? "The office is working the tickets" : "Paused: agents finish the step they are on");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Failed");
+      if (e instanceof ApiError && e.cta) nav(e.cta);
+    } finally { setBusy(false); }
+  };
+  return (
+    <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
+      {canEdit && p.status !== "complete" && (running
+        ? <Button variant="secondary" loading={busy} icon={<Pause className="h-4 w-4" />} onClick={() => act("pause")}>Pause</Button>
+        : <Button loading={busy} icon={<Play className="h-4 w-4" />} onClick={() => act("run")}>{o?.state && o.state !== "idle" ? "Resume" : "Run"}</Button>)}
+      <span className={cx("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium", TONE_CLS[st.tone])} aria-live="polite">
+        {running && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}{st.label}</span>
+      {o?.simulated && <span title="Development mode: agents are simulated and no AI is called"><Badge tone="warning"><FlaskConical className="mr-1 inline h-3 w-3" />Simulated agents</Badge></span>}
+      {o?.bypass && <span title="God mode: the token budget is not enforced"><Badge tone="neutral">Budget bypass</Badge></span>}
+      <p className="min-w-[260px] flex-1 text-[12px] text-muted">
+        {running || o?.state === "complete" || o?.state === "paused"
+          ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved; <b>Fitz</b> assembles each level. Comment, pause, reassign or take over any ticket.</>
+          : o?.state === "stopped"
+            ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
+            : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. You can still move tickets and open parts by hand.</>}
+      </p>
+    </Card>
+  );
+}
+
+function BudgetDialog({ p, open, onOpenChange }: { p: Program; open: boolean; onOpenChange: (v: boolean) => void }) {
+  const qc = useQueryClient();
+  const [tokens, setTokens] = useState(p.budget.tokens);
+  const [conc, setConc] = useState(p.concurrency);
+  const save = async () => {
+    try {
+      const v = await api.patch<Program>(`${BASE}/programs/${p.id}`, { budget_tokens: tokens, concurrency: conc });
+      qc.setQueryData(["office-program", p.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      onOpenChange(false);
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
+  };
+  return (
+    <Modal open={open} onOpenChange={onOpenChange} title="Budget and agents" description="The office warns at 80 % of the budget and starts no new work at 100 %."
+      footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={save}>Save</Button></>}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block"><span className="label">Token budget</span>
+          <input className="input mt-1" type="number" min={0} step={100} value={tokens} onChange={e => setTokens(Math.max(0, Number(e.target.value) || 0))} /></label>
+        <label className="block"><span className="label">Agents at a time</span>
+          <input className="input mt-1" type="number" min={1} max={12} value={conc} onChange={e => setConc(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} /></label>
+      </div>
+      <p className="mt-2 text-[12px] text-muted">More agents finish sooner but share one AI subscription: above 3 at a time, expect waits for capacity.</p>
+    </Modal>
+  );
+}
+
 export default function ProgramPage() {
   const { pid } = useParams();
   const nav = useNavigate();
@@ -67,6 +139,10 @@ export default function ProgramPage() {
   const { recent, live } = useProgramEvents(pid);
   const [open, setOpen] = useState<Ticket | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [budgetOpen, setBudgetOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
+  const handoffs = recentHandoffs(recent, now);
   const p = q.data;
   useTitle(p?.name ?? "Design Office");
   const tab = params.get("tab") ?? "board";
@@ -76,7 +152,9 @@ export default function ProgramPage() {
   }, [p, params, setParams]);
   useEffect(() => {
     const m = recent[0];
-    if (m?.type === "program.milestone") toast.success(m.text, { icon: <PartyPopper className="h-4 w-4" /> });
+    if (m?.type === "program.milestone" || m?.type === "program.done") toast.success(m.text, { icon: <PartyPopper className="h-4 w-4" /> });
+    else if (m?.type === "budget.warn") toast.warning(m.text);
+    else if (m?.type === "budget.stop") toast.error(m.text);
   }, [recent]);
 
   if (q.isLoading) return <PageLoader />;
@@ -89,7 +167,7 @@ export default function ProgramPage() {
     try { await api.del(`${BASE}/programs/${p.id}`); qc.invalidateQueries({ queryKey: ["office-home"] }); toast.success("Program deleted"); nav("/app/office"); }
     catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not delete"); }
   };
-  const budgetPct = p.budget.tokens ? (100 * p.budget.spent) / p.budget.tokens : 0;
+  const bt = budgetTone(p.budget.spent, p.budget.tokens);
 
   return (
     <div className="mx-auto w-full max-w-[1500px] px-4 py-6 sm:px-6">
@@ -107,7 +185,9 @@ export default function ProgramPage() {
         <div className="flex items-center gap-3">
           <LiveStrip recent={recent} live={live} />
           {canEdit && <Menu><MenuTrigger asChild><Button variant="ghost" size="sm" aria-label="Program actions"><MoreHorizontal className="h-4 w-4" /></Button></MenuTrigger>
-            <MenuContent><MenuItem danger icon={<Trash2 />} onSelect={() => setConfirm(true)}>Delete program</MenuItem></MenuContent></Menu>}
+            <MenuContent><MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/programs/${p.id}/export`, `${p.name}.fwprog`, "fwprog"); }}>Save as file (.fwprog)</MenuItem>
+            <MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Budget and agents…</MenuItem>
+              <MenuItem danger icon={<Trash2 />} onSelect={() => setConfirm(true)}>Delete program</MenuItem></MenuContent></Menu>}
         </div>
       </div>
 
@@ -118,12 +198,14 @@ export default function ProgramPage() {
           <Stat label="Progress" value={`${Math.round(p.rollup?.progress ?? 0)} %`} sub={<Progress className="mt-1" value={p.rollup?.progress ?? 0} tone={p.status === "complete" ? "success" : "primary"} />} />
           <Stat label="Tickets done" value={`${done} / ${p.tickets.length}`} sub={`${p.counts.in_design} in design · ${p.counts.in_review} in review`} />
           <Stat label="ETA (remaining)" value={fmtEta(p.eta)} sub={`of ${fmtMinutes(p.rollup?.estimate_min ?? 0)} estimated · ${p.concurrency} in parallel`} />
-          <Stat label="Tokens" value={num(p.budget.spent)} sub={<span className={cx(budgetPct >= 80 && "text-warning")}>of {num(p.budget.tokens)} budget{budgetPct >= 80 ? ` · ${Math.round(budgetPct)} %` : ""}</span>} />
+          <Stat label="Tokens" value={num(p.budget.spent)} sub={<div>
+            <span className={cx(bt.tone === "warning" && "text-warning", bt.tone === "danger" && "text-danger")}>of {num(p.budget.tokens)} budget · {Math.round(bt.pct)} %</span>
+            {p.budget.tokens > 0 && <Progress className="mt-1" value={Math.min(100, bt.pct)} tone={bt.tone} />}</div>} />
         </div>
-        <AutoRunNote className="mb-4" />
+        <RunBar p={p} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
           <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
-          <TabPanel value="board"><Board program={p} onOpen={setOpen} /></TabPanel>
+          <TabPanel value="board"><Board program={p} onOpen={setOpen} handoffs={handoffs} /></TabPanel>
           <TabPanel value="tree"><Tree program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="activity"><Activity program={p} /></TabPanel>
           <TabPanel value="brief">
@@ -137,6 +219,7 @@ export default function ProgramPage() {
         </Tabs>
       </>}
       <TicketDrawer program={p} ticket={open} onClose={() => setOpen(null)} />
+      {budgetOpen && <BudgetDialog p={p} open={budgetOpen} onOpenChange={setBudgetOpen} />}
       <Modal open={confirm} onOpenChange={setConfirm} title={`Delete ${p.name}?`}
         description="The program, its board and its history are removed. Design Studio parts and assemblies opened from tickets stay in Projects."
         footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>Cancel</Button><Button variant="danger" onClick={del}>Delete program</Button></>} />

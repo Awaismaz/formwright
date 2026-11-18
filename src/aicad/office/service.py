@@ -294,6 +294,11 @@ def update(root: Path, doc: dict[str, Any], tid: str, actor: dict[str, Any], *, 
     if specialist is not None and specialist != t["specialist"]:
         if specialist not in roster.AGENT_CODES or specialist == "archie":
             raise OfficeInputError("Unknown specialist")
+        if t["kind"] == "integration" and specialist != "fitz":
+            raise OfficeInputError("Fitz assembles sub-assemblies; assign part tickets to the designers.")
+        if t["kind"] != "integration" and specialist not in roster.DESIGNERS + ("hex",):
+            raise OfficeInputError(f"{roster.agent(specialist)['name']} doesn't design parts. Gage checks them "
+                                   "independently, so he can't be the designer (no self-approval).")
         t["specialist"] = specialist
         changes.append(f"reassigned to {roster.agent(specialist)['name']}")
     if complexity is not None:
@@ -377,6 +382,27 @@ def sync_studio(root: Path, doc: dict[str, Any], info: dict[str, dict[str, Any]]
 # --------------------------------------------------------------------------- views
 AGENT_STATE = {"in_design": "working", "in_review": "review", "changes_requested": "blocked",
                "approved": "done", "integrated": "done"}
+RUN_STATE = {"searching": "working", "designing": "working", "reviewing": "working", "integrating": "working",
+             "blocked": "blocked", "done": "done"}
+
+
+def ticket_view(t: dict[str, Any]) -> dict[str, Any]:
+    """The card: who holds the ticket now (Hex searching, Mill designing, Gage inspecting, Fitz assembling), their
+    state and the live status line. Tickets the office has not touched keep the Phase 2 column-derived state."""
+    r = t.get("run") or {}
+    st = r.get("status")
+    state = RUN_STATE.get(st or "", AGENT_STATE.get(t["column"], "idle")) if st else AGENT_STATE.get(t["column"], "idle")
+    if st in ("queued", "waiting_capacity", "retry", "manual") or t.get("paused"):
+        state = "idle"
+    if st == "done" and t["column"] not in DONE_COLUMNS:
+        state = AGENT_STATE.get(t["column"], "idle")
+    agent_code = r.get("agent") if st in ("searching", "designing", "reviewing", "integrating") else t["specialist"]
+    if st == "done" and r.get("agent") in ("hex", "gage", "fitz"):
+        agent_code = r["agent"]
+    return {**t, "agent": agent_code or t["specialist"], "agent_label": r.get("agent_label") if st in (
+        "searching", "designing", "reviewing", "integrating") else None,
+            "agent_state": state, "line": r.get("line"), "run_status": "paused" if t.get("paused") else st,
+            "review_tokens": int(t.get("review_tokens") or 0), "spent": int(t.get("tokens") or 0) + int(t.get("review_tokens") or 0)}
 
 
 def view(doc: dict[str, Any]) -> dict[str, Any]:
@@ -393,10 +419,21 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
     else:
         out["rollup"] = None
         out["eta"] = None
-    out["tickets"] = [{**t, "agent_state": AGENT_STATE.get(t["column"], "idle")} for t in tickets]
+    from aicad.office import orchestrator
+
+    out["tickets"] = [ticket_view(t) for t in tickets]
     out["counts"] = {c: sum(1 for t in tickets if t["column"] == c) for c in COLUMN_CODES}
-    spent = int(doc["budget"].get("planning_tokens", 0)) + sum(int(t.get("tokens") or 0) for t in tickets)
-    out["budget"] = {**doc["budget"], "spent": spent}
+    b = orchestrator.budget_state(doc)
+    out["budget"] = {**doc["budget"], "spent": b["spent"], "pct": b["pct"], "level": b["level"]}
+    o = doc.get("orchestrator") or {}
+    out["orchestrator"] = {"state": o.get("state", "idle"), "reason": o.get("reason"), "by": o.get("by"),
+                           "started_at": o.get("started_at"), "capacity_until": o.get("capacity_until"),
+                           "bypass": bool(o.get("god_tokens")),
+                           "working": sum(1 for t in tickets if (t.get("run") or {}).get("status") in
+                                          orchestrator.ACTIVE),
+                           "waiting": sum(1 for t in tickets if (t.get("run") or {}).get("status") in
+                                          ("waiting_capacity", "retry")),
+                           "blocked": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "blocked")}
     if doc.get("plan") and doc["status"] == "plan_review":
         out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"])
     out["constants"] = estimates.constants()
@@ -407,7 +444,7 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
 def summary(doc: dict[str, Any]) -> dict[str, Any]:
     v = view(doc)
     return {k: v.get(k) for k in ("id", "name", "key", "status", "planner", "created_at", "updated_at", "rollup",
-                                  "eta", "counts", "budget", "gates", "concurrency")} | {
+                                  "eta", "counts", "budget", "gates", "concurrency", "orchestrator")} | {
         "tickets": len(doc["tickets"]), "brief": doc["brief"][:300]}
 
 
@@ -439,7 +476,15 @@ def roster_view(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     s = AGENT_STATE.get(t["column"], "idle")
                     if best is None or rank[s] > rank[best[0]]:
                         best = (s, t, d)
-            if best and best[0] != "idle":
+            live = [(t, d) for d in docs for t in d["tickets"] if (t.get("run") or {}).get("agent") == a["code"]
+                    and (t.get("run") or {}).get("status") in ("searching", "designing", "reviewing", "integrating")]
+            if live:
+                t, d = live[0]
+                state, prog = "working", d["id"]
+                line = t["run"].get("line") or f"{a['name']} is working on {t['title']}"
+                if len(live) > 1:
+                    line += f" (+{len(live) - 1} more)"
+            elif best and best[0] != "idle":
                 s, t, d = best
                 state, prog = s, d["id"]
                 line = {"working": f"{t['title']} is in design", "review": f"{t['title']} is waiting for review",
@@ -459,7 +504,13 @@ def inbox(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "title": f"Approve the brief and plan for {d['name']}",
                         "source": (d.get("plan") or {}).get("source")})
         for t in d["tickets"]:
-            if t["column"] == "in_review":
+            if (t.get("run") or {}).get("status") == "blocked":
+                out.append({"kind": "blocked", "program_id": d["id"], "program": d["name"], "at": t["updated_at"],
+                            "ticket_id": t["id"], "key": t["key"], "title": t["title"],
+                            "specialist": t["specialist"], "checks": t.get("checks"),
+                            "reason": (t.get("run") or {}).get("blocked")})
+                continue
+            if t["column"] == "in_review" and not (t.get("run") or {}).get("status"):
                 out.append({"kind": "ticket", "program_id": d["id"], "program": d["name"], "at": t["updated_at"],
                             "ticket_id": t["id"], "key": t["key"], "title": t["title"],
                             "specialist": t["specialist"], "checks": t.get("checks")})

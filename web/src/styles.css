@@ -53,6 +53,27 @@
 
 html, body, #root { height: 100%; }
 body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"; }
+
+/* ---- installed app / touch polish (UX-022) ----
+   viewport-fit=cover lets the page run under the notch and home indicator; #root keeps content inside the safe
+   area, and the strips around it show the graphite theme colour (behind iOS's translucent status bar). */
+html { -webkit-text-size-adjust: 100%; }
+body { -webkit-tap-highlight-color: transparent; }
+@media (display-mode: standalone) { html, body { background: rgb(var(--chrome)); } }
+#root {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  background: rgb(var(--bg)); background-clip: content-box;
+}
+/* the app shell scrolls inside its panels, never the page: no rubber-band bounce or pull-to-refresh over the viewer */
+html:has(.fw-app-shell), html:has(.fw-app-shell) body { overscroll-behavior: none; }
+.fw-app-shell main, .fw-app-shell [data-scroll] { overscroll-behavior: contain; }
+/* iOS zooms the page into any focused field under 16 px: keep fields at 16 px on iPhone/iPad */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) { input:not([type=checkbox]):not([type=radio]):not([type=range]), select, textarea { font-size: 16px !important; } }
+}
+/* horizontal scrollers on touch (command bar, board columns) without a visible scrollbar */
+.fw-hscroll { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.fw-hscroll::-webkit-scrollbar { display: none; }
 ::selection { background: rgb(var(--primary) / .22); }
 * { scrollbar-width: thin; scrollbar-color: rgb(var(--border)) transparent; }
 
@@ -122,6 +143,8 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 .fw-ping { animation: fw-ping 1.8s cubic-bezier(0, 0, .2, 1) infinite; }
 .fw-float { animation: fw-float 6s ease-in-out infinite; }
 .fw-shimmer { background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .45) 50%, transparent 70%) 0 0 / 220% 100%; animation: fw-shimmer 2.4s linear infinite; }
+.fw-flow { left: 0; animation: fw-flow 2.2s cubic-bezier(.4, 0, .2, 1) infinite; }
+@keyframes fw-flow { 0% { left: 0; opacity: 0; } 15%, 85% { opacity: 1; } 100% { left: calc(100% - 6px); opacity: 0; } }
 @keyframes fw-draw { to { stroke-dashoffset: 0; } }
 @keyframes fw-pop { to { opacity: 1; transform: none; } }
 @keyframes fw-blink { 50% { opacity: 0; } }
@@ -131,7 +154,7 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 @media (prefers-reduced-motion: reduce) {
   .fw-reveal, .fw-pop { opacity: 1; transform: none; transition: none; animation: none !important; }
   .fw-draw { stroke-dashoffset: 0; animation: none !important; }
-  .fw-caret, .fw-ping, .fw-float, .fw-shimmer { animation: none !important; }
+  .fw-caret, .fw-ping, .fw-float, .fw-shimmer, .fw-flow { animation: none !important; }
 }
 .fw-bar { transform: scaleX(0); transform-origin: left; transition: transform 1.4s cubic-bezier(.2, .7, .2, 1); }
 .is-in .fw-bar { transform: none; }

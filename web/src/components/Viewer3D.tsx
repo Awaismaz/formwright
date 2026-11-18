@@ -153,7 +153,7 @@ export default function Viewer3D(props: Props) {
       {!topo && <div className="pointer-events-none absolute inset-0 flex items-center justify-center">{empty}</div>}
 
       {/* toolbar */}
-      <div className="absolute left-3 top-3 flex flex-wrap items-center gap-0.5 rounded-lg border border-border bg-panel/95 p-1 shadow-card">
+      <div className="absolute left-3 top-3 flex flex-wrap items-center gap-0.5 rounded-lg border border-border bg-panel/95 p-1 shadow-card max-sm:max-w-[calc(100%-1.5rem)] max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:[scrollbar-width:none]">
         {(["Iso", "Front", "Top", "Right"] as ViewName[]).map(view)}
         <Menu>
           <MenuTrigger asChild><button className="rounded px-1 py-1 text-muted hover:bg-text/5" aria-label="More views"><ChevronDown className="h-3.5 w-3.5" /></button></MenuTrigger>

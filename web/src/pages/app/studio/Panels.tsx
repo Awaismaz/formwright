@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileText, GitCompare, Hand, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, CheckResult, ManualFeature, Project, RepairItem } from "@/lib/types";
@@ -11,6 +11,7 @@ import type { Topo } from "@/viewer/types";
 import { FEATURE_LABEL, type RefPlane } from "@/viewer/planes";
 import ChangeNotice from "./ChangeNotice";
 import HandoffCard from "./HandoffCard";
+import { ImportProvenance, PartExportDialog } from "@/components/NativeExport";
 import VariantsBar from "./Variants";
 
 /* ------------------------------------------------------------------ checks */
@@ -456,11 +457,17 @@ export function RevisionsPanel({ project, onChanged, version, onCompare, compari
 
 /* ------------------------------------------------------------------ files & source */
 export function FilesPanel({ project, status }: { project: Project; status?: BuildStatus }) {
+  const [fwpart, setFwpart] = useState(false);
   if (!status?.fingerprint) return <p className="p-4 text-sm text-muted">Exports appear after the first successful build.</p>;
   const base = `/api/projects/${project.id}/files`;
   return (
     <div className="space-y-2 p-3">
+      <ImportProvenance projectId={project.id} />
       <HandoffCard projectId={project.id} version={status.build_id} />
+      <button onClick={() => setFwpart(true)} className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left hover:border-primary/50" data-testid="download-fwpart">
+        <FileDown className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">Formwright part (.fwpart)</div><div className="text-xs text-muted">Full parametric model for another Formwright workspace</div></div>
+      </button>
+      <PartExportDialog open={fwpart} onOpenChange={setFwpart} projectId={project.id} name={project.name} />
       {[["part.step", "STEP (AP214)", "SOLIDWORKS, Creo, Fusion, Inventor, NX…"], ["part.stl", "STL", "Slicers and quick viewing"], ["part.3mf", "3MF", "Modern 3D-printing format with units"]].map(([f, l, h]) => (
         <a key={f} href={`${base}/${f}`} className="flex items-center gap-3 rounded-lg border border-border p-3 hover:border-primary/50">
           <Download className="h-4 w-4 text-primary" /><div className="flex-1"><div className="text-sm font-medium">{l}</div><div className="text-xs text-muted">{h}</div></div>

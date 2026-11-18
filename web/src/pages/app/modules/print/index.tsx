@@ -9,6 +9,8 @@ import { useSession } from "@/lib/session";
 import type { Project } from "@/lib/types";
 import { Button, EmptyState, PageLoader, Spinner } from "@/components/ui";
 import type { ModuleAppProps } from "../registry";
+import { FileButtons } from "@/components/NativeExport";
+import { moduleExportUrl } from "@/lib/native";
 import type { Presets, Report, Settings, UploadMeta } from "./types";
 import { PrintViewport } from "./Viewport";
 import { SettingsPanel } from "./SettingsPanel";
@@ -81,6 +83,7 @@ export default function PrintPrep({ projectId }: ModuleAppProps) {
       <ModuleHeader code="print" icon={<Printer className="h-4 w-4" />} title="3D Print Prep" projectId={src?.kind === "projects" ? src.id : null} projectName={srcName}
         projects={projects.data?.items.filter(p => p.builds > 0 && p.last_status?.ok).map(p => ({ id: p.id, name: p.name }))}
         onSwitch={id => choose(id ? { kind: "projects", id } : null)}
+        files={src?.kind === "uploads" ? <FileButtons ext="fwprint" saveUrl={moduleExportUrl("upload", src.id)} saveName={`${srcName ?? "mesh"}.fwprint`} /> : undefined}
         actions={<>
           {src?.kind === "uploads" && <Button size="sm" variant="secondary" icon={<FolderOpen className="h-4 w-4" />} onClick={() => choose(null)}>Change source</Button>}
           {canEdit && <Button size="sm" variant="secondary" icon={<Upload className="h-4 w-4" />} onClick={() => setUploadOpen(true)}>Upload mesh</Button>}

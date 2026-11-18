@@ -74,7 +74,7 @@ export function PrintViewport({ src, report, orient }: { src: Src; report: Repor
 
   return (
     <div className="viewport-bg relative h-full w-full">
-      <div ref={host} className="absolute inset-0" data-testid="print-viewer" />
+      <div ref={host} className="absolute inset-0 [&>canvas]:!h-full [&>canvas]:!w-full" data-testid="print-viewer" />
       {(loading || !mesh) && <div className="absolute inset-0 flex items-center justify-center"><Spinner className="h-6 w-6" /></div>}
       <div className="absolute left-3 right-3 top-3 flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border border-border bg-panel/95 p-0.5 shadow-card" role="tablist" aria-label="Overlay">

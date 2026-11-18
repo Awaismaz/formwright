@@ -4,6 +4,49 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (r) — Coordinator summary of the autonomous run (handoff)
+
+Founder away; work run as parallel agents in git worktrees, merged + pushed one by one.
+- Merged today: punch-list reconciliation (20 rows closed with evidence, 8 superseded); Design Office plan, names
+  (Archie, Mill, Chuck, Axel, Benny, Molly, Hex, Fitz, Gage, Ortho, Smithy), phase 2; smart assembly (ASM-010/019);
+  DS-036 shop-floor status, DS-037 Discuss mode; AI quality (CAD-028, AGT-002, AGT-006, EVAL-003 harness);
+  UX-019 sidebar; UX-020 landing v1; UX-021 /why page; MSH-013 AI Render Studio; DRW-017 2D drafting; Mesh fixes.
+- Founder decisions recorded: landing page is launch-state marketing (no coming-soon labels; own icon tiles until
+  vendor logo permission, PD-42); push after every merge (CLAUDE.md + memory).
+- Parked: PD-35…PD-46 (see DECISIONS).
+- In flight: office phase 3, landing hero v2 (gearbox story, phone + tablet, CAD section), PWA + mobile,
+  native file formats in every module, collaboration (teams, permissions, sharing, branching).
+- Known flakes under machine load: warm-worker test, some Blender/mesh render tests — pass when run alone.
+## 2026-11-18 (r) — Native Formwright files for every module (IO-020…IO-025), branch wip/native-formats
+
+**Done.** One shared container (`src/aicad/native/`): deterministic signed zip, `manifest.json` with `kind`, sha256 of
+every entry, per-workspace HMAC signature, format versions + migration hook. Formats: `.fwpart` (full parametric
+model), `.fwasm` (parts embedded once, linked by fingerprint on import), `.fwdrw` (model drawing or 2D draft),
+`.fwprog`, `.fwrender` (Mesh Studio / AI Render), `.fwmfg`, `.fwcalc`, `.fwprint` (part setup or uploaded mesh),
+`.fwread` (Image-to-CAD), plus "Download all" (zip of .fwpart). API `/api/native/*` (`mod_native.py`,
+`native_modules.py`). Import: untrusted-input validation, tripwire + strict allow-list for foreign scripts, rebuild in
+the workspace's build worker, fingerprint comparison → "Verified identical" / differences / exact read-only fallback.
+UI: import dialog for every Formwright file (Home drop zone, Projects page Import + drag-drop, New project dialog,
+every module's "Open .ext"), "Save .ext" in every module header (shared `ModuleHeader`), Studio Files panel .fwpart
+with options + import provenance, `/app/open-file` route for the PWA file handler. Spec: `docs/FORMATS.md`.
+
+**Verified.** `tests/test_native_formats.py` (9 tests: container/zip-bomb/path attacks, determinism + signature,
+migration hook, script gate, part/assembly/drawing/program/archive round trips into a second workspace, tamper and
+malicious re-packs, fallback, all 8 module kinds); vitest `web/src/lib/native.test.ts` (6). Browser walkthrough
+(puppeteer-core 25.18.1, port 8802, throwaway data): workspace A saved Demo Mounting Plate .fwpart, an assembly
+(plate + L bracket, coincident mate) as .fwasm and a Manufacturing Advisor report as .fwmfg; a second account opened
+each: part "Verified identical" (volume 89,663.758238 mm³, 23 faces, 56 edges both sides), parameter Length 120 → 130
+rebuilt and verified (97,653.758 mm³); assembly both parts verified, same placement, mate ok; DFM report current.
+Screenshots reviewed (dialog title casing fixed; client event tracking removed: the server records exports/imports).
+
+**Not done / limits.** Mesh exports (GLB/OBJ/STL) and `.blend` scenes are never packed; uploaded-mesh repair state
+not carried; draft Save exports the last saved revision; assembly mates whose faces don't match the rebuilt part are
+dropped (counted); the PWA manifest `file_handlers` entries are listed in FORMATS.md for the PWA branch to add.
+
+**Decision parked.** PD-49 native file defaults.
+
+---
+
 ## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
 
 ### Done
@@ -64,6 +107,130 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 ### Not done / next
 - Dimensions to midpoints / intersections, hatch angles, user layers, blocks, DXF import into a 2D drawing; open the
   DXF in SOLIDWORKS / AutoCAD by hand. Copy DRW-PD-10..14 into DECISIONS.md when merging.
+## 2026-11-18 (p) — Installable web app (UX-022) and mobile/tablet layout pass (UX-018), branch wip/pwa
+
+### Done
+- **PWA**: `web/public/manifest.webmanifest` (standalone, start `/app`, scope `/`, theme/background #23272E, shortcuts
+  Projects / Design Office), icons rendered from the logo mark by `scripts/pwa_icons.py` (any + maskable 192/512,
+  opaque 180 apple-touch-icon), manifest/theme/Apple meta tags and `viewport-fit=cover` in `web/index.html`.
+- **Service worker** without a dependency: `web/pwa/sw.js` is a template; `web/pwa/plugin.ts` (Vite, build only) lists
+  every built file (70: hashed JS/CSS, Inter fonts, icons, landing GLBs, offline page) and a content-hash build id into
+  `dist/sw.js`. Cache-first for those, `/api/*` and `text/event-stream` never touched, navigations network-first with
+  `offline.html` ("You're offline. Your projects are safe. Reconnect to keep designing."), which polls `/api/health`
+  and reloads itself. A new worker waits; the app shows a "New version available · Reload" toast (`lib/pwa.ts`).
+  In-app "You're offline" banner from `navigator.onLine`.
+- **Install offer** (`components/InstallApp.tsx`, pure helpers `lib/install.ts`): one tap via a captured
+  `beforeinstallprompt`; on iPhone/iPad a bottom sheet with Share → Add to Home Screen steps; hidden when running
+  installed. In the account menu, sidebar footer, and a dismissible banner on phones/tablets (not on Studio/module
+  pages; dismissal remembered 60 days).
+- **Server** (`platform/app.py`): `static_headers()` gives explicit MIME types (Windows can map .js to text/plain) and
+  caching: `sw.js`, manifest and offline page `no-cache` (+ `Service-Worker-Allowed: /`), `/assets/*` immutable for a
+  year, other public files one hour; CSP adds `manifest-src 'self'`.
+- **Standalone polish** (`styles.css`): safe-area padding on `#root` (graphite strips behind iOS's translucent status
+  bar in standalone), no overscroll bounce in the app shell, tap highlight off, 16 px fields on iOS, `.fw-hscroll`.
+- **Mobile/tablet pass** (UX-018): see the UX-018 row. Studio compact layout (bottom bar on phones, overlays on
+  tablets, PropertyManager as a bottom half-sheet), touch ribbon, scrolling viewer toolbar, office board snap scroll
+  with sticky lane titles, Modal = bottom sheet on phones, scrollable tab lists, tablet default icon rail,
+  `DesktopOnly` for local integrations (Settings → CAD plugins). Fixed: Assembly and 3D Print canvases drew at
+  devicePixelRatio× on high-DPI screens.
+
+### Verified
+- `npx tsc --noEmit`, `npm test` (49, incl. `lib/install.test.ts` 7), `vite build`; `pytest tests/test_platform.py
+  tests/test_pwa.py` (33 passed); `ruff check src tests`.
+- Headless Chrome (puppeteer-core 25.18.1) on port 8801 with a throwaway data dir: CDP `Page.getAppManifest` (no
+  errors), `Page.getInstallabilityErrors` → `[]`, SW activated and controlling after reload, 70 files in
+  `fw-static-<build>`, no `/api` entry in any cache; update flow (changed `sw.js` → toast → Reload → navigation, new
+  worker active); offline (page + SW target) → offline page; back online → reloads itself.
+- iPhone 14 (390×844, DPR 2, touch, iOS UA) and iPad (820×1180, touch): dashboard, drawer, install sheet, projects,
+  Studio (model / features / agent, Fillet PropertyManager), Design Office home, board (scrolled), ticket sheet,
+  Assembly Studio, modules, billing, settings (+ CAD plugins note), standalone (no install offer). Touch orbit, pinch
+  zoom and two-finger pan change the view (CDP touch events). 0 console errors; 34 screenshots reviewed.
+
+### Not done / limitations
+- Selecting several edges/faces on touch still needs Ctrl (no modifier on phones): next step is a "tap adds to the
+  selection" mode while a multi-pick PropertyManager is open.
+- Drawing, Engineering, 3D Print and Mesh modules were not reworked for phones (they keep the "larger screen" note).
+- No offline viewing and no app-store packaging (PD-47). `display-mode` can't be emulated over CDP; standalone was
+  verified through iOS's `navigator.standalone`. Real-device checks (iOS Safari, Android Chrome) still to do.
+
+### Next step
+Touch multi-select for fillet/chamfer/shell/draft; real-device pass on an iPhone and an Android phone.
+
+---
+## 2026-11-18 (p) — Design Office Phase 3 (branch wip/office-phase3): orchestrator, part agents, Gage, Fitz, budget
+
+**Done:** CD-006 orchestrator (Run/Pause per program, critical-path priority, concurrency cap, retry and rate-limit
+back-off, restart resume, idempotent), CD-007 specialist part agents in their own Studio projects (Hex reuse first,
+per-trade practice notes, milestones and machinist status lines from real session events, CAD-028 gate skipped for
+approved ticket briefs), CD-008 Gage (deterministic checks + metered advisory AI note, 2 send-backs then the engineer,
+no self-approval), CD-009 comments queued/delivered, priority, reassign, pause, take over / hand back, reopen, retry,
+CD-016 budget warn at 80 % and stop, spend per ticket and program. Fitz integrates each level via `fitz.py`.
+Board: live holder avatars, status lines, hand-off slide, Run bar, budget meter and dialog. Report:
+`docs/reports/design-office.md` (Phase 3 section). Merged `main` (AI quality) first and used its `client_factory`
+hook for the simulated agents.
+
+**Verified:** `tests/test_office_orchestrator.py` 15 tests (all agents simulated, no model calls), `test_office.py`
+20, vitest office 11; browser walkthrough with simulated agents on port 8798 (throwaway data, deleted), 0 console
+errors, screenshots in `docs/reports/design-office/phase3/`. Full gate results in the commit.
+
+**Not done / blocked:** no live multi-agent run (PD-48, needs the founder's go-ahead on subscription use); ICD,
+placeholders and change requests are Phase 4.
+
+**Next:** one supervised live run of a small program (3 parts) to calibrate practice notes, rate-limit wording and
+costs; then Phase 4 (CD-010…CD-013).
+## 2026-11-18 (q) — Landing hero: Design Office gearbox story (UX-020), branch wip/landing-hero
+
+### Done
+- **Hero rebuilt** (`web/src/components/landing/hero/`): one scripted ~52 s loop telling the Design Office story for a
+  planetary gearbox PG-5 (ring fixed, sun in, carrier out; m1.5, sun 18T, 3 × planet 27T, internal ring 72T, face 12;
+  i = 1 + 72/18 = 5, (18 + 72)/3 = 30, a = 33.75): (a) a detailed brief types itself; (b) Archie's product tree,
+  gear-set checks, frozen interfaces, estimate, "Plan approved"; (c) a mini board where Axel, Chuck, Mill and Hex work
+  in parallel with avatars, progress rings/bars and status lines ("Axel is shaping 72 internal teeth…": internal gears
+  are shaped, not hobbed), Gage reviews, Hex's Toolbox parts land at 0 tokens; (d) build flash: 16 unique parts on a
+  table, each stock blank machined into the real part by a sweeping cut plane, ✓ labels; (e) Fitz flies them to an
+  axial exploded view and seats them bottom-up, "0 interferences", "a = 33.75 ✓"; (f) the gearbox runs: sun spins,
+  planets spin and orbit inside the fixed ring, carrier/output at 1/5, output side turns to glass; readouts (5.00 : 1,
+  600 → 120 rpm, 12 Nm out / 2.4 Nm in, design point) and an "All gating checks pass · STEP · BOM · Drawings · Shop
+  pack" chip row. Play/pause, replay, six click-to-jump chapter chips with progress. Holds at the build chapter until
+  the geometry is loaded (the 3D loads during the brief).
+- `kinematics.ts`: ratio, carrier speed, Willis planet spin, planet phase φk = θk(1 − Zr/Zp) mod pitch (all 0 for PG-5),
+  mesh residuals, spin-up; `kinematics.test.ts` (9 tests, hand-computed, incl. a 13/25/63 × 4 set with half-pitch phases).
+- **Real geometry** (`scripts/landing_assets.py`): Toolbox spur gears (sun, planet), bearings 6204/6001/6000, SHCS M5×35,
+  dowels; build123d internal ring 72T (disc minus the external-involute outline with swapped tip/root, 0.08 mm
+  backlash), carrier plates with posts, planet pins, input shaft (Ø6.35 socket), output shaft (keyway), input/output
+  covers (6204 seats, 140 square flange), NEMA 23 motor flange. Manifest `hero/gearbox.json` (29 instances, assembly
+  coordinates). New GLB compaction: build123d exports one primitive per B-rep face (hundreds of draw calls); the script
+  now rewrites each GLB as one indexed primitive with crease-aware normals: gear.glb 457 → 84 KB, all landing GLBs 1.15 MB.
+- Founder direction applied: no Coming soon / Preview / Illustration / (concept) labels on the landing page (OfficeBoard
+  copy now present tense, module status badges removed, FAQ rewritten). "Why should I buy this" CTA in the hero and
+  "Why Formwright" nav link to `/why` (page built by another agent). New sections: **Integrates with your CAD**
+  (`CadTools.tsx`, own monogram tiles; dropping `web/public/landing/logos/<slug>.svg` replaces a tile via a build-time
+  glob; trademark notice) and **Formwright in your pocket** (`AppDevices.tsx`, generic phone + landscape tablet frames,
+  each with its own loop: home tap → splash → chat → live 3D flange → board → "Gearbox approved ✓" toast; tablet Design
+  Studio with live gear, tree, checks, chat, then the Office board; static frames under reduced motion; stacks on mobile).
+- Removed the old flange hero (`HeroVisual.tsx`, `heroTimeline*`, flange-blank/bore GLBs).
+
+### Verified
+- Interference: every gearbox instance pair intersected in build123d at the assembled pose: only ≤ 0.004 mm³ tolerance
+  noise at nominal fits; planet/ring and planet/sun 0 at three sun angles, 234 mm³ when a planet is deliberately
+  half a pitch off (the phase formula matters). Tapped holes modelled at nominal Ø (Toolbox cosmetic-thread rule).
+- `npx tsc --noEmit`, `npm test` (48), `npx vite build`, `ruff check src tests scripts`, `pytest` (335 passed; `test_mesh::test_highlight_protection…` failed under load and passes alone, known flaky Blender render, no src change).
+- Headless Chrome (puppeteer-core) on port 8799 with a throwaway data dir: desktop 1440 shots at every chapter (brief,
+  plan, board ×2, build ×2, explode, seating, assembled, run ×2 + mesh close-up), mobile 390 (all chapters), reduced
+  motion (assembled still + six static steps), CAD and mobile sections at 1440 and 390; 0 console errors/warnings;
+  no horizontal scroll. rAF rate with a GPU (headless d3d11) about 96–98 fps in build/assemble/run (swiftshader is far
+  slower, so the story clock runs in real time with dt capped at 0.5 s). Fixed from screenshots: FLIP cards compounding
+  transforms (layout rects now measured without the running transform), stock top-face clipping speckle, run view
+  clutter (output side to glass), mobile framing (camera keyframes fit half width AND height), compact run HUD,
+  mobile build labels (latest only), reduced-motion still frame rendering, phone 3D viewport mounting.
+
+### Not done / limitations
+- The story is scripted (deterministic timeline), not a recording of a live run; numbers shown are the design values.
+- GLBs are not Draco/meshopt compressed (served gzipped by the app). Housing parts are simple (no fillets or seals).
+- Exploded/seating framing leaves some empty space at the bottom on desktop; could be tuned.
+
+### Next
+- Merge `wip/landing-hero` after the `/why` page lands; consider meshopt compression if the asset budget tightens.
 
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 

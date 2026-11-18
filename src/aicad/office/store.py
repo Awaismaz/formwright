@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -51,14 +52,31 @@ def lock(pid: str) -> threading.Lock:
 
 
 def load(root: Path, pid: str) -> dict[str, Any] | None:
-    d = read_json(program_dir(root, pid) / "program.json")
-    return d if isinstance(d, dict) else None
+    """The program, or None when it doesn't exist. On Windows a read can collide with the atomic replace of a
+    concurrent save (the orchestrator saves often), so a failed read of an existing file is retried."""
+    f = program_dir(root, pid) / "program.json"
+    for i in range(20):
+        d = read_json(f)
+        if isinstance(d, dict):
+            return d
+        if not f.exists():
+            return None
+        time.sleep(0.01 * (i + 1))
+    return None
 
 
 def save(root: Path, doc: dict[str, Any]) -> dict[str, Any]:
     doc["rev"] = int(doc.get("rev", 0)) + 1
     doc["updated_at"] = now()
-    write_json(program_dir(root, doc["id"]) / "program.json", doc)
+    f = program_dir(root, doc["id"]) / "program.json"
+    for i in range(20):
+        try:
+            write_json(f, doc)
+            break
+        except PermissionError:  # a reader holds the file open for a moment (Windows)
+            if i == 19:
+                raise
+            time.sleep(0.01 * (i + 1))
     return doc
 
 
