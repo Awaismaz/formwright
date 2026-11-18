@@ -18,6 +18,7 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
   collapsible panels (feature panel left, agent right, collapsible command bar, no wasted header space).
 
 ## Standing decisions (details in docs/DECISIONS.md)
+- Landing page (founder decision 2026-11-18): launch-state marketing — present features as they will be at market launch, no 'coming soon'/'preview' labels; the in-app product keeps strict honesty labels. Before public launch: legal review of claims, and official vendor logos only with permission (own icon tiles until then; drop-in slot `web/public/landing/logos/`).
 - Name/brand: **Formwright** (trademark unchecked, PD-01). SOLIDWORKS-like blue/grey theme (docs/BRAND.md).
 - Stack: Python 3.12 (uv), FastAPI, SQLAlchemy (SQLite now), build123d 0.13 / OCP 7.9 (OCCT), React 18 + TS +
   Vite + Tailwind + Radix + TanStack Query + three.js. Agent: Claude Agent SDK (`aicad.agent.session`).
