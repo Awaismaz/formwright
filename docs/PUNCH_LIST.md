@@ -20,7 +20,7 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 | Backlog | 91 |
 | Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **296** |
+| **Total** | **297** |
 
 Recomputed 2026-11-18 after reconciling rows the Design Studio work had already delivered.
 
