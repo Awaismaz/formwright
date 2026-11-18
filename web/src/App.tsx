@@ -22,6 +22,7 @@ import NotFoundPanel from "@/components/NotFoundPanel";
 
 const ProjectStudio = lazy(() => import("@/pages/app/ProjectStudio"));
 const Admin = lazy(() => import("@/pages/admin/Admin"));
+const Office = lazy(() => import("@/pages/app/office"));
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { me, loading } = useSession();
@@ -70,6 +71,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="projects" element={<Projects />} />
           <Route path="projects/:id" element={<ProjectStudio />} />
+          <Route path="office/*" element={<Office />} />
           <Route path="modules" element={<Modules />} />
           <Route path="modules/:code" element={<ModulePage />} />
           <Route path="billing" element={<Billing />} />

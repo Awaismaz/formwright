@@ -1,0 +1,146 @@
+/* Design Office agent avatars (CD-017, plan §3.1). Pure SVG + CSS. Transform origins are in SVG user units
+   (viewBox -26 -26 52 52, origin at the badge centre). Every animation stops under prefers-reduced-motion and
+   each avatar keeps a meaningful static pose. */
+
+.fwa { display: inline-flex; flex-shrink: 0; position: relative; line-height: 0; }
+.fwa svg { overflow: visible; }
+
+/* ------------------------------------------------------------------ shared states */
+.fwa-body { transform-origin: 0px 0px; }
+.fwa--idle .fwa-body { animation: fwa-breathe 3.8s ease-in-out infinite; }
+.fwa-eyes { transform-origin: 0px 11px; animation: fwa-blink 5.2s infinite; }
+.fwa--working .fwa-eyes { animation-duration: 3.1s; }
+.fwa--blocked .fwa-body { animation: fwa-shake .62s cubic-bezier(.36, .07, .19, .97) 1 both; }
+
+.fwa-ring-track { opacity: .18; }
+.fwa-ring-fill { transition: stroke-dasharray .5s ease; }
+.fwa-ring-spin { transform-origin: 0px 0px; animation: fwa-spin 1.4s linear infinite; }
+.fwa-ring-pulse { transform-origin: 0px 0px; animation: fwa-pulse 1.8s ease-in-out infinite; }
+.fwa-badge { transform-box: fill-box; transform-origin: center; animation: fwa-pop .55s cubic-bezier(.2, 1.6, .4, 1) 1 both; }
+
+@keyframes fwa-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+@keyframes fwa-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+@keyframes fwa-shake {
+  10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-3px) rotate(-3deg); } 40%, 60% { transform: translateX(3px) rotate(3deg); }
+}
+@keyframes fwa-spin { to { transform: rotate(360deg); } }
+@keyframes fwa-pulse { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(1.09); opacity: .25; } }
+@keyframes fwa-pop { 0% { transform: scale(0); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
+@keyframes fwa-fly-a { 0% { transform: translate(0, 0) rotate(0); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(8px, -7px) rotate(220deg); opacity: 0; } }
+@keyframes fwa-fly-b { 0% { transform: translate(0, 0) rotate(0); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(-8px, -6px) rotate(-200deg); opacity: 0; } }
+@keyframes fwa-fly-c { 0% { transform: translate(0, 0) rotate(0); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(5px, -10px) rotate(160deg); opacity: 0; } }
+
+/* ------------------------------------------------------------------ Archie: the compass swings an arc */
+.fwa-archie-compass { transform-origin: 0px -17px; transform: rotate(-4deg); }
+.fwa-archie-arc { stroke-dasharray: 100; stroke-dashoffset: 0; }
+.fwa--working .fwa-archie-compass { animation: fwa-archie-swing 2.4s ease-in-out infinite; }
+.fwa--working .fwa-archie-arc { animation: fwa-archie-draw 2.4s ease-in-out infinite; }
+@keyframes fwa-archie-swing { 0%, 100% { transform: rotate(-20deg); } 50% { transform: rotate(20deg); } }
+@keyframes fwa-archie-draw { 0% { stroke-dashoffset: 100; } 50% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -100; } }
+
+/* ------------------------------------------------------------------ Mill: the cutter spins, chips fly */
+.fwa-mill-chip { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.fwa--working .fwa-mill-helix { animation: fwa-mill-helix .28s linear infinite; }
+.fwa--working .fwa-mill-cutter { animation: fwa-mill-plunge 2.6s ease-in-out infinite; }
+.fwa--working .fwa-mill-chip:nth-child(1) { animation: fwa-fly-a .9s ease-out infinite; }
+.fwa--working .fwa-mill-chip:nth-child(2) { animation: fwa-fly-b .9s ease-out .3s infinite; }
+.fwa--working .fwa-mill-chip:nth-child(3) { animation: fwa-fly-c .9s ease-out .6s infinite; }
+@keyframes fwa-mill-helix { to { transform: translateY(2.4px); } }
+@keyframes fwa-mill-plunge { 0%, 100% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+
+/* ------------------------------------------------------------------ Chuck: the jaws spin, swarf curls away */
+.fwa-chuck-spin { transform-origin: 0px -6px; }
+.fwa-chuck-swarf { stroke-dasharray: 40; stroke-dashoffset: 40; opacity: 0; }
+.fwa--working .fwa-chuck-spin { animation: fwa-spin .9s linear infinite; }
+.fwa--working .fwa-chuck-swarf { animation: fwa-chuck-swarf 1.8s ease-out infinite; }
+@keyframes fwa-chuck-swarf { 0% { stroke-dashoffset: 40; opacity: 1; } 70% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
+
+/* ------------------------------------------------------------------ Axel: the gears mesh (10 : 7) */
+.fwa-axel-big { transform-origin: -5px -5px; }
+.fwa-axel-small { transform-origin: 6.6px -9.4px; }
+.fwa--working .fwa-axel-big { animation: fwa-spin 3s linear infinite; }
+.fwa--working .fwa-axel-small { animation: fwa-spin 2.1s linear infinite reverse; }
+
+/* ------------------------------------------------------------------ Benny: the sheet folds to 90° and springs back */
+.fwa-benny-flap { transform-origin: 1px 2.3px; transform: rotate(-90deg); }
+.fwa--working .fwa-benny-flap { animation: fwa-benny-fold 2.4s cubic-bezier(.5, 0, .3, 1) infinite; }
+@keyframes fwa-benny-fold {
+  0%, 8% { transform: rotate(0deg); } 45% { transform: rotate(-96deg); } 55%, 85% { transform: rotate(-89deg); }
+  100% { transform: rotate(0deg); }
+}
+
+/* ------------------------------------------------------------------ Molly: the mould closes, fills, ejects */
+.fwa-molly-part { opacity: 0; }
+.fwa-molly-left { transform: translateX(-1px); }
+.fwa-molly-right { transform: translateX(1px); }
+.fwa--idle .fwa-molly-part, .fwa--done .fwa-molly-part, .fwa--review .fwa-molly-part { opacity: 1; transform: translateY(-1px); }
+.fwa--working .fwa-molly-left { animation: fwa-molly-l 2.6s ease-in-out infinite; }
+.fwa--working .fwa-molly-right { animation: fwa-molly-r 2.6s ease-in-out infinite; }
+.fwa--working .fwa-molly-part { animation: fwa-molly-part 2.6s ease-in-out infinite; }
+.fwa--working .fwa-molly-shine { animation: fwa-molly-shine 2.6s ease-in-out infinite; }
+.fwa-molly-shine { opacity: 0; }
+@keyframes fwa-molly-l { 0%, 100% { transform: translateX(-3px); } 22%, 55% { transform: translateX(1.2px); } 70% { transform: translateX(-3px); } }
+@keyframes fwa-molly-r { 0%, 100% { transform: translateX(3px); } 22%, 55% { transform: translateX(-1.2px); } 70% { transform: translateX(3px); } }
+@keyframes fwa-molly-part { 0%, 30% { opacity: 0; transform: translateY(0); } 40%, 62% { opacity: 1; transform: translateY(0); } 90% { opacity: 0; transform: translateY(-9px); } 100% { opacity: 0; } }
+@keyframes fwa-molly-shine { 0%, 28% { opacity: 0; } 40% { opacity: .9; } 55%, 100% { opacity: 0; } }
+
+/* ------------------------------------------------------------------ Hex: the nut spins down the bolt, a drawer opens */
+.fwa-hex-nut { transform: translateY(0); }
+.fwa--working .fwa-hex-nut { animation: fwa-hex-run 2.2s ease-in infinite; }
+.fwa--working .fwa-hex-facets { animation: fwa-hex-facets .3s linear infinite; }
+.fwa--working .fwa-hex-drawer { animation: fwa-hex-drawer 2.2s ease-in-out infinite; }
+@keyframes fwa-hex-run { 0% { transform: translateY(-4px); opacity: 0; } 10% { opacity: 1; } 85% { transform: translateY(8px); opacity: 1; } 100% { transform: translateY(8px); opacity: 0; } }
+@keyframes fwa-hex-facets { to { transform: translateX(4px); } }
+@keyframes fwa-hex-drawer { 0%, 100% { transform: translateX(0); } 40%, 70% { transform: translateX(4px); } }
+
+/* ------------------------------------------------------------------ Fitz: the parts slide together and click */
+.fwa-fitz-click { opacity: 0; transform-origin: 0px -8px; }
+.fwa--working .fwa-fitz-right { animation: fwa-fitz-slide 2s cubic-bezier(.6, 0, .4, 1) infinite; }
+.fwa--working .fwa-fitz-click { animation: fwa-fitz-click 2s ease-out infinite; }
+@keyframes fwa-fitz-slide { 0%, 10% { transform: translateX(9px); } 50%, 85% { transform: translateX(0); } 100% { transform: translateX(9px); } }
+@keyframes fwa-fitz-click { 0%, 48% { opacity: 0; transform: scale(.6); } 55% { opacity: 1; transform: scale(1.1); } 75%, 100% { opacity: 0; transform: scale(1.3); } }
+
+/* ------------------------------------------------------------------ Gage: the caliper jaws close, the readout ticks */
+.fwa--working .fwa-gage-jaw { animation: fwa-gage-close 2.4s ease-in-out infinite; }
+.fwa--working .fwa-gage-digit { animation: fwa-gage-tick .24s steps(2) infinite; }
+.fwa--working .fwa-gage-digit:nth-child(2) { animation-delay: .08s; }
+.fwa--working .fwa-gage-digit:nth-child(3) { animation-delay: .16s; }
+@keyframes fwa-gage-close { 0%, 100% { transform: translateX(0); } 40%, 75% { transform: translateX(-8.6px); } }
+@keyframes fwa-gage-tick { 0% { opacity: 1; } 100% { opacity: .2; } }
+
+/* ------------------------------------------------------------------ Ortho: the pen draws a view and a dimension */
+.fwa-ortho-view, .fwa-ortho-dim { stroke-dasharray: 100; stroke-dashoffset: 0; }
+.fwa-ortho-pen { transform: translate(6px, -7px); }
+.fwa--working .fwa-ortho-view { animation: fwa-ortho-view 3.2s linear infinite; }
+.fwa--working .fwa-ortho-dim { animation: fwa-ortho-dim 3.2s linear infinite; }
+.fwa--working .fwa-ortho-pen { animation: fwa-ortho-pen 3.2s linear infinite; }
+@keyframes fwa-ortho-view { 0% { stroke-dashoffset: 100; } 70%, 100% { stroke-dashoffset: 0; } }
+@keyframes fwa-ortho-dim { 0%, 72% { stroke-dashoffset: 100; } 92%, 100% { stroke-dashoffset: 0; } }
+@keyframes fwa-ortho-pen {
+  0% { transform: translate(-9px, -13px); } 19.4% { transform: translate(1px, -13px); } 35% { transform: translate(1px, -5px); }
+  54.4% { transform: translate(-9px, -5px); } 70% { transform: translate(-9px, -13px); } 72% { transform: translate(-9px, -2.4px); }
+  92% { transform: translate(1px, -2.4px); } 100% { transform: translate(-9px, -13px); }
+}
+
+/* ------------------------------------------------------------------ Smithy: the hammer strikes, sparks fly */
+.fwa-smithy-hammer { transform-origin: 14px -10.3px; transform: rotate(28deg); }
+.fwa-smithy-spark { opacity: 0; transform-box: fill-box; transform-origin: center; }
+.fwa--working .fwa-smithy-hammer { animation: fwa-smithy-strike 1.3s cubic-bezier(.6, 0, .9, .6) infinite; }
+.fwa--working .fwa-smithy-spark:nth-child(1) { animation: fwa-spark-a 1.3s ease-out infinite; }
+.fwa--working .fwa-smithy-spark:nth-child(2) { animation: fwa-spark-b 1.3s ease-out infinite; }
+.fwa--working .fwa-smithy-spark:nth-child(3) { animation: fwa-spark-c 1.3s ease-out infinite; }
+.fwa--working .fwa-smithy-spark:nth-child(4) { animation: fwa-spark-d 1.3s ease-out infinite; }
+.fwa--working .fwa-smithy-glow { animation: fwa-smithy-glow 1.3s ease-out infinite; }
+@keyframes fwa-smithy-strike { 0%, 40% { transform: rotate(38deg); } 58% { transform: rotate(0deg); } 66% { transform: rotate(5deg); } 100% { transform: rotate(38deg); } }
+@keyframes fwa-spark-a { 0%, 56% { opacity: 0; transform: translate(0, 0); } 60% { opacity: 1; } 85%, 100% { opacity: 0; transform: translate(-7px, -6px); } }
+@keyframes fwa-spark-b { 0%, 56% { opacity: 0; transform: translate(0, 0); } 60% { opacity: 1; } 85%, 100% { opacity: 0; transform: translate(-3px, -9px); } }
+@keyframes fwa-spark-c { 0%, 56% { opacity: 0; transform: translate(0, 0); } 60% { opacity: 1; } 85%, 100% { opacity: 0; transform: translate(4px, -8px); } }
+@keyframes fwa-spark-d { 0%, 56% { opacity: 0; transform: translate(0, 0); } 60% { opacity: 1; } 85%, 100% { opacity: 0; transform: translate(-9px, -1px); } }
+@keyframes fwa-smithy-glow { 0%, 55% { fill: #FF922B; } 60% { fill: #FFE066; } 100% { fill: #FF922B; } }
+
+/* ------------------------------------------------------------------ reduced motion: a still, meaningful pose */
+@media (prefers-reduced-motion: reduce) {
+  .fwa, .fwa * { animation: none !important; transition: none !important; }
+}
+.fwa--still, .fwa--still * { animation: none !important; }

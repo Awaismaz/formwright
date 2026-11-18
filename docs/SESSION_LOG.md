@@ -33,6 +33,31 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 ### Not done / limitations
 - gear.glb is 457 KB (polyline involute flanks); loads lazily below the fold. Not Draco-compressed.
 - Advisors, Drawing and sketcher panels are illustrations (labelled); only the 3D stages are real output.
+## 2026-11-18 (p) — Design Office Phase 2 (branch wip/design-office): programs, Archie, board, roll-up, avatars
+
+### Done
+- CD-001 program data model + per-org storage and event log; CD-002 Archie planning (fw-plan block, metered, capped)
+  with a deterministic standard planner fallback and an editable brief gate; CD-003 Jira-style board with swimlanes,
+  drag, SSE live updates; CD-004 estimates, milestone progress, effort-weighted roll-up, critical path, ETA ranges;
+  CD-005 office home, roster, reviews inbox, spend vs budget; CD-017 SVG avatars with role animations and states.
+  Start on a ticket opens a Design Studio project with the brief (or an Assembly Studio doc for integration).
+  Details and the Phase 3 hook list: `docs/reports/design-office.md`.
+
+### Evidence
+- `tests/test_office.py` 20 passed (no live AI); vitest `office/model.test.ts` 6 passed; tsc, vite build, ruff clean.
+- Browser walkthrough on port 8794 with a throwaway data dir (puppeteer-core 25.18.1, standard planner only, no
+  agent runs): home, plan review with edit, approve (14 tickets), real drag Ready → In design, every column state,
+  drawer, tree (34 %, ETA 20 min–1 h), activity, roster, Start → Studio with brief in the chat box, reduced motion;
+  0 console errors. Fixed from screenshots: lane header wrapping, glyphs spilling outside the badge.
+
+### Not done / next
+- No live Archie run yet (prompt quality on benchmark briefs unverified). Budget not enforced (CD-016). Avatars not
+  yet in the Studio chat. Next: Phase 3 orchestrator (CD-006…009) on the hooks listed in the report.
+
+### Decision parked
+- PD-39 Design Office Phase 2 defaults.
+
+---
 
 ## 2026-11-18 (o) — Punch list reconciliation; Design Office (Chief Designer) plan
 
