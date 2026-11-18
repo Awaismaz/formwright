@@ -166,3 +166,4 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-35 | Design Office agent names/avatars | Archie, Mill, Chuck, Axel, Benny, Molly, Hex, Fitz, Gage, Ortho, Smithy (docs/plans/CHIEF_DESIGNER.md §3) | Before CD-005 |
 | PD-36 | Design Office default concurrency and program token budget | 3 parallel agents; budget set at program creation | Before CD-006 |
 | PD-37 | Mandatory gates in a program | Brief + ICD + release mandatory; per-part review optional | Before CD-002 |
+| PD-38 | Native CAD bridge target order after the SOLIDWORKS pilot | Onshape (no install), then Inventor, then Creo | When NCB-006 is done |

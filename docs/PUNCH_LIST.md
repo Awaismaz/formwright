@@ -15,12 +15,12 @@ Last updated: 2026-11-18 (reconciliation; Chief Designer plan added, see `docs/p
 
 | Status | Items |
 |---|---|
-| Done | 164 |
+| Done | 165 |
 | In Progress | 23 |
-| Backlog | 77 |
-| Blocked | 11 |
+| Backlog | 90 |
+| Blocked | 10 |
 | Superseded | 8 |
-| **Total** | **283** |
+| **Total** | **296** |
 
 Recomputed 2026-11-18 after reconciling rows the Design Studio work had already delivered.
 
@@ -97,7 +97,7 @@ Implemented so far: the **Formwright platform** (auth, workspaces, roles, onboar
 | CAD-061 | CAD | Feature tree UI-backed native history (edit any feature, regenerate) | P2 | Done | M5 | LT | Eng | CAD-007 | Edit mid-tree → valid regeneration in tests | Manual features edit/suppress/reorder/delete with regeneration (DS-010c); agent features suppress/delete (DS-027); `tests/test_studio.py`::test_manual_feature_lifecycle | Reconciled 2026-11-18 |
 | CAD-062 | CAD | Feature graph revision model (branching, compare) | P2 | Backlog | M5 | LT | Eng | CAD-012 | Diff two revisions visually + structurally | — | |
 | CAD-070 | CAD | SOLIDWORKS export pathway via STEP with explicit disclosure (no native history) | P1 | Backlog | M2 | LT | Eng | IO-001 | Disclosure text in UI and docs; SW 2025 opens file | — | §2.A bullet 9 |
-| CAD-071 | CAD | SOLIDWORKS API bridge spike (feature recreation from spec) | P2 | Blocked | M3 | LT | Eng | LEG-006 | Spike report: feasibility, licensing, deployment | — | Blocked on API/EULA review |
+| CAD-071 | CAD | SOLIDWORKS API bridge spike (feature recreation from spec) | P2 | Backlog | M3 | LT | Eng | LEG-006 | Spike report: feasibility, licensing, deployment | — | = NCB-001; founder's own-machine spike can proceed, external pilots wait for LEG-006 |
 | CAD-072 | CAD | Creo bridge spike | P2 | Blocked | M5 | LT | Eng | LEG-006 | Spike report | — | Blocked on API/EULA review |
 
 ### IO — formats
@@ -262,6 +262,25 @@ Plan: `docs/plans/CHIEF_DESIGNER.md`.
 | CD-014 | Design Office | Program deliverables: drawings (Drew), DFM (Forge), BOM, release pack | P2 | Backlog | M4 | LT | Eng | CD-011 |  | — |  |
 | CD-015 | Design Office | Estimate calibration from completed tickets; timeline (Gantt-lite) | P2 | Backlog | M4 | LT | Eng | CD-004 | Estimate error shrinks across runs | — |  |
 | CD-016 | Design Office | Program token budget per ticket/program with 80 %/100 % stops and spend on cards | P1 | Backlog | M4 | LT | Eng | CD-006 |  | — | PD-36 |
+
+### Native CAD Bridge — SOLIDWORKS pilot, then Onshape, Inventor, Creo (founder-requested 2026-11-18)
+
+Plan: `docs/plans/NATIVE_CAD_BRIDGE.md`. Related: CAD-070/071/072, LEG-006.
+
+| ID | Module | Feature/task | Pri | Status | MS | Scope | Owner | Deps | Acceptance criteria | Evidence/test | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| NCB-001 | Native CAD | SOLIDWORKS spike: COM from Python on SW 2025 — part, sketch, extrude, Hole Wizard, fillet, global variable, STEP export; feasibility/speed report | P2 | Backlog | M5 | LT | Eng | — | Spike report in docs/reports | — | Pilot |
+| NCB-002 | Native CAD | Feature IR: neutral, versioned recipe recorded by `fw` (planes, sketches+constraints, extrude/cut/revolve/sweep/loft, holes, fillet/chamfer, patterns, mirror, shell, draft, rib, named params+formulas, location-based references) | P2 | Backlog | M5 | LT | Eng | NCB-001 | IR replays in Formwright to the same fingerprint | — |  |
+| NCB-003 | Native CAD | Design agent 'native-exportable' mode: models through `fw` feature calls so the IR is complete; free-form code exports as a labelled native body | P2 | Backlog | M5 | LT | Eng | NCB-002 | Benchmark parts export with full feature trees | — |  |
+| NCB-004 | Native CAD | SOLIDWORKS translator: IR → features, sketches with relations/dimensions, Hole Wizard, Global Variables, feature names = Formwright tree | P2 | Backlog | M5 | LT | Eng | NCB-002 | Core fixture parts rebuild natively | — | Pilot |
+| NCB-005 | Native CAD | Formwright Connector (local, signed Windows app): account pairing, outbound-only websocket, consented job queue, CAD version detection, no arbitrary code | P2 | Backlog | M5 | LT | Eng | NCB-001 | Works only with an online account; jobs need consent | — | Pilot |
+| NCB-006 | Native CAD | Native round-trip verification: CAD-exported STEP vs Formwright model (CHK-09) + parameter read-back → 'native verified' badge | P2 | Backlog | M5 | LT | Eng | NCB-004, NCB-005 | Δvol ≤ 1e-6 on fixtures; mismatches listed | — | Pilot |
+| NCB-007 | Native CAD | Imported STEP to SOLIDWORKS: exact body + recognised features; FeatureWorks hand-off as fallback | P2 | Backlog | M5 | LT | Eng | NCB-004 |  | — |  |
+| NCB-008 | Native CAD | Onshape translator (cloud REST/FeatureScript, OAuth, no local install) | P2 | Backlog | M5 | LT | Eng | NCB-002 | Fixture parts rebuild in a Part Studio | — |  |
+| NCB-009 | Native CAD | Inventor translator (COM via Connector; User Parameters) | P2 | Backlog | M5 | LT | Eng | NCB-005 |  | — |  |
+| NCB-010 | Native CAD | Creo translator (Toolkit/J-Link via Connector) | P2 | Backlog | M5 | LT | Eng | NCB-005, LEG-006 |  | — |  |
+| NCB-011 | Native CAD | Native assemblies with mates; native drawings | P2 | Backlog | M5 | LT | Eng | NCB-006 |  | — |  |
+| NCB-012 | Native CAD | Reverse sync: native feature tree → Feature IR (edit in SOLIDWORKS, continue in Formwright) | P2 | Backlog | M5 | LT | Eng | NCB-006 |  | — |  |
 
 ## B. AI Manufacturing Advisor
 
