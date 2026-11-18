@@ -346,6 +346,10 @@ def expose_and_write(exr_paths, png_paths):
 
 
 def main():
+    # Refuse bad output paths before any heavy work (a full GPU render can take minutes on a cold device).
+    for v in (SPEC.get("outputs") or {}).values():
+        if isinstance(v, str) and v:
+            out_path(v)
     mode = SPEC["mode"]
     assembly = bool(SPEC.get("parts"))
     part = None if assembly else build_part()
