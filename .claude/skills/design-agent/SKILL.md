@@ -15,6 +15,7 @@ contract with the others. Change them together.
 | UI wording | `session.py` `friendly_step`, `friendly_result`, `_SCRUB`, `scrub()` | no file names, tools, code, Python, library or model ids reach the UI (DS-014, CLAUDE.md rule) |
 | Structured blocks | `extract_questions` (`fw-questions`), `extract_recognition` (`fw-recognition`), `agent/blocks.py` `extract_brief` (`fw-brief`, CAD-028) and `extract_review` (`fw-review`, AGT-006: reconciled with `out/status.json`, can never pass a failed gate) | JSON in a fenced block; the block is stripped from the visible text and rendered as chips, tree data, the brief card or the Self-review panel |
 | PropertyManager edits | `agent/edits.py` `extract_edit` (`fw-edit`, DS-035): one small edit (fillet / chamfer / shell / hole / an existing hand-made feature / parameters) resolved on `out/topo.json` and validated by `studio.validate_feature`; `design_state` adds a one-line `[Design state for quick edits: ...]` to short build prompts (never shown) | the session publishes `{"type": "edit"}`; the Studio opens the real PM pre-filled (`studio/agentEdit.ts`), the user presses OK; the agent writes no code |
+| Provider | `src/aicad/llm/` (AGT-001): `AgentSession.client_factory` defaults to `session.provider_client` = `llm.get_provider("design_agent").agent_client(options)`; single calls elsewhere use `llm.complete(CallRequest(role=...))` | the session vocabulary stays the Agent SDK message dataclasses; providers `claude-sdk` (default, unchanged behaviour incl. replay/record env), `anthropic-api` (no sessions), `stub`, `replay`; `FW_LLM_PROVIDERS` routes roles; the run record stores `provider` |
 | Replay | `agent/replay.py` (`ReplayClient`, `RecordingClient`, `FW_AGENT_REPLAY` / `FW_AGENT_RECORD`, `AgentSession.client_factory`) | tests and demos replay recorded turns with zero model calls |
 | Build tool | `src/aicad/agent/tools.py` → `runner.py` via the warm `worker.py` | returns the "Overall gating checks: PASS/FAIL" text plus the 4-view render; `friendly_result` keys on that prefix |
 | Editable params | `runner.editable_params` / `param_meta` | only top-level `NAME = <number>` lines declared in `PARAMS`; PARAM_META limits enforced server-side |
@@ -31,6 +32,15 @@ contract with the others. Change them together.
 - Prompt changes alter behaviour that unit tests can't see. Record the reason in the session log. Before the
   EVAL-003 benchmark exists, do one live run of a representative prompt (see `studio-e2e`). It spends the founder's
   Claude subscription, so keep runs few and log them.
+
+## Model providers (AGT-001 / AGT-013)
+- Never call `claude_agent_sdk.query`, `ClaudeSDKClient`, `anthropic` or `openai` outside `src/aicad/llm/` (and
+  `agent/replay.py`, `airender/provider.py` for images): `test_no_module_calls_a_model_sdk_directly` fails.
+- A new model call = a new role in `llm/base.py` `ROLES` + a thin wrapper function the tests can monkeypatch; it gets
+  metering (`llm.metering`) for free. Ask for JSON with `schema=` instead of hand parsing when the answer is pure data.
+- Provider changes must keep `tests/test_llm_providers.py` green for every provider (contract suite, fakes only).
+- The Messages API provider is the AGT-015 path for single calls; the Studio session still needs the Claude Code
+  harness (a Messages-API tool loop is future work).
 
 ## Tests (`tests/test_agent.py`, `tests/test_library.py`)
 Cover the runner (builds, wrong expectation, script errors, missing `result`), tripwire allow/deny, guard

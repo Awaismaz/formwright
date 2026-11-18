@@ -4,6 +4,62 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (w) — Agent platform: LLMProvider, second provider, SOLIDWORKS STEP pathway, Blender IO rows (AGT-001, AGT-013, CAD-070, IO-008b)
+
+Branch `wip/agent-platform` (worktree `fw-wt/agent-platform`), not merged. PD-59. No live model calls: fakes,
+stub and replay only.
+
+### Done
+- AGT-001: `src/aicad/llm/` — typed `LLMProvider`: `complete(CallRequest)` (role, system, prompt, images, JSON
+  schema, budget, cwd, model) → `CallResult` (text, validated `data`, `Metering`: provider, role, model id, tokens,
+  cost + source reported/estimated/none, latency, ok); `agent_client(options)` for the Studio session. Roles per call
+  site; routing `FW_LLM_PROVIDERS` (`Settings.llm_providers`; dev-only providers refused in production);
+  `llm.metering` (structured `aicad.llm` log line, listeners, ring buffer shown in super-admin `/api/admin/system`).
+  Migrated: Studio session (`session.provider_client`, also `aicad bench` / `aicad repeat` live paths), Archie plan
+  + change review, Gage review, image vision read (image passed as `images=`), AI Render prompt polish, drafting
+  assist, assembly librarian, merge reconcile. Wrapper function names kept, so existing tests and fakes are
+  untouched. The run record now stores `provider`.
+- AGT-013: `stub` (deterministic: schema examples, image fingerprints, a one-turn session client) and
+  `anthropic-api` (official SDK, `beta.messages.create`, images as base64 blocks, `output_config` JSON schema,
+  server-side refusal fallback, refusal → ProviderError; own key `FW_LLM_ANTHROPIC_API_KEY`; off by default; no
+  sessions; `anthropic` imported lazily). `replay` provider wraps the cassette (new optional `calls` list).
+- CAD-070: `native/solidworks.py` + `GET /api/projects/{id}/export/solidworks?schema=ap214` (or `ap242`): zip of
+  a STEP with one product named after the part (build123d's exporter wraps a solid in an assembly of one and always
+  writes an AP214 header, so we write the XCAF document ourselves and take the header after the transfer; located
+  shapes have the placement baked in), mm, colour from the material finish; read back and compared with the build
+  (volume, bbox corners, solid count) before it is offered; parameters CSV; README with the disclosure (dumb solid,
+  no feature history, Native CAD bridge, not opened in SOLIDWORKS by Formwright). UI: "Export for SOLIDWORKS" in
+  the Studio Files panel and the Projects row menu (dialog with the disclosure + AP214/AP242 choice); Help text.
+- IO-008b: Mesh Studio's Blender GLB / OBJ / STL in the IO matrix (real export job, spec readers incl. new
+  `read_obj`): GLB metres +Y up, OBJ/STL mm Z up, frame kept, positive signed volume. Skips without Blender; ran
+  here (Blender 5.1). No axis or unit error found.
+
+### Verified how
+- New: `tests/test_llm_providers.py` (35: contract ×4 providers for text/metering, structured, invalid JSON,
+  vision, session-or-refusal; option shapes; request body; key/refusal; routing; production refusal; every call
+  site routed; choke-point scan), `tests/test_solidworks_export.py` (9), IO-008b row in `tests/test_io_roundtrip.py`.
+- Existing suites for agent, ai_quality, run_record, repeat, office, office_orchestrator, airender, image2cad,
+  drawings_2d, assembly_ai, collab: 214 passed after the migration. Full suite 668 passed (25 min); ruff clean; web
+  gate green (tsc, vitest 121, vite build).
+
+### Not done / limitations
+- The Messages API provider has no agent-session loop (the Studio agent needs the Claude Code harness); never run
+  live. `anthropic` is not a dependency yet (AGT-015 adds it with the API-key switch).
+- AI Render's OpenAI image generation is outside the LLM interface (image model, BYO key).
+- Replay provider replays single calls but `RecordingClient` still records sessions only.
+- CAD-070's "SOLIDWORKS 2025 opens the file" is EVAL-005 (founder manual check, Backlog). Cosmetic thread notes
+  from the build's STEP header are not carried into the SOLIDWORKS STEP.
+
+### Next
+- Merge `wip/agent-platform`; founder: open one "Export for SOLIDWORKS" zip in SW 2025 (EVAL-005).
+- AGT-015: add `anthropic`, route single-call roles to `anthropic-api` in the pilot build, then a Messages-API
+  session loop.
+
+### Decision parked
+- PD-59 (provider routing, Messages API defaults, SOLIDWORKS export defaults).
+
+---
+
 ## 2026-11-18 (v) — Engineering hygiene: IO round-trip matrix, licence audit + SBOM, agent run record, repeatability (IO-008, LEG-002, AGT-009, EVAL-008)
 
 Branch `wip/eng-hygiene` (worktree `fw-wt/eng-hygiene`). Reports: docs/reports/io-roundtrip.md,

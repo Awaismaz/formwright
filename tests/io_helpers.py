@@ -128,6 +128,28 @@ def gltf_to_cad_mm(tris: np.ndarray) -> np.ndarray:
     return np.stack([x, -z, y], axis=-1) * 1000.0
 
 
+# ------------------------------------------------------------------ Wavefront OBJ (IO-008b)
+def read_obj(path: Path) -> np.ndarray:
+    """Triangles of every ``f`` record, in the file's own units and axes. From the OBJ spec: ``v x y z [w]``,
+    ``f v[/vt][/vn] ...`` with 1-based indices (negative = relative to the end); polygons fan-triangulated."""
+    verts: list[tuple[float, float, float]] = []
+    tris: list[list[tuple[float, float, float]]] = []
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        parts = line.split()
+        if not parts or parts[0].startswith("#"):
+            continue
+        if parts[0] == "v":
+            verts.append((float(parts[1]), float(parts[2]), float(parts[3])))
+        elif parts[0] == "f":
+            idx = []
+            for tok in parts[1:]:
+                i = int(tok.split("/")[0])
+                idx.append(i - 1 if i > 0 else len(verts) + i)
+            for k in range(1, len(idx) - 1):
+                tris.append([verts[idx[0]], verts[idx[k]], verts[idx[k + 1]]])
+    return np.array(tris, dtype=np.float64)
+
+
 # ------------------------------------------------------------------ STEP
 def step_length_unit(path: Path) -> str:
     """The STEP file's declared length unit, e.g. 'MILLI.METRE' (empty prefix = metre)."""

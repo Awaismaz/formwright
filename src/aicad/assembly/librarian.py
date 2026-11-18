@@ -369,29 +369,11 @@ def ai_prompt(clauses: list[str], parts: list[str]) -> str:
 async def ask_ai(clauses: list[str], parts: list[str], budget_usd: float | None = None) -> tuple[str, float | None]:
     """One text-only turn of the design agent's model (no tools). Returns (answer, cost in USD). The only model call
     in this module; tests replace it."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES
-
-    opts = ClaudeAgentOptions(tools=[], allowed_tools=[], permission_mode="dontAsk",
-                              system_prompt={"type": "preset", "preset": "claude_code", "append": AI_INSTRUCTIONS},
-                              setting_sources=[], max_turns=1, max_buffer_size=AGENT_BUFFER_BYTES)
-    if budget_usd is not None:
-        opts.max_budget_usd = max(0.01, budget_usd)
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=ai_prompt(clauses, parts), options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="librarian", system=AI_INSTRUCTIONS,
+                                             prompt=ai_prompt(clauses, parts), budget_usd=budget_usd))
+    return res.text, res.metering.cost_usd
 
 
 _BLOCK = re.compile(r"```(?:fw-items|json)?\s*\n(.*?)\n?```", re.DOTALL)

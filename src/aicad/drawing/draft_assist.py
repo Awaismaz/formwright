@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import math
 import re
-import tempfile
 from typing import Any
 
 from aicad.drawing import DrawingInputError
@@ -47,32 +46,12 @@ MAX_SHAPES = 60
 
 
 async def run_agent(request: str, budget_usd: float | None = None) -> tuple[str, float | None]:
-    """One tool-less turn of the design agent. Returns (assistant text, cost in USD)."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    """One tool-less turn of the design agent's model. Returns (assistant text, cost in USD)."""
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES
-
-    with tempfile.TemporaryDirectory(prefix="fw-draft-") as tmp:
-        opts = ClaudeAgentOptions(
-            cwd=tmp, tools=[], allowed_tools=[], permission_mode="dontAsk", setting_sources=[], max_turns=1,
-            system_prompt={"type": "preset", "preset": "claude_code", "append": INSTRUCTIONS},
-            max_buffer_size=AGENT_BUFFER_BYTES)
-        if budget_usd is not None:
-            opts.max_budget_usd = max(0.01, budget_usd)
-        texts: list[str] = []
-        cost: float | None = None
-        async for msg in query(prompt=PROMPT.format(request=request[:400]), options=opts):
-            if isinstance(msg, AssistantMessage):
-                texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-            elif isinstance(msg, ResultMessage):
-                cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="draft_assist", system=INSTRUCTIONS,
+                                             prompt=PROMPT.format(request=request[:400]), budget_usd=budget_usd))
+    return res.text, res.metering.cost_usd
 
 
 def parse_block(text: str) -> dict[str, Any] | None:

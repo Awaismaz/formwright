@@ -126,25 +126,12 @@ word for word at the end. Answer with only a fenced block:
 
 
 async def run_refiner_agent(system: str, prompt: str) -> tuple[str, float | None]:
-    """One Claude turn, no tools. Returns (text, cost USD). Tests replace this function (no live calls)."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    """One model turn, no tools, plain system text. Returns (text, cost USD). Tests replace this function."""
+    from aicad import llm
 
-    opts = ClaudeAgentOptions(tools=[], allowed_tools=[], permission_mode="dontAsk", system_prompt=system,
-                              setting_sources=[], max_turns=1)
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="render_refine", system=system, prompt=prompt,
+                                             standalone_system=True))
+    return res.text, res.metering.cost_usd
 
 
 def parse_polish(text: str) -> dict[str, Any] | None:

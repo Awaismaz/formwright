@@ -166,35 +166,15 @@ def narrative(text: str) -> str:
 # --------------------------------------------------------------------------- the agent (mocked in tests)
 async def run_agent(folder: Path, name: str, brief: str, notes: str = "",
                     budget_usd: float | None = None) -> tuple[str, float | None]:
-    """One planning turn, no tools. Returns (assistant text, estimated cost in USD)."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    """One planning turn, no tools. Returns (assistant text, estimated cost in USD). Via the LLM provider (AGT-001)."""
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES
-
-    folder.mkdir(parents=True, exist_ok=True)
-    opts = ClaudeAgentOptions(
-        cwd=str(folder), tools=[], allowed_tools=[], permission_mode="dontAsk",
-        system_prompt={"type": "preset", "preset": "claude_code", "append": ARCHIE_INSTRUCTIONS},
-        setting_sources=[], max_turns=2, max_buffer_size=AGENT_BUFFER_BYTES)
-    if budget_usd is not None:
-        opts.max_budget_usd = max(0.01, budget_usd)
     prompt = f"Program: {name}\n\nBrief:\n{brief}"
     if notes.strip():
         prompt += f"\n\nThe engineering manager reviewed your previous plan and asks for these changes:\n{notes}"
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="planner", system=ARCHIE_INSTRUCTIONS, prompt=prompt, max_turns=2,
+                                             budget_usd=budget_usd, cwd=folder))
+    return res.text, res.metering.cost_usd
 
 
 # --------------------------------------------------------------------------- Archie on a change request (CD-012)
@@ -232,31 +212,11 @@ def parse_cr_decision(text: str) -> dict[str, Any] | None:
 
 async def run_cr_review(folder: Path, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
     """One text-only turn (same shape as the planning turn). Tests and simulated mode replace it."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES
-
-    folder.mkdir(parents=True, exist_ok=True)
-    opts = ClaudeAgentOptions(
-        cwd=str(folder), tools=[], allowed_tools=[], permission_mode="dontAsk",
-        system_prompt={"type": "preset", "preset": "claude_code", "append": CR_INSTRUCTIONS},
-        setting_sources=[], max_turns=1, max_buffer_size=AGENT_BUFFER_BYTES)
-    if budget_usd is not None:
-        opts.max_budget_usd = max(0.01, budget_usd)
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return "\n".join(texts), cost
+    res = await llm.complete(llm.CallRequest(role="change_review", system=CR_INSTRUCTIONS, prompt=prompt,
+                                             budget_usd=budget_usd, cwd=folder))
+    return res.text, res.metering.cost_usd
 
 
 # --------------------------------------------------------------------------- the deterministic planner

@@ -36,6 +36,11 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Formwright files (IO-020…025): every module saves/opens its work as a signed, checksummed zip (`.fwpart .fwasm .fwdrw
   .fwprog .fwrender .fwmfg .fwcalc .fwprint .fwread`), one container in `src/aicad/native/`, spec `docs/FORMATS.md`.
   Imports are untrusted input; parts are rebuilt and verified against the exported fingerprint.
+- `src/aicad/llm/` — **every model call goes through `LLMProvider`** (AGT-001): `llm.complete(CallRequest(role=...))`
+  for single calls (text, JSON schema, images, metering) and `get_provider("design_agent").agent_client(opts)` for the
+  Studio session. Providers `claude-sdk` (default), `anthropic-api` (off; own key), `stub`, `replay` (dev only); routing
+  `FW_LLM_PROVIDERS` (server-only, never in the UI). Never import `claude_agent_sdk.query` / `anthropic` / `openai`
+  elsewhere: `tests/test_llm_providers.py` fails on it. New call site = new role in `llm/base.py` `ROLES`.
 - `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
   `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),
   `worker.py` (warm per-org build worker).
@@ -135,6 +140,9 @@ input / ICD, STEP→drawing; PD-58), engineering hygiene (IO matrix, SBOM, run r
 intelligence (agent fills the PropertyManager, change-impact preview, datasheet pack; PD-57). Full suite 623 passed.
 **In flight (WORKLIST 26-28, worktrees `C:/Users/Awais/Desktop/fw-wt/`):** `wip/sheet-metal`, `wip/office-phase6`,
 `wip/agent-platform`. Unmerged = unfinished. Parked decisions now PD-35…PD-58.
+**`wip/agent-platform` finished (2026-11-18, not merged):** LLMProvider abstraction + stub / Messages API providers
+(AGT-001, AGT-013), "Export for SOLIDWORKS" STEP pathway with disclosure (CAD-070), Blender exports in the IO matrix
+(IO-008b). PD-59.
 
 **Engineering hygiene (merged 2026-11-18, 63a9887):** every design-agent turn writes a server-side run record `.fw/runs/<id>/run.json` (AGT-009; super-admin API only, prompt hashed + redacted by default, PD-56); licence audit + CycloneDX SBOMs in `docs/legal/` (regenerate with `uv run python scripts/sbom.py` after any dependency change; `tests/test_sbom.py` fails on a stale SBOM or an un-allow-listed copyleft licence); IO round-trip matrix `docs/reports/io-roundtrip.md`; `aicad repeat` repeatability harness (fake/replay by default).
 **Studio intelligence (branch `wip/studio-intel`, 2026-11-18):** DS-035 the design agent answers a small edit with a

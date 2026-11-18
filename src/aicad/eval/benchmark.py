@@ -157,8 +157,8 @@ async def run_case(case: dict[str, Any], mode: str, root: Path, replay_dir: Path
         rec = record_dir / f"{case['id']}.json"
         s.client_factory = lambda o: _Tap(RecordingClient(o, rec), sink)
     else:
-        from aicad.agent.replay import make_client
-        s.client_factory = lambda o: _Tap(make_client(o), sink)
+        from aicad.agent.session import provider_client
+        s.client_factory = lambda o: _Tap(provider_client(o), sink)
     t0 = time.time()
     await s.send(case["prompt"] + BENCH_SUFFIX)
     if s.client is not None:

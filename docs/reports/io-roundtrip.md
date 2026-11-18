@@ -1,7 +1,7 @@
 # IO-008: coordinate system and unit round-trip matrix
 
 Test: `tests/test_io_roundtrip.py` (readers in `tests/io_helpers.py`, written from the format specs, not from the
-exporters). Run: `uv run pytest -q tests/test_io_roundtrip.py` (about 8 s).
+exporters). Run: `uv run pytest -q tests/test_io_roundtrip.py` (about 10 s with Blender).
 
 ## Fixture FX-IO-1 (asymmetric, off-origin, analytic)
 
@@ -31,10 +31,15 @@ Mesh formats are also checked for a **positive signed volume** (a mirror flips t
 | Assembly STEP (`assembly.geometry.export`) | mm | OCCT `import_step`, leaves in export order | instance A identity; instance B rotated +90° about Z and moved (100, −50, 0): bbox, volume and boss centre equal the hand-transformed values | 1e-6 mm | pass |
 | 3D Print Prep STL / 3MF (`printprep.mesh.write_stl/_3mf`) | mm (`unit="millimeter"`) | spec STL reader, `parse_mesh` | bbox, signed volume, boss; an STL uploaded as inches is scaled ×25.4 on the way in | 1e-4 / 1e-5 mm | pass |
 
-Not in the automated matrix: Mesh Studio's GLB/OBJ/STL are written by Blender (`blender_scene.py`: glTF with
-`export_yup=True`, i.e. metres and +Y up; OBJ/STL with `global_scale=1000`, `forward_axis="Y"`, `up_axis="Z"`, i.e. mm
-and Z up). They need a local Blender install; `tests/test_mesh.py` runs its Blender tests only when Blender is
-present and does not read the exported frame back. Follow-up: add the FX-IO-1 readers to those tests (IO-008b).
+Mesh Studio rows (IO-008b, added 2026-11-18) run the real export job (`meshstudio.service._execute_export`: Blender
+headless, `blender_scene.py`) on FX-IO-1 and are skipped when Blender is not installed (ran on Blender 5.1 here):
+
+| Format (Mesh Studio, Blender) | Declared unit / frame | Read back with | Checks | Tolerance | Result |
+|---|---|---|---|---|---|
+| GLB (`export_scene.gltf`, `export_yup=True`) | metres, +Y up | spec reader | tallest point +Y = 0.027 m; CAD −Y side is glTF +Z; mapped back gives bbox, signed volume > 0, boss top centre | 1e-3 mm, 2e-4 rel | pass |
+| OBJ (`wm.obj_export`, scale 1000, forward Y, up Z) | mm, Z up (header comment says so) | spec reader `read_obj` (v / f records, fan triangulation) | bbox, signed volume > 0 and value, boss top centre | 1e-3 mm, 2e-4 rel | pass |
+| STL (`wm.stl_export`, scale 1000) | mm, Z up; header labelled visualisation mesh | spec reader | header label, bbox, signed volume, boss | 1e-3 mm, 2e-4 rel | pass |
+
 Print Prep intentionally re-orients parts for printing; its writers are tested here with the part unrotated.
 
 ## Bugs found

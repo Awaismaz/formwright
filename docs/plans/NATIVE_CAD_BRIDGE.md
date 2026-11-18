@@ -11,6 +11,13 @@ dimensions and named global variables in the tree, not a dumb STEP body. Everyth
 same: the agent, the deterministic checks, the revisions and the verification. The native CAD system becomes one
 more output, and it is verified the same way.
 
+### Until then: the STEP pathway (CAD-070, live)
+"Export for SOLIDWORKS" (Studio Files panel, Projects menu, `GET /api/projects/{id}/export/solidworks`) gives a zip:
+a STEP (AP214 default or AP242, mm, one product named after the part, material colour) that is read back and compared
+with the verified build before it is offered, the parameters as CSV, and a README. The UI and the README say plainly
+that SOLIDWORKS imports it as a **dumb solid with no feature history** and that native trees are this plan's job.
+Whether SOLIDWORKS 2025 opens it is the founder's periodic manual check (EVAL-005); Formwright never claims it.
+
 ## 2. Key design decisions
 
 ### 2.1 A neutral feature recipe (Feature IR) is the single source

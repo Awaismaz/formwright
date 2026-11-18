@@ -23,33 +23,13 @@ Use "value" for parameter conflicts, "pick" for feature conflicts and "text" for
 
 async def propose(folder: Path, conflicts: list[dict[str, Any]], context: dict[str, Any],
                   budget_usd: float | None = None) -> tuple[dict[str, Any], float | None]:
-    """Returns ({"resolutions": {...}, "note": str}, estimated cost in USD)."""
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        ResultMessage,
-        TextBlock,
-        query,
-    )
+    """Returns ({"resolutions": {...}, "note": str}, estimated cost in USD). Via the LLM provider (AGT-001)."""
+    from aicad import llm
 
-    from aicad.agent.session import AGENT_BUFFER_BYTES
-
-    folder.mkdir(parents=True, exist_ok=True)
-    opts = ClaudeAgentOptions(
-        cwd=str(folder), tools=[], allowed_tools=[], permission_mode="dontAsk",
-        system_prompt={"type": "preset", "preset": "claude_code", "append": INSTRUCTIONS},
-        setting_sources=[], max_turns=2, max_buffer_size=AGENT_BUFFER_BYTES)
-    if budget_usd is not None:
-        opts.max_budget_usd = max(0.01, budget_usd)
     prompt = json.dumps({"part": context, "conflicts": conflicts}, default=str, indent=1)
-    texts: list[str] = []
-    cost: float | None = None
-    async for msg in query(prompt=prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            texts.extend(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            cost = msg.total_cost_usd
-    return parse("\n".join(texts)), cost
+    res = await llm.complete(llm.CallRequest(role="reconcile", system=INSTRUCTIONS, prompt=prompt, max_turns=2,
+                                             budget_usd=budget_usd, cwd=folder))
+    return parse(res.text), res.metering.cost_usd
 
 
 def parse(text: str) -> dict[str, Any]:

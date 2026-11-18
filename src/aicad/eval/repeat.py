@@ -213,7 +213,8 @@ async def run_series(prompt: str, runs: int, mode: str, out: Path, *, reference:
     """Run the series and write ``report.json`` + ``report.md`` to ``out``. ``factory_for(i)`` (tests) overrides the
     client factory of run i."""
     from aicad.agent import worker
-    from aicad.agent.replay import RecordingClient, ReplayClient, make_client
+    from aicad.agent.replay import RecordingClient, ReplayClient
+    from aicad.agent.session import provider_client
 
     out.mkdir(parents=True, exist_ok=True)
     rows: list[dict[str, Any]] = []
@@ -235,7 +236,7 @@ async def run_series(prompt: str, runs: int, mode: str, out: Path, *, reference:
                     rec = record / f"run-{i + 1:02d}.json"
                     factory = lambda o, rec=rec: RecordingClient(o, rec)
                 else:
-                    factory = make_client
+                    factory = provider_client
                 r = await run_once(prompt, Path(tmp) / f"run-{i + 1:02d}", factory, expect, model)
                 rows.append(r)
                 print(f"  run {i + 1}/{runs}: {'built' if r['built'] else 'no build'}  "
