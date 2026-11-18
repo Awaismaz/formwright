@@ -22,6 +22,7 @@ from aicad.engineering import REGISTRY, core, project, report, review, store, wo
 from aicad.engineering import standards as std
 from aicad.engineering import units as eunits
 from aicad.engineering.calc_machine import stack
+from aicad.platform.collab import permissions
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
 from aicad.platform.routers.projects import _project, workspace_for
@@ -103,8 +104,9 @@ def run_calc(body: RunIn, ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any]:
 def projects(ctx: Ctx = Depends(eng_ctx)) -> dict[str, Any]:
     org = ctx.require_org()
     out = []
-    for p in ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
-                            .order_by(Project.updated_at.desc())):
+    for p in permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+            select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+            .order_by(Project.updated_at.desc())).all()):
         ws = workspace_for(p)
         sets = store.load(ws, "sets") if (ws / "engineering").is_dir() else []
         lcs = store.load(ws, "loadcases") if (ws / "engineering").is_dir() else []

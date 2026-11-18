@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Box, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, GitCompare, History, ListTree, Loader2, PanelLeft, PanelRight, PenLine, Printer, Redo2, Scale, ScanLine, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
+import { ArrowLeft, Box, Boxes, Camera, Check, CircleHelp, Download, Factory, FileCode2, FileText, Gauge, GitCompare, History, ListTree, Loader2, MessageSquare, PanelLeft, PanelRight, PenLine, Printer, Redo2, Scale, ScanLine, SlidersHorizontal, Sparkles, Trash2, TriangleAlert, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -26,6 +26,9 @@ import { SimilarPartsDialog } from "@/components/SimilarParts";
 import { WhereUsed } from "./modules/assembly/WhereUsed";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 import StudioCommands, { SHORTCUTS } from "./studio/StudioCommands";
+import CollabBar, { CollabBanner, NewBranchDialog } from "@/components/collab/CollabBar";
+import ActivityPanel from "@/components/collab/ActivityPanel";
+import { can, whyNot } from "@/lib/collab";
 import { COMPACT, PHONE, useMedia } from "@/lib/media";
 
 interface CompareState { base: number; added: Topo | null; removed: Topo | null; added_mm3: number; removed_mm3: number; params: Record<string, { from: unknown; to: unknown }> }
@@ -66,7 +69,8 @@ export default function ProjectStudio() {
   const [tbInit, setTbInit] = useState<{ code: string; params: Record<string, number> } | null>(null);
   const viewerApi = useRef<ViewerApi | null>(null);
   const [compare, setCompare] = useState<CompareState | null>(null);
-  const [tab, setTab] = useState("tree");
+  const [tab, setTab] = useState(() => (new URLSearchParams(location.search).get("panel") === "activity" ? "activity" : "tree"));
+  const [branchDlg, setBranchDlg] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
   const [leftOpen, setLeftOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_left") !== "0"; } catch { return true; } });
   const [chatOpen, setChatOpenS] = useState(() => { try { return localStorage.getItem("fw_studio_chat") !== "0"; } catch { return true; } });
@@ -121,6 +125,8 @@ export default function ProjectStudio() {
     queryFn: () => api.get<{ recognition: Recognition | null }>(`/api/projects/${id}/recognition`) });
   const p = project.data;
   const st = status.data ?? undefined;
+  const branch = p?.branch ?? "main";
+  const readOnly = !!p && !can(p.access, "edit", branch);  // PLT-021: view-only people get the viewer, not the tools
 
   useEffect(() => { if (p) setName(p.name); }, [p?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (id) api.post(`/api/projects/${id}/warm`).catch(() => {}); }, [id]);
@@ -234,6 +240,7 @@ export default function ProjectStudio() {
   const selFace = selection.find((x): x is Extract<Pick, { kind: "face" }> => x.kind === "face" && topo?.faces[x.id]?.type === "plane");
   const normalTo = () => { const n = selFace && topo?.faces[selFace.id]?.normal; if (n) viewerApi.current?.normalTo(n as V3); };
   const onCommand = (c: Command) => {
+    if (readOnly && ["feature", "sketch", "import", "toolbox"].includes(c.kind)) { toast.error(whyNot(p?.access, "edit", branch) ?? "You can't change this part"); return; }
     if (c.kind === "feature") openPm(c.op, null, c.preset);
     else if (c.kind === "sketch") openPm("sketch", null, c.preset);
     else if (c.kind === "tool") { setPm(null); setSk(null); setTool(tool === c.tool ? "orbit" : c.tool); }
@@ -283,6 +290,7 @@ export default function ProjectStudio() {
   const tabs: [string, React.ReactNode, string][] = [["tree", <ListTree className="h-3.5 w-3.5" />, "Tree"], ["checks", <Check className="h-3.5 w-3.5" />, "Checks"],
     ["params", <SlidersHorizontal className="h-3.5 w-3.5" />, "Params"], ["mass", <Scale className="h-3.5 w-3.5" />, "Mass"],
     ["revs", <History className="h-3.5 w-3.5" />, "Revisions"], ["files", <Download className="h-3.5 w-3.5" />, "Files"],
+    ["activity", <MessageSquare className="h-3.5 w-3.5" />, "Activity"],
     // the model script is never shown to users (STU-06); superadmins keep it as a support view (PD parked)
     ...(me?.user?.is_superadmin ? [["src", <FileCode2 className="h-3.5 w-3.5" />, "Source"] as [string, React.ReactNode, string]] : [])];
   const repairs = st?.manual_errors ?? [];
@@ -322,10 +330,11 @@ export default function ProjectStudio() {
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true)} /></TabPanel>
                 <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
-                <TabPanel value="params"><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} /></TabPanel>
+                <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} /></fieldset></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
                 <TabPanel value="revs"><RevisionsPanel project={p} onChanged={refresh} version={st?.build_id} onCompare={runCompare} comparing={compare?.base ?? null} /></TabPanel>
                 <TabPanel value="files"><FilesPanel project={p} status={st} /></TabPanel>
+                <TabPanel value="activity"><ActivityPanel projectId={p.id} /></TabPanel>
                 {me?.user?.is_superadmin && <TabPanel value="src"><SourcePanel project={p} version={st?.build_id} /></TabPanel>}
               </div>
             </Tabs>)}
@@ -341,10 +350,11 @@ export default function ProjectStudio() {
             onKeyDown={e => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />
             : <button onClick={() => setEditing(true)} className="min-w-0 max-w-[220px] truncate rounded px-1 py-0.5 text-[13.5px] font-semibold hover:bg-text/5" title="Rename">{p.name}</button>}
           {!phone && <ProjectStatus p={p} />}
+          <CollabBar projectId={p.id} onSwitched={() => { setRedo([]); setCompare(null); refresh(); }} />
           {owned.has("assembly") && !phone && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
         </div>}
         right={<>
-          <Tip content="Undo (Ctrl+Z)" side="bottom"><button onClick={() => void undo()} disabled={manualBusy || !!p.agent?.busy || !hasBuilds} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Undo"><Undo2 className="h-4 w-4" /></button></Tip>
+          <Tip content="Undo (Ctrl+Z)" side="bottom"><button onClick={() => void undo()} disabled={manualBusy || !!p.agent?.busy || !hasBuilds || readOnly} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Undo"><Undo2 className="h-4 w-4" /></button></Tip>
           <Tip content="Redo (Ctrl+Y)" side="bottom"><button onClick={() => void redoNow()} disabled={manualBusy || !redo.length} className="mr-1 rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Redo"><Redo2 className="h-4 w-4" /></button></Tip>
           {!phone && <>
           <Tip content={showLeft ? "Hide feature panel" : "Show feature panel"} side="bottom"><button onClick={() => (compact ? setPane(showLeft ? "model" : "features") : setLeftOpen(!leftOpen))} className={cx("rounded p-1 hover:bg-text/5", showLeft ? "text-primary" : "text-muted")} aria-label="Toggle feature panel"><PanelLeft className="h-4 w-4" /></button></Tip>
@@ -374,6 +384,7 @@ export default function ProjectStudio() {
                 <button onClick={() => { setTbInit(null); setDialog("toolbox"); }} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Toolbox component</button>
                 <button onClick={() => setDialog("import")} className="pointer-events-auto rounded-md border border-border bg-panel px-3 py-1.5 text-[12.5px] font-medium text-text hover:border-primary hover:text-primary">Import STEP</button>
               </div></div>} />
+          <CollabBanner projectId={p.id} onBranch={() => setBranchDlg(true)} />
           {sk?.phase === "pick" && (
             <div className="absolute left-1/2 top-14 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center gap-2 whitespace-nowrap rounded-lg border border-primary/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
               <PenLine className="h-4 w-4 text-primary" />{fp ? "Select a flat face, or a plane:" : "Choose a sketch plane:"}
@@ -411,7 +422,7 @@ export default function ProjectStudio() {
             </div>)}
         </div>
         {(compact ? chatMounted || showChat : chatOpen) && (() => {
-          const chat = <Chat project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
+          const chat = <Chat key={branch} project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
             features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} />;
           return compact ? <div data-studio-sheet="agent" className={cx("z-20 grid grid-rows-[minmax(0,1fr)] bg-panel", !showChat && "hidden",
             phone ? "absolute inset-0" : "absolute inset-y-0 right-0 w-[400px] max-w-[85%] border-l border-border shadow-pop")}>{chat}</div> : chat;
@@ -432,6 +443,7 @@ export default function ProjectStudio() {
         <p className="text-[13px] text-muted">The result is checked to be identical to suppressing it. If anything else would change, nothing is deleted and
           the feature stays suppressed. Then you can ask the design agent to remove it. Undo with <b>Revisions</b>.</p>
       </Modal>
+      {branchDlg && <NewBranchDialog projectId={p.id} from={{ id: branch, name: branch === "main" ? "main" : "this branch" }} onClose={() => setBranchDlg(false)} onDone={() => { qc.invalidateQueries(); setRedo([]); }} />}
       <SimilarPartsDialog projectId={p.id} open={dialog === "similar"} onClose={() => setDialog(null)} />
       <StudioCommands open={palette} onOpenChange={setPalette} topo={topo} selection={selection} manual={mf} designFeatures={(st?.features ?? []).filter(f => f.kind === "feature").map(f => f.name)}
         viewer={viewerApi} onPm={(op, preset) => openPm(op, null, preset)}

@@ -4,6 +4,56 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (s) — Collaboration: teams, permissions, sharing, branches, merge requests (branch wip/collab)
+
+**Done** (PLT-010, PLT-017 review queue part, PLT-020…024, CAD-062):
+- Teams (Team page → Members | Teams): create/edit/delete, colour, members with team roles admin/editor/viewer.
+- One permission module (`src/aicad/platform/collab/permissions.py`): none/read/comment/edit/admin = max(workspace
+  baseline, owning-team role, grants), owners/admins always admin, viewers capped at comment, guests capped at edit and
+  never run the agent. `projects._project` delegates to it with the level taken from the HTTP method unless given, so
+  every project router (Studio, library, modules, native export) is covered; module `_project` helpers delegate;
+  project lists, search, recent revisions, module pickers and export-all are filtered. Permission changes are audited.
+- Sharing: Share dialog (people/teams/levels, general access, owning team, protect main), guests by email (reuses the
+  invite flow, role "guest", no seat), read-only links (HMAC-signed id, revocable, optional expiry) opening a public
+  viewer `/share/:token` (3D, parameters, checks, revisions, drawing), Shared with me on Projects, lock chips on cards.
+- Collaboration in the Studio: branch picker + presence avatars (SSE) + Share in the CommandManager tab row, Activity
+  tab (comments with @mentions → notifications; activity feed from the audit log + agent runs, per branch), soft lock
+  banner ("Ada is editing main (design agent running)" → Work on my own branch), View-only chip + locked commands.
+- Branches: main = existing workspace/history (no data moved); a branch is a sibling copy-on-write workspace forked
+  from any revision; the active branch per person/project is a cookie resolved by `workspace_for`, so all existing
+  endpoints work on branches unchanged; agent sessions keyed per branch.
+- Merge requests: page with 3D compare (main vs branch), parameter table (base / main / branch), feature and change
+  lists, checks, reviews (approve / request changes with note), discussion; fast-forward or 3-way (parameters per
+  name, manual features per id, source merge3 with parameters masked); conflicts side by side with take main / take
+  branch / design-agent proposal (optional, token-metered, faked in tests); rebuild + gating checks or refused;
+  protected main needs approvals; tags for releases on main.
+
+**Verified how.** `tests/test_collab.py` (13 tests: merge engine, additive migration on a pre-collab database,
+team CRUD, permission matrix, guest invite + read-only link + revoke + expiry, presence/comments/mentions/activity,
+branch isolation + soft lock + fast-forward + 3-way + refusal on failing checks, conflicts + reconcile (fake) +
+protected main + source conflict + tags), `web/src/lib/collab.test.ts` (12 vitest). Full gate below. Browser
+walkthrough (puppeteer-core 25.18.1, port 8803, throwaway data dir, two people in two browser contexts + an anonymous
+one): owner creates team "Drivetrain", makes the demo plate team-owned, protects main, creates a read-only link;
+Ada (engineer) opens the part (owner sees her avatar; protected-main banner), works on a copy `ada/thicker-plate`,
+changes thickness 10 → 12 (branch only; main still 10), opens merge request !1; owner opens it, 3D compare shows
++18,926 mm³ added / 0 removed, approves, merges (fast-forward) → main bbox 120 × 80 × 12, checks ok; activity feed
+lists branch/edit/MR/approve/merge; the anonymous link shows the viewer read-only (write via link 403, project API
+401). 0 console errors in the final runs. Fixes made from the walkthrough: compare output folder on branches
+(and a shorter compare path for long Windows data dirs), agent gate on protected main, MR title capitalised, inline
+review note instead of a browser prompt, approve disabled after approving.
+
+**Not done / limits.** Team ownership covers parts only (assemblies, 2D drafts, renders, Design Office programs stay
+workspace-scoped, PD-53); presence and locks are in memory (one app process); "their edits go to their own branch"
+is offered (409 + one click), not automatic; guests have no workspace home page (they land on the shared part and
+Projects → Shared with me); the review queue's part-catalogue columns (rest of PLT-017) are still open; no live
+design-agent reconcile was run.
+
+**Parked:** PD-50 (guest billing), PD-51 (permission defaults), PD-52 (branch/merge defaults), PD-53 (team
+ownership scope, presence scale).
+
+**Next:** guest landing page; team ownership for assemblies and Design Office programs; review-queue page across
+projects ("merge requests waiting for me").
+
 ## 2026-11-18 (r) — Coordinator summary of the autonomous run (handoff)
 
 Founder away; work run as parallel agents in git worktrees, merged + pushed one by one.

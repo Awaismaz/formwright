@@ -32,6 +32,7 @@ from aicad.native import NativeFormatError, bundles
 from aicad.native import container as c
 from aicad.native import modules as nm
 from aicad.native import part as fpart
+from aicad.platform.collab import permissions
 from aicad.platform.config import get_settings
 from aicad.platform.db import utcnow
 from aicad.platform.deps import Ctx, verified_ctx
@@ -81,6 +82,8 @@ async def export_all(ctx: Ctx = Depends(verified_ctx)) -> Response:
     """Every built project of the workspace as .fwpart files in one zip (history and reference images included)."""
     org = ctx.require_org()
     rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id).order_by(Project.created_at)).all()
+    acc = permissions.access_map(ctx.db, ctx.user, rows)  # only parts you could export one by one
+    rows = [p for p in rows if acc[p.id].at_least("edit")]
     files: dict[str, bytes] = {}
     skipped = []
     for p in rows:
@@ -103,7 +106,7 @@ async def export_all(ctx: Ctx = Depends(verified_ctx)) -> Response:
 @router.get("/projects/{project_id}/export")
 async def export_project(project_id: str, history: str | None = None, refs: str | None = None, chat: str | None = None,
                          ctx: Ctx = Depends(verified_ctx)) -> Response:
-    p = prj._project(ctx, project_id)
+    p = prj._project(ctx, project_id, "export")
     data = await part_bytes(ctx, p, _flag(history, True), _flag(refs, True), _flag(chat, False))
     audit(ctx.db, "native.exported", ctx.user, p.org_id, target=p.id, format="fwpart", chat=_flag(chat, False))
     track(ctx.db, "native_export", ctx.user, p.org_id, format="fwpart")

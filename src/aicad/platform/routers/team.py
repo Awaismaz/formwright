@@ -56,7 +56,7 @@ def team(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     invites = [{"id": i.id, "email": i.email, "role": i.role, "created_at": i.created_at.isoformat(),
                 "expires_at": i.expires_at.isoformat()}
                for i in ctx.db.scalars(select(Invite).where(Invite.org_id == org.id, Invite.accepted_at.is_(None),
-                                                            Invite.revoked.is_(False)))]
+                                                            Invite.revoked.is_(False), Invite.role != "guest"))]
     return {"org": public_org(ctx.db, org, ctx.role), "members": members, "invites": invites,
             "roles": list(ROLES), "my_role": ctx.role}
 
@@ -71,7 +71,7 @@ def invite(body: InviteIn, ctx: Ctx = Depends(confirmed_ctx)) -> dict[str, Any]:
     if body.role not in ROLES or body.role == "owner":
         raise HTTPException(422, "Invalid role")
     pending = len(ctx.db.scalars(select(Invite).where(Invite.org_id == org.id, Invite.accepted_at.is_(None),
-                                                      Invite.revoked.is_(False))).all())
+                                                      Invite.revoked.is_(False), Invite.role != "guest")).all())
     if seats_used(ctx.db, org) + pending >= seat_limit(ctx.db, org) and not ctx.god_on("bypass_paywall"):
         raise HTTPException(402, "All seats are in use. Add a seat in Billing to invite more teammates."
                             if org.plan_code == "team" else
@@ -113,6 +113,19 @@ def accept(body: TokenIn, ctx: Ctx = Depends(auth_ctx)) -> dict[str, Any]:
         raise HTTPException(400, "This invitation is invalid or has expired.")
     if inv.email != ctx.user.email:
         raise HTTPException(403, f"This invitation was sent to {inv.email}. Sign in with that account.")
+    if inv.role == "guest":  # a guest invite opens one project, without a workspace seat (PLT-022)
+        from aicad.platform.routers.collab import accept_guest_invite
+
+        pid = accept_guest_invite(ctx.db, inv, ctx.user)
+        inv.accepted_at = utcnow()
+        ctx.user.email_verified_at = ctx.user.email_verified_at or utcnow()
+        ctx.user.onboarding_completed_at = ctx.user.onboarding_completed_at or utcnow()
+        if inv.invited_by:
+            notify(ctx.db, inv.invited_by, f"{ctx.user.name} opened the project you shared",
+                   link=f"/app/projects/{pid}" if pid else None)
+        ctx.db.commit()
+        ctx.db.refresh(ctx.user)
+        return {**me_payload(ctx), "project_id": pid}
     if not ctx.db.scalar(select(Membership).where(Membership.user_id == ctx.user.id,
                                                   Membership.org_id == inv.org_id)):
         ctx.db.add(Membership(user_id=ctx.user.id, org_id=inv.org_id, role=inv.role))
