@@ -128,7 +128,11 @@ comments, branches + merge requests). DB backup taken before collaboration went 
 with BOM/balloons, Smithy DFM summary, program BOM, "Release program" → tagged parts + release pack), estimate
 calibration (EMA per family, simulated runs in their own profile) + Timeline tab, bearing-seat/key/dowel interfaces,
 frame-tolerant Gage (24 axis rotations), shared assembly lock (in-memory, single server — PD-53). Report:
-docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3. Nothing is in flight on branches.
+docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.1.3.
+
+**In flight (worktrees under `C:/Users/Awais/Desktop/fw-wt/`, WORKLIST 23-25):** `wip/drawing-depth` (threads, detail
+views, GD&T from explicit input, STEP→drawing), `wip/eng-hygiene` (unit round-trip matrix, licences + SBOM, run record,
+repeatability), `wip/studio-intel` (agent fills the PropertyManager, change-impact preview). Unmerged = unfinished.
 Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
 review gate, change notices after release).
 
