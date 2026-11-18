@@ -364,6 +364,7 @@ class Sheet:
     sheet_like: bool
     thickness: float | None
     frac: float
+    model: bool = False  # the part carries a sheet-metal model (CAD-026): flat pattern and bends are known
 
 
 def sheet_like(g: PartGeom, th: list[Thick], max_t: float = 6.0) -> Sheet:

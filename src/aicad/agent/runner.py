@@ -508,7 +508,9 @@ def finalize(out: Path) -> int:
     # keep the original build id so the viewer doesn't reload identical geometry
     st2 = json.loads(status_p.read_text(encoding="utf-8"))
     st2["build_id"] = build_id
-    status_p.write_text(json.dumps(st2, indent=2, default=str), encoding="utf-8")
+    tmp = status_p.with_suffix(".final.tmp")  # atomic: the app reads status.json while this runs
+    tmp.write_text(json.dumps(st2, indent=2, default=str), encoding="utf-8")
+    tmp.replace(status_p)
     return 0
 
 

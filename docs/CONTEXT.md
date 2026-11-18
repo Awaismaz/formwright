@@ -144,6 +144,8 @@ assembly is previewed first (`POST /api/m/assembly/impact/{project}`: trial rebu
 assembly copies; broken mates, moves, refits, new clashes; nothing committed); Mesh Studio has a per-part datasheet
 shot list that goes stale on revision and re-renders (queues) in one click. Defaults PD-57.
 
+**Sheet metal (branch `wip/sheet-metal`, CAD-026 / MFG-011):** `src/aicad/sheetmetal.py` keeps a panel + bend model next to the solid; Studio ops `sm_base` / `sm_flange` / `sm_hem`, helpers `fw.base_flange/edge_flange/hem`; every build writes `out/flat.topo.json|dxf|json` and `status.sheet_metal`; Drawing Studio adds a flat-pattern sheet (`flat_sheet.*`), the Manufacturing Advisor reads the model (SHM-03..05). Defaults PD-59.
+
 **Next:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
 

@@ -181,7 +181,8 @@ def analyse_geom(g: PartGeom, shop: ShopProfile, inputs: Inputs, status_material
                 turn=F.turning(g), sheet=F.sheet_like(g, th), material=mat)
     if sheet_model and sheet_model.get("flat") and not sheet_model.get("flat_error"):
         geo = ctx.sheet
-        ctx.sheet = F.Sheet(True, float(sheet_model["thickness"]), geo.frac if geo and geo.sheet_like else 1.0)
+        ctx.sheet = F.Sheet(True, float(sheet_model["thickness"]), geo.frac if geo and geo.sheet_like else 1.0,
+                             model=True)
         ctx.sheet_model = sheet_model
     sheet = ctx.sheet
     ctx.mould_acc = F.accessibility(g, 1e9, 1e9)

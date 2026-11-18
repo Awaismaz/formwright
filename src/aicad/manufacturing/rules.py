@@ -656,8 +656,10 @@ def r_sheet_scope(c: Ctx) -> list[Finding]:
     return [Finding(
         "SHM-00", "sheet_metal", "info", f"Screening only: {f2(t)} mm sheet, bends checked",
         f"constant {f2(t)} mm thickness over {f2(100 * sh.frac, 0)} % of the surface",  # type: ignore[union-attr]
-        "—", "Inside bend radius against the material table and the formed outer radius are checked. The flat "
-        "pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed.",
+        "—", "Inside bend radius against the material table and the formed outer radius are checked. "
+        + ("The flat pattern and bend count come from the sheet-metal model (SHM-03); bend reliefs, hole-to-bend "
+           "distances, grain direction and springback are not analysed." if sh.model else  # type: ignore[union-attr]
+           "The flat pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed."),
         "Ask your fabricator to review the flat pattern before ordering.", S.BEND_SOURCE, [], t)]
 
 
