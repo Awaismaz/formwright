@@ -21,4 +21,5 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 14 | Mesh render failed on a founder model (degenerate triangle broke custom normals) | — | Done: triangles cleaned before normals; regression test; test_mesh 91/91 |
 | 15 | 2D drafting without a model in Drawing Studio (tools, dimensions, title block, SVG/PDF/DXF, AI assist + templates) | DRW-017 | In progress (agent) |
 | 16 | AI Render Studio: OpenAI image generation with the user's own key; settings + optional prompt → backend prompt refinement → review → generate from a real reference render; encrypted key, consent, honest captions | MSH-012 | In progress (agent) |
+| 17 | Landing hero = Design Office story: detailed planetary gearbox brief → Archie plan → tickets to named agents → parallel part build flash → Fitz assembly → gearbox running with true kinematics; real geometry incl. internal ring gear; no 'coming soon' labels anywhere on the landing page | UX-020 | In progress (agent) |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |
