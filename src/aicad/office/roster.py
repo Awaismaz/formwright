@@ -47,6 +47,7 @@ FAMILIES: dict[str, tuple[str, str]] = {
     "integration": ("Assembly integration", "fitz"),
 }
 PART_FAMILIES = [f for f in FAMILIES if f != "integration"]
+DESIGNERS = ("mill", "chuck", "axel", "benny", "molly")
 
 _ALIASES = {
     "prismatic": "machined", "milled": "machined", "machining": "machined", "mill": "machined", "plate": "machined",

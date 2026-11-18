@@ -128,6 +128,27 @@ Founder away; work run as parallel agents in git worktrees, merged + pushed one 
 Touch multi-select for fillet/chamfer/shell/draft; real-device pass on an iPhone and an Android phone.
 
 ---
+## 2026-11-18 (p) — Design Office Phase 3 (branch wip/office-phase3): orchestrator, part agents, Gage, Fitz, budget
+
+**Done:** CD-006 orchestrator (Run/Pause per program, critical-path priority, concurrency cap, retry and rate-limit
+back-off, restart resume, idempotent), CD-007 specialist part agents in their own Studio projects (Hex reuse first,
+per-trade practice notes, milestones and machinist status lines from real session events, CAD-028 gate skipped for
+approved ticket briefs), CD-008 Gage (deterministic checks + metered advisory AI note, 2 send-backs then the engineer,
+no self-approval), CD-009 comments queued/delivered, priority, reassign, pause, take over / hand back, reopen, retry,
+CD-016 budget warn at 80 % and stop, spend per ticket and program. Fitz integrates each level via `fitz.py`.
+Board: live holder avatars, status lines, hand-off slide, Run bar, budget meter and dialog. Report:
+`docs/reports/design-office.md` (Phase 3 section). Merged `main` (AI quality) first and used its `client_factory`
+hook for the simulated agents.
+
+**Verified:** `tests/test_office_orchestrator.py` 15 tests (all agents simulated, no model calls), `test_office.py`
+20, vitest office 11; browser walkthrough with simulated agents on port 8798 (throwaway data, deleted), 0 console
+errors, screenshots in `docs/reports/design-office/phase3/`. Full gate results in the commit.
+
+**Not done / blocked:** no live multi-agent run (PD-48, needs the founder's go-ahead on subscription use); ICD,
+placeholders and change requests are Phase 4.
+
+**Next:** one supervised live run of a small program (3 parts) to calibrate practice notes, rate-limit wording and
+costs; then Phase 4 (CD-010…CD-013).
 
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 

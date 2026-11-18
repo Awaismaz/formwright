@@ -17,6 +17,8 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/tickets/{tid}/milestones
   POST   /api/office/programs/{pid}/tickets/{tid}/comments
   POST   /api/office/programs/{pid}/tickets/{tid}/start     open the part in Design Studio (or the assembly)
+  POST   /api/office/programs/{pid}/run | /pause            the orchestrator: agents work the tickets (CD-006)
+  POST   /api/office/programs/{pid}/tickets/{tid}/control   pause, resume, take_over, hand_back, reopen, retry
   GET    /api/office/programs/{pid}/activity[?after=seq]    event log
   GET    /api/office/programs/{pid}/events[?once=1]         live events (SSE); once: backlog only, then close
 """
@@ -34,7 +36,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from aicad.office import OfficeInputError, planner, service, store
+from aicad.office import OfficeInputError, orchestrator, planner, service, store
 from aicad.platform import metering
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory
@@ -79,6 +81,11 @@ class TicketPatch(BaseModel):
     title: str | None = None
     specialist: str | None = None
     complexity: int | None = None
+    priority: str | None = None
+
+
+class ControlIn(BaseModel):
+    action: str
 
 
 class MilestoneIn(BaseModel):
@@ -263,12 +270,25 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     audit(ctx.db, "office.program_created", ctx.user, org.id, target=doc["id"], planner=kind)
     track(ctx.db, "office_program_created", ctx.user, org.id, planner=kind)
     ctx.db.commit()
-    return service.view(doc)
+    return _view(doc)
 
 
 @router.get("/programs/{pid}")
-def get_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return {**service.view(_synced(ctx, pid)), "can_edit": ctx.role != "viewer"}
+async def get_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    doc = _synced(ctx, pid)
+    if (doc.get("orchestrator") or {}).get("state") == "running" and orchestrator.runner(pid) is None:
+        orchestrator.ensure(_root(ctx), pid)  # resume after a restart (also done at startup)
+    return {**_view(doc), "can_edit": ctx.role != "viewer"}
+
+
+def _view(doc: dict[str, Any]) -> dict[str, Any]:
+    from aicad.office import fake_agents
+
+    v = service.view(doc)
+    r = orchestrator.runner(doc["id"])
+    v["orchestrator"] = {**v["orchestrator"], "active": len(r.tasks) if r else 0,
+                         "simulated": fake_agents.enabled()}
+    return v
 
 
 @router.patch("/programs/{pid}")
@@ -280,15 +300,19 @@ def patch_program(pid: str, body: ProgramPatch, ctx: Ctx = Depends(verified_ctx)
             doc["concurrency"] = body.concurrency
         if body.budget_tokens is not None:
             doc["budget"]["tokens"] = body.budget_tokens
+            o = doc.get("orchestrator") or {}
+            if o.get("warned") and orchestrator.budget_state(doc)["level"] == "ok":
+                o["warned"] = False  # warn again at 80 % of the new budget
         service.emit(root, doc, "program.updated", f"{ctx.user.name or 'Someone'} updated the program settings.",
                      _actor(ctx))
-    return service.view(_mutate(ctx, pid, fn))
+    return _view(_mutate(ctx, pid, fn))
 
 
 @router.delete("/programs/{pid}")
 def delete_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     _editor(ctx)
     doc = _load(ctx, pid)
+    orchestrator.forget(pid)
     store.delete(_root(ctx), pid)
     audit(ctx.db, "office.program_deleted", ctx.user, doc["org_id"], target=pid)
     ctx.db.commit()
@@ -312,7 +336,7 @@ async def replan(pid: str, body: ReplanIn, ctx: Ctx = Depends(verified_ctx)) -> 
     doc = _mutate(ctx, pid, fn)
     if kind == "archie":
         _spawn(ctx, _root(ctx), doc, body.notes)
-    return service.view(doc)
+    return _view(doc)
 
 
 @router.post("/programs/{pid}/gates/brief/approve")
@@ -321,30 +345,91 @@ def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -
     track(ctx.db, "office_brief_approved", ctx.user, doc["org_id"], tickets=len(doc["tickets"]),
           edited=bool(doc["plan"].get("edited")))
     ctx.db.commit()
-    return service.view(doc)
+    return _view(doc)
 
 
 # ----------------------------------------------------------------------------- routes: tickets
 @router.post("/programs/{pid}/tickets/{tid}/move")
 def move_ticket(pid: str, tid: str, body: MoveIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return service.view(_mutate(ctx, pid, lambda root, d: service.move(root, d, tid, body.column, _actor(ctx))))
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        t = service.ticket(d, tid)
+        if orchestrator.run_of(t).get("status") in orchestrator.ACTIVE:
+            who = orchestrator.run_of(t).get("agent_label") or "An agent"
+            raise OfficeInputError(f"{who} is working on this ticket. Pause it or take over first.")
+        service.move(root, d, tid, body.column, _actor(ctx))
+        if body.column in ("ready", "backlog") and t.get("run"):
+            t["run"] = None  # the engineer put it back in the queue: the office starts it afresh
+            t["taken_over"] = False
+    doc = _mutate(ctx, pid, fn)
+    orchestrator.poke(pid)
+    return _view(doc)
 
 
 @router.patch("/programs/{pid}/tickets/{tid}")
 def patch_ticket(pid: str, tid: str, body: TicketPatch, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return service.view(_mutate(ctx, pid, lambda root, d: service.update(
-        root, d, tid, _actor(ctx), title=body.title, specialist=body.specialist, complexity=body.complexity)))
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        service.update(root, d, tid, _actor(ctx), title=body.title, specialist=body.specialist,
+                       complexity=body.complexity)
+        if body.priority is not None:
+            orchestrator.set_priority(root, d, tid, body.priority, _actor(ctx))
+    doc = _mutate(ctx, pid, fn)
+    orchestrator.poke(pid)
+    return _view(doc)
 
 
 @router.post("/programs/{pid}/tickets/{tid}/milestones")
 def ticket_milestone(pid: str, tid: str, body: MilestoneIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return service.view(_mutate(ctx, pid, lambda root, d: service.set_milestone(
+    return _view(_mutate(ctx, pid, lambda root, d: service.set_milestone(
         root, d, tid, body.code, body.reached, _actor(ctx))))
 
 
 @router.post("/programs/{pid}/tickets/{tid}/comments")
 def ticket_comment(pid: str, tid: str, body: CommentIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    return service.view(_mutate(ctx, pid, lambda root, d: service.comment(root, d, tid, body.text, _actor(ctx))))
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        c = service.comment(root, d, tid, body.text, _actor(ctx))
+        orchestrator.on_comment(root, d, tid, c)
+    doc = _mutate(ctx, pid, fn)
+    orchestrator.poke(pid)
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/tickets/{tid}/control")
+async def ticket_control(pid: str, tid: str, body: ControlIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer's controls on one ticket (CD-009). Pause and take over stop a working agent at once."""
+    stop = [False]
+
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        stop[0] = orchestrator.control(root, d, tid, body.action, _actor(ctx))
+    doc = _mutate(ctx, pid, fn)
+    if stop[0]:
+        await orchestrator.interrupt(pid, tid)
+    orchestrator.poke(pid)
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/run")
+async def run_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Run: the orchestrator keeps up to ``concurrency`` agents working the tickets, by critical-path priority."""
+    from aicad.platform.routers.projects import can_run_agent
+
+    _editor(ctx)
+    allowed, reason, cta = can_run_agent(ctx)
+    if not allowed:
+        raise HTTPException(402, {"message": reason, "cta": cta})
+    doc = _mutate(ctx, pid, lambda root, d: orchestrator.start(
+        root, d, _actor(ctx), user_id=ctx.user.id, god_tokens=ctx.god_on("bypass_tokens"),
+        god_paywall=ctx.god_on("bypass_paywall")))
+    orchestrator.ensure(_root(ctx), pid)
+    track(ctx.db, "office_run", ctx.user, doc["org_id"], tickets=len(doc["tickets"]))
+    ctx.db.commit()
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/pause")
+async def pause_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    doc = _mutate(ctx, pid, lambda root, d: orchestrator.pause(root, d, _actor(ctx)))
+    orchestrator.poke(pid)
+    return _view(doc)
 
 
 @router.post("/programs/{pid}/tickets/{tid}/start")
@@ -389,14 +474,14 @@ def start_ticket(pid: str, tid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[s
                 workspace_for(p).mkdir(parents=True, exist_ok=True)
                 audit(ctx.db, "project.created", ctx.user, org.id, target=p.id, name=p.name, office_program=pid)
                 service.link(root, doc, tid, _actor(ctx), project_id=p.id)
-            if not p.builds:
+            if not p.builds and not t.get("run"):
                 starter = t["brief"]
         store.save(root, doc)
     track(ctx.db, "office_ticket_started", ctx.user, org.id, kind=t["kind"])
     ctx.db.commit()
     t = service.ticket(doc, tid)
     return {"ticket": t, "project_id": t.get("project_id"), "assembly_id": t.get("assembly_id"),
-            "starter_prompt": starter, "program": service.view(doc)}
+            "starter_prompt": starter, "program": _view(doc)}
 
 
 # ----------------------------------------------------------------------------- routes: activity + live events
@@ -441,3 +526,12 @@ async def office_events(ctx: Ctx = Depends(verified_ctx)) -> StreamingResponse:
     key = f"org:{ctx.require_org().id}"
     ctx.db.close()
     return _sse(key, [], False)
+
+
+# ----------------------------------------------------------------------------- orchestrator lifecycle
+async def _resume_on_startup() -> None:
+    orchestrator.resume_all(get_settings().data_dir)
+
+
+router.on_startup.append(_resume_on_startup)
+router.on_shutdown.append(orchestrator.shutdown)

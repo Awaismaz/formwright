@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, ChevronRight, Coins, Library, MessageSquare, Puzzle, XCircle } from "lucide-react";
+import { ArrowUp, CheckCircle2, ChevronDown, ChevronRight, Coins, Library, MessageSquare, Puzzle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx, num } from "@/lib/format";
 import { Progress, Tip } from "@/components/ui";
 import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
-import { boardLanes, canDrop, COLUMN_STATE, fmtEta, fmtMinutes, progressAfterMove } from "./model";
+import { boardLanes, canDrop, COLUMN_STATE, fmtEta, fmtMinutes, progressAfterMove, runChip, type Handoff } from "./model";
 import type { Column, Program, Ticket } from "./types";
 
 const COLUMN_TONE: Record<Column, string> = {
@@ -35,32 +35,65 @@ export function useMoveTicket(program: Program) {
   };
 }
 
-export function TicketCard({ t, maxEst, onOpen, draggable }: { t: Ticket; maxEst: number; onOpen: () => void; draggable: boolean }) {
+const ACTIVE = new Set(["searching", "designing", "reviewing", "integrating"]);
+const CHIP_TONE: Record<string, string> = {
+  neutral: "border-border text-muted", primary: "border-primary/30 bg-primary-soft text-primary",
+  warning: "border-warning/40 bg-warning/10 text-warning", danger: "border-danger/40 bg-danger/10 text-danger",
+  success: "border-success/30 bg-success/10 text-success",
+};
+
+/** The hand-off moment: the previous agent's avatar slides out of the card as the next one slides in. */
+function HandoffSlide({ h, size }: { h: Handoff; size: number }) {
+  return (
+    <span key={h.seq} className="fw-ho" style={{ width: size, height: size }} aria-hidden>
+      <span className="fw-ho-out"><AgentAvatar code={h.from} size={size} still /></span>
+      <span className="fw-ho-in"><AgentAvatar code={h.to} size={size} still /></span>
+    </span>
+  );
+}
+
+export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticket; maxEst: number; onOpen: () => void; draggable: boolean; handoff?: Handoff }) {
   const outline = Math.max(18, Math.min(100, (100 * t.estimate_min) / Math.max(maxEst, 0.1)));
+  const busy = ACTIVE.has(t.run_status ?? "");
+  const chip = runChip(t);
+  const who = t.agent ?? t.specialist;
+  const tokens = t.spent ?? t.tokens;
+  draggable = draggable && !busy;
   return (
     <div role="button" tabIndex={0} draggable={draggable} onClick={onOpen} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
       onDragStart={e => { e.dataTransfer.setData("text/plain", t.id); e.dataTransfer.effectAllowed = "move"; }}
-      aria-label={`${t.key} ${t.title}, ${AGENT[t.specialist]?.name}, ${t.progress} percent`}
+      aria-label={`${t.key} ${t.title}, ${t.agent_label ?? AGENT[who]?.name}, ${t.progress} percent${t.line ? `. ${t.line}` : ""}`}
       className={cx("group rounded-md border border-border bg-panel p-2 shadow-sm transition hover:border-primary/40 hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-        draggable && "cursor-grab active:cursor-grabbing", t.column === "changes_requested" && "border-warning/50")}>
+        draggable && "cursor-grab active:cursor-grabbing", t.column === "changes_requested" && "border-warning/50",
+        busy && "border-primary/40 shadow-[0_0_0_3px_rgb(54_79_199/.08)]", handoff && "fw-ho-card")}>
+      {handoff && <div className="fw-ho-caption">{AGENT[handoff.from]?.name} → {AGENT[handoff.to]?.name}</div>}
       <div className="flex items-start gap-2">
-        <AgentAvatar code={t.specialist} state={t.agent_state} size={30} progress={t.agent_state === "working" ? t.progress : null} />
+        <span className="relative shrink-0" style={{ width: 30, height: 30 }}>
+          {handoff ? <HandoffSlide h={handoff} size={30} />
+            : <AgentAvatar code={who} state={t.agent_state} size={30} progress={t.agent_state === "working" ? t.progress : null}
+              label={t.agent_label ?? undefined} />}
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1 text-[10.5px] text-muted">
             <span className="font-mono">{t.key}</span>
             {t.kind === "standard" && <Tip content="Standard part: Hex picks it from the Toolbox"><Library className="h-3 w-3" /></Tip>}
             {t.kind === "integration" && <Tip content="Assembly integration"><Puzzle className="h-3 w-3" /></Tip>}
             {t.qty > 1 && <span>×{t.qty}</span>}
+            {t.priority === "high" && <Tip content="High priority"><ArrowUp className="h-3 w-3 text-danger" /></Tip>}
             <span className="ml-auto flex items-center gap-1">
               {t.checks && (t.checks.ok ? <Tip content="Latest Studio build passes the gating checks"><CheckCircle2 className="h-3.5 w-3.5 text-success" /></Tip>
                 : <Tip content="Latest Studio build fails a gating check"><XCircle className="h-3.5 w-3.5 text-danger" /></Tip>)}
-              {t.tokens > 0 && <Tip content="Tokens spent on this part"><span className="inline-flex items-center gap-0.5"><Coins className="h-3 w-3" />{num(t.tokens)}</span></Tip>}
+              {tokens > 0 && <Tip content="Tokens spent on this ticket (design runs and Gage's review)"><span className="inline-flex items-center gap-0.5"><Coins className="h-3 w-3" />{num(tokens)}</span></Tip>}
               {t.comments.length > 0 && <span className="inline-flex items-center gap-0.5" title="Comments"><MessageSquare className="h-3 w-3" />{t.comments.length}</span>}
             </span>
           </div>
           <div className="line-clamp-2 text-[12.5px] font-medium leading-snug">{t.title}</div>
         </div>
       </div>
+      {(t.line || chip) && <div className="mt-1 space-y-0.5">
+        {chip && <span className={cx("inline-block rounded-full border px-1.5 text-[10px] font-medium leading-4", CHIP_TONE[chip.tone])}>{chip.label}</span>}
+        {t.line && <div key={t.line} className={cx("line-clamp-2 animate-fade-in text-[11px] leading-snug", busy ? "text-text" : "text-muted")}>{t.line}</div>}
+      </div>}
       <div className="mt-1.5" title={`Estimate ${fmtMinutes(t.estimate_min)} (outline) · ${t.progress} % done (fill)`}>
         <div className="h-1.5 rounded-full border border-text/25" style={{ width: `${outline}%` }}>
           <div className={cx("h-full rounded-full", t.progress >= 100 ? "bg-success" : "bg-primary")} style={{ width: `${t.progress}%` }} />
@@ -71,7 +104,7 @@ export function TicketCard({ t, maxEst, onOpen, draggable }: { t: Ticket; maxEst
   );
 }
 
-export default function Board({ program, onOpen }: { program: Program; onOpen: (t: Ticket) => void }) {
+export default function Board({ program, onOpen, handoffs }: { program: Program; onOpen: (t: Ticket) => void; handoffs?: Map<string, Handoff> }) {
   const lanes = useMemo(() => boardLanes(program.items, program.tickets), [program.items, program.tickets]);
   const maxEst = Math.max(...program.tickets.map(t => t.estimate_min), 1);
   const move = useMoveTicket(program);
@@ -121,7 +154,7 @@ export default function Board({ program, onOpen }: { program: Program; onOpen: (
                         if (canDrop(t, c.code)) move(t, c.code);
                       }}
                       className={cx("min-h-[72px] space-y-2 rounded-md p-1 transition", over === zone ? "bg-primary-soft ring-2 ring-primary/30" : "bg-transparent")}>
-                      {cards.map(t => <TicketCard key={t.id} t={t} maxEst={maxEst} draggable={canEdit} onOpen={() => onOpen(t)} />)}
+                      {cards.map(t => <TicketCard key={t.id} t={t} maxEst={maxEst} draggable={canEdit} onOpen={() => onOpen(t)} handoff={handoffs?.get(t.id)} />)}
                     </div>);
                 })}
               </div>}

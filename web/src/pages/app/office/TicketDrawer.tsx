@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, Info, Send } from "lucide-react";
+import { ExternalLink, Hand, Library, Pause, Play, Puzzle, RotateCcw, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
@@ -9,7 +9,7 @@ import { Avatar, Badge, Button, Modal } from "@/components/ui";
 import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE } from "./api";
 import { useMoveTicket } from "./Board";
-import { fmtMinutes } from "./model";
+import { assignable, fmtMinutes, runChip } from "./model";
 import type { Column, OfficeEvent, Program, Ticket } from "./types";
 
 export function ActorBadge({ e, size = 24 }: { e: Pick<OfficeEvent, "actor">; size?: number }) {
@@ -50,6 +50,13 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
       if (e instanceof ApiError && e.cta) nav(e.cta);
     } finally { setBusy(null); }
   };
+  const control = (action: string) => call(action, () => api.post<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}/control`, { action }));
+  const who = t.agent ?? t.specialist;
+  const holder = AGENT[who];
+  const busyRun = ["searching", "designing", "reviewing", "integrating"].includes(t.run_status ?? "");
+  const chip = runChip(t);
+  const done = t.column === "approved" || t.column === "integrated";
+  const spec = AGENT[t.specialist]?.name ?? "the agent";
   const deps = t.depends_on.map(id => program.tickets.find(x => x.id === id)).filter(Boolean) as Ticket[];
   const history = (acts.data?.items ?? []).filter(e => e.ticket_id === t.id).slice(0, 12);
   const linked = t.project_id || t.assembly_id;
@@ -60,15 +67,33 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
       <div className="grid gap-5 md:grid-cols-[1fr_220px]">
         <div className="min-w-0 space-y-4">
           <div className="flex items-center gap-3 rounded-lg border border-border p-3">
-            <AgentAvatar code={t.specialist} state={t.agent_state} size={56} progress={t.agent_state === "working" ? t.progress : null} />
+            <AgentAvatar code={who} state={t.agent_state} size={56} progress={t.agent_state === "working" ? t.progress : null} />
             <div className="min-w-0 flex-1">
-              <div className="text-[14px] font-semibold" style={{ color: a?.colour }}>{a?.name}</div>
-              <div className="text-[12px] text-muted">{a?.role} · {STATE_LABEL[t.agent_state]}</div>
-              <div className="mt-1 flex items-center gap-1.5 text-[11.5px] text-muted"><Info className="h-3.5 w-3.5" />Auto-run arrives with the orchestrator. Start opens the {t.kind === "integration" ? "assembly" : "part in Design Studio"}.</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[14px] font-semibold" style={{ color: holder?.colour }}>{t.agent_label ?? holder?.name}</span>
+                {chip && <Badge tone={chip.tone === "danger" ? "danger" : chip.tone === "warning" ? "warning" : chip.tone === "primary" ? "primary" : "neutral"}>{chip.label}</Badge>}
+              </div>
+              <div className="text-[12px] text-muted">{holder?.role} · {STATE_LABEL[t.agent_state]}{who !== t.specialist && <> · assigned to <b style={{ color: a?.colour }}>{a?.name}</b></>}</div>
+              {t.line && <div className="mt-1 text-[12.5px]" aria-live="polite">{t.line}</div>}
+              {!t.run && !done && <div className="mt-1 text-[11.5px] text-muted">Waiting for the office: press Run on the program, or start it by hand.</div>}
             </div>
           </div>
+          {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
+            <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
+          {t.integration?.summary && <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]">
+            <Puzzle className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><span>{t.integration.summary}</span></div>}
+          {canEdit && <div className="flex flex-wrap gap-1.5">
+            {t.paused ? <Button size="sm" variant="secondary" loading={busy === "resume"} icon={<Play className="h-3.5 w-3.5" />} onClick={() => control("resume")}>Resume ticket</Button>
+              : !done && <Button size="sm" variant="secondary" loading={busy === "pause"} icon={<Pause className="h-3.5 w-3.5" />} onClick={() => control("pause")}>Pause ticket</Button>}
+            {t.kind !== "integration" && !done && (t.taken_over
+              ? <Button size="sm" variant="secondary" loading={busy === "hand_back"} icon={<Undo2 className="h-3.5 w-3.5" />} onClick={() => control("hand_back")}>Hand back to {spec}</Button>
+              : <Button size="sm" variant="secondary" loading={busy === "take_over"} icon={<Hand className="h-3.5 w-3.5" />} onClick={() => control("take_over")}
+                  title="Stops the agent; you continue in the Design Studio">Take over</Button>)}
+            {(done || t.run_status === "blocked") && <Button size="sm" variant="secondary" loading={busy === "reopen"} disabled={busyRun} icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => control("reopen")}>Reopen</Button>}
+            {(t.run_status === "blocked" || t.run_status === "retry") && <Button size="sm" loading={busy === "retry"} icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => control("retry")}>Retry now</Button>}
+          </div>}
           {canEdit && <Button className="w-full" loading={busy === "start"} icon={<ExternalLink className="h-4 w-4" />} onClick={start}>
-            {linked ? (t.kind === "integration" ? "Open the assembly" : "Open in Design Studio") : t.kind === "integration" ? "Start: open an assembly" : "Start: open in Design Studio with this brief"}</Button>}
+            {linked ? (t.kind === "integration" ? "Open the assembly" : t.taken_over ? "Continue in Design Studio" : "Open in Design Studio") : t.kind === "integration" ? "Start: open an assembly" : "Start by hand: open in Design Studio with this brief"}</Button>}
           <div>
             <div className="label mb-1">Brief</div>
             <p className="whitespace-pre-line rounded-md bg-panel2 p-3 text-[12.5px] leading-relaxed">{t.brief}</p>
@@ -80,8 +105,10 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
             <div className="label mb-1.5">Comments</div>
             <div className="space-y-2">
               {t.comments.length === 0 && <div className="text-[12.5px] text-muted">No comments yet.</div>}
-              {t.comments.map(c => <div key={c.id} className="flex gap-2"><Avatar name={c.by.name} size={24} />
-                <div className="min-w-0 flex-1 rounded-md bg-panel2 px-2.5 py-1.5"><div className="text-[11.5px] text-muted"><b className="text-text">{c.by.name}</b> · {ago(c.t)}</div>
+              {t.comments.map(c => <div key={c.id} className="flex gap-2">{c.by.kind === "agent" && c.by.code ? <AgentAvatar code={c.by.code} size={24} still /> : <Avatar name={c.by.name} size={24} />}
+                <div className="min-w-0 flex-1 rounded-md bg-panel2 px-2.5 py-1.5"><div className="text-[11.5px] text-muted"><b className="text-text">{c.by.name}</b> · {ago(c.t)}
+                  {c.delivery === "queued" && <span className="ml-1.5 text-warning">· queued for {spec}</span>}
+                  {c.delivery === "delivered" && <span className="ml-1.5 text-success">· sent to {spec}</span>}</div>
                   <div className="whitespace-pre-line text-[13px]">{c.text}</div></div></div>)}
             </div>
             {canEdit && <form className="mt-2 flex gap-2" onSubmit={e => { e.preventDefault(); if (!comment.trim()) return;
@@ -89,7 +116,9 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               <input className="input h-9 flex-1" value={comment} onChange={e => setComment(e.target.value)} placeholder="Add a comment…" maxLength={2000} />
               <Button type="submit" size="md" loading={busy === "comment"} disabled={!comment.trim()} icon={<Send className="h-4 w-4" />} aria-label="Post comment" />
             </form>}
-            <p className="mt-1 text-[11px] text-muted">Comments reach the working agent once auto-run arrives.</p>
+            <p className="mt-1 text-[11px] text-muted">{t.kind === "integration" ? "Comments on assembly tickets are notes for the team." : done
+              ? `Reopen the ticket to send a new comment to ${spec}.` : t.taken_over ? "You took over: comments are notes until you hand the ticket back."
+              : `Comments reach ${spec} as its next message (queued while it works).`}</p>
           </div>
           {history.length > 0 && <div><div className="label mb-1.5">History</div>
             <ul className="space-y-1.5">{history.map(e => <li key={e.seq} className="flex items-start gap-2 text-[12px]"><ActorBadge e={e} size={20} />
@@ -102,7 +131,11 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           <label className="block"><span className="label">Specialist</span>
             <select className="input mt-1 h-9 py-0" value={t.specialist} disabled={!canEdit}
               onChange={e => call("assign", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { specialist: e.target.value }))}>
-              {AGENTS.filter(x => x.code !== "archie").map(x => <option key={x.code} value={x.code}>{x.name} · {x.role}</option>)}</select></label>
+              {AGENTS.filter(x => assignable(t.kind).includes(x.code)).map(x => <option key={x.code} value={x.code}>{x.name} · {x.role}</option>)}</select></label>
+          <label className="block"><span className="label">Priority</span>
+            <select className="input mt-1 h-9 py-0" value={t.priority ?? "normal"} disabled={!canEdit}
+              onChange={e => call("prio", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { priority: e.target.value }))}>
+              <option value="high">High: next in line</option><option value="normal">Normal: critical path</option><option value="low">Low: after the rest</option></select></label>
           {t.kind !== "standard" && <label className="block"><span className="label">Complexity</span>
             <select className="input mt-1 h-9 py-0" value={t.complexity} disabled={!canEdit}
               onChange={e => call("cx", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { complexity: Number(e.target.value) }))}>
@@ -110,7 +143,9 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           <div className="rounded-md border border-border p-2.5 text-[12px]">
             <div className="flex justify-between"><span className="text-muted">Estimate</span><b>{fmtMinutes(t.estimate_min)}</b></div>
             <div className="flex justify-between"><span className="text-muted">Progress</span><b>{t.progress} %</b></div>
-            {t.tokens > 0 && <div className="flex justify-between"><span className="text-muted">Tokens</span><b>{t.tokens}</b></div>}
+            {t.tokens > 0 && <div className="flex justify-between"><span className="text-muted">Design tokens</span><b>{t.tokens}</b></div>}
+            {(t.review_tokens ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted">Review tokens</span><b>{t.review_tokens}</b></div>}
+            {(t.run?.review_round ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted">Sent back</span><b>{t.run?.review_round}×</b></div>}
           </div>
           <div>
             <div className="label mb-1">Milestones</div>
@@ -121,7 +156,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
                   onChange={() => call(m.code, () => api.post<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}/milestones`, { code: m.code, reached: !on }))} />
                 <span className="flex-1">{m.label}</span><span className="tabular-nums text-muted">{m.weight} %</span></label></li>;
             })}</ul>
-            <p className="mt-1.5 text-[11px] text-muted">First build and checks pass are set from the linked Design Studio part automatically.</p>
+            <p className="mt-1.5 text-[11px] text-muted">Set from the agent's real work: the brief read, its first build, the gating checks on the linked part, its self-review, and Gage's approval.</p>
           </div>
         </div>
       </div>
