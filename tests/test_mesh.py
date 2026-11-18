@@ -787,3 +787,22 @@ def test_assembly_render_request_body_builds_render_options() -> None:
     body = AssemblyRenderIn(explode=0.5, lighting="dark", quality="final")
     opts = body.options()
     assert opts.lighting == "dark" and opts.quality == "final" and body.explode == 0.5
+
+
+def test_scene_tolerates_degenerate_triangles(flange: dict, tmp_path: Path) -> None:
+    """Imported meshes can contain zero-area triangles; Blender drops them and the per-corner normals must follow
+    (founder render failed with 'Number of custom normals is not number of loops')."""
+    if BLENDER is None:
+        pytest.skip("Blender not installed")
+    d = np.load(flange["npz"])
+    f = d["f"].reshape(-1, 3)
+    n = d["n"].reshape(-1, 3, 3)
+    bad = np.array([[f[0, 0], f[0, 0], f[0, 1]]])
+    np.savez(tmp_path / "geom.npz", v=d["v"], f=np.vstack([f, bad]), n=np.concatenate([n, n[:1]]))
+    root = tmp_path / "mesh"
+    job = root / "j"
+    job.mkdir(parents=True)
+    spec = scene.export_spec("Flange", "clay", None, {"glb": "part.glb"})
+    (job / "scene.py").write_text(scene.build_script(spec), encoding="utf-8")
+    res = runner.run(job / "scene.py", job, root, [str(job), str(tmp_path / "geom.npz")], 180)
+    assert "part.glb" in res["files"] and (job / "part.glb").stat().st_size > 1000

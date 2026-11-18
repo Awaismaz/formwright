@@ -44,6 +44,14 @@ sc.unit_settings.length_unit = "MILLIMETERS"
 def build_mesh(path, name="Part"):
     d = np.load(path)
     v, f, n = d["v"], d["f"], d["n"]
+    # Drop degenerate triangles (repeated vertex indices) up front, with their corner normals: Blender's
+    # validate() would delete them and the custom-normal count would no longer match the loops.
+    f = f.reshape(-1, 3)
+    n = n.reshape(len(f), 3, 3) if n.size == f.size * 3 else None
+    keep = (f[:, 0] != f[:, 1]) & (f[:, 1] != f[:, 2]) & (f[:, 0] != f[:, 2])
+    f = f[keep]
+    if n is not None:
+        n = n[keep].reshape(-1, 3)
     me = bpy.data.meshes.new(name)
     me.vertices.add(len(v))
     me.vertices.foreach_set("co", v.ravel())
@@ -54,7 +62,10 @@ def build_mesh(path, name="Part"):
     me.update(calc_edges=True)
     me.validate(clean_customdata=False)
     me.shade_smooth()
-    me.normals_split_custom_set(n.astype(np.float64).reshape(-1, 3))
+    if n is not None and len(n) == len(me.loops):
+        me.normals_split_custom_set(n.astype(np.float64).reshape(-1, 3))
+    else:  # anything else validate() removed: fall back to Blender's own smooth normals rather than failing
+        print("FW_NOTE custom normals skipped (mesh was cleaned)", flush=True)
     return me
 
 
