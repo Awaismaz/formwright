@@ -12,6 +12,8 @@ import { Badge, Button, Card, EmptyState, Input, Menu, MenuContent, MenuItem, Me
 import type { ModuleAppProps } from "../registry";
 import SheetViewer from "./SheetViewer";
 import { ModuleHeader, PartCard } from "../ModuleHeader";
+import DraftEditor from "./draft/DraftEditor";
+import { DraftStrip } from "./draft/DraftHome";
 import { DEFAULT_OPTIONS, EMPTY_EDITS, localStamp, type DrawingEdits, type DrawingOptions, type DrawingProject, type DrawingRecord, type DrawingState } from "./types";
 
 const BASE = "/api/m/drawings";
@@ -27,12 +29,14 @@ async function fetchText(url: string): Promise<string> {
 export default function DrawingStudio({ projectId }: ModuleAppProps) {
   const [params, setParams] = useSearchParams();
   const pid = params.get("project") ?? projectId;
-  if (!pid) return <ProjectPicker onPick={id => setParams({ project: id })} />;
+  const draft = params.get("draft");
+  if (draft) return <DraftEditor id={draft} onBack={() => setParams({})} />;
+  if (!pid) return <ProjectPicker onPick={id => setParams({ project: id })} onDraft={id => setParams({ draft: id })} />;
   return <Workspace key={pid} pid={pid} onBack={() => setParams({})} onSwitch={id => setParams({ project: id })} />;
 }
 
 /* ------------------------------------------------------------------ project picker */
-function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
+function ProjectPicker({ onPick, onDraft }: { onPick: (id: string) => void; onDraft: (id: string) => void }) {
   const q = useQuery({ queryKey: ["drw-projects"], queryFn: () => api.get<{ items: DrawingProject[] }>(`${BASE}/projects`) });
   if (q.isLoading) return <PageLoader />;
   if (q.error) return <div className="p-10 text-center text-sm text-muted">{(q.error as Error).message}</div>;
@@ -41,6 +45,7 @@ function ProjectPicker({ onPick }: { onPick: (id: string) => void }) {
     <div>
     <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={null} />
     <div className="mx-auto max-w-7xl px-6 py-6">
+      <DraftStrip onOpen={onDraft} />
       <h2 className="text-[20px] font-semibold tracking-tight">Choose a part to draw</h2>
       <p className="mb-5 mt-1 text-sm text-muted">The sheet is made from the part's latest verified model.</p>
       <div className="mb-6 flex items-start gap-3 rounded-lg border border-border bg-panel p-3.5 text-[13px] text-muted">

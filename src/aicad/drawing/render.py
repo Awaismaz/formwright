@@ -22,7 +22,9 @@ from xml.sax.saxutils import escape
 from aicad.drawing.layout import LAYERS, TEXT_COLORS
 
 # Layer classes are prefixed (drw-*) so an inline SVG cannot clash with page CSS (e.g. a "hidden" utility).
-FILLS = {"dim": "#222222", "bannerfill": "#fdecec", "visible": "#111111", "cutthick": "#111111"}
+FILLS = {"dim": "#222222", "dim_n": "#222222", "bannerfill": "#fdecec", "visible": "#111111", "cutthick": "#111111"}
+ORDER = ["bannerfill", "construction", "hatch", "hatch_n", "hidden", "center", "center_n", "visible", "cut",
+         "cutthick", "dim", "dim_n", "frame", "tb", "tbthin", "banner", "text"]
 SVG_FONT = "Helvetica, Arial, 'Liberation Sans', sans-serif"
 
 
@@ -62,8 +64,7 @@ def to_svg(sheet: dict[str, Any], title: str = "") -> str:
                    f"stroke-linejoin:round}}")
     out.append("</style>")
     out.append(f'<rect x="0" y="0" width="{_n(W)}" height="{_n(H)}" fill="#ffffff"/>')
-    order = ["bannerfill", "hatch", "hidden", "center", "visible", "cut", "cutthick", "dim", "frame", "tb",
-             "tbthin", "banner", "text"]
+    order = ORDER
     prims = sorted(sheet["prims"], key=lambda p: order.index(p["l"]) if p["l"] in order else 99)
     for p in prims:
         t, layer = p["t"], p["l"]
@@ -96,7 +97,7 @@ def to_svg(sheet: dict[str, Any], title: str = "") -> str:
             elif p["font"] == "italic":
                 attrs.append('font-style="italic"')
             if p["rot"]:
-                attrs.append(f'transform="rotate(-90 {_n(p["x"])} {_n(p["y"])})"')
+                attrs.append(f'transform="rotate({_n(-p["rot"])} {_n(p["x"])} {_n(p["y"])})"')
             tip = ""
             if p.get("kind") in ("dim", "callout") and sheet.get("copy") != "issue":
                 attrs.append(f'data-kind="{p["kind"]}" data-tag="{p.get("tag") or ""}"')
@@ -137,8 +138,7 @@ def to_pdf(sheet: dict[str, Any], path: Path, title: str = "") -> None:
         c.setLineCap(1 if layer in ("visible", "frame") else 0)
         c.setLineJoin(1)
 
-    order = ["bannerfill", "hatch", "hidden", "center", "visible", "cut", "cutthick", "dim", "frame", "tb",
-             "tbthin", "banner", "text"]
+    order = ORDER
     prims = sorted(sheet["prims"], key=lambda p: order.index(p["l"]) if p["l"] in order else 99)
     for p in prims:
         t, layer = p["t"], p["l"]
@@ -181,7 +181,7 @@ def to_pdf(sheet: dict[str, Any], path: Path, title: str = "") -> None:
             c.saveState()
             c.translate(X(p["x"]), Y(p["y"]))
             if p["rot"]:
-                c.rotate(90)
+                c.rotate(p["rot"])
             draw = {"start": c.drawString, "middle": c.drawCentredString, "end": c.drawRightString}[p["anchor"]]
             draw(0, 0, p["txt"])
             c.restoreState()

@@ -4,6 +4,26 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (q) — 2D drafting without a model (DRW-017), branch wip/drafting-2d
+
+### Done
+- Drawing Studio: "New 2D drawing" (per org, revisions per save) with a drafting editor: draw / modify / annotate /
+  dimension ribbon, ISO 128 layers, snaps + ortho/polar + typed coordinates, associative measured dimensions with
+  ± / deviations / limits / fits, hatch with planar-face detection, notes, leaders, balloons, ISO 21920 surface and
+  ISO 1101 GD&T frames (user-entered), datum symbols, revision table; SVG / PDF / CAD-native DXF exports; templates
+  (gasket, washer, plate) and an assist that reads common requests without AI (agent fallback mocked in tests).
+  Details, limits and parked defaults (DRW-PD-10..14): `docs/reports/drawings.md` §DRW-017.
+
+### Verified
+- pytest `tests/test_drawings.py` + `tests/test_drawings_2d.py` 41 passed; ruff clean; tsc, vitest 42, vite build.
+- Browser walkthrough on port 8796 with a throwaway data dir (deleted): plate with holes + dimensions + tolerance +
+  datum + GD&T + Ra, PDF / DXF / SVG downloads; gasket from the assist; bush half-section (fillet, chamfer, hatch,
+  mirror, trim, revision preview). 0 console errors.
+
+### Not done / next
+- Dimensions to midpoints / intersections, hatch angles, user layers, blocks, DXF import into a 2D drawing; open the
+  DXF in SOLIDWORKS / AutoCAD by hand. Copy DRW-PD-10..14 into DECISIONS.md when merging.
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done
