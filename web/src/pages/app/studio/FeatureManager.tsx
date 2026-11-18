@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, Info, TriangleAlert, X } from "lucide-react";
+import { ArrowLeftRight, Check, Info, Loader2, Sparkles, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import type { ManualFeature, Project } from "@/lib/types";
+import type { Impact, ManualFeature, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Button, Field, Input, Tip } from "@/components/ui";
 import { describe, edgeMid, edgeRef } from "@/viewer/measure";
 import HoleWizard, { type HoleApi, type HolePreset } from "./HoleWizard";
+import ImpactPanel from "./ImpactPanel";
 import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer/planes";
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
@@ -69,12 +70,14 @@ function pickMarks(e: ManualFeature, size: number): V3[][] {
   return pts.flatMap(p => [[[p[0] - h, p[1], p[2]], [p[0] + h, p[1], p[2]]], [[p[0], p[1] - h, p[2]], [p[0], p[1] + h, p[2]]], [[p[0], p[1], p[2] - h], [p[0], p[1], p[2] + h]]] as V3[][]);
 }
 
-export default function FeatureManager({ project, op, editing, preset, topo, selection, manual, onSelection, onSketch, onDone, onCancel, onBusy, repair }: {
+export default function FeatureManager({ project, op, editing, preset, topo, selection, manual, onSelection, onSketch, onDone, onCancel, onBusy, repair, usedIn = 0 }: {
   project: Project; op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown>; topo: Topo | null; selection: Pick[];
   manual: ManualFeature[];
   onSelection: (p: Pick[]) => void; onSketch: (s: SketchPreview | null) => void; onDone: () => void; onCancel: () => void; onBusy: (b: boolean) => void;
   /** the feature failed to rebuild: why (shown with its original picks marked, IDEA 1) */
   repair?: string | null;
+  /** assemblies using this part: OK first previews the change's impact on them (ASM-018) */
+  usedIn?: number;
 }) {
   const e = editing;
   const pre = preset ?? {};
@@ -102,7 +105,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [axOrigin, setAxOrigin] = useState<[string, string, string]>(ax0 ? ax0.origin.map(String) as [string, string, string] : ["0", "0", "0"]);
   const picked = op === "pattern" ? pickedAxis(selection, topo) : null;
   const keptPick = axisKey === "pick" && !picked && e ? (e.kind === "circular" ? ax0 : e.step ? { origin: [0, 0, 0] as V3, dir: e.step } : null) : null;
-  const [size, setSize] = useState(String(e?.r ?? e?.d ?? e?.t ?? (op === "hole" ? 6.6 : op === "fillet" ? 2 : op === "shell" ? 2 : 1)));
+  const [size, setSize] = useState(String(e?.r ?? e?.d ?? e?.t ?? (pre.size as number | undefined) ?? (op === "hole" ? 6.6 : op === "fillet" ? 2 : op === "shell" ? 2 : 1)));
   const [pattern, setPattern] = useState<"none" | "linear" | "circular">(e?.pattern === "circular" ? "circular" : (e?.count ?? 1) > 1 ? "linear" : (pre.pattern as "linear" | "circular") ?? "none");
   const [count, setCount] = useState(String(e?.count ?? (pre.pattern ? 6 : 1)));
   const [step, setStep] = useState<[string, string, string]>(e?.step ? e.step.map(String) as [string, string, string] : ["20", "0", "0"]);
@@ -156,6 +159,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     return (Object.entries(PRINCIPAL).find(([, v]) => Math.abs(Math.abs(v[0] * n[0] + v[1] * n[1] + v[2] * n[2]) - Math.hypot(...n)) < 1e-9)?.[0] as MirrorPlane | undefined) ?? "face";
   });
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [impact, setImpact] = useState<{ data: Impact; key: string } | null>(null);
   const hole = useRef<HoleApi | null>(null);
   const [holeReady, setHoleReady] = useState(false);
 
@@ -241,7 +246,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
 
   // features are replayed in tree order, whatever order they were ticked in
   const inTreeOrder = manual.filter(m => sources.includes(m.id)).map(m => m.id);
-  const submit = async () => {
+  const submit = async (force = false) => {
     let f: Record<string, unknown> = { op, name, suppressed: e?.suppressed ?? false };
     if (op === "pattern") {
       const d = patDir()!;
@@ -278,6 +283,19 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
       f = { ...f, plane, distance: num(dist), mode,
         sketch: kind === "rect" ? { kind, w: num(w), h: num(h), cx: num(cx_) || 0, cy: num(cy_) || 0 } : { kind, r: num(r), cx: num(cx_) || 0, cy: num(cy_) || 0 } };
     }
+    // ASM-018: a part used in assemblies previews the change on a trial rebuild first; problems stop at the panel
+    const key = JSON.stringify(f);
+    if (usedIn > 0 && !(force && impact?.key === key)) {
+      setChecking(true);
+      try {
+        const r = await api.post<Impact>(`/api/m/assembly/impact/${project.id}`, e ? { kind: "edit", id: e.id, feature: f } : { kind: "feature", feature: f });
+        if ((r.issues ?? 0) > 0) { setImpact({ data: r, key }); return; }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 422) { toast.error(err.message); return; }
+        // the preview is advisory: if it can't run (no module, engine busy), the change still goes through the normal path
+      } finally { setChecking(false); }
+    }
+    setImpact(null);
     setBusy(true); onBusy(true);
     try {
       const t0 = performance.now();
@@ -290,7 +308,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   };
 
   const submitRef = useRef(submit); submitRef.current = submit;
-  const okRef = useRef(false); okRef.current = ready && !busy;
+  const okRef = useRef(false); okRef.current = ready && !busy && !checking && !impact;
   useEffect(() => {
     const h = (ev: KeyboardEvent) => {
       const t = ev.target as HTMLElement | null;
@@ -325,10 +343,14 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border bg-gradient-to-r from-primary-soft to-transparent px-3 py-2.5">
         <span className="flex-1 text-sm font-semibold">{e ? "Edit" : ""} {op === "extrude" ? (mode === "cut" ? "Extruded Cut" : "Extruded Boss") : op === "pattern" ? (patKind === "circular" ? "Circular Pattern" : "Linear Pattern") : op === "sweep" ? (mode === "cut" ? "Swept Cut" : "Swept Boss/Base") : op === "loft" ? (mode === "cut" ? "Lofted Cut" : "Lofted Boss/Base") : TITLE[op]}</span>
-        <Tip content="OK (Enter)" side="bottom"><button onClick={submit} disabled={!ready || busy} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button></Tip>
+        <Tip content="OK (Enter)" side="bottom"><button onClick={() => void submit()} disabled={!ready || busy || checking} className="rounded bg-success p-1 text-white disabled:opacity-40" aria-label="OK"><Check className="h-4 w-4" /></button></Tip>
         <Tip content="Cancel (Esc)" side="bottom"><button onClick={onCancel} className="rounded bg-danger p-1 text-white" aria-label="Cancel"><X className="h-4 w-4" /></button></Tip>
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto p-3 text-[13px]">
+        {typeof pre.agent === "string" && <div className="flex gap-2 rounded-lg border border-accent/40 bg-accent/5 p-2.5 text-[12px]" data-agent-edit>
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+          <span><b>Suggested by the design agent:</b> {pre.agent}. Check the highlighted {needsEdges ? "edges" : "faces"} and the values, then OK. Nothing changes until you do.</span></div>}
+        {impact && <ImpactPanel impact={impact.data} busy={busy} onApply={() => void submit(true)} onBack={() => setImpact(null)} />}
         {repair && <div className="flex gap-2 rounded-lg border border-warning/50 bg-warning/10 p-2.5 text-[12px]" data-repair-note>
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <span><b>This feature no longer rebuilds:</b> {repair}. {needsEdges || op === "shell" || op === "draft" ? "The crosses mark where it was picked: click the edges or faces again, or change the size, then OK." : "Change its values or placement, then OK."}</span></div>}
@@ -448,7 +470,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
         </>}
       </div>
       <div className="flex gap-2 border-t border-border p-3">
-        <Button className="flex-1" onClick={submit} loading={busy} disabled={!ready}>{e ? "Update" : "Add"} feature <span className="ml-1 text-[10.5px] opacity-70">Enter</span></Button>
+        <Button className="flex-1" onClick={() => void submit()} loading={busy} disabled={!ready || !!impact || checking}>{checking ? <><Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />Checking assemblies</> : <>{e ? "Update" : "Add"} feature <span className="ml-1 text-[10.5px] opacity-70">Enter</span></>}</Button>
         <Button variant="secondary" onClick={onCancel}>Cancel <span className="ml-1 text-[10.5px] opacity-70">Esc</span></Button>
       </div>
     </div>

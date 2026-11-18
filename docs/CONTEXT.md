@@ -132,6 +132,13 @@ docs/reports/design-office.md Phase 5; defaults PD-55. Drawing Studio VERSION 1.
 Design Office follow-ups: CD-018..CD-020 (horizontal shafts + caps over bearings, GD&T from ICD datums, per-part
 review gate, change notices after release).
 
+**Studio intelligence (branch `wip/studio-intel`, 2026-11-18):** DS-035 the design agent answers a small edit with a
+```fw-edit``` block (`agent/edits.py`) that opens the real PropertyManager pre-filled with the targets highlighted; the user
+presses OK (normal manual-feature / parameter path, no agent code). ASM-018 every Studio edit on a part used in an
+assembly is previewed first (`POST /api/m/assembly/impact/{project}`: trial rebuild in the warm worker + in-memory
+assembly copies; broken mates, moves, refits, new clashes; nothing committed); Mesh Studio has a per-part datasheet
+shot list that goes stale on revision and re-renders (queues) in one click. Defaults PD-56.
+
 **Next:** live (non-simulated) agent runs once the founder approves PD-41/PD-48 token use; the
 remaining backlog in `docs/PUNCH_LIST.md`. Native CAD bridge (SOLIDWORKS pilot) stays in backlog by founder decision.
 

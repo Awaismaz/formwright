@@ -31,6 +31,7 @@ Viewers can open assemblies, the BOM and the last exported STEP; changes need th
   POST   /api/m/assembly/assemblies/{id}/smart/plan          Hex + Fitz: description -> components + placement plan
   POST   /api/m/assembly/assemblies/{id}/smart/run           Fitz inserts, places and mates the approved plan
   GET    /api/m/assembly/parts/{key}/topo                    exact topology of a part snapshot (viewer)
+  POST   /api/m/assembly/impact/{project_id}                change impact preview of a pending Studio edit
 """
 
 from __future__ import annotations
@@ -46,7 +47,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from aicad import similarity, toolbox
-from aicad.assembly import AssemblyInputError, fitz, librarian, locks, service, solver, store
+from aicad.assembly import (
+    AssemblyInputError,
+    fitz,
+    impact,
+    librarian,
+    locks,
+    service,
+    solver,
+    store,
+)
 from aicad.assembly.locks import OFFICE
 from aicad.platform.collab import permissions
 from aicad.platform.config import get_settings
@@ -642,6 +652,111 @@ def where_used(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
                     "stale": sum(1 for i in mine if current not in ("None",) and str(i["source"]["build_id"]) != current),
                     "broken_mates": sum(1 for m in d["mates"] if m.get("broken"))})
     return {"items": out}
+
+
+class ImpactIn(BaseModel):
+    kind: Literal["feature", "edit", "params"]
+    feature: dict[str, Any] | None = None
+    id: str | None = Field(default=None, max_length=40)
+    values: dict[str, float] | None = None
+
+
+def _programs_using(ctx: Ctx, project_id: str) -> list[dict[str, Any]]:
+    """Design Office programs whose tickets build or reuse this part."""
+    from aicad.office import store as ostore
+
+    out = []
+    for d in ostore.list_docs(ostore.org_root(get_settings().data_dir, ctx.require_org().id)):
+        hits = [t for t in d.get("tickets", []) if t.get("project_id") == project_id
+                or (t.get("reuse") or {}).get("project_id") == project_id]
+        if hits:
+            out.append({"id": d["id"], "name": d.get("name"), "tickets": [f"{t.get('key')} {t.get('title')}" for t in hits][:5]})
+    return out
+
+
+def _datasheet(ws: Path) -> dict[str, int]:
+    from aicad.meshstudio import service as mservice
+
+    shots = mservice.get_shots(ws)
+    return {"shots": len(shots)}
+
+
+def _describe_impact(root: Path, doc: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    parts = service._parts(root, doc)
+    names = service.display_names(doc)
+    for m in item["mates"]:
+        a, b = m.pop("a"), m.pop("b")
+        m["text"] = (f"{solver.LABEL.get(m['type'], m['type'])}: {names.get(a['inst'], '?')} {_ref_desc(doc, parts, a)} "
+                     f"↔ {names.get(b['inst'], '?')} {_ref_desc(doc, parts, b)}")
+    return item
+
+
+@router.post("/impact/{project_id}")
+async def impact_preview(project_id: str, body: ImpactIn, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """What a pending Studio change would do to the assemblies using this part (ASM-018): where-used, mates that
+    break, parts that move, stacks to refit, new interference. Computed on a trial build of the edited model in a
+    scratch folder and in-memory copies of the assemblies: nothing is committed or saved."""
+    import shutil
+    import uuid
+
+    from aicad.agent import worker as bworker
+    from aicad.platform.plain import build_error
+    from aicad.platform.routers.studio import trial_source
+
+    p = permissions.require_project(ctx, project_id, "read")
+    ws = workspace_for(p)
+    root, org = _root(ctx), ctx.require_org().id
+    docs = impact.users(root, org, p.id)
+    base = {"programs": _programs_using(ctx, p.id), "datasheet": _datasheet(ws)}
+    if not docs:
+        return {**base, "assemblies": [], "headline": impact.headline([]), "checked": False}
+    model = ws / "model.py"
+    if not model.is_file():
+        raise HTTPException(404, "There is no design to change yet")
+    src, strict = trial_source(model.read_text(encoding="utf-8"), ws, body.model_dump())
+    trial = ws / ".fw" / "impact" / uuid.uuid4().hex[:12]
+    key = None
+    try:
+        trial.mkdir(parents=True)
+        for f in ws.glob("*.py"):
+            shutil.copy2(f, trial / f.name)
+        if (ws / "refs").is_dir():
+            shutil.copytree(ws / "refs", trial / "refs")
+        (trial / "model.py").write_text(src, encoding="utf-8")
+        out = trial / "out"
+        res = await bworker.build(p.org_id, trial / "model.py", out, determinism=False, fast=True)
+        if res.get("starting"):
+            raise HTTPException(503, bworker.STARTING)
+        st = _status(trial)
+        if st.get("error") or not st.get("fingerprint"):
+            raise HTTPException(422, f"That change couldn't be built: {build_error(st.get('error'))}")
+        bad = next((m for m in st.get("manual_errors") or [] if m["id"] in strict), None)
+        if bad:
+            raise HTTPException(422, f"“{bad['name']}” couldn't be built: {bad['error']}")
+        await bworker.finalize(p.org_id, out)
+        if not (out / "part.step").is_file():
+            raise HTTPException(422, "The trial build produced no geometry to check")
+        key = await impact.prepare_trial(root, org, p.id, p.name, out / "part.step", st.get("material"))
+        current = _status(ws).get("build_id")
+        items = []
+        for d in docs:
+            try:
+                items.append(_describe_impact(root, d, await impact.assess(root, org, d, p.id, key, current)))
+            except (AssemblyInputError, service.WorkerError) as e:
+                items.append({"id": d["id"], "name": d["name"], "error": str(e) if isinstance(e, AssemblyInputError)
+                              else "This assembly couldn't be checked.", "mates": [], "moved": [], "refit": [],
+                              "clashes": [], "resolved": [], "breaks": 0, "instances": 0, "behind": 0})
+    except service.WorkerError as e:
+        raise _err(e) from e
+    finally:
+        if key:
+            impact.drop_trial(root, key)
+        shutil.rmtree(trial, ignore_errors=True)
+    track(ctx.db, "impact_previewed", ctx.user, org, assemblies=len(items),
+          breaks=sum(a["breaks"] for a in items), clashes=sum(len(a["clashes"]) for a in items))
+    ctx.db.commit()
+    return {**base, "assemblies": items, "headline": impact.headline(items), "checked": True,
+            "issues": sum(a["breaks"] + len(a["clashes"]) + len(a["refit"]) for a in items)}
 
 
 @router.post("/assemblies/{aid}/mates")

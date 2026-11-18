@@ -15,6 +15,7 @@ import { LookPanel, Section, Seg, Swatch } from "./LookPanel";
 import { FileButtons } from "@/components/NativeExport";
 import { moduleExportUrl } from "@/lib/native";
 import { CHECKER, deviceLine, Exports, Gallery, MeshPanel } from "./Gallery";
+import DatasheetPanel from "./DatasheetPanel";
 
 const ACTIVE = (j?: Job | null) => !!j && (j.state === "queued" || j.state === "running");
 
@@ -303,6 +304,7 @@ function Workspace({ id, assembly, presets, canEdit }: { id: string; assembly: b
           <TabList className="px-2">
             <Tab value="gallery">Gallery{running > 0 && <span className="ml-1 rounded-full bg-primary px-1.5 text-[10.5px] font-semibold text-primary-fg">{running}</span>}</Tab>
             {!assembly && <Tab value="exports">Exports</Tab>}
+            {!assembly && <Tab value="datasheet">Datasheet</Tab>}
             {d.mesh && <Tab value="mesh">Mesh</Tab>}
           </TabList>
           <TabPanel value="gallery" className="min-h-0 flex-1 overflow-y-auto">
@@ -313,6 +315,7 @@ function Workspace({ id, assembly, presets, canEdit }: { id: string; assembly: b
             <Exports base={base} items={exportsL} canEdit={canEdit} busy={busy === "export"} onExport={doExport} finishLabel={finishLabel} onRerender={rerender}
               onChanged={() => qc.invalidateQueries({ queryKey: ["mesh-jobs", base] })} />
           </TabPanel>
+          {!assembly && <TabPanel value="datasheet" className="min-h-0 flex-1 overflow-y-auto"><DatasheetPanel base={base} pid={pid} settings={settings} canEdit={canEdit} /></TabPanel>}
           {d.mesh && <TabPanel value="mesh" className="min-h-0 flex-1 overflow-y-auto"><MeshPanel info={d} mesh={d.mesh} /></TabPanel>}
         </Tabs>
       </aside>

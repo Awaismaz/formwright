@@ -545,6 +545,49 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
             "build_s": (st.get("timings_s") or {}).get("total_s")}
 
 
+def trial_source(src: str, ws: Path, change: dict[str, Any]) -> tuple[str, set[str]]:
+    """The model source as it would be after a pending Studio change, without touching the workspace (ASM-018 trial
+    builds). ``change``: {"kind": "feature", "feature"} (a new manual feature), {"kind": "edit", "id", "feature"}
+    (changed fields of one), or {"kind": "params", "values"}. Returns (source, ids whose failure rejects it)."""
+    from aicad.platform.routers.projects import current_editable, rewrite_params
+
+    kind = change.get("kind")
+    if kind == "params":
+        values = change.get("values")
+        if not isinstance(values, dict) or not values:
+            raise HTTPException(422, "Which parameter changes?")
+        new, changes = rewrite_params(src, current_editable(ws), _read_status(ws).get("param_meta") or {},
+                                      {str(k): float(v) for k, v in values.items()})
+        if not changes:
+            raise HTTPException(422, "Those are the current values: nothing changes")
+        return stamp_manual_refs(new, ws), set()
+    feats = read_manual(src)
+    bbox = _current_bbox(ws)
+    raw = change.get("feature")
+    if not isinstance(raw, dict):
+        raise HTTPException(422, "Which feature?")
+    if kind == "feature":
+        feat = validate_feature({**raw, "rolled_back": False})
+        bar = next((i for i, x in enumerate(feats) if x.get("rolled_back")), len(feats))
+        new_feats = [*feats[:bar], *stamp_refs([feat], bbox, {feat["id"]}), *feats[bar:]]
+        fid = feat["id"]
+    elif kind == "edit":
+        fid = str(change.get("id") or "")
+        i = next((k for k, x in enumerate(feats) if x["id"] == fid), None)
+        if i is None:
+            raise HTTPException(404, "Feature not found")
+        merged = {**feats[i], **raw, "id": fid}
+        repicked = bool({"edges", "point", "faces", "place", "neutral"} & set(raw))
+        if repicked and "edges" in raw and "edge_refs" not in raw:
+            merged.pop("edge_refs", None)
+        new = validate_feature(merged)
+        new_feats = list(feats)
+        new_feats[i] = stamp_refs([new], bbox, {fid})[0] if repicked else new
+    else:
+        raise HTTPException(422, "Unknown change")
+    return write_manual(src, normalize_rollback(sync_planes(new_feats))), {fid}
+
+
 SUP_START = "# --- Formwright suppressed features (managed by the app; toggle them in the feature tree) ---"
 SUP_END = "# --- end suppressed features ---"
 

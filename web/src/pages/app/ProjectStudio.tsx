@@ -5,7 +5,7 @@ import { ArrowLeft, Box, Boxes, Camera, Check, CircleHelp, Download, Factory, Fi
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { BuildStatus, Catalog, ManualFeature, Project, RepairItem } from "@/lib/types";
+import type { AgentEdit, BuildStatus, Catalog, ManualFeature, Project, RepairItem } from "@/lib/types";
 import { cx, num } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Tab, TabList, TabPanel, Tabs, Tip } from "@/components/ui";
 import { Icon } from "@/components/icons";
@@ -23,7 +23,10 @@ import { offsetPlane, sketchLines, type PlaneDef, type RefPlane } from "@/viewer
 import StepImport from "./studio/StepImport";
 import Toolbox from "./studio/Toolbox";
 import { SimilarPartsDialog } from "@/components/SimilarParts";
-import { WhereUsed } from "./modules/assembly/WhereUsed";
+import { useWhereUsed, WhereUsed } from "./modules/assembly/WhereUsed";
+import { DatasheetChip } from "./modules/mesh/DatasheetChip";
+import ParamEditPM from "./studio/ParamEditPM";
+import { prefillPm } from "./studio/agentEdit";
 import { ChecksPanel, FilesPanel, MassPanel, ParamsPanel, RevisionsPanel, SourcePanel, TreePanel, type Recognition } from "./studio/Panels";
 import StudioCommands, { SHORTCUTS } from "./studio/StudioCommands";
 import CollabBar, { CollabBanner, NewBranchDialog } from "@/components/collab/CollabBar";
@@ -62,7 +65,9 @@ export default function ProjectStudio() {
   const [hl, setHl] = useState<number[]>([]);
   const [showCom, setShowCom] = useState(false);
   const [sketch, setSketch] = useState<SketchPreview | null>(null);
-  const [pm, setPm] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
+  const [pm, setPmS] = useState<{ op: FeatureOp; editing: ManualFeature | null; preset?: Record<string, unknown> } | null>(null);
+  const [paramPm, setParamPm] = useState<{ rows: NonNullable<AgentEdit["params"]>; summary: string; n: number } | null>(null);
+  const setPm = (v: typeof pm) => { setPmS(v); if (v) setParamPm(null); };
   const [sk, setSk] = useState<{ phase: "pick"; preset?: SketchPreset } | { phase: "edit"; plane: PlaneDef; faceId: number | null; editing: ManualFeature | null; preset?: SketchPreset; planeRef?: ManualFeature } | null>(null);
   const [planeOffset, setPlaneOffset] = useState("0");
   const [dialog, setDialog] = useState<"import" | "toolbox" | "similar" | null>(null);
@@ -127,6 +132,7 @@ export default function ProjectStudio() {
   const st = status.data ?? undefined;
   const branch = p?.branch ?? "main";
   const readOnly = !!p && !can(p.access, "edit", branch);  // PLT-021: view-only people get the viewer, not the tools
+  const usedIn = useWhereUsed(id, st?.build_id, owned.has("assembly")).length;  // ASM-018: edits preview their impact
 
   useEffect(() => { if (p) setName(p.name); }, [p?.name]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (id) api.post(`/api/projects/${id}/warm`).catch(() => {}); }, [id]);
@@ -183,6 +189,18 @@ export default function ProjectStudio() {
     setSk(null); setPm({ op: op as FeatureOp, editing: ed, preset }); setTool("select");
     const kinds = selectKindsFor(op);
     setSelection(s => s.filter(x => kinds.includes(x.kind)));
+  };
+  /** DS-035: an edit proposed by the design agent opens the real PropertyManager, pre-filled, targets highlighted. */
+  const openAgentEdit = (edit: AgentEdit) => {
+    if (readOnly) { toast.error("You can view this part but not change it"); return; }
+    const r = prefillPm(edit, topo, manual.data?.features ?? [], st?.build_id);
+    if (r.kind === "error") { toast.error(r.message); return; }
+    openLeft();
+    setSk(null);
+    if (r.kind === "params") { setPm(null); setParamPm({ rows: r.rows, summary: edit.summary, n: Date.now() }); return; }
+    setPm({ op: r.op, editing: r.editing, preset: { ...r.preset, agent: edit.summary, n: Date.now() } });
+    setTool("select"); setSelection(r.selection);
+    if (r.note) toast.warning(r.note);
   };
   // Sketch: as soon as a face is picked, open the sketcher on it
   useEffect(() => {
@@ -301,7 +319,10 @@ export default function ProjectStudio() {
             <FeatureManager key={`${pm.op}-${pm.editing?.id ?? "new"}-${JSON.stringify(pm.preset ?? {})}`} project={p} op={pm.op} editing={pm.editing} preset={pm.preset} topo={topo} selection={selection} manual={mf} onBusy={setManualBusy}
               repair={repairOf(pm.editing)}
               onSelection={setSelection} onSketch={setSketch} onDone={() => { setPm(null); setSketch(null); setRedo([]); refresh(); setTool("orbit"); }}
-              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} />
+              onCancel={() => { setPm(null); setSketch(null); setSelection([]); setTool("orbit"); }} usedIn={usedIn} />
+          ) : paramPm ? (
+            <ParamEditPM key={paramPm.n} project={p} rows={paramPm.rows} summary={paramPm.summary} usedIn={usedIn}
+              onDone={() => { setParamPm(null); setRedo([]); refresh(); }} onCancel={() => setParamPm(null)} />
           ) : (
             <Tabs value={tab} onValueChange={t => { setTab(t); if (t !== "params") setParamFocus(null); }} className="flex min-h-0 flex-1 flex-col" data-tour="feature-tree">
               <TabList className="gap-0 overflow-x-auto px-1 [scrollbar-width:none]">
@@ -330,7 +351,7 @@ export default function ProjectStudio() {
                   onMove={(f, d) => { const ids = mf.map(x => x.id); const i = ids.indexOf(f.id); [ids[i], ids[i + d]] = [ids[i + d]!, ids[i]!]; manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!)); }}
                   onDelete={f => manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true)} /></TabPanel>
                 <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
-                <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} /></fieldset></TabPanel>
+                <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} usedIn={usedIn} /></fieldset></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
                 <TabPanel value="revs"><RevisionsPanel project={p} onChanged={refresh} version={st?.build_id} onCompare={runCompare} comparing={compare?.base ?? null} /></TabPanel>
                 <TabPanel value="files"><FilesPanel project={p} status={st} /></TabPanel>
@@ -352,6 +373,7 @@ export default function ProjectStudio() {
           {!phone && <ProjectStatus p={p} />}
           <CollabBar projectId={p.id} onSwitched={() => { setRedo([]); setCompare(null); refresh(); }} />
           {owned.has("assembly") && !phone && <WhereUsed projectId={p.id} buildId={st?.build_id} />}
+          {owned.has("mesh") && !phone && !readOnly && <DatasheetChip projectId={p.id} buildId={st?.build_id} />}
         </div>}
         right={<>
           <Tip content="Undo (Ctrl+Z)" side="bottom"><button onClick={() => void undo()} disabled={manualBusy || !!p.agent?.busy || !hasBuilds || readOnly} className="rounded p-1 text-muted hover:bg-text/5 hover:text-text disabled:opacity-35" aria-label="Undo"><Undo2 className="h-4 w-4" /></button></Tip>
@@ -423,7 +445,7 @@ export default function ProjectStudio() {
         </div>
         {(compact ? chatMounted || showChat : chatOpen) && (() => {
           const chat = <Chat key={branch} project={p} topo={topo} selection={pm || sk ? [] : selection} onSelectionChange={setSelection} onActivity={refresh} onToolbox={m => { setTbInit(m ? { code: m.code, params: m.params } : null); setDialog("toolbox"); }}
-            features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} />;
+            features={featureChips} onFeaturesChange={setFeatureChips} request={chatRequest} onEdit={openAgentEdit} usedIn={usedIn} />;
           return compact ? <div data-studio-sheet="agent" className={cx("z-20 grid grid-rows-[minmax(0,1fr)] bg-panel", !showChat && "hidden",
             phone ? "absolute inset-0" : "absolute inset-y-0 right-0 w-[400px] max-w-[85%] border-l border-border shadow-pop")}>{chat}</div> : chat;
         })()}

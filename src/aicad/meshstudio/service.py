@@ -437,3 +437,92 @@ def delete_job(ws: Path, jid: str) -> bool:
         raise RuntimeError("This render is running; wait for it to finish.")
     shutil.rmtree(d, ignore_errors=True)
     return True
+
+
+# ------------------------------------------------------------------ living datasheet pack (ASM-018)
+# A saved shot list: the renders a part's datasheet needs (finish, lighting, camera, quality...). Each shot remembers
+# the build its last render showed; when the part revises, the shot is stale until it is rendered again. Re-rendering
+# only queues the jobs (the render queue does the work); nothing renders on its own.
+MAX_SHOTS = 12
+
+
+def _shots_path(ws: Path) -> Path:
+    return ws / "mesh" / "shots.json"
+
+
+def get_shots(ws: Path) -> list[dict[str, Any]]:
+    try:
+        raw = json.loads(_shots_path(ws).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [s for s in raw if isinstance(s, dict) and isinstance(s.get("options"), dict)] if isinstance(raw, list) else []
+
+
+def _save_shots(ws: Path, shots: list[dict[str, Any]]) -> None:
+    p = mesh_root(ws) / "shots.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(shots, indent=1), encoding="utf-8")
+    tmp.replace(p)
+
+
+def shots_view(ws: Path, base_url: str = "") -> dict[str, Any]:
+    """The shot list with, per shot, which revision its last render shows and whether the part changed since."""
+    current = build_info(ws)["build_id"]
+    revs = revisions(ws)
+    out = []
+    for s in get_shots(ws):
+        bid = s.get("build_id")
+        job = None
+        if s.get("job_id"):
+            d = _find(ws, str(s["job_id"]))
+            job = view(ws, d, None, base_url) if d else None
+        out.append({**{k: s.get(k) for k in ("id", "label", "options", "added_at", "build_id")},
+                    "revision": revs.get(int(bid)) if bid is not None else None,
+                    "stale": bid is None or (current is not None and str(bid) != str(current)),
+                    "job": {k: job.get(k) for k in ("id", "state", "progress", "files")} if job else None})
+    return {"shots": out, "stale": sum(1 for s in out if s["stale"]), "build_id": current,
+            "revision": revs.get(int(current)) if current is not None else None}
+
+
+def add_shot(ws: Path, opts: scene.Options, user_id: str) -> dict[str, Any]:
+    opts.validate()
+    shots = get_shots(ws)
+    key = opts.key()
+    if any(s["options"] == key for s in shots):
+        raise ValueError("That shot is already in the datasheet pack.")
+    if len(shots) >= MAX_SHOTS:
+        raise ValueError(f"A datasheet pack holds up to {MAX_SHOTS} shots.")
+    sid = scene.spec_hash({"shot": key})[:10]
+    shot = {"id": sid, "label": label_for(opts), "options": key, "added_at": jobs.now(), "added_by": user_id,
+            "build_id": None, "job_id": None}
+    _save_shots(ws, [*shots, shot])
+    return shot
+
+
+def remove_shot(ws: Path, sid: str) -> bool:
+    shots = get_shots(ws)
+    keep = [s for s in shots if s.get("id") != sid]
+    if len(keep) == len(shots):
+        return False
+    _save_shots(ws, keep)
+    return True
+
+
+def rerender_stale(ws: Path, name: str, org_id: str, user_id: str, base_url: str = "",
+                   request: Any = None) -> list[dict[str, Any]]:
+    """Queue a render for every stale shot (one click). ``request`` defaults to ``request_render`` (tests pass a
+    fake so they need no Blender). Returns the queued jobs."""
+    request = request or request_render
+    current = build_info(ws)["build_id"]
+    shots = get_shots(ws)
+    queued = []
+    for s in shots:
+        if s.get("build_id") is not None and current is not None and str(s["build_id"]) == str(current):
+            continue
+        opts = scene.Options(**{k: v for k, v in s["options"].items() if k in scene.Options.__dataclass_fields__})
+        job = request(ws, name, opts, org_id, user_id, base_url)
+        s["job_id"], s["build_id"] = job.get("id"), current
+        queued.append({"shot": s["id"], "job": job.get("id"), "state": job.get("state")})
+    if queued:
+        _save_shots(ws, shots)
+    return queued

@@ -27,6 +27,7 @@ from claude_agent_sdk import (
 )
 
 from aicad.agent.blocks import extract_brief, extract_review
+from aicad.agent.edits import extract_edit
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
 from aicad.agent.replay import make_client
@@ -338,7 +339,7 @@ class AgentSession:
         if self.mode != "build":
             shown, prompt = shown or prompt, (DISCUSS_PREFIX if self.mode == "discuss" else BRIEF_PREFIX) + prompt
         self.publish({"type": "user", "text": shown or prompt, "mode": self.mode})
-        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data)",
+        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data|Design state)",
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         self._run_costs, self._budget_hit, self._result_seen = {}, False, False
@@ -391,6 +392,9 @@ class AgentSession:
                     text, questions = extract_questions(text)
                     text, brief = extract_brief(text, scrub)
                     text, review = extract_review(text, self._status() if "fw-review" in text else None, scrub)
+                    edit, edit_note = None, None
+                    if "fw-edit" in text:  # DS-035: a small edit handed to the PropertyManager
+                        text, edit, edit_note = extract_edit(text, self.workspace, scrub)
                     if text.strip():
                         self.publish({"type": "text", "text": scrub(text)})
                     if questions:
@@ -399,6 +403,11 @@ class AgentSession:
                         self.publish({"type": "brief", "brief": brief})
                     if review:
                         self.publish({"type": "review", **review})
+                    if edit:
+                        self.publish({"type": "edit", "edit": edit})
+                    elif edit_note:
+                        self.publish({"type": "text", "text": "The proposed change can't open in the PropertyManager: "
+                                                              + scrub(edit_note)})
                 elif isinstance(b, ToolUseBlock):
                     self._tool_names[b.id] = b.name
                     self.publish({"type": "tool", "id": b.id, "name": "build" if "build_model" in b.name else "step",

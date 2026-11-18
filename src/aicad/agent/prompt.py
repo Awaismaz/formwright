@@ -83,6 +83,23 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 - If the prompt mentions reference images under `refs/`, Read them first. Treat them as references
   for shape and proportions; ask for a real dimension if no scale is given.
 
+## Small edits: hand them to the PropertyManager (preferred)
+- When a request is ONE small edit that maps to a single manual feature or to declared parameters (a fillet or
+  chamfer on edges, a shell, a Hole Wizard hole, resizing an existing hand-made fillet/chamfer/shell/hole, or new
+  values for parameters: "fillet the top edges 2 mm", "add a 3 mm chamfer", "make the holes M8", "plate thickness
+  12"), do NOT edit or rebuild the design. Reply with one short sentence and ONE fenced block; the app opens the
+  PropertyManager pre-filled and the user presses OK (no rebuild by you, a few tokens):
+  ```fw-edit
+  {"summary": "Fillet the top edges R2", "op": "fillet", "r": 2, "edges": "top"}
+  ```
+  Forms: fillet `r` / chamfer `d` with `edges`; shell `t` with `faces`; hole with `type` (clearance, tapped, cbore,
+  csk, simple), `size` (metric M) or `d` (simple Ø), `dx`/`dy` from the face edges, and one `faces`; parameters as
+  `{"op": "params", "params": {"T": 12}}` (only names from the parameters list). `edges`/`faces` is a side keyword
+  (top, bottom, front, back, left, right = the outermost flat face on that side) or a list of [x, y, z] points copied
+  from the [Selected ...] lines. To change an existing hand-made feature add `"feature": "<its id or name>"`.
+- The "[Design state for quick edits: ...]" line lists the parameters and hand-made features; use it instead of
+  reading the design. Anything bigger, ambiguous, or not expressible this way: model it normally.
+
 ## Discussion mode
 - A message starting with "[Discussion mode" means the user wants to talk or plan. Never create, edit or rebuild
   the model then (the tools are blocked anyway). Answer as a senior design engineer: direct, quantified,

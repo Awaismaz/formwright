@@ -4,7 +4,7 @@ import { Check, ClipboardCheck, Coins, Hammer, MessagesSquare, ImagePlus, ListTr
 import { toast } from "sonner";
 import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { AgentBrief, AgentEvent, AgentQuestion, AgentReview, Project } from "@/lib/types";
+import type { AgentBrief, AgentEdit, AgentEvent, AgentQuestion, AgentReview, Project } from "@/lib/types";
 import { cx } from "@/lib/format";
 import { Markdown } from "@/lib/markdown";
 import { Button, Modal, Tip } from "@/components/ui";
@@ -15,6 +15,7 @@ import { pickKey } from "@/viewer/types";
 import type { TbMatch } from "./Toolbox";
 import ShopStatus, { phaseFor } from "./ShopStatus";
 import { BriefCard, SelfReview } from "./AgentCards";
+import EditCard from "./EditCard";
 
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
@@ -22,7 +23,7 @@ type ChatItem =
   | { kind: "noai"; lines: string[] }
   | { kind: "tool"; id: string; name: string; brief: string; state: "run" | "ok" | "bad"; result?: string; ids?: string[]; done?: number }
   | { kind: "result"; ev: ResultEv } | { kind: "questions"; questions: AgentQuestion[] }
-  | { kind: "brief"; brief: AgentBrief } | { kind: "review"; review: AgentReview };
+  | { kind: "brief"; brief: AgentBrief } | { kind: "review"; review: AgentReview } | { kind: "edit"; edit: AgentEdit };
 
 /** "5 edits" or "×3" for a collapsed run of identical steps. */
 function stepCount(brief: string, n: number): string {
@@ -58,8 +59,16 @@ function reduce(items: ChatItem[], ev: AgentEvent): ChatItem[] {
     case "questions": return [...items, { kind: "questions", questions: ev.questions }];
     case "brief": return [...items, { kind: "brief", brief: ev.brief }];
     case "review": return [...items, { kind: "review", review: { items: ev.items, gates: ev.gates } }];
+    case "edit": return [...items, { kind: "edit", edit: ev.edit }];
     default: return items;
   }
+}
+
+/** Whether the agent turn ending at result index `n` built the model (only then is there a change to undo). */
+function builtInTurn(items: ChatItem[], n: number): boolean {
+  let k = n - 1;
+  while (k >= 0 && items[k]!.kind !== "user") k--;
+  return items.slice(k + 1, n).some(x => x.kind === "tool" && x.name === "build");
 }
 
 interface Att { name: string; mime: string; data_b64: string; url: string }
@@ -121,13 +130,17 @@ function Questions({ qs, active, onSubmit }: { qs: AgentQuestion[]; active: bool
   );
 }
 
-export default function Chat({ project, topo, selection, onSelectionChange, onActivity, onToolbox, features = [], onFeaturesChange, request }: {
+export default function Chat({ project, topo, selection, onSelectionChange, onActivity, onToolbox, features = [], onFeaturesChange, request, onEdit, usedIn = 0 }: {
   project: Project; topo: Topo | null; selection: Pick[]; onSelectionChange: (p: Pick[]) => void; onActivity: () => void;
   onToolbox?: (m?: TbMatch) => void;
   /** Design features picked in the feature tree, sent to the agent as references. */
   features?: string[]; onFeaturesChange?: (f: string[]) => void;
   /** A prompt the Studio asks the chat to send (e.g. "delete this feature"); a new id triggers it once. */
   request?: { id: number; text: string } | null;
+  /** DS-035: open the PropertyManager pre-filled with an agent edit */
+  onEdit?: (e: AgentEdit) => void;
+  /** assemblies using this part (the edit card previews the impact on them) */
+  usedIn?: number;
 }) {
   const [mode, setModeS] = useState<"build" | "discuss">(() => { try { return (localStorage.getItem(`fw_chat_mode_${project.id}`) as "build" | "discuss") || "build"; } catch { return "build"; } });
   const setMode = (m: "build" | "discuss") => { setModeS(m); try { localStorage.setItem(`fw_chat_mode_${project.id}`, m); } catch { /* */ } };
@@ -149,13 +162,17 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   const agent = project.agent;
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
 
+  const onEditRef = useRef(onEdit); onEditRef.current = onEdit;
   useEffect(() => {
     setItems([]);
     const es = new EventSource(`/api/projects/${project.id}/agent/events`);
+    let backlog = Infinity; // events replayed from the history (never auto-open an old edit)
     es.onmessage = (m) => {
       const ev = JSON.parse(m.data) as AgentEvent;
       if (ev.type === "meter") { setMeter(ev); return; }
-      if (ev.type === "hello") setBusy(ev.busy);
+      if (ev.type === "hello") { setBusy(ev.busy); backlog = ev.backlog ?? Infinity; }
+      else backlog -= 1;
+      if (ev.type === "edit" && backlog < 0) onEditRef.current?.(ev.edit); // a fresh suggestion opens the PropertyManager
       if (ev.type === "busy") { setBusy(ev.value); if (!ev.value) setMeter(null); }
       if (ev.type === "tool_result" || ev.type === "result" || ev.type === "recognition" || (ev.type === "text" && /^(Parameters updated|Restored|Manual feature|Feature|Created|Imported|Rebuilt|Undone|Redone)/.test(ev.text))) onActivity();
       setItems(prev => reduce(prev, ev));
@@ -191,12 +208,16 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     }
     if (selection.length && topo) t += "\n\n[Selected in viewer: " + selection.map((p, i) => `(${i + 1}) ${agentDescriptor(p, topo)}`).join("; ") + "]";
     if (features.length && !override) t += "\n\n[Selected feature(s) in the feature tree: " + features.map(f => `“${f}”`).join(", ") + "]";
+    const sentSel = selection, sentFeatures = features, clears = !override || skipToolbox;
+    // cleared before the request: a quick reply (e.g. an edit that selects its own targets) can arrive before it returns
+    if (clears) { onSelectionChange([]); onFeaturesChange?.([]); }
     try {
       await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, mode: m, skip_brief: skipBrief, brief_approved: briefApproved, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
-      if (!override || skipToolbox) { if (!override || skipToolbox) { setText(""); setAtts([]); } onSelectionChange([]); onFeaturesChange?.([]); }
+      if (clears) { setText(""); setAtts([]); }
       setSkipBrief(false);
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
     } catch (e) {
+      if (clears) { onSelectionChange(sentSel); onFeaturesChange?.(sentFeatures); }
       if (e instanceof ApiError && e.status === 402) {
         track("paywall_shown", { where: "studio" });
         toast.error(e.message, { action: e.cta ? { label: "Fix", onClick: () => nav(e.cta!) } : undefined });
@@ -238,6 +259,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           if (i.kind === "brief") return <BriefCard key={n} brief={i.brief} active={!busy && !items.slice(n + 1).some(x => x.kind === "user")}
             onApprove={a => { setMode("build"); void send(a, true, "build", true); }} />;
           if (i.kind === "review") return <SelfReview key={n} review={i.review} />;
+          if (i.kind === "edit") return <EditCard key={n} project={project} edit={i.edit} usedIn={usedIn} onOpen={e => onEdit?.(e)}
+            active={!busy && !items.slice(n + 1).some(x => x.kind === "user" || x.kind === "edit")} />;
           if (i.kind === "error") return <div key={n} className="rounded-lg border border-danger/40 bg-danger/5 px-3 py-2 text-danger">{i.text}</div>;
           if (i.kind === "noai") return <NoAi key={n} lines={i.lines} />;
           if (i.kind === "tool") return (
@@ -253,7 +276,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
               {n === lastResultIdx && i.ev.mode === "discuss" && !busy &&
                 <>·<button onClick={() => { setMode("build"); void send("Go ahead and build the design we just discussed, following the build plan above.", true, "build"); }}
                   className="inline-flex items-center gap-1 rounded bg-primary px-2 py-0.5 font-medium text-white hover:brightness-110"><Hammer className="h-3 w-3" />Build this plan</button></>}
-              {n === lastResultIdx && i.ev.mode !== "discuss" && typeof i.ev.rev_before === "number" && !busy &&
+              {n === lastResultIdx && i.ev.mode !== "discuss" && typeof i.ev.rev_before === "number" && !busy && builtInTurn(items, n) &&
                 <>·<button onClick={() => undo(i.ev.rev_before as number)} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><Undo2 className="h-3 w-3" />Undo this change</button></>}
             </div>);
         })}

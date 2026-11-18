@@ -4,6 +4,57 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (v) — Studio intelligence: agent fills the PropertyManager (DS-035), change impact preview + living datasheet pack (ASM-018)
+
+Branch `wip/studio-intel` (worktree `fw-wt/studio-intel`). Report: docs/reports/studio-intel/README.md. PD-56.
+
+### Done
+- DS-035: new ```fw-edit``` block (`src/aicad/agent/edits.py`): fillet / chamfer / shell / Hole Wizard, an edit of one
+  existing hand-made feature, or declared parameters. Targets are side keywords (outer loop of the outermost flat face)
+  or points from the [Selected ...] lines, resolved on `out/topo.json` and validated by `studio.validate_feature`;
+  malformed or unusable blocks are dropped with a plain note, never shown raw. The session publishes an `edit` event;
+  the Studio opens the real PropertyManager pre-filled with the targets selected/highlighted (`studio/agentEdit.ts`,
+  re-finds targets by position if the model was rebuilt) or the new "Modify dimensions" PM for parameters; OK goes
+  through the normal manual-feature / parameter endpoints. Prompt section "Small edits: hand them to the
+  PropertyManager"; short build prompts carry a hidden one-line `[Design state for quick edits: ...]` so no file read
+  is needed. `hello` SSE event carries the backlog size, so only a fresh edit auto-opens. "Undo this change" is only
+  offered for turns that built. Fixed a race where a quick reply's selection was cleared by the chat's own send.
+- ASM-018: `POST /api/m/assembly/impact/{project}` (`src/aicad/assembly/impact.py`): trial source
+  (`studio.trial_source`, `projects.rewrite_params` extracted from the parameter edit) built in a scratch folder on the
+  warm worker, snapshotted under a temporary `x_` part key, every using assembly copied in memory, refs remapped +
+  re-solved as a refresh would; reports mates that break / follow, parts that move, fastener stacks to refit,
+  new / grown / resolved clashes (exact booleans on pairs involving the part or moved parts), Design Office programs
+  using the part, datasheet shots. Nothing committed; trial files removed. UI: impact panel on OK in the
+  PropertyManager, Modify dimensions and the Params tab ("Apply anyway / Back"), and in the agent's chat card.
+- Living datasheet pack: per-project shot list in Mesh Studio (Datasheet tab: add current look, stale per shot,
+  "Re-render stale" queues only), Studio header chip "n renders stale · Re-render".
+
+### Verified how
+- `tests/test_studio_intel.py` (9): block parse / side keywords / outer loop / points / validation errors / params /
+  edit existing feature / design state; replayed "add a 2 mm chamfer to the top edges" = 1 turn, 0 tool events, model
+  unchanged; end to end through the app with the analytic volume 24000 − (400 − 32/3); impact on the fixture
+  assembly: HOLES 4→0 = 1 mate breaks + new clash 90π mm³, T 10→12 = block moves 2.000 mm, 10×10×3 boss = 300 mm³
+  clash, model / assembly / part cache untouched; datasheet shots stale → queued (fake render) → stale after a revision.
+  vitest `studio/agentEdit.test.ts` (4).
+- Targeted pytest: test_studio_intel, test_agent, test_ai_quality, test_studio, test_studio_fixes, test_assembly,
+  test_mesh, test_platform: 219 passed (re-run after the last fixes: intel + agent + ai_quality 46 passed). ruff clean,
+  tsc clean, vitest 121 passed, vite build OK.
+- Browser walkthrough (puppeteer-core 25.18.1, port 8821, throwaway data dir, replay cassette): 6 screenshots in
+  docs/reports/studio-intel/, 0 console/page errors. Found and fixed from it: chat sends with Ctrl+Enter (script);
+  the agent's chamfer opened with no edges selected (send cleared the selection after the reply arrived);
+  "top edges" included the 4 hole rims (now the outer loop only).
+- No live model call was made (replay only).
+
+### Not done / limitations
+- Impact runs only when the part is in an assembly; Studio's typed commands (Ctrl+K) and tree suppress/delete/reorder
+  don't preview impact yet. A part dropped from a Design Office program's assembly shows in the program list only.
+- fw-edit does not cover extrudes, sketches, patterns, drafts or several features in one block.
+- Re-render needs Blender on the server; nothing re-renders automatically on revision.
+
+### Next
+- Founder try-out on a real assembly; extend impact to tree actions and typed commands; one live agent run to confirm
+  the model prefers fw-edit for small requests (PD-09 subscription, a few hundred tokens).
+
 ## 2026-11-18 (u) — Design Office Phase 5: deliverables, release, calibration, timeline (CD-014, CD-015, DRW-014, CD-018…020)
 
 Branch `wip/office-phase5` (worktree `fw-wt/office-phase5`). Report: docs/reports/design-office.md, Phase 5. PD-55.
