@@ -416,12 +416,9 @@ def create_project(body: ProjectIn, ctx: Ctx = Depends(verified_ctx)) -> dict[st
 @router.get("/projects/{project_id}")
 def get_project(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     p = _project(ctx, project_id)
-    acc = ctx.project_access
-    allowed, reason, cta = can_run_agent(ctx) if acc.as_dict()["can_agent"] else (
-        False, "Guests can't run the design agent." if acc.guest else "You can view this project but not change it.",
-        None)
+    allowed, reason, cta = permissions.agent_gate(ctx, p) or can_run_agent(ctx)
     s = _sessions.get(p.id)
-    return {**project_dict(p), "access": acc.as_dict(), "branch": branches.active_branch(p.id),
+    return {**project_dict(p), "access": ctx.project_access.as_dict(), "branch": branches.active_branch(p.id),
             "agent": {"busy": bool(s and s.busy), "allowed": allowed, "reason": reason,
                       "cta": cta, "has_history": bool(s and s.history)}}
 

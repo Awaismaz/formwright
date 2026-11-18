@@ -131,6 +131,7 @@ def fork_workspace(src_ws: Path, dst_ws: Path, rev: int | None) -> bool:
             if not cur.is_file() or cur.read_text(encoding="utf-8") != rsrc.read_text(encoding="utf-8"):
                 shutil.copy2(rsrc, cur)
                 needs_build = True
+    (dst_ws / ".fw" / "compare").mkdir(parents=True, exist_ok=True)  # revision compares write here
     base = dst_ws / ".fw" / "merge_base"
     base.mkdir(parents=True, exist_ok=True)
     if (dst_ws / "model.py").is_file():

@@ -1190,7 +1190,8 @@ def _mr_state(ctx: Ctx, p: Project, mr: MergeRequest, b: Branch) -> dict[str, An
                           "ids": sorted(((mr.reconcile or {}).get("resolutions") or {}).keys())},
             "can_merge": not blockers, "blockers": blockers,
             "can_review": acc.at_least("comment") and mr.status == "open",
-            "can_approve": acc.at_least("edit") and mr.created_by != ctx.user.id and mr.status == "open"}
+            "can_approve": acc.at_least("edit") and mr.created_by != ctx.user.id and mr.status == "open"
+            and not any(r["user"]["id"] == ctx.user.id and r["state"] == "approved" for r in reviews[-1:])}
 
 
 @router.get("/projects/{project_id}/merge-requests")
@@ -1297,11 +1298,13 @@ async def compare_mr(project_id: str, mid: str, ctx: Ctx = Depends(verified_ctx)
     a, c = main_ws / "out" / "part.step", bws / "out" / "part.step"
     if not a.is_file() or not c.is_file():
         raise HTTPException(404, "Both main and the branch need a built part to compare")
-    out = bws / ".fw" / "compare" / f"mr_{mr.id}"
+    out = bws / ".fw" / "compare" / f"mr{mr.number}"
     shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
     r = await worker.diff(p.org_id, a, c, out)
     if not r.get("ok"):
-        raise HTTPException(422, f"Compare failed: {r.get('error')}")
+        raise HTTPException(422, "The 3D compare could not be computed for these two parts. Try again after both "
+                                 "have finished building.")
     url = f"/api/projects/{p.id}/merge-requests/{mr.id}/compare-files"
     return {"added_mm3": r.get("added_mm3"), "removed_mm3": r.get("removed_mm3"),
             "added_url": f"{url}/added.json" if (out / "added.json").is_file() else None,
@@ -1315,8 +1318,8 @@ def mr_compare_file(project_id: str, mid: str, name: str, ctx: Ctx = Depends(ver
     p = pm._project(ctx, project_id, "read")
     mr, b = _mr(ctx, p, mid)
     bws = _branch_ws(p, b.id)
-    files = {"added.json": bws / ".fw" / "compare" / f"mr_{mr.id}" / "added.json",
-             "removed.json": bws / ".fw" / "compare" / f"mr_{mr.id}" / "removed.json",
+    files = {"added.json": bws / ".fw" / "compare" / f"mr{mr.number}" / "added.json",
+             "removed.json": bws / ".fw" / "compare" / f"mr{mr.number}" / "removed.json",
              "main_topo.json": pm.main_workspace(p) / "out" / "topo.json",
              "branch_topo.json": bws / "out" / "topo.json"}
     f = files.get(name)
@@ -1453,7 +1456,7 @@ async def do_merge(project_id: str, mid: str, body: MergeIn, response: Response,
         notify(ctx.db, mr.created_by, f"{ctx.user.name} merged !{mr.number} {mr.title}",
                f"Main is now at revision {rev}.", f"/app/projects/{p.id}")
     audit(ctx.db, "mr.merged", ctx.user, p.org_id, target=p.id, mr=mr.id, number=mr.number, title=mr.title,
-          branch=b.id, revision=rev, fast_forward=ff)
+          branch="main", source_branch=b.id, revision=rev, fast_forward=ff)
     ctx.db.commit()
     if branches.active_branch(p.id) == b.id:
         _set_branch_cookie(response, p.id, "main")

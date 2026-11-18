@@ -207,10 +207,17 @@ def _check_main_and_locks(ctx: Any, p: Project, acc: Access) -> None:
                                   "lock": lk})
 
 
-def require_level_for_new(ctx: Any) -> None:
-    """Creating projects: any workspace member except viewers."""
-    if ctx.role == "viewer":
-        raise HTTPException(403, "Viewers can't create projects")
+def agent_gate(ctx: Any, p: Project) -> tuple[bool, str | None, str | None] | None:
+    """Why this person can't start the design agent on this project's active branch (None = no project-level
+    reason; plan, tokens and verification are checked by the caller)."""
+    acc: Access = ctx.project_access
+    if acc.guest:
+        return False, "Guests can't run the design agent on a shared project.", None
+    if not acc.at_least("edit"):
+        return False, "You can view this project but not change it.", None
+    if branches.active_branch(p.id) == "main" and acc.protected_main and acc.level != "admin":
+        return False, "Main is protected: work on your own branch to use the design agent.", None
+    return None
 
 
 # ----------------------------------------------------------------------------- helpers for routers

@@ -84,7 +84,7 @@ def test_merge3_lines_and_conflicts() -> None:
     chunks = merge.merge3(base, ["a", "B", "c", "d"], ["a", "b", "c", "D"])
     assert [c["kind"] for c in chunks if c["kind"] != "same"] == ["ours", "theirs"]
     chunks = merge.merge3(base, ["a", "X", "c", "d"], ["a", "Y", "c", "d"])
-    assert [c for c in chunks if c["kind"] == "conflict"][0]["ours"] == ["X"]
+    assert next(c for c in chunks if c["kind"] == "conflict")["ours"] == ["X"]
     assert all(c["kind"] == "same" or c["kind"] == "both" for c in merge.merge3(base, ["a", "Q"], ["a", "Q"]))
 
 
@@ -206,7 +206,7 @@ def test_existing_database_gains_collab_tables_and_keeps_working(tmp_path: Path,
 
 
 # ============================================================================= teams
-def test_team_crud_and_roles(app_client: TestClient) -> None:
+def test_team_crud_and_roles(app_client: TestClient) -> None:  # noqa: F811
     owner = app_client
     signup(owner, "own@x.com", name="Olga Owner")
     eng = _member(owner, "own@x.com", "eng@x.com", "Ed Engineer", "engineer")
@@ -233,7 +233,7 @@ def test_team_crud_and_roles(app_client: TestClient) -> None:
 
 
 # ============================================================================= permission matrix
-def test_permission_matrix(app_client: TestClient) -> None:
+def test_permission_matrix(app_client: TestClient) -> None:  # noqa: F811
     """Workspace roles x team roles x grants x guests x share links, on representative endpoints."""
     owner = app_client
     signup(owner, "own@x.com", name="Olga Owner")
@@ -310,7 +310,7 @@ def test_permission_matrix(app_client: TestClient) -> None:
     assert {"access.changed", "access.granted", "access.revoked"} <= acts
 
 
-def test_guest_invite_link_and_expiry(app_client: TestClient) -> None:
+def test_guest_invite_link_and_expiry(app_client: TestClient) -> None:  # noqa: F811
     owner = app_client
     signup(owner, "own@x.com", name="Olga Owner")
     pid = owner.post("/api/projects", json={"name": "Shared bracket"}).json()["id"]
@@ -364,7 +364,7 @@ def test_guest_invite_link_and_expiry(app_client: TestClient) -> None:
     assert anon.get(f"/api/share/{short['token']}").status_code == 410
 
 
-def test_presence_comments_mentions_activity(app_client: TestClient) -> None:
+def test_presence_comments_mentions_activity(app_client: TestClient) -> None:  # noqa: F811
     owner = app_client
     signup(owner, "own@x.com", name="Olga Owner")
     ada = _member(owner, "own@x.com", "ada@x.com", "Ada Lovelace", "engineer")
@@ -414,7 +414,7 @@ def _main_src(ws: Path) -> str:
     return (ws / "model.py").read_text(encoding="utf-8")
 
 
-def test_branch_isolation_fast_forward_three_way_and_refusal(app_client: TestClient) -> None:
+def test_branch_isolation_fast_forward_three_way_and_refusal(app_client: TestClient) -> None:  # noqa: F811
     owner = app_client
     signup(owner, "own@x.com", name="Olga Owner")
     ada = _member(owner, "own@x.com", "ada@x.com", "Ada Lovelace", "engineer")
@@ -489,7 +489,7 @@ def test_branch_isolation_fast_forward_three_way_and_refusal(app_client: TestCli
     assert _main_src(ws) == before and owner.get(f"/api/projects/{pid}/files/status.json").json()["ok"]
 
 
-def test_conflicts_reconcile_and_protected_main(app_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_conflicts_reconcile_and_protected_main(app_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from aicad.platform.collab import reconcile
 
     owner = app_client

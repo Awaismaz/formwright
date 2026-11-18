@@ -113,7 +113,11 @@ export function AcceptInvite() {
       {error && <div className="mb-4 rounded border border-danger/30 bg-danger/5 px-3 py-2 text-sm text-danger">{error}</div>}
       <Button className="w-full" size="lg" loading={busy} onClick={async () => {
         setBusy(true); setError(null);
-        try { await api.post("/api/team/invites/accept", { token }); await refresh(); toast.success("Welcome to the team!"); nav("/app"); }
+        try {
+          const r = await api.post<{ project_id?: string | null }>("/api/team/invites/accept", { token }); await refresh();
+          if (r.project_id) { toast.success("You have access to the shared project"); nav(`/app/projects/${r.project_id}`); }
+          else { toast.success("Welcome to the team!"); nav("/app"); }
+        }
         catch (e) { setError(e instanceof ApiError ? e.message : "Could not accept the invitation."); }
         finally { setBusy(false); }
       }}>Accept invitation</Button>
