@@ -4,6 +4,36 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
+
+### Done
+- Hero is now a scripted replay of a Design Studio session around a LIVE three.js part: the brief types itself,
+  machinist status words cycle (shared `WORDS` + `MeshingGears` from ShopStatus), the feature tree grows while the
+  flange builds in stages (blank → bore → 6 holes, crossfaded), the five gating checks tick PASS, then "All gating
+  checks pass" and a Flange.step chip. Labelled "Replay"; caption says the part is real Formwright output.
+- Real geometry: `scripts/landing_assets.py` exports Toolbox parts to `web/public/landing/*.glb` (flange stages,
+  spur gear m2 z24, 6204 bearing, M12 bolt/nut/washer, M8 SHCS). `components/landing/PartScene.tsx` renders them
+  (env lighting, CAD edges, turntable, drag to orbit, renders only on screen, still frames under reduced motion,
+  no orbit capture on touch so the page scrolls); `LazyScene` loads three.js only near the viewport.
+- Scroll tour (`components/landing/Showcase.tsx`): Design Studio (ribbon, tree, sketch drawing itself), Toolbox
+  carousel, STEP import + recognition (teeth faces pulse; lines are the recognizer's real output for that gear:
+  24 teeth, module ≈ 2.0, tip Ø52, root Ø43, bore Ø10, 651/651 faces), Assembly (two flanges + 6 × M12 stacks
+  exploding; auto-fit arithmetic 32 + 5 + 10.8 + 3.5 = 51.3 → M12×55), Drawing (flange sheet drawing itself),
+  Advisors. Design Office section labelled **Coming soon** with the 11 named agents and a looping FLIP sprint board.
+- Live badges with a ping, reveal-on-scroll, hero parallax; everything settles to its end state under
+  `prefers-reduced-motion`.
+
+### Verified
+- `npx tsc --noEmit`, `npm test` (32 incl. new `heroTimeline.test.ts`), `vite build`, `ruff check scripts src tests`.
+- Headless Chrome (swiftshader) on port 8792 with a throwaway data dir: desktop 1440, mobile 390 and
+  reduced-motion runs, screenshots at every section; 0 console errors; scrollWidth = viewport width (no horizontal
+  scroll). Fixed from screenshots: tag overlaps, cropped gear on narrow stages (fit uses the narrower FOV), drawing
+  label collisions, auto-fit table wrapping, sketch chip covering a dimension.
+
+### Not done / limitations
+- gear.glb is 457 KB (polyline involute flanks); loads lazily below the fold. Not Draco-compressed.
+- Advisors, Drawing and sketcher panels are illustrations (labelled); only the 3D stages are real output.
+
 ## 2026-11-18 (o) — Punch list reconciliation; Design Office (Chief Designer) plan
 
 ### Done

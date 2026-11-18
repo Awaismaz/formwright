@@ -110,3 +110,29 @@ body { @apply bg-bg text-text antialiased; font-feature-settings: "cv11", "ss01"
 
 @keyframes fw-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { [style*="fw-spin"] { animation: none !important; } }
+
+/* ---- landing page motion (UX-020); everything settles to its final state under reduced motion ---- */
+.fw-reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .8s cubic-bezier(.2, .7, .2, 1); }
+.fw-reveal.is-in { opacity: 1; transform: none; }
+.fw-draw { stroke-dasharray: var(--len, 600); stroke-dashoffset: var(--len, 600); }
+.is-in .fw-draw { animation: fw-draw 1.6s cubic-bezier(.4, 0, .2, 1) forwards; animation-delay: var(--d, 0s); }
+.fw-pop { opacity: 0; transform: translateY(6px); }
+.is-in .fw-pop { animation: fw-pop .45s ease-out forwards; animation-delay: var(--d, 0s); }
+.fw-caret { display: inline-block; width: 1px; height: 1em; margin-left: 1px; vertical-align: -2px; background: currentColor; animation: fw-blink 1s steps(1) infinite; }
+.fw-ping { animation: fw-ping 1.8s cubic-bezier(0, 0, .2, 1) infinite; }
+.fw-float { animation: fw-float 6s ease-in-out infinite; }
+.fw-shimmer { background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .45) 50%, transparent 70%) 0 0 / 220% 100%; animation: fw-shimmer 2.4s linear infinite; }
+@keyframes fw-draw { to { stroke-dashoffset: 0; } }
+@keyframes fw-pop { to { opacity: 1; transform: none; } }
+@keyframes fw-blink { 50% { opacity: 0; } }
+@keyframes fw-ping { 0% { transform: scale(1); opacity: .7; } 80%, 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes fw-float { 50% { transform: translateY(-6px); } }
+@keyframes fw-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .fw-reveal, .fw-pop { opacity: 1; transform: none; transition: none; animation: none !important; }
+  .fw-draw { stroke-dashoffset: 0; animation: none !important; }
+  .fw-caret, .fw-ping, .fw-float, .fw-shimmer { animation: none !important; }
+}
+.fw-bar { transform: scaleX(0); transform-origin: left; transition: transform 1.4s cubic-bezier(.2, .7, .2, 1); }
+.is-in .fw-bar { transform: none; }
+@media (prefers-reduced-motion: reduce) { .fw-bar { transform: none; transition: none; } }
