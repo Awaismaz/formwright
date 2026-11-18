@@ -33,7 +33,8 @@ export const STUDIO_TOUR: DriveStep[] = [
 ];
 
 export function runTour(steps: DriveStep[], name: string, onDone?: () => void) {
-  const present = steps.filter(s => !s.element || document.querySelector(s.element as string));
+  // only steps whose target is on screen (phones hide the sidebar and some studio panels, UX-018)
+  const present = steps.filter(s => { if (!s.element) return true; const el = document.querySelector(s.element as string); return !!el && el.getClientRects().length > 0; });
   track("tour_started", { name });
   const d = driver({
     showProgress: true, allowClose: true, popoverClass: "fw-tour", overlayOpacity: 0.45, stagePadding: 6,

@@ -6,6 +6,7 @@ import { Toaster } from "sonner";
 import { SessionProvider } from "@/lib/session";
 import { TipProvider } from "@/components/ui";
 import { ApiError } from "@/lib/api";
+import { initPwa } from "@/lib/pwa";
 import App from "./App";
 import "./styles.css";
 
@@ -17,6 +18,8 @@ const qc = new QueryClient({
     },
   },
 });
+
+initPwa();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

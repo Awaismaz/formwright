@@ -82,11 +82,11 @@ export default function Board({ program, onOpen }: { program: Program; onOpen: (
   const items = useMemo(() => new Map(program.items.map(i => [i.id, i])), [program.items]);
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-panel2/40">
-      <div className="min-w-[1180px]">
+    <div className="snap-x snap-mandatory overflow-x-auto overscroll-x-contain scroll-pl-2 rounded-lg border border-border bg-panel2/40" data-board-scroll>
+      <div className="min-w-[1180px] max-sm:min-w-[calc(7*78vw)]">
         <div className="sticky top-0 z-10 grid grid-cols-7 gap-2 border-b border-border bg-panel px-2 py-2">
           {program.columns.map(c => (
-            <div key={c.code} className="flex items-center gap-1.5 px-1 text-[11.5px] font-semibold uppercase tracking-wider text-muted">
+            <div key={c.code} className="flex snap-start items-center gap-1.5 px-1 text-[11.5px] font-semibold uppercase tracking-wider text-muted">
               <span className={cx("h-2 w-2 rounded-full", COLUMN_TONE[c.code])} />{c.label}
               <span className="ml-auto rounded-full bg-text/[.06] px-1.5 text-[10.5px] tabular-nums">{program.counts[c.code] ?? 0}</span>
             </div>))}
@@ -96,7 +96,7 @@ export default function Board({ program, onOpen }: { program: Program; onOpen: (
           const isFolded = folded.has(l.id);
           return (
             <section key={l.id} className="border-b border-border last:border-0" aria-label={`Swimlane ${l.name}`}>
-              <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-panel" aria-expanded={!isFolded}
+              <button className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-panel max-sm:sticky max-sm:left-0 max-sm:max-w-[calc(100vw-2.5rem)] max-sm:overflow-hidden" aria-expanded={!isFolded}
                 onClick={() => setFolded(f => { const n = new Set(f); n.has(l.id) ? n.delete(l.id) : n.add(l.id); return n; })}>
                 {isFolded ? <ChevronRight className="h-3.5 w-3.5 text-muted" /> : <ChevronDown className="h-3.5 w-3.5 text-muted" />}
                 <span className="whitespace-nowrap text-[13px] font-semibold">{l.name}</span>

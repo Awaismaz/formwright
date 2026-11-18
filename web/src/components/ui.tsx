@@ -182,7 +182,9 @@ export function Modal({ open, onOpenChange, title, description, children, footer
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] animate-fade-in" />
         <Dialog.Content className={cx("fixed left-1/2 top-1/2 z-50 w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
-          "max-h-[calc(100vh-48px)] overflow-y-auto rounded-xl border border-border bg-panel shadow-pop animate-fade-in",
+          "max-h-[calc(100dvh-48px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-panel shadow-pop animate-fade-in",
+          // phones: a bottom sheet clear of the home indicator (UX-018)
+          "max-sm:bottom-0 max-sm:left-0 max-sm:top-auto max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:pb-[env(safe-area-inset-bottom)]",
           wide ? "max-w-3xl" : "max-w-lg")}>
           <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
             <div>
@@ -241,12 +243,12 @@ export const TipProvider = Tooltip.Provider;
 
 export const Tabs = TabsP.Root;
 export function TabList({ children, className }: { children: ReactNode; className?: string }) {
-  return <TabsP.List className={cx("flex gap-1 border-b border-border", className)}>{children}</TabsP.List>;
+  return <TabsP.List className={cx("flex gap-1 border-b border-border max-sm:overflow-x-auto max-sm:[scrollbar-width:none]", className)}>{children}</TabsP.List>;
 }
 export function Tab({ value, children, compact, title }: { value: string; children: ReactNode; compact?: boolean; title?: string }) {
   return (
     <TabsP.Trigger value={value} title={title}
-      className={cx("-mb-px inline-flex items-center gap-1.5 border-b-2 border-transparent py-2 text-sm text-muted transition hover:text-text data-[state=active]:border-primary data-[state=active]:font-medium data-[state=active]:text-text",
+      className={cx("-mb-px inline-flex shrink-0 items-center whitespace-nowrap gap-1.5 border-b-2 border-transparent py-2 text-sm text-muted transition hover:text-text data-[state=active]:border-primary data-[state=active]:font-medium data-[state=active]:text-text",
         compact ? "px-2 text-[12.5px]" : "px-3")}>
       {children}
     </TabsP.Trigger>

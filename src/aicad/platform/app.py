@@ -37,8 +37,33 @@ WEB_DIST = ROOT / "web" / "dist"
 CSRF_HEADER = "x-fw-csrf"
 CSRF_EXEMPT = {"/api/billing/webhook"}
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; "
+       "connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; "
        "base-uri 'self'; form-action 'self' https://checkout.stripe.com")
+
+# Installable web app (UX-022): explicit types (Windows' registry can map .js to text/plain), and caching that lets
+# a new deploy reach users: the service worker and its manifest are always revalidated, hashed assets are immutable.
+STATIC_TYPES = {".webmanifest": "application/manifest+json", ".js": "text/javascript; charset=utf-8",
+                ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+                ".glb": "model/gltf-binary", ".svg": "image/svg+xml", ".html": "text/html; charset=utf-8",
+                ".woff2": "font/woff2", ".png": "image/png", ".json": "application/json"}
+NO_CACHE = {"sw.js", "manifest.webmanifest", "offline.html", "offline.js"}
+
+
+def static_headers(rel: str) -> dict[str, str]:
+    """Response headers for a built SPA file at `rel` (path relative to web/dist)."""
+    h: dict[str, str] = {}
+    ext = os.path.splitext(rel)[1].lower()
+    if ext in STATIC_TYPES:
+        h["Content-Type"] = STATIC_TYPES[ext]
+    if rel in NO_CACHE:
+        h["Cache-Control"] = "no-cache"
+        if rel == "sw.js":
+            h["Service-Worker-Allowed"] = "/"
+    elif rel.startswith("assets/"):
+        h["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        h["Cache-Control"] = "public, max-age=3600"
+    return h
 
 
 def module_routers() -> list[Any]:
@@ -109,6 +134,8 @@ def create_app() -> FastAPI:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         resp.headers.setdefault("X-Frame-Options", "DENY")
+        if path.startswith("/assets/") and resp.status_code in (200, 304):  # content-hashed build output (StaticFiles)
+            resp.headers.update(static_headers(path[1:]))
         if not path.startswith("/api/docs"):
             resp.headers.setdefault("Content-Security-Policy", CSP)
         if s.cookie_secure:
@@ -134,7 +161,8 @@ def create_app() -> FastAPI:
             return JSONResponse({"detail": "Not found"}, status_code=404)
         f = (WEB_DIST / full_path).resolve()
         if full_path and WEB_DIST.resolve() in f.parents and f.is_file():
-            return FileResponse(f)
+            h = static_headers(full_path)
+            return FileResponse(f, media_type=h.pop("Content-Type", None), headers=h)
         index = WEB_DIST / "index.html"
         if index.is_file():
             return FileResponse(index, headers={"Cache-Control": "no-cache"})

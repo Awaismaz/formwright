@@ -305,7 +305,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) { e.preventDefault(); send(); } }}
             placeholder={mode === "discuss" ? "Ask anything or plan the design, e.g. “How should I retain a bearing on a Ø20 shaft?” — nothing will be changed" : features.length ? "Say what to change, e.g. “make these Ø12” or “move it 10 mm towards the edge”" : selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
             className="input h-auto min-h-[84px] resize-y py-2 leading-relaxed" />
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
             <Tip content="Attach a sketch, photo or drawing (or paste / drop an image)" side="top">
               <button onClick={() => fileRef.current?.click()} className="rounded p-1.5 text-muted hover:bg-text/5" aria-label="Attach image"><ImagePlus className="h-4 w-4" /></button>
@@ -318,10 +318,12 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
                 <button role="radio" aria-checked={mode === "discuss"} onClick={() => setMode("discuss")} className={cx("flex items-center gap-1 px-2 py-1", mode === "discuss" ? "bg-accent text-white" : "text-muted hover:text-text")}><MessagesSquare className="h-3.5 w-3.5" />Discuss</button>
               </Tip>
             </div>
-            <RunMeter projectId={project.id} busy={busy} meter={meter} unlimited={unlimited} balance={me?.org?.token_balance}
-              long={text.length >= 1200} budget={runBudget} onBudget={setRunBudget} version={items.length} />
-            {busy ? <Button size="sm" variant="secondary" icon={<Square className="h-3.5 w-3.5" />} onClick={() => api.post(`/api/projects/${project.id}/agent/interrupt`)}>Stop</Button>
-              : <Button size="sm" icon={<Send className="h-3.5 w-3.5" />} onClick={() => send()} disabled={!text.trim() && !atts.length}>Send</Button>}
+            {/* phones: the run meter gets its own line under the buttons (UX-018) */}
+            <div className="flex min-w-0 flex-1 max-sm:order-last max-sm:basis-full">
+              <RunMeter projectId={project.id} busy={busy} meter={meter} unlimited={unlimited} balance={me?.org?.token_balance}
+                long={text.length >= 1200} budget={runBudget} onBudget={setRunBudget} version={items.length} /></div>
+            {busy ? <Button size="sm" variant="secondary" className="ml-auto" icon={<Square className="h-3.5 w-3.5" />} onClick={() => api.post(`/api/projects/${project.id}/agent/interrupt`)}>Stop</Button>
+              : <Button size="sm" className="ml-auto" icon={<Send className="h-3.5 w-3.5" />} onClick={() => send()} disabled={!text.trim() && !atts.length}>Send</Button>}
           </div>
         </>}
       </div>

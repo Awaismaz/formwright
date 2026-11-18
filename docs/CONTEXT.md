@@ -28,6 +28,10 @@ from any machine. Keep it current at the end of every session (see `CLAUDE.md`).
 - Toolbox generators are deterministic and versioned (`aicad/toolbox.py`, `VERSION`); bump the version on any
   geometry change so old models stay reproducible.
 
+- Installable web app (UX-022): build-time service worker from `web/pwa/` (never caches `/api`); bump nothing by hand,
+  the build id follows the built files. Icons: `scripts/pwa_icons.py`. Anything needing locally installed software
+  goes inside `components/DesktopOnly.tsx`. Compact layouts: `lib/media.ts` (PHONE < 768, COMPACT < 1024).
+
 ## Architecture in one screen
 - `src/aicad/agent/` — `session.py` (Agent SDK session, event scrubbing, `fw-questions` choice blocks),
   `prompt.py` (agent instructions), `runner.py` (build + checks CHK-02..09, fast path, exports, determinism),

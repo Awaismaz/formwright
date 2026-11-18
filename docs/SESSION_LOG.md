@@ -4,6 +4,57 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (p) — Installable web app (UX-022) and mobile/tablet layout pass (UX-018), branch wip/pwa
+
+### Done
+- **PWA**: `web/public/manifest.webmanifest` (standalone, start `/app`, scope `/`, theme/background #23272E, shortcuts
+  Projects / Design Office), icons rendered from the logo mark by `scripts/pwa_icons.py` (any + maskable 192/512,
+  opaque 180 apple-touch-icon), manifest/theme/Apple meta tags and `viewport-fit=cover` in `web/index.html`.
+- **Service worker** without a dependency: `web/pwa/sw.js` is a template; `web/pwa/plugin.ts` (Vite, build only) lists
+  every built file (70: hashed JS/CSS, Inter fonts, icons, landing GLBs, offline page) and a content-hash build id into
+  `dist/sw.js`. Cache-first for those, `/api/*` and `text/event-stream` never touched, navigations network-first with
+  `offline.html` ("You're offline. Your projects are safe. Reconnect to keep designing."), which polls `/api/health`
+  and reloads itself. A new worker waits; the app shows a "New version available · Reload" toast (`lib/pwa.ts`).
+  In-app "You're offline" banner from `navigator.onLine`.
+- **Install offer** (`components/InstallApp.tsx`, pure helpers `lib/install.ts`): one tap via a captured
+  `beforeinstallprompt`; on iPhone/iPad a bottom sheet with Share → Add to Home Screen steps; hidden when running
+  installed. In the account menu, sidebar footer, and a dismissible banner on phones/tablets (not on Studio/module
+  pages; dismissal remembered 60 days).
+- **Server** (`platform/app.py`): `static_headers()` gives explicit MIME types (Windows can map .js to text/plain) and
+  caching: `sw.js`, manifest and offline page `no-cache` (+ `Service-Worker-Allowed: /`), `/assets/*` immutable for a
+  year, other public files one hour; CSP adds `manifest-src 'self'`.
+- **Standalone polish** (`styles.css`): safe-area padding on `#root` (graphite strips behind iOS's translucent status
+  bar in standalone), no overscroll bounce in the app shell, tap highlight off, 16 px fields on iOS, `.fw-hscroll`.
+- **Mobile/tablet pass** (UX-018): see the UX-018 row. Studio compact layout (bottom bar on phones, overlays on
+  tablets, PropertyManager as a bottom half-sheet), touch ribbon, scrolling viewer toolbar, office board snap scroll
+  with sticky lane titles, Modal = bottom sheet on phones, scrollable tab lists, tablet default icon rail,
+  `DesktopOnly` for local integrations (Settings → CAD plugins). Fixed: Assembly and 3D Print canvases drew at
+  devicePixelRatio× on high-DPI screens.
+
+### Verified
+- `npx tsc --noEmit`, `npm test` (49, incl. `lib/install.test.ts` 7), `vite build`; `pytest tests/test_platform.py
+  tests/test_pwa.py` (33 passed); `ruff check src tests`.
+- Headless Chrome (puppeteer-core 25.18.1) on port 8801 with a throwaway data dir: CDP `Page.getAppManifest` (no
+  errors), `Page.getInstallabilityErrors` → `[]`, SW activated and controlling after reload, 70 files in
+  `fw-static-<build>`, no `/api` entry in any cache; update flow (changed `sw.js` → toast → Reload → navigation, new
+  worker active); offline (page + SW target) → offline page; back online → reloads itself.
+- iPhone 14 (390×844, DPR 2, touch, iOS UA) and iPad (820×1180, touch): dashboard, drawer, install sheet, projects,
+  Studio (model / features / agent, Fillet PropertyManager), Design Office home, board (scrolled), ticket sheet,
+  Assembly Studio, modules, billing, settings (+ CAD plugins note), standalone (no install offer). Touch orbit, pinch
+  zoom and two-finger pan change the view (CDP touch events). 0 console errors; 34 screenshots reviewed.
+
+### Not done / limitations
+- Selecting several edges/faces on touch still needs Ctrl (no modifier on phones): next step is a "tap adds to the
+  selection" mode while a multi-pick PropertyManager is open.
+- Drawing, Engineering, 3D Print and Mesh modules were not reworked for phones (they keep the "larger screen" note).
+- No offline viewing and no app-store packaging (PD-43). `display-mode` can't be emulated over CDP; standalone was
+  verified through iOS's `navigator.standalone`. Real-device checks (iOS Safari, Android Chrome) still to do.
+
+### Next step
+Touch multi-select for fillet/chamfer/shell/draft; real-device pass on an iPhone and an Android phone.
+
+---
+
 ## 2026-11-18 (p) — Live landing page (UX-020), branch wip/landing
 
 ### Done
