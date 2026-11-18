@@ -119,6 +119,11 @@ def next_step(ctx: Ctx) -> str:
     u = ctx.user
     if u.email_verified_at is None and not ctx.god_on("skip_verification") and not in_grace(u):
         return "verify_email"
+    if ctx.org is None and u.onboarding_completed_at is not None:
+        from aicad.platform.collab.permissions import is_guest_only
+
+        if is_guest_only(ctx.db, u):
+            return "app"  # a guest: projects shared with them, no workspace of their own (yet)
     if ctx.org is None or (u.onboarding_completed_at is None and not ctx.god_on("skip_onboarding")):
         return "onboarding"
     return "app"

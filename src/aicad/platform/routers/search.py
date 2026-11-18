@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 
 from aicad import similarity
+from aicad.platform.collab import permissions
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
 from aicad.platform.routers.projects import _project, project_dict, workspace_for
@@ -19,7 +20,7 @@ MIN_SCORE = 35.0
 
 def _candidates(ctx: Ctx, exclude: str | None = None) -> list[tuple[Project, dict[str, Any]]]:
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id)).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(select(Project).where(Project.org_id == org.id)).all())
     out = []
     for p in rows:
         if p.id == exclude:

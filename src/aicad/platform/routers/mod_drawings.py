@@ -31,6 +31,7 @@ from aicad import deliverables
 from aicad.drawing import DrawingInputError
 from aicad.drawing import worker as dworker
 from aicad.drawing.generate import normalize_edits
+from aicad.platform.collab import permissions
 from aicad.platform.deps import Ctx, verified_ctx
 from aicad.platform.models import Project
 from aicad.platform.routers.projects import _thumb, wait_finalized, workspace_for
@@ -82,10 +83,7 @@ def _access(ctx: Ctx) -> None:
 
 def _project(ctx: Ctx, project_id: str) -> Project:
     _access(ctx)
-    p = ctx.db.get(Project, project_id)
-    if p is None or p.org_id != ctx.require_org().id:
-        raise HTTPException(404, "Project not found")
-    return p
+    return permissions.require_project(ctx, project_id)  # drawings live in the part's workspace
 
 
 def _status(ws: Path) -> dict[str, Any]:
@@ -189,8 +187,9 @@ def local_date(day: str | None, tz: str | None) -> str:
 def list_projects(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     _access(ctx)
     org = ctx.require_org()
-    rows = ctx.db.scalars(select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
-                          .order_by(Project.updated_at.desc())).all()
+    rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
+        select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
+        .order_by(Project.updated_at.desc())).all())
     return {"items": [_summary(p, workspace_for(p)) for p in rows]}
 
 

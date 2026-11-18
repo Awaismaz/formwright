@@ -20,6 +20,7 @@ from aicad.platform.routers import (
     admin,
     auth,
     billing,
+    collab,
     god,
     handoff,
     journey,
@@ -116,7 +117,8 @@ def create_app() -> FastAPI:
         return resp
 
     for r in (auth.router, journey.router, team.router, billing.router, projects.router, studio.router, library.router,
-              admin.router, god.router, search.router, handoff.router, variants.router, office.router):
+              admin.router, god.router, search.router, handoff.router, variants.router, office.router,
+              collab.router):
         app.include_router(r)
     for r in module_routers():
         app.include_router(r)
@@ -141,4 +143,7 @@ def create_app() -> FastAPI:
         return JSONResponse({"detail": "Frontend not built. Run: cd web && npm install && npm run build"},
                             status_code=503)
 
+    from aicad.platform.collab.branches import RequestContextMiddleware
+
+    app.add_middleware(RequestContextMiddleware)  # request method + active branch for permissions/workspaces
     return app
