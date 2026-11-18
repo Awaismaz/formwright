@@ -1,0 +1,100 @@
+{
+ "python": {
+  "runtime": {
+   "permissive": 107,
+   "weak-copyleft": 2,
+   "proprietary": 1
+  },
+  "dev": {
+   "permissive": 9,
+   "weak-copyleft": 1
+  }
+ },
+ "web": {
+  "dev": {
+   "permissive": 216
+  },
+  "runtime": {
+   "permissive": 60,
+   "weak-copyleft": 1
+  }
+ },
+ "flagged": [
+  {
+   "ecosystem": "pypi",
+   "name": "cadquery-ocp-novtk",
+   "version": "8.0.1.1.0",
+   "scope": "runtime",
+   "license": "Apache-2.0",
+   "effective_class": "weak-copyleft",
+   "bundled": [
+    {
+     "name": "Open CASCADE Technology (OCCT) 8.0",
+     "license": "LGPL-2.1-only WITH OCCT-exception-1.0",
+     "linking": "shared libraries (TK*.dll / .so), loaded by the OCP bindings"
+    },
+    {
+     "name": "FreeImage",
+     "license": "FreeImage OR GPL-2.0-only OR GPL-3.0-only",
+     "linking": "shared library; used under the FreeImage Public Licence (FIPL, MPL-1.1 based) option"
+    },
+    {
+     "name": "LibRaw",
+     "license": "LGPL-2.1-only OR CDDL-1.0",
+     "linking": "shared library (raw.dll)"
+    },
+    {
+     "name": "FreeType",
+     "license": "FTL OR GPL-2.0-only",
+     "linking": "shared library; used under the FTL option"
+    }
+   ]
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "certifi",
+   "version": "2026.10.23",
+   "scope": "runtime",
+   "license": "MPL-2.0",
+   "effective_class": "weak-copyleft",
+   "bundled": []
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "claude-agent-sdk",
+   "version": "0.2.182",
+   "scope": "runtime",
+   "license": "MIT",
+   "effective_class": "proprietary",
+   "bundled": [
+    {
+     "name": "Claude Code CLI (bundled executable)",
+     "license": "LicenseRef-Anthropic-Commercial-Terms",
+     "linking": "separate executable started as a subprocess"
+    }
+   ]
+  },
+  {
+   "ecosystem": "pypi",
+   "name": "pathspec",
+   "version": "1.1.1",
+   "scope": "dev",
+   "license": "MPL-2.0",
+   "effective_class": "weak-copyleft",
+   "bundled": []
+  },
+  {
+   "ecosystem": "npm",
+   "name": "@fontsource-variable/inter",
+   "version": "5.1.0",
+   "scope": "runtime",
+   "license": "OFL-1.1",
+   "effective_class": "weak-copyleft",
+   "bundled": []
+  }
+ ],
+ "components": {
+  "python": 120,
+  "web": 277
+ }
+}

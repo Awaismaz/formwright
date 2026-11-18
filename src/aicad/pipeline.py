@@ -127,7 +127,7 @@ def run(spec_path: Path, out_dir: Path) -> dict[str, Any]:
         checks=checks.as_dicts(results),
         timings_s={k: round(v, 4) for k, v in t.items()},
         env={"python": platform.python_version(), "build123d": _ver("build123d"),
-             "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp"),
+             "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp", "cadquery-ocp-novtk"),
              "platform": platform.platform()},
         viewer_mesh_source="re-imported part.step",
     )

@@ -1,0 +1,21 @@
+{
+ "note": "LEG-002. Every dependency whose licence (or a native library bundled in its wheel) is weak / strong / network copyleft, proprietary or unknown must be listed here with how Formwright uses it. scripts/sbom.py --check (and tests/test_sbom.py) fail on any flagged dependency missing from this list, or whose licence class got worse than max_class. Adding an AGPL/SSPL (network-copyleft) or GPL (strong-copyleft) entry needs a founder decision (PD row) and counsel (LEG-003/LEG-004).",
+ "entries": [
+  {"ecosystem": "pypi", "name": "cadquery-ocp-novtk", "max_class": "weak-copyleft",
+   "license": "Apache-2.0 (bindings); bundles OCCT LGPL-2.1-only WITH OCCT-exception-1.0, FreeImage (FIPL option), LibRaw (LGPL-2.1/CDDL-1.0), FreeType (FTL option)",
+   "usage": "The CAD kernel. Python bindings load the unmodified OCCT shared libraries shipped in the wheel (dynamic linking). Formwright does not modify OCCT. Runs server-side (SaaS); nothing is distributed to customers today. If a desktop app or plugin ever ships these libraries, LGPL obligations apply (offer source of OCCT, allow relinking/replacement of the shared libraries, keep notices). Counsel review: LEG-003.",
+   "reviewed": "2026-11-18 (engineering, not legal advice)"},
+  {"ecosystem": "pypi", "name": "certifi", "max_class": "weak-copyleft", "license": "MPL-2.0",
+   "usage": "CA certificate bundle used unmodified by HTTP clients (requests/httpx). MPL-2.0 is file-level copyleft: obligations only if certifi's own files are modified and distributed. We do neither.",
+   "reviewed": "2026-11-18"},
+  {"ecosystem": "pypi", "name": "claude-agent-sdk", "max_class": "proprietary",
+   "license": "MIT (SDK); bundles the Claude Code CLI executable under Anthropic's commercial terms",
+   "usage": "Design agent runtime. The bundled CLI runs as a separate subprocess; it is not linked into or redistributed with Formwright. Use is governed by Anthropic's terms (dev: founder's Claude Code login; production: API key, PD-09 / AGT-015).",
+   "reviewed": "2026-11-18"},
+  {"ecosystem": "pypi", "name": "pathspec", "max_class": "weak-copyleft", "license": "MPL-2.0",
+   "usage": "Development only (mypy dependency): never deployed or distributed.", "reviewed": "2026-11-18"},
+  {"ecosystem": "npm", "name": "@fontsource-variable/inter", "max_class": "weak-copyleft", "license": "OFL-1.1",
+   "usage": "The Inter web font, served unmodified with the web app. OFL allows bundling and embedding; only modified fonts must stay OFL and must not use the reserved name. We do not modify it.",
+   "reviewed": "2026-11-18"}
+ ]
+}

@@ -96,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
         from aicad.eval.benchmark import main as bench
 
         return bench(argv[1:])
+    if argv[:1] == ["repeat"]:  # EVAL-008 same-prompt repeatability (aicad repeat --help)
+        from aicad.eval.repeat import main as repeat
+
+        return repeat(argv[1:])
     p = argparse.ArgumentParser(prog="aicad")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("build", "live"):
