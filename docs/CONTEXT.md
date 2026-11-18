@@ -113,7 +113,7 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-58).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-63).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
@@ -142,7 +142,6 @@ intelligence (agent fills the PropertyManager, change-impact preview, datasheet 
 review gate, change notices / Rev B, motion check, faster clash screening; PD-61), agent platform (LLM provider layer,
 Export for SOLIDWORKS, Blender IO; PD-59). Parked decisions now PD-35…PD-63. Batch 29-30 merged 2026-11-19; nothing in flight on branches.
 **Quality fixtures (merged 2026-11-19):** golden assembly fixtures FX-04/05/06 in `src/aicad/fixtures/` + `specs/fixtures/` (regenerate definitions with `uv run python -m aicad.fixtures --write`; expected values are hand formulas only), advisory render similarity `eval/render_similarity.py` logged in bench / repeat / run record, never gating (PD-62).
-Export for SOLIDWORKS, Blender IO; PD-59). Parked decisions now PD-35…PD-61.
 **Studio follow-ups (merged 2026-11-19, WORKLIST 30, PD-63):** sheet metal: automatic corner relief + closed/open corners where flanges on adjacent edges meet (`Bend.ext` shortens the earlier bend), cuts through bends unbent into the flat (neutral-surface trace), jog (`sm_jog` / `fw.jog`); fw-edit: extrude depth, pattern count/spacing, several edits per block (one PM step each); impact preview also for tree suppress/delete/move and Ctrl+K commands (`trial_source` kinds suppress / delete / reorder / design_* / sequence). Report: docs/reports/studio-followups/.
 
 **Design Office phase 6 (merged 2026-11-19):** gearbox-like programs lay their shafts along +Y in the housing's side walls (seat per wall, caps coaxial over the seats with tapped holes, cover = lid, gear cavity); ICD features along X/Y carry `ax` and are written in a canonical frame (`office/frames.CANON`) so the Z code (placeholders, Gage, Fitz, GD&T) is reused; optional per-part review gate (`review_gate`); change notices after release (`office/ecn.py`, Rev B pack + diff, packs write-once); motion range check (ASM-011, `assembly/motion.py`, program joints from the ICD); faster interference / clearance screening (ASM-022). Report: docs/reports/design-office.md Phase 6; defaults PD-61.
