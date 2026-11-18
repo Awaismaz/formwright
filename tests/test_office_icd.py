@@ -97,7 +97,13 @@ def test_icd_templates_are_valid(name: str, brief: str) -> None:
         assert (mesh["module"], mesh["teeth_a"], mesh["teeth_b"], mesh["centre_distance"]) == (2.0, 18, 54, 72)
         dx = abs(mesh["axis_a"][0] - mesh["axis_b"][0])
         assert abs(dx - 72) < 1e-9 and mesh["axis_a"][1] == mesh["axis_b"][1]
-        assert sum(1 for f in ifs if f["kind"] == "shaft_bore") == 4  # 2 shafts in the housing, 2 gears on them
+        # Phase 5: the shafts run in pairs of 6205 bearings (2 off per shaft in the plan), the gears sit on them,
+        # and the output gear ("keyed to the output shaft") carries a DIN 6885 key 8 x 7 (Ø25: 22 < d <= 30)
+        assert sum(1 for f in ifs if f["kind"] == "shaft_bore") == 2  # the 2 gears on their shafts
+        seats = [f["data"] for f in ifs if f["kind"] == "bearing_seat"]
+        assert [(s["designation"], s["d"], s["D"], s["B"], s["count"]) for s in seats] == [("6205", 25, 52, 15, 2)] * 2
+        key = next(f["data"] for f in ifs if f["kind"] == "key")
+        assert (key["b"], key["h"], key["t1"], key["t2"]) == (8, 7, 4.0, 3.3)
 
 
 def test_fit_zones_iso286() -> None:

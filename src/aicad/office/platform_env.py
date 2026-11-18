@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 
 from aicad.office import (
     conformance,
+    deliverables,
     fake_agents,
     gage,
     interfaces,
@@ -333,7 +334,9 @@ class PlatformEnv(orchestrator.Env):
             if (doc.get("assembly") or {}).get("status") != "ready":
                 return {"skipped": "Fitz will place this part when the program assembly is built."}
             try:
-                state = await program_assembly.swap(_aroot(self.org_id), self.org_id, doc, {t["item_id"]: key})
+                fr = (t.get("icd_check") or {}).get("frame")
+                state = await program_assembly.swap(_aroot(self.org_id), self.org_id, doc, {t["item_id"]: key},
+                                                    frames={t["item_id"]: fr} if fr and not fr.get("identity") else None)
             except Exception as e:
                 log.exception("swap-in failed")
                 return {"skipped": f"Fitz couldn't swap the part in: {e}"}
@@ -382,13 +385,111 @@ class PlatformEnv(orchestrator.Env):
             db.close()
         return None if r is None else {**r, "tokens": 0 if self.god_tokens else tokens}
 
+    # ------------------------------------------------------------------ Phase 5: Ortho and Smithy
+    def _module(self, code: str) -> bool:
+        from aicad.platform.models import Organization
+        from aicad.platform.services import org_modules
+
+        db = self._db()
+        try:
+            org = db.get(Organization, self.org_id)
+            return org is not None and (code in org_modules(db, org) or self.god_paywall)
+        finally:
+            db.close()
+
+    def _user_name(self) -> str:
+        from aicad.platform.models import User
+
+        db = self._db()
+        try:
+            u = db.get(User, self.user_id)
+            return (u.name or u.email) if u else "Design Office"
+        finally:
+            db.close()
+
+    async def drawing(self, doc: dict[str, Any], t: dict[str, Any], project_id: str) -> dict[str, Any]:
+        from fastapi import HTTPException
+
+        from aicad.platform.routers import mod_drawings as md
+        from aicad.platform.routers.projects import workspace_for
+
+        if not self._module("drawings"):
+            return {"ok": False, "error": "Drawing Studio isn't included in your plan: unlock it to get drawings."}
+        db = self._db()
+        try:
+            p = self._project(db, project_id)
+            db.expunge(p)
+        finally:
+            db.close()
+        ws = workspace_for(p)
+        spec = {}
+        if interfaces.has_icd(doc) and t["item_id"] in (doc.get("skeleton") or {}).get("items", {}):
+            spec = deliverables.icd_spec(doc["skeleton"], doc["icd"], t["item_id"])
+        d = ws / "drawings"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "spec.json").write_text(json.dumps(spec, indent=1, sort_keys=True), encoding="utf-8")
+        meta = md._meta(p, ws, self._user_name(), md.local_date(None, None))
+        old = md._record(ws) or {}
+        try:
+            res = await md._generate(p, ws, old.get("options") or {}, meta, md._edits(ws), d)
+        except HTTPException as e:
+            return {"ok": False, "error": e.detail if isinstance(e.detail, str) else "The drawing failed."}
+        except Exception as e:
+            log.exception("drawing failed")
+            return {"ok": False, "error": f"The drawing failed: {e}"}
+        rec = res["result"]
+        dims = rec.get("dimensions") or []
+        return {"ok": True, "check_passed": bool(rec["check"]["passed"]), "problems": rec["check"].get("problems") or [],
+                "scale": rec["sheet"]["scale"], "size": rec["sheet"]["size"], "model_rev": rec.get("model_rev"),
+                "spec_dims": sum(1 for x in dims if x["tag"] == "spec"),
+                "inferred_dims": sum(1 for x in dims if x["tag"] == "inferred"),
+                "icd_dims": len((rec.get("icd") or {}).get("mapped") or []),
+                "icd_offered": len((rec.get("icd") or {}).get("offered") or []),
+                "callouts": len(rec.get("callouts") or [])}
+
+    async def assembly_drawing(self, root: Path, pid: str, rev: str | None = None,
+                               dest: Path | None = None) -> dict[str, Any]:
+        return await assembly_drawing(root, pid, self.org_id, self._user_name(), rev, dest,
+                                      self._module("drawings"))
+
+    async def dfm(self, doc: dict[str, Any], t: dict[str, Any], project_id: str) -> dict[str, Any]:
+        from aicad.manufacturing import shop as shop_mod
+        from aicad.manufacturing.analyze import Inputs, analyse_workspace
+        from aicad.platform.config import get_settings
+        from aicad.platform.routers import mod_manufacturing as mm
+        from aicad.platform.routers.projects import wait_finalized, workspace_for
+
+        if not self._module("manufacturing"):
+            return {"error": "The Manufacturing Advisor isn't included in your plan."}
+        db = self._db()
+        try:
+            p = self._project(db, project_id)
+            ws = workspace_for(p)
+        finally:
+            db.close()
+        await wait_finalized(project_id)
+        if not (ws / "out" / "part.step").is_file():
+            return {"error": "No verified build to analyse."}
+        org_dir = (get_settings().workspaces_dir.resolve() / self.org_id).resolve()
+        prof, _ = shop_mod.load(org_dir)
+        qty = max(10, int(t.get("qty") or 1))
+
+        def run() -> dict[str, Any]:
+            with mm._lock:
+                return analyse_workspace(ws, prof, Inputs(quantity=qty), mm._project_material(ws))
+        try:
+            return {"analysis": await asyncio.to_thread(run)}
+        except Exception as e:
+            log.exception("DFM failed")
+            return {"error": f"The analysis failed: {e}"}
+
     # ------------------------------------------------------------------ Fitz
     async def integrate(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
-        from aicad.assembly import AssemblyInputError, fitz
+        from aicad.assembly import AssemblyInputError, fitz, locks
         from aicad.assembly import service as aservice
         from aicad.assembly import store as astore
         from aicad.platform.models import Organization, Project
-        from aicad.platform.routers.mod_assembly import _lock, _model_rev, _status
+        from aicad.platform.routers.mod_assembly import _model_rev, _status
         from aicad.platform.routers.projects import wait_finalized, workspace_for
         from aicad.platform.services import org_modules
 
@@ -450,7 +551,7 @@ class PlatformEnv(orchestrator.Env):
                                                       _model_rev(ws, st.get("build_id")))
 
         try:
-            async with _lock(adoc["id"]):
+            async with locks.hold(adoc["id"], locks.OFFICE):
                 adoc = astore.load(aroot, adoc["id"]) or adoc
                 res = await fitz.execute(aroot, self.org_id, adoc, items, project_part)
                 astore.save(aroot, adoc)
@@ -542,6 +643,15 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
     item = next((i for i in doc["items"] if i["id"] == t["item_id"]), {})
     text = f"{t['title']} {item.get('description') or ''}".strip()
     standard = t["kind"] == "standard"
+    if standard and interfaces.has_icd(doc):  # a bearing / dowel the ICD sized and placed: take exactly that
+        from aicad.office import icd
+
+        seat = icd.seated(doc["icd"]["interfaces"], t["item_id"])
+        if seat:
+            return {"source": "toolbox", "code": seat["code"], "params": toolbox.normalize(seat["code"], seat["params"]),
+                    "title": seat["title"], "standard": seat["standard"], "kind": seat["code"], "confidence": "high",
+                    "read": True, "found": f"Hex found {seat['title']} in the Toolbox, sized by the ICD "
+                                           f"({seat['interface']})"}
     tb = librarian.read_toolbox(text) or (librarian.read_toolbox(f"{t['title']} {item['toolbox']}")
                                           if standard and item.get("toolbox") else None)
     if tb is not None:
@@ -629,6 +739,97 @@ async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str
                           "Fitz couldn't build the program assembly from placeholders.")
             return
         save_assembly(root, pid, state, state["summary"], clashes=len(state["clashes"]))
+
+
+# ---------------------------------------------------------------------------- deliverables (CD-014)
+def _clean(name: str, program: str) -> str:
+    from aicad.assembly.service import clean_name
+
+    return clean_name(name).removeprefix(f"{program} · ").strip()
+
+
+def program_bom(doc: dict[str, Any]) -> dict[str, Any]:
+    """The program BOM from its final assembly (what is really in the product) and its tickets (quantities, make /
+    buy). Before the program assembly exists: from the tickets alone."""
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+    from aicad.platform.models import Project
+    from aicad.platform.routers.projects import workspace_for
+
+    aroot = _aroot(doc["org_id"])
+    state = doc.get("assembly") or {}
+    final = astore.load(aroot, state["final"]) if state.get("final") and state.get("status") == "ready" else None
+    names = {}
+    pids = {t.get("project_id") or (t.get("reuse") or {}).get("project_id") for t in doc["tickets"]} - {None}
+    info: dict[str, dict[str, Any]] = {}
+    if pids:
+        from aicad import materials
+
+        db = session_factory()
+        try:
+            for p in db.scalars(select(Project).where(Project.id.in_(pids), Project.org_id == doc["org_id"])).all():
+                names[p.id] = _clean(p.name, doc["name"])
+                try:
+                    st = json.loads((workspace_for(p) / "out" / "status.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    st = {}
+                m = materials.get(materials.guess(st.get("material")))
+                vol = (st.get("fingerprint") or {}).get("volume")
+                info[p.id] = {"name": names[p.id], "material": st.get("material"),
+                              "mass_g": round(float(vol) * float(m["density_g_cm3"]) / 1000.0, 2) if m and vol else None}
+        finally:
+            db.close()
+    rows = None
+    inst_items: dict[str, dict[str, Any]] = {}
+    part_projects: dict[str, str] = {}
+    if final is not None and final["instances"]:
+        parts = aservice._parts(aroot, final)
+        b = aservice.bom(aroot, final, names)
+        rows = [{**r, "code": parts[r["part_key"]].get("code")} for r in b["rows"]]
+        inst_items = {i["id"]: i["office"] for i in final["instances"] if i.get("office")}
+        part_projects = {k: p["project_id"] for k, p in parts.items() if p.get("kind") == "project"}
+    return deliverables.bom(doc["tickets"], rows, inst_items, part_projects, info)
+
+
+def session_factory() -> Any:
+    from aicad.platform.db import session_factory as sf
+
+    return sf()()
+
+
+async def assembly_drawing(root: Path, pid: str, org_id: str, user_name: str, rev: str | None = None,
+                           dest: Path | None = None, allowed: bool = True) -> dict[str, Any]:
+    """Ortho's assembly drawing (DRW-014): the final assembly in an isometric view, the program BOM as a table and
+    a balloon per BOM line. Written to the program's ``deliverables/assembly`` folder (or ``dest`` for a release)."""
+    from aicad.assembly import store as astore
+    from aicad.drawing import worker as dworker
+    from aicad.platform.routers.mod_drawings import local_date
+
+    if not allowed:
+        return {"ok": False, "error": "Drawing Studio isn't included in your plan: unlock it to get drawings."}
+    doc = store.load(root, pid)
+    if doc is None:
+        return {"ok": False, "error": "Program not found"}
+    state = doc.get("assembly") or {}
+    aroot = _aroot(org_id)
+    final = astore.load(aroot, state["final"]) if state.get("final") else None
+    if final is None or not final["instances"]:
+        return {"ok": False, "error": "There is no program assembly to draw."}
+    b = program_bom(doc)
+    nodes = [{"step": str(astore.part_dir(aroot, i["part"]) / "part.step"), "T": i["T"], "inst": i["id"]}
+             for i in final["instances"]]
+    out = dest or store.program_dir(root, pid) / "deliverables" / "assembly"
+    meta = {"title": doc["name"], "drawing_no": f"FW-{doc['key']}-ASM", "drawn_by": user_name,
+            "date": local_date(None, None), "rev": rev or "DRAFT",
+            "source": f"ICD v{(doc.get('icd') or {}).get('version', '—')} · {len(final['instances'])} instances"}
+    try:
+        res = await dworker.assembly(org_id, nodes, b["rows"], out, meta)
+    except Exception as e:
+        log.exception("assembly drawing failed")
+        return {"ok": False, "error": f"The assembly drawing failed: {e}"}
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error") or "The assembly drawing failed."}
+    return {"ok": True, **res["result"], "bom_rows": len(b["rows"])}
 
 
 async def decide_cr(root: Path, pid: str, cid: str, env: PlatformEnv | None) -> dict[str, Any]:

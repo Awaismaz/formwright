@@ -10,6 +10,7 @@ import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE } from "./api";
 import { useMoveTicket } from "./Board";
 import { assignable, fmtMinutes, runChip } from "./model";
+import { errorTone, fmtError } from "./timeline";
 import type { Column, OfficeEvent, Program, Ticket } from "./types";
 
 export function ActorBadge({ e, size = 24 }: { e: Pick<OfficeEvent, "actor">; size?: number }) {
@@ -53,7 +54,8 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
   const control = (action: string) => call(action, () => api.post<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}/control`, { action }));
   const who = t.agent ?? t.specialist;
   const holder = AGENT[who];
-  const busyRun = ["searching", "designing", "reviewing", "integrating"].includes(t.run_status ?? "");
+  const busyRun = ["searching", "designing", "reviewing", "integrating", "fitting", "drafting", "screening"].includes(t.run_status ?? "");
+  const deliverable = t.kind === "deliverable";
   const chip = runChip(t);
   const done = t.column === "approved" || t.column === "integrated";
   const spec = AGENT[t.specialist]?.name ?? "the agent";
@@ -100,7 +102,9 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
             {(done || t.run_status === "blocked") && <Button size="sm" variant="secondary" loading={busy === "reopen"} disabled={busyRun} icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => control("reopen")}>Reopen</Button>}
             {(t.run_status === "blocked" || t.run_status === "retry") && <Button size="sm" loading={busy === "retry"} icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => control("retry")}>Retry now</Button>}
           </div>}
-          {canEdit && <Button className="w-full" loading={busy === "start"} icon={<ExternalLink className="h-4 w-4" />} onClick={start}>
+          {deliverable && <Button className="w-full" variant="secondary" icon={<ExternalLink className="h-4 w-4" />}
+            onClick={() => { onClose(); nav(`/app/office/programs/${program.id}?tab=deliverables`); }}>Open the deliverables</Button>}
+          {canEdit && !deliverable && <Button className="w-full" loading={busy === "start"} icon={<ExternalLink className="h-4 w-4" />} onClick={start}>
             {linked ? (t.kind === "integration" ? "Open the assembly" : t.taken_over ? "Continue in Design Studio" : "Open in Design Studio") : t.kind === "integration" ? "Start: open an assembly" : "Start by hand: open in Design Studio with this brief"}</Button>}
           <div>
             <div className="label mb-1">Brief</div>
@@ -139,7 +143,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           <label className="block"><span className="label">Specialist</span>
             <select className="input mt-1 h-9 py-0" value={t.specialist} disabled={!canEdit}
               onChange={e => call("assign", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { specialist: e.target.value }))}>
-              {AGENTS.filter(x => assignable(t.kind).includes(x.code)).map(x => <option key={x.code} value={x.code}>{x.name} · {x.role}</option>)}</select></label>
+              {AGENTS.filter(x => assignable(t.kind, t.deliverable).includes(x.code)).map(x => <option key={x.code} value={x.code}>{x.name} · {x.role}</option>)}</select></label>
           <label className="block"><span className="label">Priority</span>
             <select className="input mt-1 h-9 py-0" value={t.priority ?? "normal"} disabled={!canEdit}
               onChange={e => call("prio", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { priority: e.target.value }))}>
@@ -150,6 +154,14 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               {[1, 2, 3, 4, 5].map(c => <option key={c} value={c}>{c}</option>)}</select></label>}
           <div className="rounded-md border border-border p-2.5 text-[12px]">
             <div className="flex justify-between"><span className="text-muted">Estimate</span><b>{fmtMinutes(t.estimate_min)}</b></div>
+            {(t.actual_min ?? 0) > 0 && <div className="flex justify-between" data-actual><span className="text-muted">Actual agent time</span>
+              <b>{fmtMinutes(t.actual_min ?? 0)}{t.error_pct !== null && t.error_pct !== undefined && <span className={cx("ml-1 font-medium",
+                { success: "text-success", warning: "text-warning", danger: "text-danger", neutral: "text-muted" }[errorTone(t.error_pct)])}>({fmtError(t.error_pct)})</span>}</b></div>}
+            {t.rounds && Object.keys(t.rounds).length > 0 && <div className="text-[11px] text-muted">{Object.entries(t.rounds).map(([k, v]) =>
+              `${{ hex: "Toolbox search", design: "design turns", review: "Gage rounds", fit: "swap-ins", integrate: "integrations", drawings: "drawing runs", dfm: "review runs" }[k] ?? k} ${v}`).join(" · ")}</div>}
+            {t.calibrated && <div className="mt-1 text-[11px] text-muted">{t.calibrated.learned
+              ? `Taught the estimate: ${AGENT[t.specialist]?.name}'s rate ${t.calibrated.before} → ${t.calibrated.after} min per unit.`
+              : `Not used for calibration: ${t.calibrated.why}.`}</div>}
             <div className="flex justify-between"><span className="text-muted">Progress</span><b>{t.progress} %</b></div>
             {t.tokens > 0 && <div className="flex justify-between"><span className="text-muted">Design tokens</span><b>{t.tokens}</b></div>}
             {(t.review_tokens ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted">Review tokens</span><b>{t.review_tokens}</b></div>}

@@ -201,8 +201,15 @@ def get_drawing(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, 
 
 def _meta(p: Project, ws: Path, user_name: str, day: str) -> dict[str, Any]:
     st = _status(ws)
-    return {"title": p.name.removeprefix("Demo · "), "drawing_no": f"FW-{p.id[:8].upper()}", "drawn_by": user_name,
+    meta = {"title": p.name.removeprefix("Demo · "), "drawing_no": f"FW-{p.id[:8].upper()}", "drawn_by": user_name,
             "date": day, "model_rev": _model_rev(ws, st.get("build_id")), "releases": releases(ws)}
+    spec = ws / "drawings" / "spec.json"  # interface numbers from a Design Office ICD (CD-014): kept with the part
+    if spec.is_file():
+        try:
+            meta["spec"] = json.loads(spec.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    return meta
 
 
 async def _generate(p: Project, ws: Path, opts: dict[str, Any], meta: dict[str, Any], edits: dict[str, Any],

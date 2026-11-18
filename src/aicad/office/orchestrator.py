@@ -13,6 +13,13 @@ Work per ticket (stages, each persisted so a restart resumes where it stopped):
   part / standard:  hex (Toolbox and company parts, 0 tokens) -> design (specialist in the Studio project) ->
                     review (Gage: deterministic checks + AI note; send back up to 2 times, then the engineer)
   integration:      integrate (Fitz: assembly document, insert approved parts, auto-mate, interference)
+  deliverables:     drawings (Ortho: a sheet per part with ICD spec dimensions, the assembly drawing with its BOM and
+                    balloons) and dfm (Smithy: the Manufacturing Advisor on every part, the program DFM summary);
+                    opened when the final assembly is integrated (CD-014)
+
+Every stage is recorded on its ticket (``segments``: stage, agent instance, start, end) together with waits for
+capacity and blocked spells; a finished ticket teaches its family's estimate (``calibration``, CD-015) and the
+Timeline tab draws planned against actual (``timeline``).
 
 Budget (CD-016): warn at 80 % of the program budget, stop claiming new work at 100 % (God mode's token bypass is
 respected); every run's own budget is capped by what is left. Rate limits (the founder's subscription is shared):
@@ -34,7 +41,9 @@ from typing import Any
 
 from aicad.office import (
     OfficeInputError,
+    calibration,
     conformance,
+    deliverables,
     estimates,
     gage,
     interfaces,
@@ -42,15 +51,17 @@ from aicad.office import (
     service,
     specialists,
     store,
+    timeline,
 )
 
 log = logging.getLogger("aicad.office.orchestrator")
 
-ACTIVE = {"searching", "designing", "reviewing", "integrating", "fitting"}
+ACTIVE = {"searching", "designing", "reviewing", "integrating", "fitting", "drafting", "screening"}
 STAGE_OF = {"searching": "hex", "designing": "design", "reviewing": "review", "integrating": "integrate",
-            "fitting": "fit"}
+            "fitting": "fit", "drafting": "drawings", "screening": "dfm"}
 STATUS_OF = {"hex": "searching", "design": "designing", "review": "reviewing", "integrate": "integrating",
-             "fit": "fitting"}
+             "fit": "fitting", "drawings": "drafting", "dfm": "screening"}
+STAGE_AGENT = {"hex": "hex", "integrate": "fitz", "review": "gage", "fit": "fitz"}
 MAX_CLASH_ROUNDS = 2       # times Fitz sends a part back for clashes before it waits for the engineer
 PRIORITY = {"high": 1, "normal": 0, "low": -1}
 MAX_ATTEMPTS = 2           # failed design runs retried before the ticket waits for the engineer
@@ -121,6 +132,8 @@ def deps_done(doc: dict[str, Any], t: dict[str, Any]) -> bool:
 
 
 def first_stage(t: dict[str, Any]) -> str:
+    if t["kind"] == "deliverable":
+        return str(t["deliverable"])
     return "integrate" if t["kind"] == "integration" else "hex"
 
 
@@ -194,6 +207,7 @@ def start(root: Path, doc: dict[str, Any], actor: dict[str, Any], *, user_id: st
         raise OfficeInputError("The program has used its token budget. Raise the budget to run more work.")
     o.update(state="running", user_id=user_id, by=actor.get("name"), god_tokens=god_tokens,
              god_paywall=god_paywall, started_at=store.now(), reason=None)
+    o.setdefault("first_run_at", round(time.time(), 3))  # the timeline's origin
     o.setdefault("warned", False)
     service.emit(root, doc, "program.run", f"{actor.get('name', 'Someone')} pressed Run: the office works the "
                  f"tickets, {doc['concurrency']} at a time.", actor)
@@ -206,6 +220,23 @@ def pause(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
     o.update(state="paused", reason=None)
     service.emit(root, doc, "program.paused", f"{actor.get('name', 'Someone')} paused the program. Agents finish "
                  "the step they are on; nothing new starts.", actor)
+
+
+def open_wait(t: dict[str, Any], kind: str) -> None:
+    """Start a waiting spell on the ticket (``capacity``: waiting for the AI service or the token balance;
+    ``blocked``: waiting for the engineer). The timeline draws it until the ticket is picked up again."""
+    w = t.get("wait_since")
+    if w and w.get("kind") == kind:
+        return
+    close_wait(t)
+    t["wait_since"] = {"kind": kind, "t": round(time.time(), 3)}
+
+
+def close_wait(t: dict[str, Any]) -> None:
+    w = t.pop("wait_since", None)
+    if w:
+        t.setdefault("segments", []).append({"stage": w["kind"], "kind": w["kind"], "agent": None, "label": None,
+                                             "start": w["t"], "end": round(time.time(), 3)})
 
 
 def _set_run(t: dict[str, Any], **kw: Any) -> dict[str, Any]:
@@ -231,9 +262,13 @@ def control(root: Path, doc: dict[str, Any], tid: str, action: str, actor: dict[
         service.emit(root, doc, "ticket.resumed", f"{who} resumed {service._label(t)}.", actor, tid)
         return False
     if action == "take_over":
+        if t["kind"] == "deliverable":
+            raise OfficeInputError("Ortho and Smithy make the deliverables from the parts: edit a sheet in Drawing "
+                                   "Studio, or reopen the ticket to make them again.")
         if t["kind"] == "integration":
             raise OfficeInputError("Open the assembly to work on it by hand; Fitz only runs when you press Run.")
         t["taken_over"] = True
+        t["manual_work"] = True  # an engineer's hands on it: its time doesn't calibrate the agents' estimates
         _set_run(t, status="manual", line=f"{who} took over: continuing by hand in the Design Studio")
         service.emit(root, doc, "ticket.taken_over", f"{who} took over {service._label(t)} and continues by hand.",
                      actor, tid)
@@ -362,6 +397,19 @@ class Env:
         """Put the approved part into the program assembly in place of its placeholder. {last, problems, mates}."""
         return {"skipped": "No program assembly to fit into."}
 
+    # ---- Phase 5: deliverables
+    async def drawing(self, doc: dict[str, Any], t: dict[str, Any], project_id: str) -> dict[str, Any]:
+        """Ortho: the part's drawing sheet (Drawing Studio) with ICD spec dimensions. {ok, check_passed, ...}."""
+        return {"ok": False, "error": "Drawing Studio is not available here."}
+
+    async def assembly_drawing(self, root: Path, pid: str) -> dict[str, Any]:
+        """Ortho: the program's assembly drawing with its BOM table and balloons (DRW-014). {ok, balloons, ...}."""
+        return {"ok": False, "error": "Drawing Studio is not available here."}
+
+    async def dfm(self, doc: dict[str, Any], t: dict[str, Any], project_id: str) -> dict[str, Any]:
+        """Smithy: the Manufacturing Advisor's analysis of the part. {analysis} or {error}."""
+        return {"error": "The Manufacturing Advisor is not available here."}
+
     async def decide_cr(self, root: Path, pid: str, cid: str) -> dict[str, Any]:
         """Archie decides a change request (rule + optional AI note) and regenerates placeholders on accept."""
         from aicad.office import platform_env
@@ -470,11 +518,23 @@ class Runner:
             o = orch(doc)
             if o.get("state") != "running":
                 return not self.tasks
-            if doc["tickets"] and all(t["column"] == "integrated" for t in doc["tickets"]):
-                o.update(state="complete")
-                service.emit(self.root, doc, "program.done", f"{doc['name']}: every ticket is integrated. The "
-                             "office has stopped.", service.agent_actor("archie"))
-                return True
+            core = [t for t in doc["tickets"] if t["kind"] != "deliverable"]
+            if core and all(t["column"] == "integrated" for t in core):
+                deliv = [t for t in doc["tickets"] if t["kind"] == "deliverable"]
+                if not deliv and doc.get("deliverables_auto", True):
+                    service.add_deliverables(self.root, doc)
+                    deliv = [t for t in doc["tickets"] if t["kind"] == "deliverable"]
+                if all(t["column"] in service.DONE_COLUMNS for t in deliv):
+                    o.update(state="complete")
+                    if deliv:
+                        g = service.gate(doc, "release")
+                        if g["status"] == "locked":
+                            g.update(status="pending", note="Drawings, BOM and the manufacturing review are ready: "
+                                                            "release the program.")
+                    service.emit(self.root, doc, "program.done", f"{doc['name']}: every ticket is integrated"
+                                 + (", the drawings, BOM and manufacturing review are done. Ready to release."
+                                    if deliv else ". The office has stopped."), service.agent_actor("archie"))
+                    return True
             b = budget_state(doc)
             if not b["bypass"] and b["level"] in ("warn", "stop") and not o.get("warned"):
                 o["warned"] = True
@@ -495,8 +555,9 @@ class Runner:
                     break
                 if t["id"] in self.tasks:
                     continue
-                code = {"hex": "hex", "integrate": "fitz", "review": "gage", "fit": "fitz"}.get(stage, t["specialist"])
+                code = STAGE_AGENT.get(stage, t["specialist"])
                 lbl = self.label(t["id"], code)
+                close_wait(t)
                 _set_run(t, status=STATUS_OF[stage], next=stage, agent=code, agent_label=lbl,
                          started_at=store.now(), line=f"{lbl} picked up {t['title']}")
                 service.emit(self.root, doc, "ticket.claimed", f"{lbl} picked up {service._label(t)}.",
@@ -514,7 +575,12 @@ class Runner:
     async def work(self, tid: str, stage: str | None) -> None:
         try:
             while stage:
-                stage = await getattr(self, f"_{stage}")(tid)
+                t0 = time.time()
+                code = STAGE_AGENT.get(stage) or service.ticket(self.load(), tid)["specialist"]
+                lbl = self.label(tid, code)
+                nxt = await getattr(self, f"_{stage}")(tid)
+                self._segment(tid, stage, code, lbl, t0)
+                stage = nxt
                 if stage and self._halt(tid, stage):
                     break
         except Stop:
@@ -531,6 +597,47 @@ class Runner:
             self.tasks.pop(tid, None)
             self.labels.pop(tid, None)
             self.wake.set()
+
+    def _segment(self, tid: str, stage: str, code: str, lbl: str, t0: float) -> None:
+        """Record one stage's work on the ticket; a ticket that has just finished teaches its estimate."""
+        t1 = time.time()
+
+        def fn(d: dict[str, Any]) -> None:
+            tt = service.ticket(d, tid)
+            seg = {"stage": stage, "kind": "work", "agent": code, "label": lbl, "start": round(t0, 3),
+                   "end": round(t1, 3)}
+            tt["segments"] = (tt.get("segments") or [])[-199:] + [seg]
+            self._calibrate(d, tt)
+        try:
+            self.edit(fn)
+        except Stop:
+            pass
+
+    def _calibrate(self, d: dict[str, Any], tt: dict[str, Any]) -> None:
+        r = run_of(tt)
+        if tt["column"] not in service.DONE_COLUMNS or r.get("status") != "done":
+            return
+        actual = timeline.actual_minutes(tt)
+        if tt.get("calibrated"):
+            tt["calibrated"]["actual_min_now"] = actual  # reopened and finished again: shown, not learned twice
+            return
+        if tt.get("manual_work") or not actual:
+            tt["calibrated"] = {"actual_min": actual, "learned": False, "at": store.now(),
+                                "why": "an engineer worked on it by hand" if tt.get("manual_work") else "no agent time"}
+            return
+        prof = "simulated" if self.env.simulated else "live"
+        e = calibration.record(self.root, prof, family=tt["family"], complexity=tt["complexity"],
+                               estimate_min=tt["estimate_min"], actual_min=actual, ticket=tt, program=d,
+                               stages=timeline.stage_minutes(tt))
+        tt["calibrated"] = {"actual_min": actual, "learned": True, "at": e["at"], "error_pct": e["error_pct"],
+                            "before": e["before"], "after": e["after"], "observed": e["observed"],
+                            "profile": prof}
+        name = roster.agent(roster.specialist_for(tt["family"]))["name"]
+        service.emit(self.root, d, "estimate.calibrated",
+                     f"{service._label(tt)} took {_mins(actual)} against {_mins(float(tt['estimate_min']))} estimated: "
+                     f"{name}'s rate for {roster.family_label(tt['family']).lower()} moves {e['before']:g} → "
+                     f"{e['after']:g} min per complexity unit.", service.agent_actor("archie"), tt["id"],
+                     family=tt["family"], before=e["before"], after=e["after"], error_pct=e["error_pct"])
 
     def _halt(self, tid: str, nxt: str) -> bool:
         """Between stages: stop for a paused program, a paused ticket or a take-over (resumable at ``nxt``)."""
@@ -551,6 +658,7 @@ class Runner:
     def _fail(self, doc: dict[str, Any], tid: str, why: str) -> None:
         t = service.ticket(doc, tid)
         _set_run(t, status="blocked", line=why, blocked=why)
+        open_wait(t, "blocked")
         if t["column"] != "changes_requested":
             service.move(self.root, doc, tid, "changes_requested", service.agent_actor("archie"))
         service.emit(self.root, doc, "ticket.blocked", f"{service._label(t)} needs you: {why}",
@@ -716,11 +824,13 @@ class Runner:
         r = run_of(tt)
         o = orch(d)
         if why == "balance":
+            open_wait(tt, "capacity")
             o.update(state="stopped", reason="balance")
             _set_run(tt, status="queued", next=nxt, line="Waiting: the workspace is out of tokens")
             service.emit(self.root, d, "budget.stop", "The workspace token balance is too low for another design "
                          "run. Top up, then press Run.", service.agent_actor("archie"))
             return
+        open_wait(tt, "capacity")
         n = int(r.get("waits") or 0) + 1
         wait = backoff(n, CAPACITY_BASE_S, CAPACITY_CAP_S)
         until = time.time() + wait
@@ -778,6 +888,10 @@ class Runner:
                             f"{'s' if n != 1 else ''} measured on the part match ICD v{icd_res['version']} "
                             f"({len(icd_res['interfaces'])} interface{'s' if len(icd_res['interfaces']) != 1 else ''}"
                             ", inside the envelope).")
+                    fr = icd_res.get("frame") or {}
+                    if fr and not fr.get("identity"):
+                        note += (f" The part is modelled in its own frame ({fr['label']} from the ICD part frame): "
+                                 "Gage measured it there and Fitz places it through that frame.")
                 if ai and ai.get("note"):
                     note += f" Review note: {ai['note']}"
                 elif ai is None:
@@ -940,6 +1054,112 @@ class Runner:
             return
         self.edit(fn)
         return None
+
+
+    # ------------------------------------------------------------------ stage: Ortho (drawings, CD-014 / DRW-014)
+    def _deliverable_begin(self, tid: str, code: str, line: str) -> list[dict[str, Any]]:
+        def fn(d: dict[str, Any]) -> list[dict[str, Any]]:
+            tt = service.ticket(d, tid)
+            if tt["column"] != "in_design":
+                service.move(self.root, d, tid, "in_design", service.agent_actor(code))
+            self.status(d, tt, code, line, status=STATUS_OF[tt["deliverable"]])
+            return [{"ticket_id": p["ticket"]["id"], "project_id": p["project_id"], "reused": p["reused"]}
+                    for p in deliverables.make_parts(d)]
+        return self.edit(fn)
+
+    def _deliverable_progress(self, tid: str, code: str, k: int, n: int, line: str) -> None:
+        def fn(d: dict[str, Any]) -> None:
+            tt = service.ticket(d, tid)
+            tt["progress"] = max(int(tt.get("progress") or 0), min(95, int(100 * k / max(1, n))))
+            self.status(d, tt, code, line)
+        self.edit(fn)
+
+    async def _drawings(self, tid: str) -> str | None:
+        parts = self._deliverable_begin(tid, "ortho", "Ortho is laying out the drawing sheets")
+        n = len(parts) + 1
+        sheets: list[dict[str, Any]] = []
+        for k, p in enumerate(parts):
+            doc = self.load()
+            pt = service.ticket(doc, p["ticket_id"])
+            self._deliverable_progress(tid, "ortho", k, n, f"Ortho is dimensioning sheet {k + 1} of {n}: {pt['title']}")
+            res = await self.env.drawing(doc, pt, p["project_id"])
+            sheets.append({"ticket": pt["id"], "key": pt["key"], "title": pt["title"], "project_id": p["project_id"],
+                           **res})
+        self._deliverable_progress(tid, "ortho", n - 1, n, f"Ortho is drawing the assembly with its BOM and balloons "
+                                                           f"(sheet {n} of {n})")
+        asm = await self.env.assembly_drawing(self.root, self.pid)
+
+        def fn(d: dict[str, Any]) -> None:
+            tt = service.ticket(d, tid)
+            o = service.agent_actor("ortho")
+            dv = d.setdefault("deliverables", {})
+            dv["drawings"] = {"sheets": sheets, "assembly": asm, "at": store.now()}
+            bad = [x for x in sheets if not x.get("ok") or not x.get("check_passed")]
+            spec = sum(int(x.get("icd_dims") or 0) for x in sheets)
+            lines = [f"Ortho drew {len(sheets)} part sheet{'s' if len(sheets) != 1 else ''}"
+                     + (f" ({spec} dimension{'s' if spec != 1 else ''} tagged spec from the ICD)" if spec else "")
+                     + (" and the assembly drawing with its BOM table and "
+                        f"{len(asm.get('balloons') or [])} balloons." if asm.get("ok") else ".")]
+            lines += [f"- {x['key']} {x['title']}: {x.get('error') or 'fails its consistency check (CHK-12): ' + '; '.join((x.get('problems') or [])[:2])}"
+                      for x in bad]
+            if not asm.get("ok"):
+                lines.append(f"- Assembly drawing: {asm.get('error') or 'not drawn'}")
+            service.comment(self.root, d, tid, "\n".join(lines), o)
+            tt["comments"][-1]["delivery"] = "stored"
+            if bad or not asm.get("ok"):
+                self._fail(d, tid, "Ortho couldn't finish every sheet: " + (f"{bad[0]['title']}: "
+                           f"{bad[0].get('error') or 'CHK-12 fails'}" if bad else asm.get("error") or "assembly drawing")
+                           + ". Fix it in Drawing Studio, then retry.")
+                return
+            service.move(self.root, d, tid, "approved", o)
+            _set_run(tt, status="done", line=lines[0], agent="ortho")
+            service.emit(self.root, d, "deliverable.done", lines[0], o, tid, deliverable="drawings")
+        self.edit(fn)
+        return None
+
+    # ------------------------------------------------------------------ stage: Smithy (manufacturing review)
+    async def _dfm(self, tid: str) -> str | None:
+        parts = self._deliverable_begin(tid, "smithy", "Smithy is banking the forge for the manufacturing review")
+        n = len(parts)
+        lines: list[dict[str, Any]] = []
+        for k, p in enumerate(parts):
+            doc = self.load()
+            pt = service.ticket(doc, p["ticket_id"])
+            self._deliverable_progress(tid, "smithy", k, n, f"Smithy is checking {pt['title']} for manufacture "
+                                                            f"({k + 1} of {n})")
+            res = await self.env.dfm(doc, pt, p["project_id"])
+            lines.append(deliverables.dfm_part(pt, res.get("analysis"), res.get("error")))
+        summ = deliverables.dfm_summary(lines)
+
+        def fn(d: dict[str, Any]) -> None:
+            tt = service.ticket(d, tid)
+            s_ = service.agent_actor("smithy")
+            d.setdefault("deliverables", {})["dfm"] = {**summ, "at": store.now()}
+            head = (f"Smithy screened {summ['analysed']} of {n} part{'s' if n != 1 else ''}: {summ['critical']} "
+                    f"critical and {summ['warning']} warning flag{'s' if summ['warning'] != 1 else ''} (advisory).")
+            body = []
+            for x in summ["parts"]:
+                if not x.get("ok"):
+                    body.append(f"- {x['key']} {x['title']}: {x.get('error')}")
+                    continue
+                top = (x.get("findings") or [{}])[0]
+                body.append(f"- {x['key']} {x['title']}: {x.get('process_name')}"
+                            + (f", relative cost {x['relative_cost']:g}×" if x.get("relative_cost") else "")
+                            + (f"; {top.get('rule')} {top.get('title')}" if top else ""))
+            service.comment(self.root, d, tid, "\n".join([head, *body[:12]]), s_)
+            tt["comments"][-1]["delivery"] = "stored"
+            if not summ["analysed"] and n:
+                self._fail(d, tid, "Smithy couldn't analyse any part. Open them in the Manufacturing Advisor.")
+                return
+            service.move(self.root, d, tid, "approved", s_)
+            _set_run(tt, status="done", line=head, agent="smithy")
+            service.emit(self.root, d, "deliverable.done", head, s_, tid, deliverable="dfm")
+        self.edit(fn)
+        return None
+
+
+def _mins(m: float) -> str:
+    return f"{m * 60:.0f} s" if m < 1 else f"{m:.1f} min"
 
 
 # ============================================================================ registry

@@ -199,7 +199,8 @@ def _program(c: Any, email: str, plan: dict[str, Any] | None = None, **kw: Any) 
     signup(c, email)
     _topup(email)
     r = c.post("/api/office/programs", json={"name": "Test rig", "brief": "A small test rig with a base and a drive.",
-                                             "planner": "standard", **kw})
+                                             "planner": "standard",
+                                             "deliverables": False, **kw})
     assert r.status_code == 200, r.text
     pid = r.json()["id"]
     r = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": plan or PLAN})

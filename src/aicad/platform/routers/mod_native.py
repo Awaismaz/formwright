@@ -197,6 +197,16 @@ async def export_drawing(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> R
 
 @router.get("/programs/{pid}/export")
 async def export_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> Response:
+    data, doc = await program_bytes(ctx, pid)
+    org = ctx.require_org()
+    audit(ctx.db, "native.exported", ctx.user, org.id, target=pid, format="fwprog")
+    track(ctx.db, "native_export", ctx.user, org.id, format="fwprog")
+    ctx.db.commit()
+    return _download(data, str(doc.get("name") or "program"), "fwprog")
+
+
+async def program_bytes(ctx: Ctx, pid: str) -> tuple[bytes, dict[str, Any]]:
+    """The program as a .fwprog (its parts and assemblies embedded), and the program document."""
     from aicad.office import store as ostore
     from aicad.platform.routers import office as of
 
@@ -220,11 +230,7 @@ async def export_program(pid: str, ctx: Ctx = Depends(verified_ctx)) -> Response
     events = ostore.events(of._root(ctx), pid, limit=5000)
     files, manifest = bundles.program_files(doc, events, pb, ab)
     manifest["source"] = {"org": c.org_tag(_dd(), org.id), "program": c.opaque(_dd(), "program", pid)}
-    data = c.write_package("fwprog", files, manifest, _dd(), org.id)
-    audit(ctx.db, "native.exported", ctx.user, org.id, target=pid, format="fwprog")
-    track(ctx.db, "native_export", ctx.user, org.id, format="fwprog")
-    ctx.db.commit()
-    return _download(data, str(doc.get("name") or "program"), "fwprog")
+    return c.write_package("fwprog", files, manifest, _dd(), org.id), doc
 
 
 # ---------------------------------------------------------------------------------------------------- import

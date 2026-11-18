@@ -46,7 +46,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from aicad import similarity, toolbox
-from aicad.assembly import AssemblyInputError, fitz, librarian, service, solver, store
+from aicad.assembly import AssemblyInputError, fitz, librarian, locks, service, solver, store
+from aicad.assembly.locks import OFFICE
 from aicad.platform.collab import permissions
 from aicad.platform.config import get_settings
 from aicad.platform.deps import Ctx, verified_ctx
@@ -57,7 +58,6 @@ from aicad.platform.services import audit, debit, org_modules, track
 router = APIRouter(prefix="/api/m/assembly", tags=["assembly"])
 CODE = "assembly"
 PNG_MAGIC = bytes([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
-_locks: dict[str, asyncio.Lock] = {}
 
 
 # ----------------------------------------------------------------------------- access
@@ -89,10 +89,8 @@ def _doc(ctx: Ctx, aid: str) -> dict[str, Any]:
 
 
 def _lock(aid: str) -> asyncio.Lock:
-    lk = _locks.get(aid)
-    if lk is None:
-        lk = _locks[aid] = asyncio.Lock()
-    return lk
+    """The document's lock, shared with the Design Office (``aicad.assembly.locks``)."""
+    return locks.lock(aid)
 
 
 def _err(e: Exception) -> HTTPException:
@@ -218,7 +216,7 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
         "assembly": {k: doc.get(k) for k in ("id", "name", "project_id", "rev", "created_at", "updated_at")},
         "home_project": {"id": home.id, "name": home.name} if home else None,
         "instances": instances, "parts": pview, "mates": mates, "groups": doc["groups"], "subassemblies": subs,
-        "office": doc.get("office"), "solve": solve or None,
+        "office": doc.get("office"), "office_busy": locks.holder(doc["id"]) == OFFICE, "solve": solve or None,
         "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
         "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
         "can_edit": ctx.role != "viewer",

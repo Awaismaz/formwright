@@ -91,6 +91,34 @@ def normalize_edits(e: dict[str, Any] | None) -> dict[str, Any]:
     return {"dims": dims, "title": title, "notes": [n for n in notes if n]}
 
 
+def spec_params(status: dict[str, Any], spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    """The model's parameters plus interface numbers from the Design Office ICD (``spec``: params / meta / fits).
+    An ICD value is offered only when no model parameter already carries that value (two names for one size would
+    make the dimension ambiguous, and then neither could tag it spec)."""
+    from aicad.drawing.dims import _numeric_params, param_kind
+
+    params = dict(status.get("params") or {})
+    pmeta = dict(status.get("param_meta") or {})
+    fits: dict[str, str] = {}
+    own = _numeric_params(params)
+    for k, v in (spec.get("params") or {}).items():
+        if not str(k).startswith("ICD_") or k in params or not isinstance(v, int | float):
+            continue
+        kind = param_kind(k, (spec.get("meta") or {}).get(k))
+        same = [p for p, x in own.items() if abs(float(v) - x) <= 1e-6 * max(1.0, x)]
+        if same:
+            # the model already declares this size: a parameter of the same kind carries the fit
+            match = [p for p in same if param_kind(p, pmeta.get(p)) == kind]
+            if len(match) == 1 and (spec.get("fits") or {}).get(k):
+                fits.setdefault(match[0], spec["fits"][k])
+            continue
+        params[k] = float(v)
+        pmeta[k] = (spec.get("meta") or {}).get(k) or {"label": k}
+        if (spec.get("fits") or {}).get(k):
+            fits[k] = spec["fits"][k]
+    return params, pmeta, fits
+
+
 def tolerance_text(t: dict[str, Any]) -> str:
     if t["mode"] == "iso2768":
         return f"ISO 2768-{t['class']} ({ISO2768[t['class']]})"
@@ -180,7 +208,18 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     if cross:
         enabled.add("section")
     dims, callouts, notes_extra = candidates(cen, enabled, {"axis": sec["axis"], "at": sec["plane"]} if cross else None)
-    mapping = tag(dims, callouts, status.get("params") or {}, status.get("param_meta") or {})
+    params, pmeta, fits = spec_params(status, meta.get("spec") or {})
+    mapping = tag(dims, callouts, params, pmeta)
+    # interface fits (Design Office ICD) printed after the value they belong to, unless the user wrote a tolerance
+    for d in dims:
+        if d.get("tag") == "spec" and d.get("param") in fits and not ed["dims"].get(d["id"], {}).get("tol"):
+            d["text"] = f"{d['text']} {fits[d['param']]}"
+            d["icd_fit"] = fits[d["param"]]
+    for c in callouts:
+        ln = c["lines"][0]
+        if ln.get("tag") == "spec" and ln.get("param") in fits and not ed["dims"].get(c["id"], {}).get("tol"):
+            ln["text"] += f" {fits[ln['param']]}"
+            c["icd_fit"] = fits[ln["param"]]
     # user edits: tolerance / fit text after the value, hidden dimensions and callouts
     hidden = sorted(k for k, v in ed["dims"].items() if v.get("hidden"))
     for d in dims:
@@ -224,6 +263,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     # Parameters with no unambiguous match (mapping["unmapped"]) are listed in the Drawing Studio panel, never on the
     # sheet: model parameter names are not manufacturing information (and a reader takes them for missing sizes).
     notes += [n.upper() for n in notes_extra]
+    notes += [str(n) for n in (meta.get("spec") or {}).get("notes") or []][:6]
     notes += ed["notes"]
     sheet = compose(an, shown_dims, shown_callouts, notes, opts, sheet_meta, rev_rows)
     expected = {v: bbox_extents(cen["bbox"], v) for v in ("front", "top", "right") if v in an["views"]}
@@ -264,8 +304,10 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
                                  "params": ln.get("params") or []} for ln in c["lines"]]}
                      for c in callouts],
         "mapping": mapping,
-        "param_labels": {k: str(((status.get("param_meta") or {}).get(k) or {}).get("label") or k)
+        "param_labels": {k: str((pmeta.get(k) or {}).get("label") or k)
                          for k in sorted({*mapping["mapped"], *mapping["unmapped"]})},
+        "icd": {"mapped": sorted(k for k in mapping["mapped"] if k.startswith("ICD_")),
+                "offered": sorted(k for k in params if k.startswith("ICD_"))},
         "census": {"bbox": cen["bbox"], "holes": len(cen["holes"]),
                                        "unsupported_holes": cen["unsupported_holes"]},
         "history": [{k: h.get(k) for k in ("rev", "date", "by", "change", "build_id")} for h in history],

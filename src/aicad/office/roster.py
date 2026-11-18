@@ -1,8 +1,8 @@
 """The Design Office team: named agents with a mechanical pun, a colour and a tool (plan §3, PD-35).
 
 Part families decide which specialist owns a part ticket. Standard parts go to Hex (Toolbox), sub-assembly
-integration goes to Fitz. Gage, Ortho and Smithy are on the roster but only start work with the orchestrator
-(Phase 3+), which the UI says plainly.
+integration goes to Fitz. Gage checks every part (Phase 3); Ortho (drawings) and Smithy (manufacturing review) make
+the program deliverables after integration (Phase 5).
 """
 
 from __future__ import annotations
@@ -47,6 +47,8 @@ FAMILIES: dict[str, tuple[str, str]] = {
     "integration": ("Assembly integration", "fitz"),
 }
 PART_FAMILIES = [f for f in FAMILIES if f != "integration"]
+# Program deliverables (Phase 5): not part families, but tickets with an owner and an estimate all the same.
+DELIVERABLES: dict[str, tuple[str, str]] = {"drawings": ("Drawings", "ortho"), "dfm": ("Manufacturing review", "smithy")}
 DESIGNERS = ("mill", "chuck", "axel", "benny", "molly")
 
 _ALIASES = {
@@ -71,7 +73,11 @@ def normalise_family(v: Any) -> str:
 
 
 def specialist_for(family: str) -> str:
-    return FAMILIES.get(family, FAMILIES["machined"])[1]
+    return (FAMILIES.get(family) or DELIVERABLES.get(family) or FAMILIES["machined"])[1]
+
+
+def family_label(family: str) -> str:
+    return (FAMILIES.get(family) or DELIVERABLES.get(family) or (family.title(), ""))[0]
 
 
 def agent(code: str) -> dict[str, Any]:

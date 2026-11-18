@@ -4,7 +4,7 @@ import type { Constants, Item, Plan, Ticket } from "./types";
 
 // Same numbers as src/aicad/office/estimates.py (the server sends them as `constants`).
 const K: Constants = {
-  minutes_per_unit: { machined: 4, turned: 3.5, gear: 4, sheet: 4.5, plastic: 5, standard: 0.5, integration: 3 },
+  minutes_per_unit: { machined: 4, turned: 3.5, gear: 4, sheet: 4.5, plastic: 5, standard: 0.5, integration: 3, drawings: 0.5, dfm: 0.5 },
   complexity: [1, 5], default_concurrency: 3, eta_factors: [0.8, 1.3],
   milestones: [{ code: "brief_read", label: "Brief read", weight: 5 }, { code: "first_build", label: "First build", weight: 35 },
     { code: "gates_pass", label: "Gating checks pass", weight: 70 }, { code: "self_review", label: "Self-review", weight: 85 },

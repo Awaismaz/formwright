@@ -23,6 +23,7 @@ Enable for a dev server with ``FW_OFFICE_FAKE_AGENTS=1`` (optionally ``FW_OFFICE
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -85,11 +86,17 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
     ``shift`` moves the first hole in X, ``grow`` makes the body that much larger (scripted defects)."""
     from build123d import Axis, Box, Cylinder, Pos, export_step, fillet
 
+    from aicad.assembly import placeholder
+    from aicad.office import icd
+
     L, W, H = (float(x) for x in spec["size"])
     L, W = L + grow, W + grow
-    holes = [f for f in spec.get("features") or [] if f["type"] == "hole"]
-    if spec.get("bore") and not any(abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6 for h in holes):
-        holes.append({"c": [0.0, 0.0], "d": spec["bore"]})
+    # the same feature builder as the placeholders: holes, bearing seats, journals, keyways
+    bs = icd.body_spec(spec["shape"], [L, W, H], spec.get("features") or [], spec.get("bore"))
+    if shift and bs["holes"]:
+        h0 = bs["holes"][0]
+        bs["holes"][0] = {**h0, "c": [float(h0["c"][0]) + shift, float(h0["c"][1])]}
+    holes = bs["holes"]
     g = spec.get("gear")
     if g:
         from aicad import toolbox
@@ -98,7 +105,7 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
         shape, _e = toolbox.build("spur_gear", M=g["module"], Z=g["teeth"], B=g["face_width"],
                                   BORE=bore or max(4.0, 0.15 * g["module"] * g["teeth"]))
         body = Pos(0, 0, -g["face_width"] / 2) * shape
-        holes = [h for h in holes if not (abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6)]
+        bs = {**bs, "holes": [h for h in holes if not (abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6)]}
     elif spec["shape"] == "box":
         body = Box(L, W, H)
         r = min(3.0, 0.1 * min(L, W))
@@ -108,9 +115,7 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
             body = Box(L, W, H)
     else:
         body = Cylinder(L / 2, H)
-    for k, h in enumerate(holes):
-        dx = shift if k == 0 else 0.0
-        body = body - Pos(float(h["c"][0]) + dx, float(h["c"][1]), 0) * Cylinder(float(h["d"]) / 2, H + 2)
+    body = placeholder.cut(body, bs)
     out = ws / "out"
     out.mkdir(parents=True, exist_ok=True)
     export_step(body, str(out / "part.step"))
@@ -124,6 +129,7 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
         ("CHK-02", "valid B-rep, solid count"), ("CHK-03", "closed manifold (no free edges)"),
         ("CHK-04", "bounding box"), ("CHK-07", "STEP export -> reimport"))]
     st = {"ok": True, "part": name, "material": "Aluminium 6061-T6", "build_id": uuid.uuid4().hex[:12],
+          "step_sha256": hashlib.sha256((out / "part.step").read_bytes()).hexdigest(),
           "params": params, "checks": checks, "fingerprint": {"bbox": size, "volume": float(body.volume), "solids": 1},
           "expected": {"bbox": size}}
     (out / "status.json").write_text(json.dumps(st), encoding="utf-8")
@@ -147,6 +153,7 @@ def _write_part(ws: Path, name: str, dims: list[float], extra: list[float]) -> d
         ("CHK-02", "valid B-rep, solid count"), ("CHK-03", "closed manifold (no free edges)"),
         ("CHK-04", "bounding box"), ("CHK-07", "STEP export -> reimport"))]
     st = {"ok": True, "part": name, "material": "Aluminium 6061-T6", "build_id": uuid.uuid4().hex[:12],
+          "step_sha256": hashlib.sha256((out / "part.step").read_bytes()).hexdigest(),
           "params": params, "checks": checks, "fingerprint": {"bbox": [L, W, H], "volume": L * W * H, "solids": 1},
           "expected": {"bbox": [L, W, H]}}
     (out / "status.json").write_text(json.dumps(st), encoding="utf-8")
