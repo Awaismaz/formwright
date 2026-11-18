@@ -4,6 +4,20 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-18 (r) — Coordinator summary of the autonomous run (handoff)
+
+Founder away; work run as parallel agents in git worktrees, merged + pushed one by one.
+- Merged today: punch-list reconciliation (20 rows closed with evidence, 8 superseded); Design Office plan, names
+  (Archie, Mill, Chuck, Axel, Benny, Molly, Hex, Fitz, Gage, Ortho, Smithy), phase 2; smart assembly (ASM-010/019);
+  DS-036 shop-floor status, DS-037 Discuss mode; AI quality (CAD-028, AGT-002, AGT-006, EVAL-003 harness);
+  UX-019 sidebar; UX-020 landing v1; UX-021 /why page; MSH-013 AI Render Studio; DRW-017 2D drafting; Mesh fixes.
+- Founder decisions recorded: landing page is launch-state marketing (no coming-soon labels; own icon tiles until
+  vendor logo permission, PD-42); push after every merge (CLAUDE.md + memory).
+- Parked: PD-35…PD-46 (see DECISIONS).
+- In flight: office phase 3, landing hero v2 (gearbox story, phone + tablet, CAD section), PWA + mobile,
+  native file formats in every module, collaboration (teams, permissions, sharing, branching).
+- Known flakes under machine load: warm-worker test, some Blender/mesh render tests — pass when run alone.
+
 ## 2026-11-18 (q) — AI Render Studio (MSH-013, Beta, BYO OpenAI key), branch wip/ai-render
 
 ### Done
