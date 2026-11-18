@@ -1024,7 +1024,7 @@ def manual_errors() -> list[dict[str, Any]]:
 
 
 # ----------------------------------------------------------------------------- sheet metal (CAD-026)
-SHEET_OPS = {"sm_base", "sm_flange", "sm_hem"}
+SHEET_OPS = {"sm_base", "sm_flange", "sm_hem", "sm_jog"}
 
 
 def sheet() -> Any:
@@ -1066,12 +1066,20 @@ def _sheet_op(part: Any, f: dict[str, Any]) -> Any:
         t = float(f["t"])
         region = sketch_region(f["profiles"])
         rel = f.get("relief") or {}
+        cor = f.get("corner") or {}
         sh, solid = _sm.base(region, _sheet_frame(f["plane"], t, bool(f.get("reverse"))), t,
                              float(f["r"]) if f.get("r") is not None else None, float(f.get("k", 0.44)),
-                             str(rel.get("type", "rect")), float(rel.get("ratio", 0.5)), name)
+                             str(rel.get("type", "rect")), float(rel.get("ratio", 0.5)), name,
+                             str(cor.get("type", "closed")), float(cor.get("gap", 0.2)))
         _STATE["sheet"] = sh
         return solid
     e = _sheet_edge(part, f)
+    if op == "sm_jog":
+        sh, part = _sm.jog(_STATE["sheet"], part, f["edge"], float(f["distance"]), float(f["offset"]),
+                           float(f.get("angle", 90)), float(f["r"]) if f.get("r") is not None else None,
+                           bool(f.get("flip")), name, edge=e)
+        _STATE["sheet"] = sh
+        return part
     if op == "sm_hem":
         gap = float(f.get("gap") or _STATE["sheet"].t)
         sh, part = _sm.flange(_STATE["sheet"], part, f["edge"], float(f["length"]), 180.0, gap / 2,
@@ -1090,11 +1098,13 @@ def _sheet_op(part: Any, f: dict[str, Any]) -> Any:
 def base_flange(points: list[Any] | None = None, *, thickness: float, width: float | None = None,
                 height: float | None = None, radius: float | None = None, k: float = 0.44, plane: Any = None,
                 relief: str = "rect", relief_ratio: float = 0.5, reverse: bool = False,
-                name: str = "Base-Flange") -> Any:
+                name: str = "Base-Flange", corner: str = "closed", corner_gap: float = 0.2) -> Any:
     """Model-script helper: start a sheet-metal part. The profile is a polygon ``points`` [(u, v), ...] or a
     ``width`` × ``height`` rectangle centred on the plane origin, on ``plane`` (a build123d Plane, default XY),
     thickened by ``thickness`` along the plane normal (``reverse`` = the other way). ``radius`` is the default
-    inside bend radius (default = thickness), ``k`` the K-factor. Returns the part (recorded as a feature)."""
+    inside bend radius (default = thickness), ``k`` the K-factor. ``corner`` ("closed" / "open") and
+    ``corner_gap`` say how flanges on adjacent edges meet (corner reliefs are cut automatically). Returns the part
+    (recorded as a feature)."""
     pl = plane if plane is not None else Plane.XY
     if points:
         region = Polygon(*[(float(u), float(v)) for u, v in points], align=None)
@@ -1104,7 +1114,7 @@ def base_flange(points: list[Any] | None = None, *, thickness: float, width: flo
         raise ValueError("base_flange needs points or width and height")
     loc = Location(pl) * Pos(0, 0, -float(thickness)) if reverse else Location(pl)
     sh, solid = _sm.base(region.faces()[0] if len(region.faces()) == 1 else region, loc, float(thickness), radius,
-                         k, relief, relief_ratio, name)
+                         k, relief, relief_ratio, name, corner, corner_gap)
     _STATE["sheet"] = sh
     return feature(name, solid)
 
@@ -1134,6 +1144,19 @@ def hem(part: Any, edge_point: Any, length: float, gap: float | None = None, fli
     g = float(gap) if gap is not None else sh.t
     sh, part = _sm.flange(sh, part, edge_point, length, 180.0, g / 2, flip, position, "tangent", (0.0, 0.0), name,
                           kind="hem")
+    _STATE["sheet"] = sh
+    return feature(name, part)
+
+
+def jog(part: Any, edge_point: Any, distance: float, offset: float, angle: float = 90.0,
+        radius: float | None = None, flip: bool = False, name: str = "Jog") -> Any:
+    """Model-script helper: a jog. The sheet between the straight edge through ``edge_point`` and a line
+    ``distance`` in from it is raised by ``offset`` (bottom face to bottom face; ``flip`` lowers it) through two
+    opposite bends of ``angle`` (≤ 90°). Add jogs before flanges on the end that moves."""
+    if name in _STATE.get("suppressed", set()):
+        return feature(name, part)
+    sh, part = _sm.jog(_STATE["sheet"] if _STATE.get("sheet") else _no_sheet(), part, edge_point, distance, offset,
+                       angle, radius, flip, name)
     _STATE["sheet"] = sh
     return feature(name, part)
 

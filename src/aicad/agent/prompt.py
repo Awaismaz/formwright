@@ -154,8 +154,15 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   straight top or bottom edge of the sheet (it folds towards that face's side; `flip=True` reverses it;
   position "inside" / "outside" / "bend_outside"; L is measured from the outer virtual sharp unless
   `length_ref="tangent"`; `inset=(a, b)` shortens it from the edge ends and cuts reliefs), and
-  `part = fw.hem(part, (x, y, z), L, gap=T)` folds an edge back. Each call is one recorded feature.
-- Flanges on adjacent edges: make the first pair first; the next edges are then already shorter (no overlap).
+  `part = fw.hem(part, (x, y, z), L, gap=T)` folds an edge back;
+  `part = fw.jog(part, (x, y, z), distance, offset)` raises the end of the sheet at that edge by `offset`
+  (bottom face to bottom face) through two opposite 90° bends starting `distance` in from the edge (do jogs before
+  flanges on that end). Each call is one recorded feature.
+- Flanges on adjacent edges: make the first pair first; the next edges are then already shorter (no overlap). Where
+  two flanges meet at a corner a corner relief is cut automatically; `fw.base_flange(..., corner="closed",
+  corner_gap=0.2)` (default) carries the walls round to meet with that gap, `corner="open"` leaves them open.
+  The corner relief and the wall extensions change the volume by a little: for such parts give EXPECTED a
+  `volume_tol` of 0.01 unless you account for them.
 - The flat pattern (bend allowance BA = angle × (R + K × T)), its DXF and the bend table are produced
   automatically. EXPECTED for a sheet part: bbox from the outer dimensions; volume = panels × T + each bend's
   angle/2 × ((R+T)² − R²) × its length (hand formula). Use an inside radius ≥ T unless the user says otherwise.

@@ -83,6 +83,8 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   const [smK, setSmK] = useState(String(smE?.k ?? 0.44));
   const [smRelief, setSmRelief] = useState<"rect" | "obround" | "none">(smE?.relief?.type ?? "rect");
   const [smRatio, setSmRatio] = useState(String(smE?.relief?.ratio ?? 0.5));
+  const [smCorner, setSmCorner] = useState<"closed" | "open">(smE?.corner?.type ?? "closed");
+  const [smCGap, setSmCGap] = useState(String(smE?.corner?.gap ?? 0.2));
   const [ribT, setRibT] = useState(String(editing?.op === "rib" ? editing.t ?? 5 : 5));
   const [ribFlip, setRibFlip] = useState(!!editing?.flip);
   const [end, setEnd] = useState<"blind" | "mid" | "through">(editing?.end ?? "blind");
@@ -373,7 +375,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
       if (!(t > 0)) { toast.error("Enter a positive sheet thickness"); return; }
       if (!(r >= 0)) { toast.error("Enter a bend radius of 0 or more"); return; }
       if (!(k >= 0 && k <= 1)) { toast.error("The K-factor is between 0 and 1 (0.3–0.5 is usual)"); return; }
-      feature = { op: "sm_base", ...common, profiles: prof.loops, t, r, k, relief: { type: smRelief, ratio: ratio > 0 ? ratio : 0.5 }, reverse };
+      feature = { op: "sm_base", ...common, profiles: prof.loops, t, r, k, relief: { type: smRelief, ratio: ratio > 0 ? ratio : 0.5 }, corner: { type: smCorner, gap: Math.max(0, Number(smCGap) || 0) }, reverse };
     } else if (kind === "rib") {
       const t = Number(ribT); if (!(t > 0)) { toast.error("Enter a positive rib thickness"); return; }
       feature = { op: "rib", ...common, chains: prof.chains, t, flip: ribFlip };
@@ -532,6 +534,11 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
             <option value="rect">Rectangular relief</option><option value="obround">Obround relief</option><option value="none">No relief (tear)</option>
           </select>
           {smRelief !== "none" && <Tip content="Relief width as a multiple of the thickness" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">×T<Input value={smRatio} onChange={e => setSmRatio(e.target.value)} className="h-8 w-12 text-right" inputMode="decimal" aria-label="Relief ratio" /></label></Tip>}
+          <Tip content="Where flanges on adjacent edges meet: closed carries the walls round to meet with the gap, open leaves the corner open. A corner relief is cut either way" side="top">
+            <select value={smCorner} onChange={e => setSmCorner(e.target.value as typeof smCorner)} className="h-8 rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="Corner type">
+              <option value="closed">Closed corners</option><option value="open">Open corners</option>
+            </select></Tip>
+          {smCorner === "closed" && <Tip content="Gap between the walls at a closed corner" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">Gap<Input value={smCGap} onChange={e => setSmCGap(e.target.value)} className="h-8 w-12 text-right" inputMode="decimal" aria-label="Corner gap" />mm</label></Tip>}
           <Tip content="Thicken to the other side of the sketch plane" side="top"><button onClick={() => setReverse(!reverse)} className={cx("rounded border p-1.5", reverse ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
         </> : kind === "rib" ? <>
           <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={ribT} onChange={e => setRibT(e.target.value)} className="h-8 w-20 text-right" inputMode="decimal" aria-label="Rib thickness" />mm</label>

@@ -3,7 +3,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, ChevronDown, ChevronUp, Circle, CircleDotDashed, Cone, Cuboid, Diamond, Drill, Fence, FlipHorizontal2,
   Focus, GitCompare, Grid3x3, Layers2, Maximize, MousePointer2, PackageOpen, PenLine, Pyramid, RectangleHorizontal, RefreshCcwDot, Rotate3d,
   RotateCw, Route, Ruler, Scale, Scissors, ShieldCheck, ScanSearch, Spline, SquareDashed, Squircle, Triangle, Upload, Wrench, Hexagon, Ellipsis, Lock,
-  PanelBottom, CornerRightUp, Undo2, FoldHorizontal, FileDown,
+  PanelBottom, CornerRightUp, Undo2, FoldHorizontal, FileDown, StepForward,
 } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "@/components/ui";
@@ -11,7 +11,7 @@ import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
 export type Command =
-  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft" | "thread" | "sm_flange" | "sm_hem"; preset?: Record<string, unknown> }
+  | { kind: "feature"; op: "extrude" | "hole" | "fillet" | "chamfer" | "shell" | "mirror" | "pattern" | "plane" | "draft" | "sweep" | "loft" | "thread" | "sm_flange" | "sm_hem" | "sm_jog"; preset?: Record<string, unknown> }
   | { kind: "sketch"; preset?: { feature?: "extrude" | "revolve" | "rib" | "sketch" | "sheet"; mode?: "add" | "cut" } }
   | { kind: "tool"; tool: "measure" | "select" }
   | { kind: "panel"; tab: string; extra?: "com" }
@@ -97,6 +97,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
       { id: "smbase", label: "Base Flange", icon: <PanelBottom className="h-5 w-5" />, tip: disabled ? "Sketch a closed profile, then thicken it into a sheet: thickness, default bend radius, K-factor and relief type are set here for the whole part" : "A base flange starts a sheet-metal part: use it on a new part", cmd: { kind: "sketch", preset: { feature: "sheet" } }, disabled: !disabled && !sheet?.has },
       { id: "smflange", label: "Edge Flange", icon: <CornerRightUp className="h-5 w-5" />, tip: sheet?.has ? "Bend a flange up from a straight edge of the sheet: length, angle, bend radius, position, end offsets" : "Needs a sheet-metal part: start it with a Base Flange", cmd: { kind: "feature", op: "sm_flange" }, needsBody: true, disabled: !sheet?.has },
       { id: "smhem", label: "Hem", icon: <Undo2 className="h-5 w-5 rotate-90" />, tip: sheet?.has ? "Fold an edge back on itself (open hem with a gap)" : "Needs a sheet-metal part: start it with a Base Flange", cmd: { kind: "feature", op: "sm_hem" }, needsBody: true, disabled: !sheet?.has },
+      { id: "smjog", label: "Jog", icon: <StepForward className="h-5 w-5 -rotate-45" />, tip: sheet?.has ? "Raise (or lower) the end of the sheet at a picked edge with two opposite bends: jog line distance, offset and angle" : "Needs a sheet-metal part: start it with a Base Flange", cmd: { kind: "feature", op: "sm_jog" }, needsBody: true, disabled: !sheet?.has },
     ], [
       { id: "smflat", label: sheet?.flat ? "Fold" : "Flatten", icon: <FoldHorizontal className="h-5 w-5" />, tip: sheet?.flat ? "Show the folded part again" : "Show the flat pattern (bend allowance from the K-factor)", onClick: () => sheet?.onFlat(), active: !!sheet?.flat, disabled: !sheet?.has },
       { id: "smdxf", label: "Flat DXF", icon: <FileDown className="h-5 w-5" />, tip: "Download the flat pattern as DXF: outline at true size, bend lines (UP / DOWN layers) and bend notes", onClick: () => sheet?.onDxf(), disabled: !sheet?.has },

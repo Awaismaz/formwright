@@ -13,7 +13,7 @@ import { FEATURE_LABEL, nextName, REF_PLANES, resolveRefPlane, sketchLines, type
 import type { Pick, SketchPreview, Topo, V3 } from "@/viewer/types";
 
 export type FeatureOp = Exclude<ManualFeature["op"], "sketch" | "revolve" | "rib" | "sketch2d" | "sm_base">;
-const TITLE: Record<FeatureOp, string> = { sm_flange: "Edge Flange", sm_hem: "Hem", fillet: "Fillet", chamfer: "Chamfer", hole: "Hole Wizard", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base", thread: "Cosmetic Thread" };
+const TITLE: Record<FeatureOp, string> = { sm_flange: "Edge Flange", sm_hem: "Hem", sm_jog: "Jog", fillet: "Fillet", chamfer: "Chamfer", hole: "Hole Wizard", extrude: "Extrude", shell: "Shell", mirror: "Mirror", pattern: "Pattern", plane: "Reference Plane", draft: "Draft", sweep: "Swept Boss/Base", loft: "Lofted Boss/Base", thread: "Cosmetic Thread" };
 const PATTERNABLE = new Set(["sketch", "extrude", "revolve", "hole", "sweep", "loft"]);
 type AxisKey = "X" | "Y" | "Z" | "pick";
 const AXES: Record<Exclude<AxisKey, "pick">, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
@@ -58,7 +58,7 @@ export function xDirFor(n: V3): V3 {
 }
 
 export function selectKindsFor(op: FeatureOp): Pick["kind"][] {
-  return op === "fillet" || op === "chamfer" || op === "sm_flange" || op === "sm_hem" ? ["edge"] : op === "pattern" ? ["edge", "face"] : ["face"]; // plane: a face as its reference
+  return op === "fillet" || op === "chamfer" || op === "sm_flange" || op === "sm_hem" || op === "sm_jog" ? ["edge"] : op === "pattern" ? ["edge", "face"] : ["face"]; // plane: a face as its reference
 }
 
 const num = (s: string) => (s.trim() === "" ? NaN : Number(s));
@@ -93,7 +93,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [name, setName] = useState(e?.name ?? (op === "pattern" ? nextName(patKind0 === "circular" ? "CirPattern" : "LPattern", manual)
     : op === "mirror" ? nextName("Mirror", manual) : op === "plane" ? nextName("Plane", manual) : op === "draft" ? nextName("Draft", manual)
     : op === "sweep" ? nextName(pre.mode === "cut" ? "Cut-Sweep" : "Sweep", manual) : op === "loft" ? nextName(pre.mode === "cut" ? "Cut-Loft" : "Loft", manual)
-    : op === "sm_flange" ? nextName("Edge-Flange", manual) : op === "sm_hem" ? nextName("Hem", manual)
+    : op === "sm_flange" ? nextName("Edge-Flange", manual) : op === "sm_hem" ? nextName("Hem", manual) : op === "sm_jog" ? nextName("Jog", manual)
     : op === "extrude" ? (pre.mode === "cut" ? "Extruded Cut" : "Extruded Boss") : pre.pattern ? `${pre.pattern === "circular" ? "Circular" : "Linear"} hole pattern` : TITLE[op]));
   // feature pattern
   const idx = e ? manual.findIndex(m => m.id === e.id) : manual.length;
@@ -186,7 +186,9 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const smBase = manual.find(m => m.op === "sm_base");
   const smT = sheet?.thickness ?? smBase?.t ?? 2, smR0 = sheet?.radius ?? smBase?.r ?? smT, smK = sheet?.k_factor ?? smBase?.k ?? 0.44;
   const [smLen, setSmLen] = useState(String(e?.length ?? (op === "sm_hem" ? 6 : 20)));
-  const [smAngle, setSmAngle] = useState(String(op === "sm_flange" && e?.angle ? e.angle : 90));
+  const [smAngle, setSmAngle] = useState(String((op === "sm_flange" || op === "sm_jog") && e?.angle ? e.angle : 90));
+  const [smDist, setSmDist] = useState(String(e?.distance ?? 20));
+  const [smOff, setSmOff] = useState(String(e?.offset ?? Math.max(10, Math.ceil(3 * (sheet?.thickness ?? 2) + 1))));
   const [smOwnR, setSmOwnR] = useState(e?.r != null);
   const [smR, setSmR] = useState(String(e?.r ?? smR0));
   const [smPos, setSmPos] = useState<NonNullable<ManualFeature["position"]>>(e?.position ?? "inside");
@@ -194,7 +196,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
   const [smFlip, setSmFlip] = useState(!!e?.flip);
   const [smIn, setSmIn] = useState<[string, string]>(e?.inset ? [String(e.inset[0]), String(e.inset[1])] : ["0", "0"]);
   const [smGap, setSmGap] = useState(String(e?.gap ?? smT));
-  const isSheet = op === "sm_flange" || op === "sm_hem";
+  const isSheet = op === "sm_flange" || op === "sm_hem" || op === "sm_jog";
 
   const edges = selection.filter(p => p.kind === "edge") as Extract<Pick, { kind: "edge" }>[];
   const planarFaces = selection.filter(p => p.kind === "face" && topo?.faces[p.id]?.type === "plane") as Extract<Pick, { kind: "face" }>[];
@@ -276,6 +278,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
     : op === "draft" ? !!neutral && (draftFaces.length > 0 || !!e?.faces?.length) && num(draftAngle) > 0
     : op === "hole" ? holeReady
     : op === "thread" ? !!cyl || !!e?.face
+    : op === "sm_jog" ? (!!smEdge || !!e?.edge) && num(smDist) > 0 && num(smOff) > 0 && num(smAngle) > 0 && num(smAngle) <= 90 && (!smOwnR || num(smR) >= 0)
     : isSheet ? (!!smEdge || !!e?.edge) && num(smLen) > 0 && (op === "sm_hem" ? num(smGap) > 0 : num(smAngle) > 0 && num(smAngle) <= 180 && smIn.every(x => num(x) >= 0) && (!smOwnR || num(smR) >= 0))
     : !!plane;
 
@@ -302,7 +305,8 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
       if (!f.place && pattern !== "none" && num(count) > 1) f = { ...f, count: num(count), ...(pattern === "circular" ? { pattern: "circular", center: center.map(num) } : { step: step.map(num) }) };
     } else if (isSheet) {
       const edge = smEdge && topo ? { edge: edgeMid(topo, smEdge.id), edge_ref: edgeRef(topo, smEdge.id) } : { edge: e!.edge, edge_ref: e!.edge_ref };
-      f = op === "sm_hem" ? { ...f, ...edge, length: num(smLen), gap: num(smGap), flip: smFlip, position: smPos === "bend_outside" ? "outside" : smPos }
+      f = op === "sm_jog" ? { ...f, ...edge, distance: num(smDist), offset: num(smOff), angle: num(smAngle), r: smOwnR ? num(smR) : null, flip: smFlip }
+        : op === "sm_hem" ? { ...f, ...edge, length: num(smLen), gap: num(smGap), flip: smFlip, position: smPos === "bend_outside" ? "outside" : smPos }
         : { ...f, ...edge, length: num(smLen), angle: num(smAngle), r: smOwnR ? num(smR) : null, flip: smFlip, position: smPos, length_ref: smRef, inset: smIn.map(num) };
     } else if (op === "thread") {
       f = { ...f, face: { point: cyl ? cyl.point : e!.face!.point }, thread: toSpec(thrVal) };
@@ -462,8 +466,23 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
             <div className="label mb-1">Edge</div>
             <p className="text-[12px]">{smEdge && topo ? describe(smEdge, topo) : e?.edge ? <span className="text-muted">Using the original edge (crosses). Click a sheet edge to change it.</span>
+              : op === "sm_jog" ? <span className="text-muted">Click a straight edge on the top or bottom face of the sheet. The sheet between that edge and the jog line is raised towards that face's side.</span>
               : <span className="text-muted">Click a straight edge on the top or bottom face of the sheet. The {op === "sm_hem" ? "hem" : "flange"} folds towards that face's side.</span>}</p>
           </div>
+          {op === "sm_jog" ? <>
+            {numField("Jog line distance from the edge", smDist, setSmDist, "mm", "The end between the edge and this line moves")}
+            {numField("Jog offset", smOff, setSmOff, "mm", "Bottom face to bottom face")}
+            {numField("Jog angle", smAngle, setSmAngle, "°", "Up to 90°")}
+            <label className="flex items-center gap-2 text-[12.5px]"><input type="checkbox" checked={smOwnR} onChange={ev => setSmOwnR(ev.target.checked)} />Own bend radius (default R{fmt(smR0)} from the sheet)</label>
+            {smOwnR && numField("Inside bend radius", smR, setSmR)}
+            {(() => { const r = smOwnR ? num(smR) : smR0, a = num(smAngle) * Math.PI / 180, off = num(smOff);
+              const m = (off - (smT + 2 * r) * (1 - Math.cos(a))) / Math.sin(a), ba = a * (r + smK * smT);
+              return Number.isFinite(m) ? <p className={cx("flex gap-1 text-[11px]", m > 0 ? "text-muted" : "text-danger")} data-sm-jog><Info className="mt-0.5 h-3 w-3 shrink-0" />{m > 0
+                ? `Two bends of ${fmt(num(smAngle))}°, ${fmt(+m.toFixed(3))} mm between them: the flat grows by 2 × BA + ${fmt(+m.toFixed(3))} = ${fmt(+(2 * ba + m).toFixed(3))} mm.`
+                : `The offset must be more than ${fmt(+((smT + 2 * r) * (1 - Math.cos(a))).toFixed(3))} mm for this angle and radius.`}</p> : null; })()}
+            <div className="flex items-center gap-2"><Tip content="Lower the end instead of raising it" side="top"><button onClick={() => setSmFlip(!smFlip)} className={cx("flex items-center gap-1.5 rounded border px-2 py-1 text-[12.5px]", smFlip ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Flip direction"><ArrowLeftRight className="h-3.5 w-3.5" />Flip direction</button></Tip></div>
+            <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>
+          </> : <>
           {numField(op === "sm_hem" ? "Hem length (straight)" : "Flange length", smLen, setSmLen)}
           {op === "sm_flange" && <>
             <div><div className="label mb-1">Length measured to</div>{seg<"outer" | "tangent">([["outer", "Outer virtual sharp"], ["tangent", "Bend tangent"]], smRef, setSmRef)}</div>
@@ -483,6 +502,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
           {(() => { const r = op === "sm_hem" ? num(smGap) / 2 : smOwnR ? num(smR) : smR0, a = op === "sm_hem" ? 180 : num(smAngle);
             const ba = (a * Math.PI / 180) * (r + smK * smT);
             return Number.isFinite(ba) ? <p className="flex gap-1 text-[11px] text-muted" data-sm-ba><Info className="mt-0.5 h-3 w-3 shrink-0" />Bend allowance BA = {fmt(a)}° × (R{fmt(r)} + K{fmt(smK)} × T{fmt(smT)}) = {fmt(+ba.toFixed(3))} mm in the flat pattern.</p> : null; })()}
+          </>}
         </> : op === "thread" ? <>
           <div className="rounded-lg border border-border bg-panel2 p-2.5">
             <div className="label mb-1">Cylindrical face</div>

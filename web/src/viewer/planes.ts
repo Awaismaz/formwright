@@ -41,7 +41,7 @@ export function nextName(base: string, existing: { name: string }[]): string {
 export const FEATURE_LABEL: Record<string, string> = {
   fillet: "Fillet", chamfer: "Chamfer", hole: "Hole", extrude: "Extrude", shell: "Shell", mirror: "Mirror",
   sketch: "Extrude", revolve: "Revolve", pattern: "Pattern", plane: "Plane", draft: "Draft", rib: "Rib", sketch2d: "Sketch", sweep: "Sweep", loft: "Loft", thread: "Thread",
-  sm_base: "Base Flange", sm_flange: "Edge Flange", sm_hem: "Hem",
+  sm_base: "Base Flange", sm_flange: "Edge Flange", sm_hem: "Hem", sm_jog: "Jog",
 };
 
 /**

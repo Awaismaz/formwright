@@ -110,7 +110,7 @@ def estimate(project_id: str, chars: int = 0, ctx: Ctx = Depends(verified_ctx)) 
 BLOCK_START = "# --- Formwright manual features (managed by the app; edit them in the feature tree) ---"
 BLOCK_END = "# --- end manual features ---"
 OPS = {"fillet", "chamfer", "hole", "extrude", "shell", "mirror", "sketch", "revolve", "pattern", "plane", "draft", "rib",
-       "sketch2d", "sweep", "loft", "thread", "sm_base", "sm_flange", "sm_hem"}
+       "sketch2d", "sweep", "loft", "thread", "sm_base", "sm_flange", "sm_hem", "sm_jog"}
 BLANK_MODEL = '''"""{name}: part modelled by hand in Formwright (features live in the feature tree)."""
 
 NAME = {name!r}
@@ -228,7 +228,7 @@ def _end_condition(f: dict[str, Any], out: dict[str, Any]) -> None:
     out["reverse"] = bool(f.get("reverse"))
 
 
-REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread", "sm_flange", "sm_hem"}  # picks stored with the body's box, to follow size changes
+REF_OPS = {"fillet", "chamfer", "hole", "shell", "draft", "thread", "sm_flange", "sm_hem", "sm_jog"}  # picks stored with the body's box, to follow size changes
 
 
 def _edge_ref(r: Any) -> dict[str, Any]:
@@ -407,10 +407,23 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         if rel.get("type", "rect") not in ("rect", "obround", "none"):
             raise HTTPException(422, "Relief type must be rectangular, obround or none")
         out["relief"] = {"type": str(rel.get("type", "rect")), "ratio": _num(rel.get("ratio", 0.5), "relief ratio", 0.05, 5)}
+        cor = f.get("corner") or {}
+        if cor.get("type", "closed") not in ("closed", "open"):
+            raise HTTPException(422, "Corner type must be closed or open")
+        out["corner"] = {"type": str(cor.get("type", "closed")), "gap": _num(cor.get("gap", 0.2), "corner gap", 0, 50)}
         out["reverse"] = bool(f.get("reverse"))
         editor = f.get("editor")
         if isinstance(editor, dict) and len(json.dumps(editor)) < 200_000:
             out["editor"] = json.loads(json.dumps(editor))
+    elif op == "sm_jog":  # two opposite bends that raise the end of the sheet at the picked edge
+        out["edge"] = _pt(f.get("edge"), "edge")
+        if f.get("edge_ref") is not None:
+            out["edge_ref"] = _edge_ref(f["edge_ref"])
+        out["distance"] = _num(f.get("distance"), "jog distance from the edge", 0.01, 1e5)
+        out["offset"] = _num(f.get("offset"), "jog offset", 0.01, 1e5)
+        out["angle"] = _num(f.get("angle", 90), "jog angle", 1, 90)
+        out["r"] = _num(f["r"], "bend radius", 0, 1e3) if f.get("r") is not None else None
+        out["flip"] = bool(f.get("flip"))
     elif op in ("sm_flange", "sm_hem"):
         out["edge"] = _pt(f.get("edge"), "edge")
         if f.get("edge_ref") is not None:
