@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import { Box, Cog, Compass, Container, Disc3, Drill, FoldVertical, Gauge, Hammer, Hexagon, PenTool, Puzzle } from "lucide-react";
 import { cx } from "@/lib/format";
 import { Reveal, useInView, useReducedMotion, useTicker } from "./motion";
+import { SectionHead } from "./site";
 
 /** The Design Office (docs/plans/CHIEF_DESIGNER.md): a Chief Designer running named specialist agents on a live board. */
 
@@ -74,12 +75,12 @@ function Board({ step, reduced }: { step: number; reduced: boolean }) {
       {COLS.map((c, ci) => {
         const here = CARDS.filter((_, i) => cols[i] === ci);
         return (
-          <div key={c} className="min-h-[150px] rounded-lg bg-white/[.04] p-2 ring-1 ring-white/10">
-            <div className="mb-2 flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-wider text-chrome-muted">{c}<span className="rounded bg-white/10 px-1.5 text-chrome-fg">{here.length}</span></div>
+          <div key={c} className="min-h-[150px] bg-white/[.03] p-2 ring-1 ring-[#7eb2ff]/20">
+            <div className="s-anno mb-2 flex items-center justify-between text-[10px] text-[#9cc3ff]">{c}<span className="bg-white/10 px-1.5 tabular-nums text-chrome-fg">{here.length}</span></div>
             <div className="space-y-1.5">
               {here.map(card => (
                 <div key={card.id} ref={el => { if (el) refs.current.set(card.id, el); else refs.current.delete(card.id); }}
-                  className={cx("rounded-md border bg-chrome-2 p-2 text-[11px]", ci === 3 ? "border-success/40" : ci === 2 ? "border-warning/40" : "border-white/10")}>
+                  className={cx("rounded-[2px] border bg-chrome-2 p-2 text-[11px]", ci === 3 ? "border-success/40" : ci === 2 ? "border-warning/40" : "border-white/10")}>
                   <div className="flex items-start gap-1.5">
                     <div className="min-w-0 flex-1">
                       <div className="font-mono text-[9.5px] text-chrome-muted">{card.id}</div>
@@ -105,27 +106,22 @@ export default function OfficeBoard() {
   const step = useTicker(on && !reduced, 1500);
   const line = ARCHIE[Math.floor(step / 3) % ARCHIE.length]!;
   return (
-    <div ref={ref} id="office" className="scroll-mt-20 bg-chrome text-chrome-fg">
-      <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+    <div ref={ref} id="office" className="s-print s-grid scroll-mt-20 border-t border-ink">
+      <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-24">
         <Reveal className="grid items-end gap-6 lg:grid-cols-[1.1fr_1fr]">
           <div>
-            <span className="text-[11px] font-semibold uppercase tracking-[.14em] text-[#F2B784]">Design Office</span>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">A whole design office, not one assistant.</h2>
-            <p className="mt-3 text-chrome-muted">
-              Archie, your Chief Designer, splits a machine into parts and interfaces and hands each one to a named specialist on a board you
-              can watch. Specialists work in parallel, Hex pulls standard parts from the Toolbox instantly, and every part passes the same gating
-              checks before Fitz fits it.
-            </p>
+            <SectionHead onPrint n="05.1" kicker="Design Office" title="Eleven named specialists on one board."
+              body="Archie, your Chief Designer, splits a machine into parts and interfaces and hands each one to a specialist on a board you can watch. Hex pulls standard parts from the Toolbox instantly, and every part passes Gage's checks before Fitz fits it." />
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
             {Object.values(AGENTS).map(a => (
-              <span key={a.name} className="inline-flex items-center gap-1.5 rounded-full bg-white/[.06] py-0.5 pl-0.5 pr-2.5 text-[11.5px] ring-1 ring-white/10">
+              <span key={a.name} className="inline-flex items-center gap-1.5 bg-white/[.05] py-0.5 pl-0.5 pr-2.5 text-[12px] ring-1 ring-[#7eb2ff]/25">
                 <AgentAvatar name={a.name} size={22} /><span className="font-medium text-white">{a.name}</span><span className="hidden text-chrome-muted sm:inline">{a.role}</span>
               </span>
             ))}
           </div>
         </Reveal>
-        <Reveal delay={0.1} className="mt-10 overflow-hidden rounded-xl border border-white/10 bg-[#1b1f25] p-3 sm:p-4">
+        <Reveal delay={0.1} className="mt-10 overflow-hidden border border-[#7eb2ff]/30 bg-[#071328] p-3 sm:p-4">
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <AgentAvatar name="Archie" size={26} working={!reduced} />
             <div className="min-w-0 flex-1">

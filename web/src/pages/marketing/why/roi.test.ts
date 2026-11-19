@@ -68,7 +68,7 @@ describe("ROI model", () => {
 });
 
 describe("worked examples", () => {
-  it("mounting plate: 3–4 h × $70 vs 150–250 tokens × $0.02 + 25% review", () => {
+  it("mounting plate: 3 to 4 h × $70 vs 150 to 250 tokens × $0.02 + 25% review", () => {
     const c = exampleCost(EXAMPLES.find(e => e.key === "plate")!, 70, 0.02, 0.25);
     expect(c.conv).toEqual([210, 280]);
     expect(c.tokensCost[0]).toBeCloseTo(3, 10);
@@ -77,7 +77,7 @@ describe("worked examples", () => {
     expect(c.fw[0]).toBeCloseTo(55.5, 10);
     expect(c.fw[1]).toBeCloseTo(75, 10);
   });
-  it("planetary gearbox: 4,000–8,000 tokens ≈ $80–160", () => {
+  it("planetary gearbox: 4,000 to 8,000 tokens ≈ $80 to 160", () => {
     const c = exampleCost(EXAMPLES.find(e => e.key === "gearbox")!, 70, 0.02, 0.25);
     expect(c.conv).toEqual([4200, 7000]);
     expect(c.tokensCost[0]).toBeCloseTo(80, 10);
@@ -101,7 +101,7 @@ describe("hire vs buy", () => {
 describe("formatting", () => {
   it("prints one currency prefix and collapses equal ends", async () => {
     const { range, usdRange } = await import("./roi");
-    expect(usdRange([210, 280])).toBe("US$210–280");
+    expect(usdRange([210, 280])).toBe("US$210 to 280");
     expect(range([73.2, 73.4], n => `${Math.round(n)}`)).toBe("73");
   });
 });

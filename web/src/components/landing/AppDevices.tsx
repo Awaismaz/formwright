@@ -6,6 +6,7 @@ import { MeshingGears } from "@/pages/app/studio/ShopStatus";
 import { AgentAvatar } from "@/pages/app/office/Avatars";
 import LazyScene from "./LazyScene";
 import { Reveal, useInView, useLoopClock, useReducedMotion } from "./motion";
+import { SectionHead } from "./site";
 
 /**
  * "Formwright in your pocket": the installable app (PWA) on a generic phone and a generic landscape tablet. Both
@@ -230,7 +231,7 @@ const POINTS: [typeof Zap, string, string][] = [
   [MonitorSmartphone, "Any phone, any tablet", "iPhone, iPad and Android, in portrait or landscape."],
   [Download, "Install from the browser", "Add it to your home screen in two taps. No app store needed."],
   [WifiOff, "Offline-ready shell", "Opens instantly and keeps your projects close, even on a patchy shop-floor signal."],
-  [Bell, "Everything but the desktop bridges", "Brief, review, approve and export on the move; native CAD bridges run on your workstation."],
+  [Bell, "Everything but the desktop bridges", "Brief, review, approve and export on the move. Desktop CAD stays on your workstation."],
 ];
 
 export default function AppDevices() {
@@ -240,18 +241,16 @@ export default function AppDevices() {
   const phoneT = useLoopClock(on && !reduced, PHONE_LOOP, 100);
   const tabT = useLoopClock(on && !reduced, TABLET_LOOP, 100);
   return (
-    <section id="mobile" className="relative scroll-mt-20 overflow-hidden border-y border-border">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_70%_40%,rgb(var(--primary)/.10),transparent_60%)]" />
-      <div ref={ref} className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-[.85fr_1.4fr]">
+    <section id="mobile" className="s-grid relative scroll-mt-20 overflow-hidden border-b border-ink/80 bg-sheet2">
+      <div ref={ref} className="relative mx-auto grid max-w-[1240px] items-center gap-12 px-4 py-20 sm:px-6 sm:py-24 lg:grid-cols-[.85fr_1.4fr]">
         <Reveal>
-          <div className="label">Mobile & tablet</div>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">Formwright in your pocket.</h2>
-          <p className="mt-3 text-muted">Install the app on iPhone and Android, no app store needed. Brief a part from the shop floor, watch the Design Office work, and approve the result before you are back at your desk.</p>
+          <SectionHead n="06" kicker="Mobile and tablet" title="Formwright in your pocket."
+            body="Install the app on iPhone and Android, no app store needed. Brief a part from the shop floor, watch the Design Office work, and approve the result before you are back at your desk." />
           <ul className="mt-6 space-y-3.5">
             {POINTS.map(([I, h, b]) => (
               <li key={h} className="flex gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary"><I className="h-[18px] w-[18px]" /></span>
-                <div><div className="text-[14.5px] font-semibold">{h}</div><div className="text-[13px] text-muted">{b}</div></div>
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center border border-ink/70 bg-slab text-bp"><I className="h-[18px] w-[18px]" strokeWidth={1.6} aria-hidden="true" /></span>
+                <div><div className="text-[15px] font-semibold text-ink">{h}</div><div className="text-[14px] text-ink2">{b}</div></div>
               </li>
             ))}
           </ul>

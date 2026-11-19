@@ -5,7 +5,8 @@ import { CheckCircle2, Inbox, MailCheck, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { Button, Field, Input, Spinner } from "@/components/ui";
+import { Field, Input, Spinner } from "@/components/ui";
+import { KeyButton as Button } from "@/components/landing/site";
 import AuthLayout from "@/layouts/AuthLayout";
 import { LinkProblem } from "./AuthPages";
 
@@ -103,8 +104,8 @@ export function AcceptInvite() {
     <AuthLayout title="You've been invited" subtitle="Join your team's Formwright workspace.">
       <div className="flex items-center gap-3 rounded-lg border border-border bg-panel2 p-4 text-sm"><Users className="h-5 w-5 text-primary" /> Create an account with the invited email, or sign in if you already have one.</div>
       <div className="mt-6 grid gap-2">
-        <Link to={`/signup?next=${encodeURIComponent(here)}`}><Button className="w-full" size="lg">Create account</Button></Link>
-        <Link to={`/login?next=${encodeURIComponent(here)}`}><Button className="w-full" size="lg" variant="secondary">Sign in</Button></Link>
+        <Button to={`/signup?next=${encodeURIComponent(here)}`} className="w-full" size="lg">Create account</Button>
+        <Button to={`/login?next=${encodeURIComponent(here)}`} className="w-full" size="lg" variant="secondary">Sign in</Button>
       </div>
     </AuthLayout>
   );

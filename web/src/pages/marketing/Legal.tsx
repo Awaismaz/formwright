@@ -1,5 +1,7 @@
-import { useParams } from "react-router-dom";
-import { Badge } from "@/components/ui";
+import { Link, useParams } from "react-router-dom";
+import { useTitle } from "@/lib/title";
+import { cx } from "@/lib/format";
+import { Badge3D, Card3D } from "@/components/landing/site";
 
 const DOCS: Record<string, { title: string; sections: [string, string][] }> = {
   terms: { title: "Terms of service", sections: [
@@ -24,14 +26,38 @@ const DOCS: Record<string, { title: string; sections: [string, string][] }> = {
 
 export default function Legal() {
   const { doc = "terms" } = useParams();
-  const d = DOCS[doc] ?? DOCS.terms!;
+  const key = DOCS[doc] ? doc : "terms";
+  const d = DOCS[key]!;
+  useTitle(d.title);
   return (
-    <main className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-      <Badge tone="warning">Draft — pending legal review</Badge>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight">{d.title}</h1>
-      <p className="mt-2 text-sm text-muted">This document is a working draft and is not yet legally binding. Final terms will be published before general availability.</p>
-      <div className="mt-10 space-y-8">
-        {d.sections.map(([h, b]) => <section key={h}><h2 className="font-semibold">{h}</h2><p className="mt-2 leading-relaxed text-muted">{b}</p></section>)}
+    <main className="s-grid border-b border-ink/80">
+      <div className="mx-auto grid max-w-[1240px] gap-10 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <nav aria-label="Legal documents" className="lg:sticky lg:top-24 lg:self-start">
+          <div className="s-anno text-bp">Documents</div>
+          <ul className="mt-3 border-t border-ink/70">
+            {Object.entries(DOCS).map(([k, v], i) => (
+              <li key={k}><Link to={"/legal/" + k} aria-current={k === key ? "page" : undefined}
+                className={cx("flex min-h-[44px] items-center gap-3 border-b border-rule text-[15px]", k === key ? "font-semibold text-ink" : "text-ink2 hover:text-ink")}>
+                <span className="s-anno text-bp">L.{i + 1}</span>{v.title}</Link></li>
+            ))}
+          </ul>
+        </nav>
+        <Card3D inner="p-6 sm:p-10">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/70 pb-4">
+            <Badge3D tone="hi">Draft · pending legal review</Badge3D>
+            <span className="s-anno text-ink2">Rev 0 · not yet binding</span>
+          </div>
+          <h1 className="s-h2 mt-6 text-[34px] text-ink sm:text-[48px]">{d.title}</h1>
+          <p className="mt-3 max-w-2xl text-[16px] leading-relaxed text-ink2">This document is a working draft and is not yet legally binding. Final terms will be published before general availability.</p>
+          <div className="mt-10 max-w-[70ch] space-y-8">
+            {d.sections.map(([h, b]) => (
+              <section key={h} className="border-t border-rule pt-5">
+                <h2 className="text-[18px] font-semibold text-ink" style={{ fontFamily: "inherit", fontStretch: "normal", letterSpacing: 0 }}>{h}</h2>
+                <p className="mt-2 text-[16px] leading-relaxed text-ink2">{b}</p>
+              </section>
+            ))}
+          </div>
+        </Card3D>
       </div>
     </main>
   );
