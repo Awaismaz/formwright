@@ -124,7 +124,10 @@ def resize(root: Path, doc: dict[str, Any], item: str, values: dict[str, Any], a
             raise OfficeInputError(f"{k} must be between 0.5 and 5000 mm.")
         vals[k] = float(v)
     ov = copy.deepcopy(ic["overrides"])
-    ov.setdefault("items", {}).setdefault(item, {}).update(vals)
+    io = ov.setdefault("items", {}).setdefault(item, {})
+    io.update(vals)
+    if io.get("grown"):  # the engineer chose these sizes: they replace the plan's (no longer Archie's growth)
+        io["grown"] = [k for k in io["grown"] if k not in vals]
     sk2, ifs2 = _rebuild(doc, ov)
     probs = icd.problems(sk2, ifs2)
     before = ic.get("problems") or []
@@ -181,11 +184,20 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
     steps: list[dict[str, Any]] = []
     while probs and len(steps) < FIX_MAX_STEPS:
         best: tuple[int, int, dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+        seen: set[tuple[str, str, str]] = set()
         for f in _implicated(sk, ifs, probs):
+            # the same joint on every copy of a part changes together: one design serves all the copies
+            group = (f["kind"], f["a"]["item"], f["b"]["item"])
+            if group in seen:
+                continue
+            seen.add(group)
+            sibs = [g for g in ifs if (g["kind"], g["a"]["item"], g["b"]["item"]) == group]
             for rank, cand in enumerate(_candidates(f)):
                 try:
                     vals = icd.clean_values(f, cand)
-                    ov2 = icd.apply_values(ov, f, vals)
+                    ov2 = ov
+                    for g in sibs:
+                        ov2 = icd.apply_values(ov2, g, vals)
                     sk2, ifs2 = _rebuild(doc, ov2)
                 except (OfficeInputError, ValueError, KeyError):
                     continue
@@ -210,7 +222,9 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
                         break
                     for r2, cand in enumerate(extra):
                         ov2 = copy.deepcopy(ov)
-                        ov2.setdefault("items", {}).setdefault(item, {}).update(ch)
+                        io = ov2.setdefault("items", {}).setdefault(item, {})
+                        io.update(ch)
+                        io["grown"] = sorted(set(io.get("grown") or []) | set(ch))  # still measured against the plan
                         try:
                             if cand:
                                 ov2 = icd.apply_values(ov2, f0, icd.clean_values(f0, cand))
@@ -236,29 +250,37 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
                               "before": {k: g["data"].get(k) for k in f["cand"]}})
         else:
             before = {k: f["data"].get(k) for k in vals}
-            steps.append({"interface": f["id"], "name": f["name"], "values": vals, "before": before})
+            nsib = sum(1 for g in ifs if (g["kind"], g["a"]["item"], g["b"]["item"]) ==
+                       (f["kind"], f["a"]["item"], f["b"]["item"]))
+            more = f" (and the same joint on {nsib - 1} other cop{'y' if nsib == 2 else 'ies'})" if nsib > 1 else ""
+            steps.append({"interface": f["id"], "name": f["name"] + more,
+                          "values": vals, "before": before})
         sk, ifs = _rebuild(doc, ov)
         probs = icd.problems(sk, ifs)
     return ov, steps, probs
 
 
 def _grow(it: dict[str, Any]) -> list[dict[str, Any]]:
-    """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot."""
+    """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot. Never
+    past ``icd.PLAN_SLACK`` times the planned envelope (CD-029): beyond that the plan, not the layout, must change."""
     L, W, H = (float(x) for x in it["size"])
+    out: list[dict[str, Any]] = []
     if it["role"] == "block":
-        out = []
         dims = sorted((("L", L), ("W", W), ("H", H)), key=lambda kv: kv[1])
         for add in (2.0, 4.0, 8.0):
             for k, v in dims[:2]:
                 out.append({k: round(v + add, 1)})
         out.append({dims[0][0]: round(dims[0][1] + 4.0, 1), dims[1][0]: round(dims[1][1] + 8.0, 1)})
-        return out
-    if it["role"] == "hub":
-        out = []
+    elif it["role"] == "hub":
         if it.get("bore") and float(it["bore"]) + 2.0 > L:  # just enough rim around its bore
             out.append({"OD": round(float(it["bore"]) + 2.0, 1)})
-        return out + [{"OD": round(L + add, 1)} for add in (2.0, 4.0, 8.0, 16.0)]
-    return []
+        out += [{"OD": round(L + add, 1)} for add in (2.0, 4.0, 8.0, 16.0)]
+    pl = it.get("planned")
+    if not pl:
+        return out
+    keys = icd.SIZE_KEYS.get(it["role"], ())
+    cap = {k: icd.PLAN_SLACK * float(pl[n]) for n, k in enumerate(keys)}
+    return [ch for ch in out if all(v <= cap.get(k, float("inf")) + 1e-6 for k, v in ch.items())]
 
 
 def _fmt_step(s: dict[str, Any]) -> str:

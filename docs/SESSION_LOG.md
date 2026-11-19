@@ -4,6 +4,45 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (g) — Design Office: the layout respects Archie's planned envelopes (CD-029)
+
+Founder report: on a 1:8 F1 display-model program the skeleton gave a 3492 mm tub (plan 380), a 4878 mm floor (plan
+560), a 590 mm rear wing pylon (plan 40) and similar; the designer must build to those envelopes and Gage rejects them,
+so parts looped until blocked. Thin plates / small brackets / a rod hosting a bore also came out too small for their
+own holes (patched after the fact by the CD-028 self-fix).
+
+**Cause.** `icd.build` → `size_block` grew every host block along its row until each child's *whole footprint*
+(`foot()`) plus GAP/MARGIN fitted side by side on its top face, recursively (pylon grows for the main plane, which grew
+for two endplates, which grew for the DRS flap + beam wing ...). Plus: all copies of a child sat on copy 0 of a
+multi-copy host (4 stub axles in one upright), every copy of a hub was stacked on shaft copy 0 and a stacked shaft was
+forced through its host + 15 mm (stub axle 22 -> 327 mm), a turned "rod" next to a shaft became a hub and was bored
+out for the shaft, and short two-bolt rows used a fixed inset (washers overlapped).
+
+**Done.** In `icd.build`: a block whose size the plan gives keeps it when the row doesn't fit; its children then need
+only a joint pad (comfortable bolt pad, else the least: washer + d + 2; shafts bore + 2; bolted round parts bolt
+circle + d + 2), spread evenly or packed, host grows only for the pads; children may overhang. Slots are shared by all
+copies of a host (one design). Children's copies spread over the copies of a planned host; hubs over shaft copies. A
+planned shaft keeps its length (blind into its host). Parts grow only for their own joint (5.4 mm wall for M3 on a 4 mm
+plate, two washers side by side, 1 mm rim round a hosted bore). Turned parts >= 4 Ø long are rods. Bolt patterns search
+(deterministically) for positions 1 mm clear of holes already in either part. Skeleton items carry `planned`; new
+`icd.outgrown` problem when any axis exceeds 1.5 x the plan (engineer resizes / the approval freeze replace the plan;
+self-fix growth is marked `grown`). `interfaces._grow` never proposes past 1.5 x; `autofix` changes the same joint on
+every copy of a part together.
+
+**Verified.** F1 copy (temp, not committed): 0 problems before any fix, worst envelope 1.35 x (4 mm endplates -> 5.4).
+Standard templates (gear reducer x2 briefs, conveyor, gripper, enclosure, fixture, linear stage, widget) and the ICD rig:
+skeleton + interfaces JSON byte-identical to before. New `tests/test_office_layout_envelopes.py` (4 tests);
+`test_office_archie_chat.py`: crowded plan buildable first time (new), self-fix / chat-fix / draft-edit tests now use a
+tighter variant (M6 screws on 12 mm parts) that still needs a fix. `ruff check src tests` clean; `pytest
+tests/test_office*.py`: 85 passed (11 min 39 s).
+
+**Not done / open.** The F1 tree itself (Archie's mounts_on) still puts tyres on the floor and rims on stub axles as
+loose parts (shaft on shaft: placed beside, "mate by hand"); children of a crowded host may overlap each other in the
+skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend untouched.
+
+**Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
+
+---
 ## 2026-11-19 (f4) — Part preview in the ticket (CD-033)
 
 Founder: clicking a completed part should show a preview instead of going to the Design Studio. The ticket drawer now

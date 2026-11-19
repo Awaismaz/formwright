@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -151,7 +152,7 @@ def test_archie_ai_turn_is_metered_and_only_valid_actions_survive(app_client: An
 
 # ------------------------------------------------------------------ the ICD gate is never a dead end (CD-028)
 # A 1:8 display-model plan whose layout used to come out unbuildable: a 4 mm endplate carrying M3 holes, a 10 mm
-# mirror with two M3 washers, a 3 mm push rod hosting an 8 mm stub axle.
+# mirror with two M3 washers, a 3 mm push rod hosting an 8 mm stub axle. Since CD-029 the layout gets it right first.
 CROWDED = {"summary": "Display model", "assumptions": [], "subassemblies": [
     {"id": "s1", "name": "Body", "description": "", "parts": [
         {"id": "p1", "name": "Tub", "family": "plastic", "complexity": 4, "qty": 1, "description": "Shell.",
@@ -172,13 +173,39 @@ CROWDED = {"summary": "Display model", "assumptions": [], "subassemblies": [
          "envelope": [3.0, 3.0, 60.0], "mounts_on": "Stub axle"}]}]}
 
 
+# Still unbuildable as laid out (CD-029): the body's M6 screws on a 12 x 6 mirror and camera pod need 20.6 mm, more
+# than 1.5 x their plan. Archie's self-fix takes a smaller bolt; it may not grow them past 1.5 x.
+TIGHT = json.loads(json.dumps(CROWDED))
+TIGHT["subassemblies"][0]["parts"][2].update(envelope=[12.0, 6.0, 15.0])
+TIGHT["subassemblies"][0]["parts"] += [
+    {"id": "p8", "name": "Camera pod", "family": "plastic", "complexity": 1, "qty": 1, "description": "Pod.",
+     "envelope": [12.0, 6.0, 8.0], "mounts_on": "Tub"},
+    {"id": "p9", "name": "Body screw M6", "family": "standard", "complexity": 1, "qty": 8,
+     "description": "ISO 4762 M6 x 16 cap screw."}]
+TIGHT["subassemblies"][2]["parts"].append(
+    {"id": "p10", "name": "Wheel nut", "family": "turned", "complexity": 1, "qty": 1, "description": "Nut.",
+     "envelope": [12.0, 12.0, 8.0], "mounts_on": "Stub axle"})
+
+
+def test_a_crowded_plan_is_laid_out_buildable_first_time(app_client: Any) -> None:  # noqa: F811
+    from test_platform import signup
+
+    c = app_client
+    signup(c, "firsttime@x.com")
+    pid = _create(c)["id"]
+    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": CROWDED})
+    assert v.status_code == 200, v.text
+    ic = v.json()["icd"]
+    assert ic["problems"] == [] and not [h for h in ic["history"] if h["kind"] == "fixed"]
+
+
 def test_a_crowded_layout_corrects_itself_before_the_engineer_sees_it(app_client: Any) -> None:  # noqa: F811
     from test_platform import signup
 
     c = app_client
     signup(c, "selffix@x.com")
     pid = _create(c)["id"]
-    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": CROWDED})
+    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": TIGHT})
     assert v.status_code == 200, v.text
     ic = v.json()["icd"]
     assert ic["problems"] == []
@@ -199,7 +226,7 @@ def test_left_over_icd_problems_are_fixed_from_the_archie_chat(app_client: Any, 
     c = app_client
     signup(c, "chatfix@x.com")
     pid = _create(c)["id"]
-    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": CROWDED}).json()
+    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": TIGHT}).json()
     probs = v["icd"]["problems"]
     assert len(probs) >= 2
     assert c.post(f"/api/office/programs/{pid}/gates/icd/approve").status_code == 409
@@ -229,7 +256,7 @@ def test_draft_icd_edits_are_allowed_while_other_problems_remain(app_client: Any
     c = app_client
     signup(c, "oneatatime@x.com")
     pid = _create(c)["id"]
-    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": CROWDED}).json()
+    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": TIGHT}).json()
     n = len(v["icd"]["problems"])
     f = next(x for x in v["icd"]["interfaces"] if x["kind"] == "face")
     r = c.patch(f"/api/office/programs/{pid}/icd/interfaces/{f['id']}", json={"values": {"flatness": 0.08}})
