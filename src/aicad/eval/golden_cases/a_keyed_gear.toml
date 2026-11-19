@@ -1,0 +1,65 @@
+# (a) The founder's sentence, given to the Design Studio and the Design Office (2026-11-19).
+# Hand values (simulated run: the standard planner's plan, docs/reports/office-small.md):
+#   gear m2 x 30 (assumed): tip Ø m (z + 2) = 64, face width 10 m = 20
+#   seat Ø20, shoulder Ø20 + 2 max(2.5, 0.1 x 20 + 1) = Ø26; the shaft axis runs along +Y on Z = 0
+#   shoulder face on datum B (Y = 0), the gear on its -Y side: gear Y -20 .. 0
+#   DIN 6885 for Ø20: b 6, h 6, t1 3.5; key length floor(max(b + 2, B - 2)) = 18, centred on the hub
+#   key base point (X, Y, Z) = (20 / 2 - 3.5, -20 / 2, 0) = (6.5, -10, 0)
+id = "keyed-gear"
+title = "Spur gear on a stepped shaft, keyed"
+letter = "a"
+source = "Founder, 2026-11-19: the same sentence built in a minute in the Studio but not in the Office"
+brief = "Build a Spur Gear mounted on stepped Shaft and locked with a key"
+fast = true
+
+[sim]
+planner = "standard"     # the office's own planner on this sentence (no AI)
+intent = "a_keyed_gear.intent.json"  # with FW_DESIGN_GRAPH=1: the live intent reply, replayed (design-graph report)
+
+[limits]
+tokens = 30              # live cap, platform tokens (Archie plan about 6, looks about 5; parts are built without AI)
+wall_simulated_s = 120
+wall_live_s = 420
+
+[expect]
+complete = true
+light = true             # small program: plan and interfaces approved in one step (PD-93)
+parts = 3                # part lines: shaft, gear, key
+pieces = 3
+subs = 1
+kinds = { shaft = 1, gear = 1, key = 1 }
+no_extras = true         # no housing, bearing, plate or support was added
+instances = 3
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+direct_min = 2           # shaft and gear built from the interfaces, no AI
+
+[[expect.at]]
+kind = "key"
+at = [[6.5, -10.0, 0.0]] # (20/2 - t1 3.5, -face 20/2, 0)
+tol = 0.01
+modes = ["simulated"]
+
+[[expect.span]]
+kind = "gear"
+axis = "y"
+min = -20.0              # face width 10 m = 20 against the shoulder at Y = 0
+max = 0.0
+tol = 0.01
+modes = ["simulated"]
+
+[[expect.within]]
+inner = { kind = "key" } # the key lies inside the hub along the shaft axis (+Y)
+outer = { kind = "gear" }
+axis = "y"
+tol = 0.01
+
+[[expect.touch]]
+a = { kind = "gear" }    # the bore sits on the seat: the gear's box meets the shaft's box
+b = { kind = "shaft" }
+tol = 0.01

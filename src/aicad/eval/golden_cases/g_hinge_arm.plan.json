@@ -1,0 +1,11 @@
+{"source": "archie", "summary": "Hinged arm on a clevis base with a Ø8 pin", "assumptions": [
+  "Arm 22 wide between lugs 24 apart: 1 mm side clearance each side."],
+ "subassemblies": [
+  {"name": "Hinge", "description": "Clevis base, arm and pin.", "parts": [
+    {"name": "Clevis base", "family": "machined", "complexity": 3, "qty": 1, "envelope": [80.0, 40.0, 30.0],
+     "description": "Clevis base: plate 80 x 40 x 8 with two lugs 8 thick, 24 apart, a Ø8 H7 pin bore through both lugs 24 mm above the underside, and two Ø6.6 fixing holes."},
+    {"name": "Hinge arm", "family": "machined", "complexity": 2, "qty": 1, "envelope": [22.0, 100.0, 12.0],
+     "mounts_on": "Clevis base",
+     "description": "Arm 100 x 22 x 12 with a Ø8 pivot bore at one end and a Ø8.4 hole 90 mm from the pivot."},
+    {"name": "Hinge pin", "family": "standard", "complexity": 1, "qty": 1, "toolbox": "dowel",
+     "description": "Dowel pin Ø8 x 40 through both lugs and the arm."}]}]}

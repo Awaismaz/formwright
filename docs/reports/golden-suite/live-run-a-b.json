@@ -1,0 +1,754 @@
+[
+ {
+  "schema": 1,
+  "run_id": "0e36df06afa8",
+  "at": "2026-11-19T21:10:21Z",
+  "mode": "live",
+  "case": "keyed-gear",
+  "title": "Spur gear on a stepped shaft, keyed",
+  "letter": "a",
+  "cap": 30,
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 46.76,
+   "phases": {
+    "plan": 14.11,
+    "gate": 0.17,
+    "run": 32.47,
+    "check": 0.01
+   },
+   "tokens": 6,
+   "light": true,
+   "parts": 3,
+   "pieces": 3,
+   "subs": 1,
+   "tickets": 5,
+   "instances": 3,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 2,
+   "conformance": {
+    "ok": 6,
+    "total": 6
+   },
+   "direct": 2,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 0,
+   "looks_wrong": 0
+  },
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "light",
+    "label": "Light path (one-step approval)",
+    "ok": true,
+    "got": true,
+    "want": true
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "subs",
+    "label": "Sub-assemblies",
+    "ok": true,
+    "got": 1,
+    "want": 1
+   },
+   {
+    "id": "instances",
+    "label": "Instances in the final assembly",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": true,
+    "got": {
+     "shaft": 1,
+     "gear": 1,
+     "key": 1
+    },
+    "want": {
+     "shaft": 1,
+     "gear": 1,
+     "key": 1
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "6 of 6 features",
+    "want": "all"
+   },
+   {
+    "id": "direct_min",
+    "label": "Parts built without AI",
+    "ok": true,
+    "got": 2,
+    "want": ">= 2"
+   },
+   {
+    "id": "within.1",
+    "label": "key inside gear along Y",
+    "ok": true,
+    "got": [
+     [
+      -19.0,
+      -1.0
+     ]
+    ],
+    "want": [
+     [
+      -20.0,
+      0.0
+     ]
+    ]
+   },
+   {
+    "id": "touch.1",
+    "label": "gear touches shaft",
+    "ok": true,
+    "got": 0.0,
+    "want": 0.0
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": true,
+    "got": 6,
+    "want": "<= 30"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 46.76,
+    "want": "<= 420 s"
+   }
+  ],
+  "passed": true,
+  "detail": {
+   "kinds": {
+    "shaft": 1,
+    "gear": 1,
+    "key": 1
+   },
+   "tickets": [
+    {
+     "title": "Stepped shaft",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": true,
+     "tokens": 0
+    },
+    {
+     "title": "Spur gear",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": true,
+     "tokens": 0
+    },
+    {
+     "title": "Parallel key",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "parallel_key",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Gear shaft assembly",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Spur gear on a stepped shaft, keyed",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [],
+   "warnings": [
+    "Stepped shaft: no bearings or housing in the plan, so it is delivered as a sub-assembly (the shaft with what it carries); what carries it is outside this program."
+   ],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Assemble Gear shaft assembly",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Spur gear on a stepped shaft, keyed",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "instances": [
+    {
+     "name": "Stepped shaft<1>",
+     "box": [
+      -16.0,
+      -22.0,
+      -16.0,
+      16.0,
+      98.0,
+      16.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Spur gear<1>",
+     "box": [
+      -42.0,
+      -20.0,
+      -42.0,
+      42.0,
+      0.0,
+      42.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Parallel key<1>",
+     "box": [
+      8.5,
+      -19.0,
+      -4.0,
+      15.5,
+      -1.0,
+      4.0
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 49.2,
+  "sha": "0340058399",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default"
+  },
+  "routing_id": "25d691",
+  "suite_id": "986f1f6c"
+ },
+ {
+  "schema": 1,
+  "run_id": "9809eb764f49",
+  "at": "2026-11-19T21:11:10Z",
+  "mode": "live",
+  "case": "gear-pair",
+  "title": "1:3 spur gear pair, four 6204, no housing",
+  "letter": "b",
+  "cap": 30,
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 84.0,
+   "phases": {
+    "plan": 16.72,
+    "gate": 0.35,
+    "run": 66.91,
+    "check": 0.02
+   },
+   "tokens": 8,
+   "light": true,
+   "parts": 6,
+   "pieces": 8,
+   "subs": 1,
+   "tickets": 8,
+   "instances": 8,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 7,
+   "conformance": {
+    "ok": 14,
+    "total": 14
+   },
+   "direct": 3,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 0,
+   "looks_wrong": 0
+  },
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "light",
+    "label": "Light path (one-step approval)",
+    "ok": true,
+    "got": true,
+    "want": true
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": false,
+    "got": 6,
+    "want": 5
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 8,
+    "want": 8
+   },
+   {
+    "id": "instances",
+    "label": "Instances in the final assembly",
+    "ok": true,
+    "got": 8,
+    "want": 8
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": false,
+    "got": {
+     "gear": 2,
+     "shaft": 2,
+     "bearing": 2
+    },
+    "want": {
+     "gear": 2,
+     "shaft": 2,
+     "bearing": 1
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "14 of 14 features",
+    "want": "all"
+   },
+   {
+    "id": "direct_min",
+    "label": "Parts built without AI",
+    "ok": false,
+    "got": 3,
+    "want": ">= 4"
+   },
+   {
+    "id": "distance.1",
+    "label": "smallest gear to largest gear",
+    "ok": true,
+    "got": 80.0,
+    "want": 80.0
+   },
+   {
+    "id": "same_span.1",
+    "label": "smallest gear same span as largest gear along Y",
+    "ok": true,
+    "got": [
+     [
+      -10.0,
+      10.0
+     ]
+    ],
+    "want": [
+     [
+      -10.0,
+      10.0
+     ]
+    ]
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": true,
+    "got": 8,
+    "want": "<= 30"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 84.0,
+    "want": "<= 480 s"
+   }
+  ],
+  "passed": false,
+  "detail": {
+   "kinds": {
+    "shaft": 2,
+    "gear": 2,
+    "bearing": 2
+   },
+   "tickets": [
+    {
+     "title": "Input shaft",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": true,
+     "tokens": 0
+    },
+    {
+     "title": "Pinion",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": true,
+     "tokens": 0
+    },
+    {
+     "title": "Bearing 6204 (input)",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "bearing",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Output shaft",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": true,
+     "tokens": 0
+    },
+    {
+     "title": "Gear",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "spur_gear",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Bearing 6204 (output)",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "bearing",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Input shaft assembly",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of 1:3 spur gear pair, four 6204, no housing",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [],
+   "warnings": [],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Assemble Input shaft assembly",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of 1:3 spur gear pair, four 6204, no housing",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "instances": [
+    {
+     "name": "Input shaft<1>",
+     "box": [
+      -12.5,
+      -50.0,
+      -12.5,
+      12.5,
+      50.0,
+      12.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Pinion<1>",
+     "box": [
+      -22.0,
+      -10.0,
+      -22.0,
+      22.0,
+      10.0,
+      22.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Output shaft<1>",
+     "box": [
+      67.5,
+      -50.0,
+      -12.5,
+      92.5,
+      50.0,
+      12.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Gear<1>",
+     "box": [
+      14.84014,
+      -10.0,
+      -65.15986,
+      145.15986,
+      10.0,
+      65.15986
+     ],
+     "bin": false
+    },
+    {
+     "name": "Bearing 6204 (input)<1>",
+     "box": [
+      -23.5,
+      -29.0,
+      -23.5,
+      23.5,
+      -15.0,
+      23.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Bearing 6204 (input)<2>",
+     "box": [
+      -23.5,
+      15.0,
+      -23.5,
+      23.5,
+      29.0,
+      23.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Bearing 6204 (output)<1>",
+     "box": [
+      56.5,
+      -29.0,
+      -23.5,
+      103.5,
+      -15.0,
+      23.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Bearing 6204 (output)<2>",
+     "box": [
+      56.5,
+      15.0,
+      -23.5,
+      103.5,
+      29.0,
+      23.5
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 84.4,
+  "sha": "0340058399",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default"
+  },
+  "routing_id": "25d691",
+  "suite_id": "986f1f6c"
+ }
+]

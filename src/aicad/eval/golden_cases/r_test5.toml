@@ -1,0 +1,43 @@
+# Regression: the founder's program "Test 5" (2026-11-19). Archie's first plan, replayed (r_test5.plan.json):
+# shaft, key and gear in two groups, no housing. What went wrong then: the shaft-support rule forced a housing
+# (two plan revisions), the key went to the parts bin, 9 tickets for 3 parts. Hand values:
+#   Ø20 shaft: DIN 6885 key 6 x 6 x 18 (t1 3.5); gear m2 x 30, face 20; the key lies inside the hub along the axis
+#   a small plan of a shaft and what rides on it is one sub-assembly: 3 parts + 1 sub + the final = 5 tickets
+id = "r-test5"
+title = "Regression: Test 5 (keyed gear, no extras)"
+letter = "R1"
+source = "Founder's program Test 5, 2026-11-19 (docs/reports/office-small.md)"
+brief = "Build a Spur Gear, mounted on shaft and locked with a key. No extra items. Just a spur gear, a shaft and a key"
+fast = true
+
+[sim]
+plan = "r_test5.plan.json"
+
+[limits]
+tokens = 30
+wall_simulated_s = 120
+wall_live_s = 420
+
+[expect]
+complete = true
+light = true
+parts = 3
+pieces = 3
+subs = 1
+tickets = 5
+kinds = { shaft = 1, gear = 1, key = 1 }
+no_extras = true         # never a housing to satisfy a rule
+instances = 3
+clashes = 0
+binned = 0               # the key is placed, not binned
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.within]]
+inner = { kind = "key" }
+outer = { kind = "gear" }
+axis = "y"
+tol = 0.01

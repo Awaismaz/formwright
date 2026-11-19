@@ -100,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
         from aicad.eval.repeat import main as repeat
 
         return repeat(argv[1:])
+    if argv[:1] == ["golden"]:  # WORKLIST 46 golden mechanism suite (aicad golden --help)
+        from aicad.eval.golden_run import main as golden
+
+        return golden(argv[1:])
     if argv[:1] == ["latency"]:  # agent-latency benchmark (aicad latency --help)
         from aicad.eval.latency import main as latency
 

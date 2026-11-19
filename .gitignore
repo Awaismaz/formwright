@@ -16,3 +16,4 @@ web/dist/
 .out_backup/
 web/*.tsbuildinfo
 bench-out/
+eval/golden/history/

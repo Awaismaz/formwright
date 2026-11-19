@@ -1,0 +1,52 @@
+# (d) A bolted bracket on a base plate: the design intent and sizes of fixture FX-04 (src/aicad/fixtures/
+# fx04_bolted_bracket.py), given to the Design Office as a brief. Hand values:
+#   program frame: datum A = the top face of the program base (Z = 0), so the plate spans Z -10 .. 0 and the
+#   bracket's foot sits on Z = 0
+#   grip = plate 10 + foot 8 = 18; ISO through-bolt rule L >= 18 + 1.6 + 1.6 + 5.2 + 2 x 1.0 = 28.4 -> M6 x 30
+#   two M6 stacks (bolt, two washers, nut), nothing else
+id = "bracket"
+title = "Bolted bracket on a base plate"
+letter = "d"
+source = "FX-04 bolted bracket (ASM-012 fixture), as a Design Office brief"
+brief = "An aluminium angle bracket (foot 60 x 40 x 8 mm, upright 50 mm high and 8 mm thick) bolted to a 120 x 80 x 10 mm aluminium base plate with two M6 x 30 hex bolts, washers and nuts."
+
+[sim]
+plan = "d_bracket.plan.json"
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+complete = true
+light = false            # 10 pieces (more than 8): the full path
+parts = 5
+pieces = 10
+kinds = { plate = 1, support = 1, fastener = 8 }  # 2 bolts, 4 washers, 2 nuts
+no_extras = true
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.span]]
+name = "(?i)base plate"
+axis = "z"
+min = -10.0              # the plate's top face is datum A (Z = 0)
+max = 0.0
+tol = 0.01
+
+[[expect.span]]
+name = "(?i)bracket"
+axis = "z"
+min = 0.0                # the foot sits on the plate
+tol = 0.01
+
+[[expect.stacks]]
+style = "hex_bolt"
+size = 6
+n = 2                    # the two bracket bolts
