@@ -3,8 +3,8 @@ import { cx } from "@/lib/format";
 import { CountUp } from "./motion";
 import { PROFILES, RATE_PRESETS, WORKDAYS_PER_MONTH, roi, usd, type Complexity, type Inputs, type PackLike, type PlanLike } from "./roi";
 
-/** Conventional = copper, Formwright = Forge blue (validated light + dark: CVD ΔE ≥ 25, contrast ≥ 3:1). */
-const CONV = "bg-[#C8742E] dark:bg-[#CC7A35]";
+/** Conventional = hatched graphite, Formwright = drafting blue: they differ in pattern as well as colour. */
+const CONV = "s-conv";
 const FW = "bg-primary";
 
 function Seg<T extends string>({ value, options, onChange, label }: { value: T; options: { v: T; l: ReactNode }[]; onChange: (v: T) => void; label: string }) {

@@ -1,8 +1,7 @@
-import { useMemo, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowRight, Boxes, Calculator as CalcIcon, CheckCircle2, ClipboardCheck, Clock, Coins, Factory, FileStack, GitBranch,
+  ArrowRight, Boxes, Calculator as CalcIcon, CheckCircle2, ClipboardCheck, Clock, Factory, FileStack, GitBranch,
   Layers, Package, Repeat2, ScanLine, ShieldCheck, Sparkles, Users, Wrench, Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -10,7 +9,8 @@ import { useSession } from "@/lib/session";
 import { useTitle } from "@/lib/title";
 import type { Catalog } from "@/lib/types";
 import { cx } from "@/lib/format";
-import { Badge, Button } from "@/components/ui";
+import LazyScene from "@/components/landing/LazyScene";
+import { Badge3D, Button3D, Card3D, Dim, Fcf, SectionHead as SheetHead, useScrollProgress } from "@/components/landing/site";
 import Calculator from "./why/Calculator";
 import { CountUp, Reveal, useReduced, useSeen } from "./why/motion";
 import {
@@ -34,13 +34,23 @@ function Sup({ n }: { n: number }) {
   return <a href="#sources" className="ml-0.5 align-super text-[10px] font-medium text-primary hover:underline">[{n}]</a>;
 }
 
-function SectionHead({ eyebrow, title, body, center = true }: { eyebrow: string; title: ReactNode; body?: ReactNode; center?: boolean }) {
+function SectionHead({ n, eyebrow, title, body }: { n: string; eyebrow: string; title: ReactNode; body?: ReactNode }) {
+  return <Reveal className="max-w-3xl"><SheetHead n={n} kicker={eyebrow} title={title} body={body} /></Reveal>;
+}
+
+/** A spur gear that turns as the page scrolls past it (real Toolbox geometry). */
+function ScrollGear() {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduced = useReduced();
+  const p = useScrollProgress(ref, !reduced);
   return (
-    <Reveal className={cx("max-w-2xl", center && "mx-auto text-center")}>
-      <div className="label">{eyebrow}</div>
-      <h2 className="mt-2 text-3xl font-semibold tracking-tight sm:text-[34px]">{title}</h2>
-      {body && <p className="mt-3 text-muted">{body}</p>}
-    </Reveal>
+    <div ref={ref} className="viewport-bg relative h-[260px] sm:h-[300px]">
+      <LazyScene parts={[{ id: "gear", url: "/landing/gear.glb", color: "#bcc4ce", highlight: { rMin: 21.6, rMax: 26.5, color: "#ffc400" } }]}
+        still={reduced} turn={reduced ? undefined : p * 360} view={[1, -1, 1.1]} zoom={1.15}
+        poster={<div className="flex h-full items-center justify-center"><svg viewBox="0 0 120 120" className="h-40 w-40 text-ink2" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><circle cx="60" cy="60" r="48" strokeDasharray="5 3" /><circle cx="60" cy="60" r="40" /><circle cx="60" cy="60" r="10" /></svg></div>}
+        label="Spur gear m2, 24 teeth, from the Formwright Toolbox. It turns as you scroll." />
+      <span className="s-anno pointer-events-none absolute bottom-3 left-3 bg-sheet/90 px-2 py-1 text-ink">Spur gear m2 · z24 · 0 tokens</span>
+    </div>
   );
 }
 
@@ -52,22 +62,22 @@ function RaceCard() {
   const p = PROFILES.medium;
   const fwH = p.convHours * 0.25 + p.briefMinutes / 60;
   const rows = [
-    { k: "Conventional", sub: `${p.convHours} h model + drawing`, w: 100, dur: 6, c: "bg-[#C8742E] dark:bg-[#CC7A35]" },
+    { k: "Conventional", sub: `${p.convHours} h model + drawing`, w: 100, dur: 6, c: "s-conv" },
     { k: "First verified model", sub: `${p.briefMinutes} min`, w: (p.briefMinutes / 60 / p.convHours) * 100, dur: 0.6, c: "bg-primary" },
     { k: "Formwright + review", sub: `${fwH.toFixed(2).replace(/0$/, "")} h incl. 25% review`, w: (fwH / p.convHours) * 100, dur: 1.6, c: "bg-primary" },
   ];
   return (
-    <div ref={ref} className="card relative overflow-hidden p-5 text-left shadow-pop sm:p-6">
+    <div ref={ref}><Card3D screws inner="relative overflow-hidden p-5 text-left sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-semibold">One medium part, start to signed-off</div>
-        <Badge tone="neutral">Modelled</Badge>
+        <Badge3D>Modelled</Badge3D>
       </div>
       <div className="mt-5 space-y-4">
         {rows.map((r, i) => (
           <div key={r.k}>
             <div className="flex items-baseline justify-between text-xs"><span className="font-medium">{r.k}</span><span className="tabular-nums text-muted">{r.sub}</span></div>
-            <div className="mt-1.5 h-2.5 rounded-full bg-panel2">
-              <div className={cx("h-full rounded-full", r.c)}
+            <div className="mt-1.5 h-3 bg-sheet2 ring-1 ring-rule">
+              <div className={cx("h-full", r.c)}
                 style={{ width: on ? `${Math.max(1.5, r.w)}%` : "0%", transition: reduced ? "none" : `width ${r.dur}s cubic-bezier(.2,.7,.2,1) ${0.2 + i * 0.15}s` }} />
             </div>
           </div>
@@ -78,7 +88,7 @@ function RaceCard() {
         <div><Factory className="mx-auto mb-1 h-4 w-4 text-accent" />DFM advice per revision</div>
         <div><FileStack className="mx-auto mb-1 h-4 w-4 text-primary" />STEP · drawing · BOM</div>
       </div>
-    </div>
+    </Card3D></div>
   );
 }
 
@@ -117,8 +127,8 @@ export default function Why() {
   const teamYear = planYear(team, 2000, packs);
   const loadedDrafter = (65_000 * HIRE.overhead) / HIRE.hoursPerYear;
   const start = signedIn
-    ? <Link to="/app"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button></Link>
-    : <Link to="/signup"><Button size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free trial</Button></Link>;
+    ? <Button3D to="/app" size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button3D>
+    : <Button3D to="/signup" size="lg" icon={<ArrowRight className="h-4 w-4" />}>Start free trial</Button3D>;
 
   const STATS = [
     { v: hero.firstModel, f: (n: number) => `${Math.round(n)}×`, l: "sooner to a first verified model", s: `${PROFILES.medium.briefMinutes} min vs ≈ ${PROFILES.medium.convHours * PROFILES.medium.modelShare} h of modelling` },
@@ -129,55 +139,48 @@ export default function Why() {
 
   return (
     <main className="overflow-x-clip">
-      <style>{`@keyframes why-drift{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(2%,-3%,0) scale(1.06)}}
-.why-drift{animation:why-drift 18s ease-in-out infinite}@media (prefers-reduced-motion:reduce){.why-drift{animation:none}}`}</style>
-
       {/* hero */}
-      <section className="relative overflow-hidden border-b border-border">
-        <div className="why-drift pointer-events-none absolute -inset-[10%] bg-[radial-gradient(ellipse_at_30%_10%,rgb(var(--primary)/.14),transparent_55%),radial-gradient(ellipse_at_85%_30%,rgb(var(--accent)/.10),transparent_50%)]" />
-        <div className="pointer-events-none absolute inset-0 opacity-[.35] [background-image:linear-gradient(rgb(var(--border))_1px,transparent_1px),linear-gradient(90deg,rgb(var(--border))_1px,transparent_1px)] [background-size:32px_32px] [mask-image:linear-gradient(to_bottom,black,transparent_80%)]" />
-        <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-14 pt-12 sm:px-6 lg:grid-cols-[1.25fr_1fr] lg:pt-16">
-          <div>
-            <Badge tone="accent" className="animate-fade-in"><Sparkles className="h-3 w-3" /> Why Formwright</Badge>
-            <h1 className="mt-5 text-[38px] font-semibold leading-[1.08] tracking-tight sm:text-[52px]">
-              Why should you buy <span className="bg-gradient-to-r from-primary to-[#5C93E6] bg-clip-text text-transparent">Formwright</span>?
+      <section className="s-grid relative overflow-hidden border-b border-ink/80">
+        <div className="relative mx-auto grid max-w-[1240px] items-end gap-12 px-4 pb-14 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:pt-16">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3"><Fcf cells={["Hours", "Per part"]} /><span className="s-anno text-ink2">Why Formwright</span></div>
+            <h1 className="s-display mt-7 text-[36px] text-ink min-[420px]:text-[44px] sm:text-[60px] md:text-[72px] lg:text-[62px] xl:text-[72px]">
+              <span className="s-rise"><span>Why buy</span></span><span className="s-rise pb-[.18em]"><span style={{ ["--d" as string]: ".1s" }}><span className="underline decoration-hi decoration-[0.12em] underline-offset-[0.1em]">Formwright?</span></span></span>
             </h1>
-            <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-muted">
+            <Dim label="Brief to signed-off part" load delay={0.45} className="max-w-[560px]" />
+            <p className="mt-6 max-w-xl text-[17px] leading-relaxed text-ink2 sm:text-[18px]">
               Because your engineers should spend their hours on engineering decisions, not on redrawing plates and brackets.
-              Formwright turns a brief into verified, parametric CAD with drawings and DFM advice, so every engineer ships more parts, sooner, for less.
+              Formwright turns a brief into checked, parametric CAD with drawings and DFM advice, so each engineer ships more parts, sooner, for less.
             </p>
             <div className="mt-6 flex flex-wrap gap-2">
-              {[[Zap, "Faster"], [ShieldCheck, "More reliable"], [Factory, "Manufacturing-aware"], [Coins, "Cheaper"]].map(([I, t]) => {
-                const Icon = I as typeof Zap;
-                return <span key={t as string} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-panel/80 px-3 py-1 text-[13px] font-medium"><Icon className="h-3.5 w-3.5 text-primary" />{t as string}</span>;
-              })}
+              {["Faster", "Checked every build", "Manufacturing-aware", "Cheaper per part"].map(t => <Badge3D key={t}>{t}</Badge3D>)}
             </div>
-            <div className="mt-8 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-wrap items-center gap-4">
               {start}
-              <a href="#calculator"><Button size="lg" variant="secondary" icon={<CalcIcon className="h-4 w-4" />}>Run your numbers</Button></a>
+              <Button3D href="#calculator" size="lg" finish="steel" icon={<CalcIcon className="h-4 w-4" />}>Run your numbers</Button3D>
             </div>
           </div>
           <Reveal delay={0.1}><RaceCard /></Reveal>
         </div>
-        <div className="relative mx-auto max-w-6xl px-4 pb-14 sm:px-6">
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-border bg-border lg:grid-cols-4">
+        <div className="relative mx-auto max-w-[1240px] px-4 pb-14 sm:px-6">
+          <div className="grid grid-cols-2 gap-px overflow-hidden border border-ink/70 bg-rule lg:grid-cols-4">
             {STATS.map((s, i) => (
-              <Reveal key={s.l} delay={i * 0.08} className="h-full bg-panel p-5 sm:p-6">
-                <div className="text-[34px] font-semibold leading-none tracking-tight text-primary sm:text-[42px]"><CountUp value={s.v} format={s.f} /></div>
+              <Reveal key={s.l} delay={i * 0.08} className="h-full bg-slab p-5 sm:p-6">
+                <div className="font-display text-[34px] font-extrabold leading-none tracking-tight text-bp sm:text-[46px]" style={{ fontStretch: "112%" }}><CountUp value={s.v} format={s.f} /></div>
                 <div className="mt-2 text-sm font-medium">{s.l}</div>
                 <div className="mt-1 text-xs text-muted">{s.s}</div>
               </Reveal>
             ))}
           </div>
-          <p className="mt-3 text-center text-[11px] text-muted">
+          <p className="mt-3 text-[12px] text-ink2">
             Modelled estimates from the calculator's opening scenario: {inputs.parts} medium parts a month, US${inputs.rate}/h engineer, {Math.round(inputs.review * 100)}% review kept, {inputs.plan.name} plan. <a href="#calculator" className="underline">See the arithmetic</a>.
           </p>
         </div>
       </section>
 
       {/* cost of conventional work */}
-      <section id="cost" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <SectionHead eyebrow="The status quo" title="Conventional CAD hours are expensive hours."
+      <section id="cost" className="mx-auto max-w-[1240px] scroll-mt-20 px-4 py-20 sm:px-6">
+        <SectionHead n="01" eyebrow="The status quo" title="Conventional CAD hours are expensive hours."
           body="Every part is modelled, drawn and checked by a skilled engineer. Here is what that time costs, from public figures." />
         <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -201,22 +204,19 @@ export default function Why() {
       </section>
 
       {/* risks */}
-      <section id="risks" className="scroll-mt-20 border-y border-border bg-chrome text-chrome-fg">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <Reveal className="mx-auto max-w-2xl text-center">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-chrome-muted">Risk, removed</div>
-            <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-[34px]">The hidden costs of conventional work, and what we do about each.</h2>
-            <p className="mt-3 text-chrome-muted">Hours are only the visible cost. Errors, drift and rework are the expensive ones.</p>
-          </Reveal>
+      <section id="risks" className="s-print s-grid scroll-mt-20 border-y border-ink">
+        <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-24">
+          <Reveal className="max-w-3xl"><SheetHead onPrint n="02" kicker="Risk, removed" title="The hidden costs of conventional work, and what we do about each."
+            body="Hours are only the visible cost. Errors, drift and rework are the expensive ones." /></Reveal>
           <div className="mt-12 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {RISKS.map((r, i) => (
-              <Reveal key={r.risk} delay={(i % 3) * 0.08} className="h-full rounded-lg border border-white/[.08] bg-white/[.03] p-5 transition hover:border-white/20 hover:bg-white/[.05]">
+              <Reveal key={r.risk} delay={(i % 3) * 0.08} className="h-full border border-[#7eb2ff]/25 bg-white/[.03] p-5 transition-colors hover:border-[#7eb2ff]/60">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/[.06] text-[#E3A06A]"><r.icon className="h-[18px] w-[18px]" /></div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center border border-[#7eb2ff]/40 text-[#9cc3ff]"><r.icon className="h-[18px] w-[18px]" /></div>
                   <h3 className="font-semibold text-white">{r.risk}</h3>
                 </div>
-                <p className="mt-3 text-sm text-chrome-muted">{r.cost}</p>
-                <div className="mt-3 flex gap-2 border-t border-white/[.08] pt-3 text-sm">
+                <p className="mt-3 text-[14.5px] text-[#b8c8e0]">{r.cost}</p>
+                <div className="mt-3 flex gap-2 border-t border-white/[.12] pt-3 text-[14.5px] text-white">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#6FC79A]" />
                   <span>{r.fix}</span>
                 </div>
@@ -227,8 +227,8 @@ export default function Why() {
       </section>
 
       {/* worked examples */}
-      <section id="examples" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <SectionHead eyebrow="Worked examples" title="The arithmetic, part by part."
+      <section id="examples" className="mx-auto max-w-[1240px] scroll-mt-20 px-4 py-20 sm:px-6">
+        <SectionHead n="03" eyebrow="Worked examples" title="The arithmetic, part by part."
           body={<>Conventional = hours × US$70/h. Formwright = tokens × US${tokenPrice.toFixed(3)} (the smallest top-up pack, our highest per-token price) + your engineer's review at 25% of the conventional hours.</>} />
         <div className="mt-12 grid gap-4 lg:grid-cols-2">
           {EXAMPLES.map((e, i) => {
@@ -247,7 +247,7 @@ export default function Why() {
                 </div>
                 <div className={cx("grid divide-y divide-border sm:grid-cols-2 sm:divide-x sm:divide-y-0")}>
                   <div className="p-5">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted"><span className="h-2 w-2 rounded-sm bg-[#C8742E] dark:bg-[#CC7A35]" />Conventional</div>
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted"><span className="s-conv h-2.5 w-2.5" />Conventional</div>
                     <div className="mt-2 text-2xl font-semibold tabular-nums">{usdRange(c.conv)}</div>
                     <div className="mt-1 font-mono text-[12px] text-muted">{range(e.convHours, n => `${n}`)} h × $70/h</div>
                     <div className="mt-3 flex items-center gap-1.5 text-xs text-muted"><Clock className="h-3.5 w-3.5" />Calendar: {e.convCalendar}</div>
@@ -273,16 +273,16 @@ export default function Why() {
 
       {/* calculator */}
       <section id="calculator" className="scroll-mt-20 border-y border-border bg-panel2/50">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <SectionHead eyebrow="ROI calculator" title="Run your own numbers."
+        <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6">
+          <SectionHead n="04" eyebrow="ROI calculator" title="Run your own numbers."
             body={`Plan prices and token packs are read live from our pricing. Your engineer still reviews and signs off every part; set how much of their time that takes.`} />
           <Reveal className="mt-10"><Calculator key={`${plans.map(p => p.code + p.price_cents + p.tokens).join()}|${packs.length}`} plans={plans} packs={packs} initial={inputs} /></Reveal>
         </div>
       </section>
 
       {/* hire vs buy */}
-      <section id="hire" className="mx-auto max-w-6xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <SectionHead eyebrow="Hire or buy" title="Another engineer, or more from the ones you have?"
+      <section id="hire" className="mx-auto max-w-[1240px] scroll-mt-20 px-4 py-20 sm:px-6">
+        <SectionHead n="05" eyebrow="Hire or buy" title="Another engineer, or more from the ones you have?"
           body="Formwright doesn't replace your engineers' judgement or sign-off. It removes the hours between a decision and a verified model." />
         <div className="mt-12 grid gap-4 md:grid-cols-2">
           <Reveal className="card h-full p-6">
@@ -298,7 +298,7 @@ export default function Why() {
             </dl>
             <p className="mt-4 text-xs text-muted">≈ 44 days to fill<Sup n={4} />, then months of onboarding before full output. One more pair of hands, at the same hours per part.</p>
           </Reveal>
-          <Reveal delay={0.08} className="card relative h-full overflow-hidden border-primary/40 p-6 ring-1 ring-primary/20">
+          <Reveal delay={0.08} className="card relative h-full overflow-hidden border-ink p-6 ring-2 ring-hi">
             <div className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" />Formwright {team.name}</div>
             <dl className="mt-5 space-y-2.5 text-sm">
               <div className="flex justify-between gap-3"><dt className="text-muted">{team.name} plan, 12 months</dt><dd className="tabular-nums">{usd(12 * team.price_cents / 100)}</dd></div>
@@ -315,8 +315,8 @@ export default function Why() {
 
       {/* tokens */}
       <section id="tokens" className="scroll-mt-20 border-y border-border bg-panel2/50">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <SectionHead eyebrow="Tokens, explained" title="You pay for AI work, not for clicks."
+        <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6">
+          <SectionHead n="06" eyebrow="Tokens, explained" title="You pay for AI work. Clicks are free."
             body="A token is our unit of AI design work. Each agent run is metered live, stops at the budget you set and is never charged beyond it. Everything deterministic is free." />
           <div className="mt-10 grid gap-6 lg:grid-cols-2">
           <div>
@@ -367,7 +367,7 @@ export default function Why() {
 
       {/* FAQ */}
       <section id="faq" className="mx-auto max-w-3xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <SectionHead eyebrow="FAQ" title="Questions buyers ask." />
+        <SectionHead n="07" eyebrow="FAQ" title="Questions buyers ask." />
         <div className="mt-10 divide-y divide-border rounded-lg border border-border bg-panel">
           {[
             ["Does Formwright replace my engineers?", "No. It amplifies them. Your engineers write the brief, make the engineering decisions, review every part and sign it off. Formwright removes the hours of modelling, drawing and checking in between."],
@@ -387,24 +387,30 @@ export default function Why() {
         </div>
       </section>
 
-      {/* CTA */}
+      {/* CTA: a title block with a gear that turns as you scroll */}
       <section className="px-4 pb-20 sm:px-6">
-        <Reveal className="relative mx-auto max-w-6xl overflow-hidden rounded-xl bg-chrome px-6 py-14 text-center text-chrome-fg sm:px-12">
-          <div className="why-drift pointer-events-none absolute -inset-[20%] bg-[radial-gradient(ellipse_at_20%_0%,rgb(31_95_191/.45),transparent_55%),radial-gradient(ellipse_at_90%_100%,rgb(200_116_46/.25),transparent_50%)]" />
-          <div className="relative">
-            <h2 className="text-3xl font-semibold tracking-tight text-white sm:text-4xl">Try it on your own parts.</h2>
-            <p className="mx-auto mt-3 max-w-xl text-chrome-muted">{trial.toLocaleString()} free tokens, every module, 14 days. No credit card. Bring a part your team modelled last month and compare.</p>
-            <div className="mt-8 flex flex-wrap justify-center gap-3">
-              {start}
-              <Link to="/pricing"><Button size="lg" variant="chrome">See pricing</Button></Link>
-              <a href={DEMO}><Button size="lg" variant="chrome" icon={<ClipboardCheck className="h-4 w-4" />}>Book a demo</Button></a>
+        <Reveal className="mx-auto max-w-[1192px]">
+          <Card3D screws hi inner="p-0">
+            <div className="s-hazard h-2.5" aria-hidden="true" />
+            <div className="grid lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+              <div className="border-b border-ink/80 p-7 sm:p-10 lg:border-b-0 lg:border-r">
+                <span className="s-anno text-bp">Next operation</span>
+                <h2 className="s-h2 mt-3 text-[34px] text-ink sm:text-[48px]">Try it on your own parts.</h2>
+                <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-ink2">{trial.toLocaleString()} free tokens, every module, 14 days. No credit card. Bring a part your team modelled last month and compare.</p>
+                <div className="mt-8 flex flex-wrap items-center gap-4">
+                  {start}
+                  <Button3D to="/pricing" size="lg" finish="steel">See pricing</Button3D>
+                  <Button3D href={DEMO} size="lg" finish="steel" icon={<ClipboardCheck className="h-4 w-4" />}>Book a demo</Button3D>
+                </div>
+              </div>
+              <ScrollGear />
             </div>
-          </div>
+          </Card3D>
         </Reveal>
       </section>
 
       {/* sources + disclaimer */}
-      <section id="sources" className="mx-auto max-w-6xl scroll-mt-20 px-4 pb-16 sm:px-6">
+      <section id="sources" className="mx-auto max-w-[1240px] scroll-mt-20 px-4 pb-16 sm:px-6">
         <div className="border-t border-border pt-6 text-[11px] leading-relaxed text-muted">
           <div className="font-semibold text-text">Sources and assumptions</div>
           <ol className="mt-2 list-decimal space-y-1 pl-5">{SOURCES.map(s => <li key={s}>{s}</li>)}</ol>

@@ -4,7 +4,8 @@ import { Eye, EyeOff, LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { Button, Field, Input } from "@/components/ui";
+import { Field, Input } from "@/components/ui";
+import { KeyButton as Button } from "@/components/landing/site";
 import AuthLayout from "@/layouts/AuthLayout";
 import { cx } from "@/lib/format";
 
@@ -151,7 +152,7 @@ export function ResetPassword() {
     <AuthLayout title="Reset your password" footer={<Link to="/login" className="link">Back to sign in</Link>}>
       <LinkProblem title={token ? "This reset link has expired or was already used" : "This page needs the link from your reset email"}
         body="Reset links work once and expire after 2 hours. Ask for a new one; it arrives in a minute."
-        action={<Link to="/forgot-password"><Button>Send a new link</Button></Link>} />
+        action={<Button to="/forgot-password">Send a new link</Button>} />
     </AuthLayout>
   );
   return (

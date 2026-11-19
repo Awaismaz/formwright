@@ -211,6 +211,9 @@ a.s-plate:focus-visible { outline: 2px solid rgb(var(--s-bp)); outline-offset: 4
 .s-link { color: rgb(var(--s-bp)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .s-link:hover { text-decoration-thickness: 2px; }
 
+/* "conventional" in charts: hatched graphite, so it differs from Formwright blue by pattern too */
+.s-conv { background: repeating-linear-gradient(135deg, rgb(var(--s-ink-2)) 0 3px, rgb(var(--s-ink-2) / .45) 3px 6px); }
+
 /* machine-guard hazard stripe: one per page at most */
 .s-hazard { background: repeating-linear-gradient(135deg, #ffc400 0 12px, #0c1016 12px 24px); }
 

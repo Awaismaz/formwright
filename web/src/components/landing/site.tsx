@@ -256,3 +256,19 @@ export function Crosshair() {
   }, [reduced]);
   return <div ref={ref} className="s-xhair" aria-hidden="true"><i className="x" /><i className="y" /><b /></div>;
 }
+
+/**
+ * Drop-in for the app's `Button` on public pages (auth, onboarding): same props, rendered as a Button3D.
+ * primary/accent: safety yellow; secondary/ghost/chrome: steel. `w-full` in className makes it full width.
+ */
+export function KeyButton({ variant = "primary", size = "md", className, loading, disabled, onClick, type = "button", icon, children, to }: {
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "accent" | "chrome"; size?: "sm" | "md" | "lg"; className?: string;
+  loading?: boolean; disabled?: boolean; onClick?: () => void; type?: "button" | "submit"; icon?: ReactNode; children: ReactNode; to?: string;
+}) {
+  const full = !!className?.split(/\s+/).includes("w-full");
+  const rest = className?.split(/\s+/).filter(c => c !== "w-full").join(" ");
+  return (
+    <Button3D to={to} type={type} onClick={onClick} loading={loading} disabled={disabled} icon={icon} block={full} className={rest}
+      size={size === "lg" ? "lg" : size === "sm" ? "sm" : "md"} finish={variant === "primary" || variant === "accent" ? "hi" : "steel"}>{children}</Button3D>
+  );
+}
