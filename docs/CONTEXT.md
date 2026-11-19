@@ -136,6 +136,15 @@ final assembly in the background and never blocks. Assembly checks go through th
   paths where the structure allows (e.g. ICD-defined parts).
 - Standing assembly test case: 1:3 spur gear pair (m2, 20/60 teeth), Ø20 shafts, four 6204 bearings, no housing.
 
+## Founder direction: architecture v2 and model routing (2026-11-19 night)
+
+"Start and complete everything": AI at the edges (intent in, explanations out), determinism in the middle. One typed
+design graph is the source of truth for Studio and Office; layout comes from connection semantics; parts come from
+parametric generators where they exist; verification is deterministic with cross-checks; process depth matches job
+size; AI image generation is NOT used in planning (a dimensioned preview from the graph instead). Model routing by job
+size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/checks (PD-82). Ordered work: WORKLIST
+41 to 48. Machine limit: at most two module agents at once.
+
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Latest (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
