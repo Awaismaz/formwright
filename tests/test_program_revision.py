@@ -421,3 +421,75 @@ def test_a_revision_waits_for_a_step_in_progress_and_refuses_after_release(tmp_p
     doc["releases"] = [{"rev": "A"}]
     with pytest.raises(Exception, match="change notice"):
         revision.apply(root, doc, c, ENG, why="x")
+
+
+def test_a_sub_assembly_whose_copies_are_joined_through_another_level_is_not_floating(tmp_path: Path) -> None:
+    """After the revision each bracket + leg pair stands on the table top, which is in the Top sub-assembly: in the
+    Legs sub-assembly alone the four pairs touch nothing of each other. That is assembled at the final assembly, not
+    floating; the founder's original leg #2 (no interface at all) still stops."""
+    from aicad.office import visual_office
+
+    root, doc = _table(tmp_path)
+    ids = _ids(doc)
+    old = copy.deepcopy(doc)
+    revision.apply(root, doc, revision.candidate(doc, CORRECTED), ENG, why="x")
+
+    def level(d: dict[str, Any]) -> dict[str, Any]:
+        return {"instances": [{"id": f"{n}-{c}", "office": {"item": ids[n], "copy": c}}
+                              for n in ("Folding leg", "Leg hinge bracket") for c in range(4)]}
+
+    groups = [{"code": "floating", "severity": "block", "items": [f"Folding leg-{c}", f"Leg hinge bracket-{c}"],
+               "text": f"Folding leg #{c + 1} touches nothing"} for c in (1, 2, 3)]
+    after = visual_office.known_loose(doc, level(doc), copy.deepcopy(groups))
+    assert [f["severity"] for f in after] == ["note"] * 3
+    assert after[0]["text"].endswith("It is joined to Table top of another sub-assembly: the final assembly checks it "
+                                     "there.")
+    before = visual_office.known_loose(old, level(old), [{"code": "floating", "severity": "block",
+                                                          "items": ["Folding leg-1"], "text": FLOATING}])
+    assert before[0]["severity"] == "block"
+
+
+# Archie's live reply on the TEST copy (2026-11-20, Opus): the right structure and his own sizes, but no size for the
+# brackets, so on today's layout the four legs would all go on bracket #1
+LIVE_OPS = [{"op": "base", "part": "Table top"}, {"op": "size", "part": "Table top", "envelope": [800, 600, 20]},
+            {"op": "mount", "part": "Leg hinge bracket", "on": "Table top"},
+            {"op": "mount", "part": "Folding leg", "on": "Leg hinge bracket"},
+            {"op": "size", "part": "Folding leg", "envelope": [90, 20, 568]}]
+
+
+def test_archies_live_revision_is_completed_so_copy_n_carries_copy_n(tmp_path: Path) -> None:
+    _root, doc = _table(tmp_path)
+    ids = _ids(doc)
+    c = revision.candidate(doc, LIVE_OPS)
+    assert c["ok"], c["why"]
+    assert c["ops"][-1] == {"op": "size", "part": "Leg hinge bracket", "envelope": [100.0, 70.0, 16.0]}
+    pairs = {(f["a"]["copy"], f["b"]["copy"]) for f in c["interfaces"]
+             if f["a"]["item"] == ids["Leg hinge bracket"] and f["b"]["item"] == ids["Folding leg"]}
+    assert pairs == {(0, 0), (1, 1), (2, 2), (3, 3)}
+    assert c["skeleton"]["items"][ids["Table top"]]["size"] == [800.0, 600.0, 20.0]
+
+
+@pytest.mark.parametrize("actions", [[], [{"tool": "revise_program", "changes": [{"op": "mount", "part": "Folding leg",
+                                                                                   "on": "Table top"}]}]])
+def test_a_live_reply_that_only_describes_the_fix_still_ends_in_a_one_click_question(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, actions: list[dict[str, Any]]) -> None:
+    from aicad import llm
+    from aicad.llm.stub import StubProvider
+
+    monkeypatch.setenv("FW_OFFICE_SUPERVISOR_AI", "1")
+    root, doc = _table(tmp_path)
+    pid = doc["id"]
+    reply = {"cause": "plan", "diagnosis": "Everything hangs off leg #1, so the other three legs float.",
+             "evidence": ["IF-02 to IF-05 all name Folding leg #1"], "say": "I propose revising to ICD v2.",
+             "actions": actions}
+    text = "The layout is upside down.\n```fw-supervisor\n" + __import__("json").dumps(reply) + "\n```"
+
+    async def go() -> None:
+        supervisor.notify(store.load(root, pid), "blocked", _t(doc, "Assemble Legs"), FLOATING)
+        with llm.use_provider(StubProvider(responder=lambda req: text), roles=("supervisor",)):
+            res = await supervisor.run_pass(root, pid, None, force=True)
+        assert res["mode"] == "ai" and len(res["asked"]) == 1
+        e = next(x for x in store.load(root, pid)["supervisor"]["log"] if x["id"] == res["asked"][0])
+        assert e["tool"] == "revise_program" and e["action"]["impact"]["placement"]["after"] == []
+
+    asyncio.run(go())

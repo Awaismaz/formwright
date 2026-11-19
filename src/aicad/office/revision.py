@@ -512,12 +512,15 @@ def impact(doc: dict[str, Any], d2: dict[str, Any], sk2: dict[str, Any], ifs2: l
     for sid in list(dict.fromkeys(list(subs_old) + list(subs_new))):
         it = subs_new.get(sid) or subs_old[sid]
         t = integ.get(sid)
+        # a level that is stopped (blocked) runs again too: the revision is what clears the stop
+        stopped = bool(t and (t.get("run") or {}).get("status") == "blocked")
         st = "added" if sid not in subs_old else "removed" if sid not in subs_new else \
-            "rerun" if sid in touched else "kept"
+            "rerun" if sid in touched or stopped else "kept"
         levels.append({"item": sid, "name": it["name"], "status": st, "ticket": (t or {}).get("key"),
                        "column": (t or {}).get("column")})
     final = integ.get("root")
-    levels.append({"item": "root", "name": "Final assembly", "status": "rerun" if changed else "kept",
+    f_stopped = bool(final and (final.get("run") or {}).get("status") == "blocked")
+    levels.append({"item": "root", "name": "Final assembly", "status": "rerun" if changed or f_stopped else "kept",
                    "ticket": (final or {}).get("key"), "column": (final or {}).get("column")})
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in CLASSES}
     est = _estimate(doc, rows, levels)
@@ -601,6 +604,7 @@ def candidate(doc: dict[str, Any], raw_ops: Any) -> dict[str, Any]:
     ops, dropped = clean_ops(doc, raw_ops)
     if not ops:
         raise OfficeInputError("No change to make" + (f": {dropped[0]}." if dropped else "."))
+    ops = complete_pairs(doc, ops)
     plan = revised_plan(doc, ops)
     d2, sk2, ifs2, ov = derive(doc, plan, ops)
     p_base = _with_base(doc, plan, ops, sk2)
@@ -633,6 +637,34 @@ def candidate(doc: dict[str, Any], raw_ops: Any) -> dict[str, Any]:
             "base": sk2.get("base"), "layout": sk2.get("layout")}
 
 
+def complete_pairs(doc: dict[str, Any], ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A part mounted on a host with as many copies (or a multiple) sits copy n on host copy n only when the host's
+    size is planned (``icd.build``): such a host without a planned size keeps the size it has now (an op the office
+    adds, shown in the change list). Live run 2026-11-20: Archie re-hosted the legs on the brackets without it, and
+    all four legs went on bracket #1."""
+    plan = doc.get("plan") or {}
+    items = (doc.get("skeleton") or {}).get("items") or {}
+    sized = {_key(o["part"]) for o in ops if o["op"] == "size"}
+    qty = {_key(p["name"]): int(p.get("qty") or 1) for _s, p in plan_parts(plan)}
+    for o in ops:
+        if o["op"] == "qty":
+            qty[_key(o["part"])] = int(o["qty"])
+    out = list(ops)
+    for o in ops:
+        if o["op"] != "mount":
+            continue
+        h, g = _key(o["on"]), _key(o["part"])
+        hit = _find(plan, o["on"])
+        if hit is None or h in sized or hit[1].get("envelope") or qty.get(h, 1) < 2 or qty.get(g, 1) % qty[h]:
+            continue
+        cur = next((v for v in items.values() if _key(v["name"]) == h and v.get("role") == "block"), None)
+        if cur is None:
+            continue
+        out.append({"op": "size", "part": hit[1]["name"], "envelope": [float(x) for x in cur["size"]]})
+        sized.add(h)
+    return out
+
+
 def describe_ops(ops: list[dict[str, Any]]) -> list[str]:
     out = []
     for o in ops:
@@ -658,8 +690,11 @@ def describe_ops(ops: list[dict[str, Any]]) -> list[str]:
 
 def title(cand: dict[str, Any], doc: dict[str, Any]) -> str:
     v = int((doc.get("icd") or {}).get("version") or 1)
-    return (f"Revise the program to ICD v{v + 1} (" + "; ".join(describe_ops(cand["ops"])[:4])
-            + ("…" if len(cand["ops"]) > 4 else "") + f"): {summary_line(cand['impact'])}")
+    ops = describe_ops(cand["ops"])
+    more = len(ops) - 3
+    return (f"Revise the program to ICD v{v + 1} (" + "; ".join(ops[:3])
+            + (f"; {more} more change{'s' if more != 1 else ''}" if more > 0 else "")
+            + f"): {summary_line(cand['impact'])}")
 
 
 def view(cand: dict[str, Any]) -> dict[str, Any]:
@@ -850,6 +885,7 @@ def apply(root: Path, doc: dict[str, Any], cand: dict[str, Any], actor: dict[str
     ic["overrides"] = icd.freeze(cand["skeleton"], cand["interfaces"], cand["overrides"]) if approved \
         else cand["overrides"]
     ic["problems"] = list(cand["problems"]) if not approved else []
+    ic.pop("look", None)  # Archie's look was at the layout before the revision: no longer what the program is
     doc["skeleton"] = cand["skeleton"]
     text = (f"{who} revised the program ({rid}): " + "; ".join(describe_ops(cand["ops"])) + f". ICD v{v0} → v{v0 + 1}: "
             + summary_line(imp) + ".")

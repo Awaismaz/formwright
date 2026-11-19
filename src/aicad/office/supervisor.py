@@ -1507,6 +1507,18 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
                 skipped.append(f"{a.get('tool')}: {why_not}")
                 continue
             checked.append((a, norm, *classify(doc, norm)))
+        if how == "ai" and not any(n["tool"] == "revise_program" for _a, n, _c, _w in checked) and (
+                any(x.startswith("revise_program:") for x in skipped)
+                or any(x["kind"] in ("blocked", "repeat") and _PLACEMENT.search(str(x.get("text") or ""))
+                       for x in triggers)):
+            # the model's revision could not be built (or he only described it): the office's own one, when it
+            # clears the problem, so the engineer always gets a one-click question, never only words
+            for a in rule_plan(doc, triggers, facts, wallet)["actions"]:
+                if a["tool"] == "revise_program":
+                    norm, why_not = check(doc, a, facts, wallet)
+                    if norm is not None:
+                        checked.append((a, norm, *classify(doc, norm)))
+                        break
         ptok = store.new_id()[:6]
         # alternatives (one problem, several ways to clear it): the engineer picks one, so a group with any major
         # option is asked as a whole
@@ -1559,6 +1571,10 @@ def _tell(root: Path, pid: str, plan: dict[str, Any], done: list[dict[str, Any]]
                          "it myself. It is in the Archie log.)")
         else:
             parts.append(f"I tried to {e['title'][0].lower() + e['title'][1:]}, but: {e['outcome']}")
+    for x in skipped:
+        if x.startswith("revise_program:") and not asked:
+            parts.append("I couldn't turn that revision into one the layout can build: " + x.split(":", 1)[1].strip()
+                         + ". Tell me what should change and I'll work it out again.")
     if asked:
         grouped = len({e.get("group") for e in asked if e.get("group")}) == 1 and all(e.get("group") for e in asked)             and len(asked) > 1
         parts.append(("These are the ways to clear it; pick one in the question below: " if grouped else

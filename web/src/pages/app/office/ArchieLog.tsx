@@ -37,7 +37,7 @@ export function RevisionImpactList({ imp, compact = false }: { imp: RevisionImpa
           </div>))}
         {rerun.length > 0 && <div className="text-muted">Assemblies run again: {rerun.join(", ")}</div>}
         {kept.length > 0 && <div className="text-muted">Assemblies kept as integrated: {kept.join(", ")}</div>}
-        {imp.placement.before.length > 0 && <div className="text-muted">Floating now: {imp.placement.before.slice(0, 3).join("; ")}. After: {imp.placement.after.length ? imp.placement.after.join("; ") : "nothing floating"}.</div>}
+        {imp.placement.before.length > 0 && <div className="text-muted">Floating now: {imp.placement.before.slice(0, 3).map(x => x.replace(/\.$/, "")).join("; ")}. After: {imp.placement.after.length ? imp.placement.after.join("; ") : "nothing floating"}.</div>}
       </div>}
     </div>
   );

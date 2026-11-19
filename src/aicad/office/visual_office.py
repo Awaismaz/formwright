@@ -264,6 +264,20 @@ def known_loose(doc: dict[str, Any], adoc: dict[str, Any], findings: list[dict[s
     loose_items |= separate
     loose = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in loose_items}
     kept = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in separate}
+    # a sub-assembly holds only its own parts: a part copy joined by an interface to a part of another level (each
+    # leg on its own bracket, each bracket on the table top of another sub-assembly) is apart here and assembled in
+    # the final assembly, where the same check runs over everything (TEST Project after its revision, 2026-11-20)
+    level = {(i.get("office") or {}).get("item") for i in adoc["instances"]} - {None}
+    outside: dict[tuple[str, int], str] = {}
+    for f in ifs:
+        for s, o in (("a", "b"), ("b", "a")):
+            if f[s]["item"] in level and f[o]["item"] not in level and f[o]["item"] in items:
+                outside.setdefault((f[s]["item"], int(f[s].get("copy") or 0)),
+                                  str(items[f[o]["item"]].get("name") or f[o].get("name") or "a part"))
+    held = {i["id"]: outside[k] for i in adoc["instances"] if (k := ((i.get("office") or {}).get("item"),
+                                                                       int((i.get("office") or {}).get("copy") or 0)))
+            in outside}
+    placed = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in items}
     out = []
     for f in findings:
         its = set(f.get("items") or [])
@@ -271,6 +285,13 @@ def known_loose(doc: dict[str, Any], adoc: dict[str, Any], findings: list[dict[s
             continue  # only parts the engineer kept separate (and at most one other) touch nothing: as decided
         if f["code"] == "floating" and its and its <= loose:
             f = {**f, "severity": "note", "text": f["text"] + " The approved layout gives it no interface."}
+        elif f["code"] == "floating" and its and its & set(held):
+            host = held[next(i for i in f["items"] if i in held)]
+            f = {**f, "severity": "note", "text": f["text"] + f" It is joined to {host} of another sub-assembly: the "
+                                                               "final assembly checks it there."}
+        elif f["code"] == "row" and its and (mine := {i for i in its if i in placed}) and mine <= set(held):
+            f = {**f, "severity": "note", "text": f["text"] + " Each of them is joined to a part of another "
+                                                               "sub-assembly: the final assembly checks them there."}
         out.append(f)
     return out
 
