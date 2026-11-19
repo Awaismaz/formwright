@@ -9,8 +9,8 @@ generation: thinking, the script and the reply. This module decides, per turn an
 - **How hard to think** (``choose_effort``): ``low`` when the request fully dimensions a simple part or asks for a
   local change to an existing one; the harness default (``medium``) otherwise. ``FW_AGENT_EFFORT`` still forces one
   level; ``FW_AGENT_ADAPTIVE_EFFORT=0`` turns the adaptive choice off.
-- **Which model** (``route_model``, PD-82, opt-in): a faster model for edits and simple, fully dimensioned parts when
-  ``FW_AGENT_FAST_MODEL`` names one. Off by default.
+- **Which model** (``route_model``, PD-82): the job size (``job_of``: edit / simple / complex) picks the model tier
+  through ``aicad.llm.routing`` (configurable per role and job with ``FW_LLM_MODELS``).
 
 Everything here is plain text heuristics on the user's words; nothing is shown in the chat.
 """
@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-ADAPTIVE_ENV, FAST_MODEL_ENV = "FW_AGENT_ADAPTIVE_EFFORT", "FW_AGENT_FAST_MODEL"
+ADAPTIVE_ENV = "FW_AGENT_ADAPTIVE_EFFORT"
 INLINE_MAX_LINES = 260  # a design longer than this is read by the agent itself (keeps the prompt small)
 INLINE_MAX_CHARS = 16_000
 DESIGN = "model.py"
@@ -135,12 +135,62 @@ def choose_effort(prompt: str, has_design: bool, forced: str | None = None) -> t
     return ("low" if c["kind"] in ("edit", "dimensioned") else None), c["reason"]
 
 
-def route_model(prompt: str, has_design: bool, default: str | None) -> tuple[str | None, str]:
-    """PD-82 (opt-in): the fast model for edits and simple dimensioned parts when FW_AGENT_FAST_MODEL is set."""
-    fast = (os.environ.get(FAST_MODEL_ENV) or "").strip()
-    if not fast:
-        return default, "routing off"
+# ------------------------------------------------------------------ job size (PD-82 model routing)
+# Part families whose geometry is novel or intricate enough to stay on the strongest model.
+_COMPLEX_FAMILY = re.compile(r"\b(?:gear(?!\s*shaft)|gears|pinion(?!\s*shaft)|rack|worm|spline|helical|bevel|"
+                             r"gearbox|housing|casing|enclosure|casting|manifold|impeller|turbine|propeller|fan blade|"
+                             r"cam|spring|linkage|mechanism|assembly|hinge|clamp|gripper|robot|organic|ergonomic|"
+                             r"freeform|loft|sweep|knurl|sheet[- ]metal|imported|mould|mold|die)\b", re.IGNORECASE)
+_SIMPLE_FAMILY = re.compile(r"\b(?:plate|bracket|angle|shaft|axle|pin|spacer|sleeve|bush(?:ing)?|collar|washer|"
+                            r"flange|block|mount|standoff|adapter|cover|bar|rod|tube|ring|disc|disk|spigot|stud|"
+                            r"bolt|nut|key|gusset|rib|base|pad|strip|link)\b", re.IGNORECASE)
+_FEATURES = re.compile(r"\b(?:holes?|bores?|slots?|pockets?|chamfers?|fillets?|rounds?|threads?|keyways?|keyseats?|"
+                       r"grooves?|gussets?|ribs?|counterbor\w*|countersin\w*|boss(?:es)?|cut-?outs?|windows?|"
+                       r"steps?|shoulders?|journals?|flats?|tapers?|undercuts?|recess\w*|notch\w*|tabs?|"
+                       r"flanges?|legs?|walls?|cross holes?)\b", re.IGNORECASE)
+MAX_SIMPLE_FEATURES = 8  # distinct feature words in the request
+MAX_SMALL_PROGRAM = 6  # designed parts in a Design Office program that still counts as small
+
+
+def job_of(prompt: str, has_design: bool, hint: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The job size for model routing: ``edit`` (a local change in the Studio), ``simple`` (one fully dimensioned
+    part of a simple family with few features, or a part in a small Design Office program) or ``complex``
+    (everything else). Deterministic: request class, part family, feature count from the brief, program size.
+    ``hint`` (Design Office): {"program_parts": n}."""
     c = classify(prompt, has_design)
-    if c["kind"] in ("edit", "dimensioned") and "```fw-icd" not in prompt:
-        return fast, f"fast model: {c['reason']}"
-    return default, f"default model: {c['reason']}"
+    if c["kind"] == "edit":
+        return {"job": "edit", "reason": c["reason"]}
+    if c["kind"] != "dimensioned":
+        return {"job": "complex", "reason": c["reason"]}
+    words = user_words(prompt)
+    office = "```fw-icd" in prompt
+    text = re.split(r"```fw-icd", words)[0] if office else words
+    name = text
+    if office:  # the ticket's own sentence names the part; the program brief names its neighbours
+        text = next((ln for ln in text.splitlines() if ln.startswith("Ticket ")), text)
+        m = re.search(r"Design the (.+?) for ", text)
+        name = m.group(1) if m else text
+    fam = _COMPLEX_FAMILY.search(name)
+    if fam:
+        return {"job": "complex", "reason": f"part family ({fam.group(0).lower()})"}
+    if not _SIMPLE_FAMILY.search(name):
+        return {"job": "complex", "reason": "part family not recognised as simple"}
+    feats = {m.group(0).lower().rstrip("s") for m in _FEATURES.finditer(text)}
+    if len(feats) > MAX_SIMPLE_FEATURES:
+        return {"job": "complex", "reason": f"{len(feats)} kinds of feature"}
+    n = int((hint or {}).get("program_parts") or 0)
+    if office and n > MAX_SMALL_PROGRAM:
+        return {"job": "complex", "reason": f"part of a program of {n} designed parts"}
+    return {"job": "simple", "reason": f"{c['reason']}; {len(feats)} kinds of feature"
+            + (f"; program of {n} parts" if office and n else "")}
+
+
+def route_model(prompt: str, has_design: bool, requested: str | None,
+                hint: dict[str, Any] | None = None) -> tuple[str | None, str, str]:
+    """PD-82: (model or None for the default, job size, why). An explicitly requested model always wins."""
+    j = job_of(prompt, has_design, hint)
+    if requested:
+        return requested, j["job"], "model requested for this session"
+    from aicad.llm.routing import model_for
+
+    return model_for("design_agent", j["job"]), j["job"], j["reason"]

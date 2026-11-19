@@ -155,6 +155,10 @@ def get_provider(role: str) -> LLMProvider:
 
 
 async def complete(req: CallRequest) -> CallResult:
+    if req.model is None:  # PD-82: the role's routed tier (None = the provider's default, Opus)
+        from aicad.llm.routing import model_for
+
+        req.model = model_for(req.role)
     return await get_provider(req.role).complete(req)
 
 
@@ -191,4 +195,11 @@ def describe() -> dict[str, Any]:
 
     caps = {k.name: {"capabilities": sorted(k.capabilities), "dev_only": bool(k.dev_only)}
             for k in (ClaudeAgentSDKProvider, AnthropicAPIProvider, StubProvider, ReplayProvider)}
-    return {"routing": routing, "config_error": error, "providers": caps, "recent_calls": metering.recent(20)}
+    from aicad.llm import routing as model_routing
+
+    try:
+        models = model_routing.describe()
+    except ValueError as e:
+        models, error = {}, error or str(e)
+    return {"routing": routing, "models": models, "config_error": error, "providers": caps,
+            "recent_calls": metering.recent(20)}

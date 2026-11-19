@@ -38,6 +38,9 @@ class Settings:
     smtp_from: str = field(default_factory=lambda: os.environ.get("FW_SMTP_FROM", "Formwright <no-reply@formwright.dev>"))
     # AGT-001: which model provider serves which role ("default=claude-sdk,vision=anthropic-api"; aicad.llm)
     llm_providers: str = field(default_factory=lambda: os.environ.get("FW_LLM_PROVIDERS", ""))
+    # PD-82: which model tier serves which role and job size ("design_agent.edit=sonnet,reviewer=haiku";
+    # aicad.llm.routing). Empty: the benchmarked defaults in routing.DEFAULT_ROUTES.
+    llm_models: str = field(default_factory=lambda: os.environ.get("FW_LLM_MODELS", ""))
     # PD-73: the visual assembly check (Claude looks at a 4-view picture; advisory) and the policy that lets a clean
     # look move the exact interference check to the background when measuring would take longer. "off": as before.
     assembly_visual_check: bool = field(default_factory=lambda: _bool("FW_ASSEMBLY_VISUAL_CHECK", True))

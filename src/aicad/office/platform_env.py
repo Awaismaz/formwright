@@ -134,7 +134,7 @@ class PlatformEnv(orchestrator.Env):
                            fake_agents.FakeClient if self.simulated else None)
 
     async def design(self, project_id: str, prompt: str, shown: str, budget: int | None,
-                     on_event: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+                     on_event: Callable[[dict[str, Any]], None], job: dict[str, Any] | None = None) -> dict[str, Any]:
         from aicad.platform import metering
         from aicad.platform.db import utcnow
         from aicad.platform.models import AgentRun, Organization
@@ -188,6 +188,7 @@ class PlatformEnv(orchestrator.Env):
             except Exception:
                 log.exception("progress update failed")
 
+        s.job_hint = dict(job or {})  # PD-82: the program's size routes small-program parts to a lighter model
         task = asyncio.create_task(s.send(prompt, shown=shown, mode="build"))
         try:
             while not task.done() or not q.empty():

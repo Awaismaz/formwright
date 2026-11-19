@@ -341,6 +341,7 @@ class AgentSession:
         self._effort_applied: str | None = None  # the agent process's current effort (None = the harness default)
         self._model_applied: str | None = model
         self.turn_settings: dict[str, Any] = {}
+        self.job_hint: dict[str, Any] | None = None  # set by the Design Office for one turn (program size)
         self._load()
 
     # ------------------------------------------------------------- persistence
@@ -588,9 +589,13 @@ class AgentSession:
         forced = effort_setting()
         if self.mode == "build":
             effort, why = speed.choose_effort(prompt, has_design, forced)
-            model, mwhy = speed.route_model(prompt, has_design, self.model)
+            try:
+                model, job, mwhy = speed.route_model(prompt, has_design, self.model, self.job_hint)
+            except Exception:  # noqa: BLE001 - routing is an optimisation: fall back to the session's model
+                model, job, mwhy = self.model, "complex", "routing unavailable"
         else:
-            effort, why, model, mwhy = forced, f"{self.mode} mode", self.model, f"{self.mode} mode"
+            effort, why, model, job, mwhy = forced, f"{self.mode} mode", self.model, "complex", f"{self.mode} mode"
+        self.job_hint = None
         q = getattr(client, "_query", None)
         applied_effort = effort
         if effort != self._effort_applied:
@@ -610,7 +615,7 @@ class AgentSession:
                 self._model_applied = model
             except Exception:  # noqa: BLE001 - replay/fake clients: keep the model
                 applied_model = self._model_applied
-        self.turn_settings = {"effort": applied_effort or "default", "effort_reason": why,
+        self.turn_settings = {"effort": applied_effort or "default", "effort_reason": why, "job": job,
                               "model": applied_model or "default", "model_reason": mwhy, "folder": folder}
         if self._rec is not None:
             self._rec.rec["turn"] = dict(self.turn_settings)

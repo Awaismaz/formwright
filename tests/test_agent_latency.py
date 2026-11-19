@@ -19,6 +19,7 @@ from claude_agent_sdk import ResultMessage
 from aicad import fw
 from aicad.agent import speed, tools
 from aicad.agent.session import AgentSession, scrub
+from aicad.llm import routing
 
 OFFICE = (Path(__file__).parents[1] / "src/aicad/eval/latency_office_shaft.txt").read_text(encoding="utf-8")
 
@@ -147,8 +148,9 @@ class _Fake:
 
 
 def test_session_turn_settings_and_folder_note(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for k in (speed.ADAPTIVE_ENV, speed.FAST_MODEL_ENV, "FW_AGENT_EFFORT"):
+    for k in (speed.ADAPTIVE_ENV, "FW_AGENT_EFFORT"):
         monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(routing, "_configured", dict)
     events: list[dict[str, Any]] = []
     s = AgentSession(tmp_path / "ws", on_event=events.append)
     s.client_factory = _Fake
@@ -170,24 +172,57 @@ def test_session_turn_settings_and_folder_note(tmp_path: Path, monkeypatch: pyte
         assert "```python\nA = 1\n```" in c.prompts[1]  # changed since the agent last saw it: inlined
         await s.send("Make the holes M8")
         assert "unchanged since your last turn" in c.prompts[2] and s.turn_settings["effort"] == "low"
-        assert c.models == []  # routing is off unless configured
+        # PD-82: simple part and edit on the lighter tier, the open request back on the default (Opus)
+        assert c.models == ["claude-sonnet-5-5", None, "claude-sonnet-5-5"]
+        assert s.last_run_record["turn"]["job"] == "edit"
 
     asyncio.run(go())
     st = json.loads((s.workspace / ".fw" / "agent.json").read_text(encoding="utf-8"))
     assert st["design_seen"] == speed.sha("A = 1\n")
 
 
-def test_fast_model_routing_is_opt_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(speed.FAST_MODEL_ENV, "claude-sonnet-5-5")
-    s = AgentSession(tmp_path / "ws")
-    s.client_factory = _Fake
+def test_job_size_and_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(routing, "_configured", dict)
+    assert speed.job_of("Make the holes M8", True)["job"] == "edit"
+    assert speed.job_of("Plate 120 × 80 × 8 mm with four Ø6.6 holes 10 mm in", False)["job"] == "simple"
+    assert speed.job_of("Spur gear m2, 60 teeth, face 20 mm, bore 20 mm", False)["job"] == "complex"  # family
+    assert speed.job_of("Gearbox housing for a 1:3 pair, 6 mm walls", False)["job"] == "complex"
+    many = ("Block 100 x 60 x 40 mm with 4 holes, 2 slots, a pocket, chamfers, fillets, a thread, a keyway, a "
+            "groove, a rib, a counterbore and a boss")
+    assert speed.job_of(many, False)["job"] == "complex"  # 11 kinds of feature
+    assert speed.job_of(OFFICE, False, {"program_parts": 4})["job"] == "simple"  # the pinion shaft, small program
+    assert speed.job_of(OFFICE, False, {"program_parts": 12})["job"] == "complex"
+    assert routing.model_for("design_agent", "complex") is None  # Opus = every provider's default
+    assert routing.model_for("design_agent", "edit") == "claude-sonnet-5-5"
+    assert routing.model_for("assembly_check") == "claude-haiku-5-5" and routing.model_for("planner") is None
+    # an explicitly requested model always wins
+    assert speed.route_model("Make the holes M8", True, "claude-opus-5-5")[0] == "claude-opus-5-5"
+    # platform config overrides any route
+    monkeypatch.setattr(routing, "_configured", lambda: routing.parse("design_agent.edit=opus, reviewer=haiku, "
+                                                                       "librarian=default"))
+    assert routing.model_for("design_agent", "edit") == "claude-opus-5-5"
+    assert routing.model_for("reviewer") == "claude-haiku-5-5" and routing.model_for("librarian") is None
+    assert routing.model_for("design_agent", "simple") == "claude-sonnet-5-5"  # unchanged default
+    for bad in ("nosuchrole=opus", "design_agent.tiny=opus", "planner=gpt", "planner"):
+        with pytest.raises(ValueError):
+            routing.parse(bad)
 
-    async def go() -> None:
-        (s.workspace).mkdir(parents=True, exist_ok=True)
-        (s.workspace / "model.py").write_text("A = 1\n", encoding="utf-8")
-        await s.send("Make the holes M8")
-        assert s.client.models == ["claude-sonnet-5-5"] and s.turn_settings["model"] == "claude-sonnet-5-5"
-        await s.send("Redesign it as a lighter assembly")
-        assert s.client.models == ["claude-sonnet-5-5", None]  # back to the default model
 
-    asyncio.run(go())
+def test_single_calls_get_their_routed_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad import llm
+
+    seen: list[Any] = []
+
+    class _P(llm.LLMProvider):
+        name, capabilities = "probe", frozenset({llm.CAP_COMPLETE})
+
+        async def _complete(self, req: llm.CallRequest) -> llm.CallResult:
+            seen.append(req.model)
+            return llm.CallResult("ok", llm.Metering(self.name, req.role, req.model))
+
+    monkeypatch.setattr(routing, "_configured", dict)
+    with llm.use_provider(_P()):
+        asyncio.run(llm.complete(llm.CallRequest(role="assembly_check", system="s", prompt="p")))
+        asyncio.run(llm.complete(llm.CallRequest(role="planner", system="s", prompt="p")))
+        asyncio.run(llm.complete(llm.CallRequest(role="reviewer", system="s", prompt="p", model="claude-x")))
+    assert seen == ["claude-haiku-5-5", None, "claude-x"]
