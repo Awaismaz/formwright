@@ -250,7 +250,7 @@ def test_shaft_line_with_a_pulley_and_stepped_user_shafts(app_client: Any) -> No
     _setup(c, "line@x.com")
     _project(c, "Pulley", pulley)
     aid = c.post("/api/m/assembly/assemblies", json={"name": "line"}).json()["assembly"]["id"]
-    pl, v = _run(c, aid, "the pulley from my projects, a Ø20 shaft and two 6204 bearings")
+    _pl, v = _run(c, aid, "the pulley from my projects, a Ø20 shaft and two 6204 bearings")
     res = v["result"]
     assert res["placed_loose"] == 0 and res["clashes"] == [], res["log"]
     (_s,), (p,), bs = _named(v, "Shaft"), _named(v, "Pulley"), _named(v, "Ball bearing 6204")
