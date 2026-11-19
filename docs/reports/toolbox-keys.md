@@ -64,6 +64,19 @@ interface axis `ax`, 2-D values in `PLANE[ax]`):
 On the shaft side `side_features` gives `{"type": "groove", c, z0, z1, d: d2, shaft_d, m, ax}` in the shaft's
 canonical frame; `body_spec` emits it as `grooves` (only when present).
 
+#### Lined up with `office/direct.py` (merged from main 111566f)
+Checked against the field names `direct.py` reads: its shaft builder takes `type: "groove"` features with `z0`/`z1`,
+`d` (= d2) and `shaft_d` (my `side_features` output; it also accepts the interface's `d2` / `m`), and keyseats from
+the unchanged `key` features. Its fillet rule reads `r_s_min` from `bearing_journal` / `bearing_seat` data: every
+bearing interface now carries `r_s_min` from `toolbox.BEARING_RS` (6204: 1.0, so direct shoulder fillets stay at
+≤ 0.8). Result on the founder's case with keys and circlips (`direct.plan`, approved ICD): "Pinion shaft: shaft Ø20 ×
+78, 2 bearing journals, 1 seat, 1 keyseat, 2 circlip grooves", "Gear shaft: … 1 keyseat, 4 circlip grooves", both
+gears "with a keyway", all `direct`; the end-to-end run completes with Gage approving every direct part (grooves
+and keyseats measured), keys and rings seated, 0 clashes.
+
+Merge resolution in `hex_lookup`: with the direct builder on (default) an ICD-fixed gear goes to it (main's rule);
+only when it is off or declines does `toolbox_gear_for` decide (keyed Toolbox gear or designed).
+
 ### 3. Hex, the BOM and the keyed Toolbox gear (`src/aicad/office/platform_env.py`, `deliverables.py`)
 * `NOT_STOCKED` no longer holds keys / circlips / retaining rings / snap rings; `librarian.read_toolbox` reads a key
   or ring by the **head noun of the leading phrase** before any host branch ("Pinion key, DIN 6885 6x6x18" is a key;
@@ -94,8 +107,9 @@ canonical frame; `body_spec` emits it as `grooves` (only when present).
   keyed gear pass conformance.
 * BOM: designed Toolbox gear = make / 42CrMo4, key = buy.
 * matching: key / ring / host nouns, "with a keyway" vs "with a hub".
-* end to end (fake agents, office fixture): the live plan completes, 4 bearings + 2 keys + 6 rings seated at the hand
-  positions, nothing in the parts bin, 0 clashes.
+* end to end (office fixture, after the merge with main): the live plan completes; shafts and gears are built
+  directly from the ICD with their keyseats, 2 / 4 circlip grooves and hub keyways, Gage approves each; 4 bearings +
+  2 keys + 6 rings seated at the hand positions, nothing in the parts bin, 0 clashes.
 
 Changed: `tests/test_office_orchestrator.py::test_hex_does_not_read_a_key_or_circlip_as_its_host` now expects the
 key / ring readings (still never the host).
@@ -123,6 +137,7 @@ message), `src/aicad/assembly/librarian.py`, `placeholder.py`, `render.py`, `vis
   face of each bearing; own sub-assembly's rings first. Alternative: shoulders + one ring per hub (needs stepped shafts).
 * **PD-b — DIN 471 values source.** Default: a distributor's reprint of DIN 471:2011 (s = 1.8 for d1 36–45, where
   older tables say 1.75), flagged verify under PD-13.
-* **PD-c — Toolbox gear for designed gears.** Default: used whenever every ICD feature is representable (now including
-  the hub keyway), regardless of "with a keyway" wording; the part is "make" in the plan's material.
+* **PD-c — Toolbox gear for designed gears.** Default: the direct builder first (main); otherwise the Toolbox gear
+  whenever every ICD feature is representable (now including the hub keyway), regardless of "with a keyway"
+  wording; the part is "make" in the plan's material, measured against the ICD at swap-in.
 * **PD-d — bearing corner as a 45° chamfer of r_s min** (inside the ISO 582 r_s min arc) rather than a fillet.
