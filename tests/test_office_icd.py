@@ -316,7 +316,7 @@ def test_gate_placeholders_and_assembly_from_minute_one(office: Any) -> None:  #
     assert r["instances"] == [] and r["subassemblies"] == []
 
 
-def test_parts_swap_in_and_keep_every_mate(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+def test_parts_swap_in_and_keep_every_mate(office: Any) -> None:  # noqa: F811
     from aicad.assembly import store as astore
 
     c = office
