@@ -216,6 +216,27 @@ def test_policy_table() -> None:
     assert not miss["stop"] and miss["unconfirmed"]
 
 
+def test_targeted_check_confirms_only_clashes_between_flagged_parts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Live run 2026-11-19: the picture flagged a loose key (gear, shaft, key named); the shaft's 2.2 mm³ shoulder
+    fillet against an unflagged bearing 'confirmed' it and stopped the sub-assembly."""
+    from aicad.assembly import service as aservice
+
+    pairs = [{"a": "shaft", "b": "brg", "kind": "interference", "volume_mm3": 2.2},
+             {"a": "gear", "b": "shaft", "kind": "interference", "volume_mm3": 40.0}]
+
+    async def fake_pairs(root: Any, org: Any, doc: Any, only: list[str]) -> dict[str, Any]:
+        return {"interference": {"pairs": [p for p in pairs if p["a"] in only or p["b"] in only]}}
+
+    monkeypatch.setattr(aservice, "check_pairs", fake_pairs)
+    monkeypatch.setattr(aservice, "display_names", lambda doc: {})
+    got = asyncio.run(visual.targeted(Path("."), "o", {}, ["shaft", "key"]))
+    assert got == []  # shaft ↔ bearing: the bearing wasn't flagged
+    got = asyncio.run(visual.targeted(Path("."), "o", {}, ["shaft", "gear", "key"]))
+    assert [(c["a"], c["b"]) for c in got] == [("gear", "shaft")]
+    got = asyncio.run(visual.targeted(Path("."), "o", {}, ["shaft"]))  # one flagged part: any clash of it counts
+    assert len(got) == 2
+
+
 def test_targets_from_numbers_and_names() -> None:
     doc = {"instances": [{"id": "i1", "name": "Pinion"}, {"id": "i2", "name": "Gear"}, {"id": "i3", "name": "Shaft"}]}
     key = [{"n": 1, "label": "Pinion"}, {"n": 2, "label": "Gear"}, {"n": 3, "label": "Shaft"}]
@@ -235,6 +256,20 @@ def test_relations_of_the_shaft_line_name_parts_never_ids() -> None:
     assert not any("i_s" in r for r in rels)  # no internal item id ever reaches the text
     # a side the skeleton can't name is "a part", never its id
     assert visual._side_name({"items": {}, "standard": []}, {"item": "i_s9_p9"}) == "a part"
+
+
+def test_relations_of_one_shaft_sub_assembly_ask_for_no_parallel_pair() -> None:
+    """Live run 2026-11-19: the Gear shaft sub-assembly was stopped because its picture showed "only one shaft"."""
+    sk, ifs = _pair_layout()
+    keep = {i for i, it in sk["items"].items() if it["name"] in ("Output shaft", "Gear")}
+    one = {**sk, "items": {i: it for i, it in sk["items"].items() if i in keep}}
+    ifs1 = [f for f in ifs if f["a"]["item"] in keep or f["b"]["item"] in keep]
+    rels = [r["text"] for r in visual.relations_from_skeleton(one, ifs1, BRIEF)]
+    assert "Output shaft runs in two bearings, one either side of its gear; nothing holds it but its bearings " \
+           "(no housing)" in rels
+    assert not any("parallel and nothing holds them" in r for r in rels)
+    both = [r["text"] for r in visual.relations_from_skeleton(sk, ifs, BRIEF)]
+    assert any("the shafts are parallel" in r for r in both)
 
 
 def test_relations_from_the_brief_roles() -> None:
@@ -341,6 +376,11 @@ def test_failure_and_level_messages() -> None:
     text, acts = visual_office.level_message(t, look)
     assert text.startswith("I stopped GP-7 Assemble Gear pair: Gear pair isn't assembled") and acts[0]["type"] == \
         "retry_blocked"
+    # a measured confirmation already carries the visual line: say it once (live run 2026-11-19 said it twice)
+    vline = "Visual check (advisory): it looks wrong. Gear is keyed to Gear shaft: the key lies apart."
+    look = {"stop": True, "reason": f"{vline} Measured: A and B overlap by 2.2 mm³.", "line": vline, "quick": []}
+    text, _ = visual_office.level_message(t, look)
+    assert text.count(vline) == 1
 
 
 def test_parts_without_interfaces_are_a_note_not_a_stop() -> None:

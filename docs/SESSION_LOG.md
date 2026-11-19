@@ -4,6 +4,37 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (i) — Assembly that assembles, a faster agent, dimensions on the model, projects and memory
+
+Founder (evening): AI assembly "lays all parts on floor"; test case: a 1:3 spur gear pair with only shafts and
+bearings. The agents must look at the result and say so on the go; the system is too slow; parameters should be
+editable on the model; a project system with memory; the Studio chat's question chips did nothing.
+
+**Done (six module agents, merged by the master, each with its report):**
+- Studio chat question chips stay clickable after the turn's result event (719c329; e2e on 8780).
+- CD-040 shaft-line layouts, `bearing_journal`, `icd.issues()` codes, Toolbox gears sized to the ICD swap in; rods
+  hung on a shaft stand in a bore (`docs/reports/assembly-fix/office-layout.md`). Tooth phase fixed by the master:
+  v = (1/2 - u), the gears turn opposite ways.
+- ASM-025 Fitz gear trains, `gear` mate, outcome codes, Hex gear shorthand (`fitz-trains.md`).
+- ASM-024 visual assembly check + Archie speaking up unprompted (`asm-visual.md`); after the merge, relations name
+  parts (never ids) and understand bearing journals; the trains test follows the targeted-check policy.
+- DS-039 pipeline speed: live gear prompt 145 s -> 52 s (`docs/reports/pipeline-speed.md`; PDs renumbered 81..84).
+- DS-038 viewport dimensions (`docs/reports/viewport-dims.md`).
+- DS-040 projects + design memory (`docs/reports/design-memory.md`).
+
+**Verified:** targeted suites after the merges: assembly*, office_icd, shaft_line, layout envelopes, phase6 layout,
+platform, collab, design_memory, dims, pipeline_speed, agent, studio, archie_chat (all green after the follow-ups;
+earlier failures were the visual tests' old row fixture, the trains test expecting an inline analysis and the push-rod
+`no_interface` regression, each fixed and re-run). ruff, tsc, vitest 146/146, vite build clean. Pushed 1995236;
+8765 restarted on it.
+
+**Not done / next:** live Design Office run of the founder's test case (agent on `wip/live-gear`, port 8797);
+ICD-defined parts without the LLM (`wip/office-direct`, port 8798); WORKLIST 40 follow-ups.
+
+**Decisions parked:** PD-73..PD-87 (defaults in DECISIONS).
+
+---
+
 ## 2026-11-19 (h) — Assembly fast and dependable: pair cache, fasteners from the ICD, advisory final check (ASM-023, PD-70, PD-71)
 
 Founder: "Assembly seems so slow and unreliable" and then "Why do assemblies take most of the time? ... If the modelled

@@ -122,9 +122,9 @@ hover, ↔ marker), `studio/commands.ts` (shortcut list), `lib/types.ts`, skill 
 - Live agent runs: none (replayed cassette `docs/reports/viewport-dims/cassette.json`, 0 tokens).
 
 ## Parked decisions (defaults used)
-- PD-xx Key **D** toggles dimensions (SOLIDWORKS has no default key for "show feature dimensions"); default off,
+- PD-87 Key **D** toggles dimensions (SOLIDWORKS has no default key for "show feature dimensions"); default off,
   remembered per browser.
-- PD-xx Single click on a value edits it (Instant3D-like) rather than double click; blur cancels.
-- PD-xx No `PARAM_META["dim"]` guidance in the agent prompt until a real part shows an inference gap (override is
+- PD-87 Single click on a value edits it (Instant3D-like) rather than double click; blur cancels.
+- PD-87 No `PARAM_META["dim"]` guidance in the agent prompt until a real part shows an inference gap (override is
   implemented and tested).
-- PD-xx Nudge 1 % (±1 for whole numbers), 24-parameter cap, 90 s budget per pass, resumable.
+- PD-87 Nudge 1 % (±1 for whole numbers), 24-parameter cap, 90 s budget per pass, resumable.
