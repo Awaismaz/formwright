@@ -46,9 +46,10 @@ def test_gearbox_layout_hand_checked() -> None:
     # length 82 + 13 + 25 = 120, centre at Y -41 + 60 = 19
     assert it[S_IN]["size"] == [25, 25, 120] and it[S_IN]["copies"] == [[-54, 19, -62]]
     assert it[S_OUT]["copies"] == [[18, 19, -62]]
-    # caps (4 off) over the 4 seats: M4 from 0.6 D; PCD = 52 + 4.5 + 2 = 58.5, OD = 58.5 + washer 9 = 67.5
-    # (67.5 + 1 <= 72: they fit side by side), thickness max(8, D / 4) = 13, bore 25 + 2; on the outer faces
-    assert it[CAP]["size"] == [67.5, 67.5, 13] and it[CAP]["bore"] == 27
+    # caps (4 off) over the 4 seats: M4 from 0.6 D; ligament max(3, 0.5 x 4) = 3 between the seat and the tap drill
+    # 3.3: PCD = 52 + 3.3 + 2 x 3 = 61.3 -> 61.5 (up to 0.5 mm), OD = 61.5 + washer 9 = 70.5 (70.5 + 1 <= 72: they fit
+    # side by side), thickness max(8, D / 4) = 13, bore 25 + 2 (identical caps: some sit where a shaft leaves)
+    assert it[CAP]["size"] == [70.5, 70.5, 13] and it[CAP]["bore"] == 27
     assert it[CAP]["copies"] == [[-54, -47.5, -62], [-54, 47.5, -62], [18, -47.5, -62], [18, 47.5, -62]]
     # the cover is the lid: the housing's footprint, on top of it
     assert it[CV]["size"][:2] == [198, 82] and it[CV]["copies"] == [[0, 0, 10]]
@@ -63,8 +64,9 @@ def test_gearbox_layout_hand_checked() -> None:
     lid = ifs[0]["data"]  # M6 (span 82 < 150): tapped Ø5 x (2.5 x 6 + 3) = 18 into the rim, at 2 d from the edges
     assert lid["tapped"] == {"d": 5.0, "depth": 18.0, "thread": "M6"} and lid["through"] is False
     assert lid["positions"] == [[-85.8, -27.8], [85.8, -27.8], [-85.8, 27.8], [85.8, 27.8]]
-    cap = ifs[6]["data"]  # the -Y cap of the input shaft: holes on PCD 58.5 at 45 deg, M4 tapped 3.3 x 13
-    r = 58.5 / 2 / math.sqrt(2)
+    cap = ifs[6]["data"]  # the -Y cap of the input shaft: holes on PCD 61.5 at 45 deg, M4 tapped 3.3 x 13
+    r = 61.5 / 2 / math.sqrt(2)
+    assert (61.5 - 52) / 2 - 3.3 / 2 == 3.1  # the wall left between the seat and each tapped hole
     assert (cap["ax"], cap["plane_z"], cap["normal"], cap["centre"]) == ("y", -41, [0, -1, 0], [-54, -62])
     assert cap["positions"][0] == [round(-54 + r, 2), round(-62 + r, 2)]
     assert cap["tapped"] == {"d": 3.3, "depth": 13.0, "thread": "M4"}

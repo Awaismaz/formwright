@@ -784,7 +784,10 @@ class PlatformEnv(orchestrator.Env):
                             + (f" and {len(ph) - 1} more" if len(ph) > 1 else "") + " in for the placeholders"}
                 return {"blocked": f"Fitz is still waiting for the real {ph[0]}: it has not been swapped in for its "
                                    "placeholder. Retry once it is approved."}
-            std = [k for k in kids if k["kind"] == "standard"]
+            # bought-out parts (and the ones a designer modelled because Hex didn't stock them: a plug, a seal, which
+            # have no place in the skeleton) are Fitz's to place or to report
+            std = [k for k in kids if k["kind"] == "standard"
+                   or (k["kind"] == "part" and k["item_id"] not in (doc.get("skeleton") or {}).get("items", {}))]
             # a sub-assembly of bought-out parts only (a fastener kit) has no layout of its own: its parts are fitted
             # where the joints are, as every other level is integrated (CD-034)
             designed = {s["id"] for s in program_assembly.subs_of(doc)}
@@ -950,9 +953,19 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
                     "title": seat["title"], "standard": seat["standard"], "kind": seat["code"], "confidence": "high",
                     "read": True, "found": f"Hex found {seat['title']} in the Toolbox, sized by the ICD "
                                            f"({seat['interface']})"}
-    unstocked = standard and NOT_STOCKED.search(t["title"]) is not None
+    # the part the title names decides the family (librarian.kind_of): a nut is a nut, a plug is not stocked; the
+    # plan's Toolbox hint is used only when it names that same family (live run 2026-11-19: "Cap screw M6x16" came
+    # with the hint "bearing", "Oil plug M16" with "washer", "Hex nut M8" with "hex_bolt")
+    fam, _head = librarian.kind_of(t["title"])
+    if not fam:
+        fam, _head = librarian.kind_of(text)
+    unstocked = standard and (NOT_STOCKED.search(t["title"]) is not None or fam == "unstocked")
+    hint = str(item.get("toolbox") or "")
+    hint_ok = bool(hint) and (not fam or hint in librarian.FAMILY_CODES.get(fam, ()))
     tb = None if unstocked else (librarian.read_toolbox(text) or (
-        librarian.read_toolbox(f"{t['title']} {item['toolbox']}") if standard and item.get("toolbox") else None))
+        librarian.read_toolbox(f"{t['title']} {hint}") if standard and hint_ok else None))
+    if tb is not None and fam and fam != "unstocked" and tb["code"] not in librarian.FAMILY_CODES.get(fam, (tb["code"],)):
+        tb = None  # never a different kind of part than the one the plan names
     if tb is not None and (standard or (tb.get("kind") in TOOLBOX_FOR_PARTS and tb.get("confidence") == "high")):
         params = tb.get("params")
         note = ""
@@ -1145,7 +1158,8 @@ def program_bom(doc: dict[str, Any]) -> dict[str, Any]:
     if final is not None and final["instances"]:
         parts = aservice._parts(aroot, final)
         b = aservice.bom(aroot, final, names)
-        rows = [{**r, "code": parts[r["part_key"]].get("code")} for r in b["rows"]]
+        rows = [{**r, "code": parts[r["part_key"]].get("code"), "params": parts[r["part_key"]].get("params")}
+                for r in b["rows"]]
         inst_items = {i["id"]: i["office"] for i in final["instances"] if i.get("office")}
         part_projects = {k: p["project_id"] for k, p in parts.items() if p.get("kind") == "project"}
     return deliverables.bom(doc["tickets"], rows, inst_items, part_projects, info)

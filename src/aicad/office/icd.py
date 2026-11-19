@@ -64,6 +64,13 @@ CAV_Y = 12.0        # mm between a shaft's stack and the inner face of a side wa
 FLOOR = 10.0        # mm floor under the cavity
 SHOULDER = 4.0      # mm of wall left behind a bearing seat (the shoulder the outer ring sits against)
 TAP_DRILL = {3: 2.5, 4: 3.3, 5: 4.2, 6: 5.0, 8: 6.8, 10: 8.5, 12: 10.2, 16: 14.0}  # ISO 2306 tap drills (verify)
+# bearing caps (PD: cap ligament): the cap screws' tapped holes leave at least max(LIGAMENT, LIGAMENT_D x d) of wall
+# between the bearing seat and each tap drill, so PCD = D + tap drill + 2 x ligament, rounded up to 0.5 mm. The live
+# gear reducer (2026-11-19) had M8 on PCD 58 over a Ø47 seat: 2.1 mm of wall.
+LIGAMENT = 3.0       # mm
+LIGAMENT_D = 0.5     # x the nominal screw size
+CAP_RELIEF = 1.0     # mm deep recess in a cap's mounting face over the bearing's inner ring (it turns; the cap doesn't)
+EXIT_SIDE = 1        # gearbox shafts leave the housing through the +Y wall (open caps there, blind caps on -Y)
 # shaft lines (no housing or base plate: the mechanism is carried by its own shafts and bearings)
 BEARING_CLEAR = 5.0  # mm between a gear / hub face and the face of a bearing on its shaft (room for a spacer)
 GEAR_SPACE = 5.0     # mm between two gears on one shaft (a compound train)
@@ -102,6 +109,12 @@ _KEYY = re.compile(r"\bkey(?:ed|way)?\b|feather key|parallel key", re.IGNORECASE
 _RINGY = re.compile(r"circlips?|retaining rings?|snap rings?|seeger|\bDIN\s*471\b", re.IGNORECASE)
 _DOWELY = re.compile(r"\bdowel|\blocating pin", re.IGNORECASE)
 _CAPPY = re.compile(r"\bcap\b|end cover|bearing cover", re.IGNORECASE)
+# open caps let the shaft through (a seal bore); blind caps close the bore. Read from the name first.
+_OPENY = re.compile(r"\bopen\b|\bthrough\b|\bthru\b|\bseal(?:ed|ing)?\b|\blip\b|\bpass(?:es)?\b", re.IGNORECASE)
+_BLINDY = re.compile(r"\bblind\b|\bclosed\b|\bsolid\b|\bblank\b", re.IGNORECASE)
+# the screws that hold the bearing caps: "Cap screw M6x16 that fixes the four bearing caps" (not "cap screw" alone)
+_CAP_FIXY = re.compile(r"\b(?:bearing |end )?caps\b|\b(?:bearing|end) cap\b|\bbearing covers?\b|\bend covers?\b",
+                       re.IGNORECASE)
 _LIDDY = re.compile(r"cover|\blid\b", re.IGNORECASE)
 _PLATEY = re.compile(r"\bplate\b", re.IGNORECASE)
 _HOUSINGY = re.compile(r"housing|casing|\bcase\b|gearbox|gear box", re.IGNORECASE)
@@ -431,6 +444,46 @@ def _line_class(name: str) -> str | None:
     return next((c for c, rx in _LINE_CLASS if rx.search(name or "")), None)
 
 
+def _cap_kind(p: dict[str, Any]) -> str | None:
+    """"open" (the shaft passes through it), "blind" (it closes the bore) or None, by the cap's name, else its
+    description."""
+    for t in (p.get("name") or "", p.get("description") or ""):
+        o, b = bool(_OPENY.search(t)), bool(_BLINDY.search(t))
+        if o != b:
+            return "open" if o else "blind"
+    return None
+
+
+def _assign_caps(cap_sts: list[tuple[str, int]], seats_at: list[tuple[int, int]], shaft_names: list[str],
+                 D: list[float], by_id: dict[str, dict[str, Any]]) -> list[tuple[int, tuple[str, int]]]:
+    """Which cap piece goes over which bearing seat: [(seat index, (cap item, copy))]. A seat on the side its shaft
+    leaves the housing (EXIT_SIDE) takes an open cap, the other a blind cap; a cap named for the input / output takes
+    that shaft's seats only; caps that say neither go anywhere. Best match first (kind 4, shaft 2, the seat Ø written
+    in the cap's description 1), then seat order and plan order, so a plan of identical caps fills the seats in seat
+    order. A cap that fits no seat is left out (it gets no interface: the ICD gate shows it)."""
+    cand: list[tuple[int, int, int]] = []
+    for j, (n, side) in enumerate(seats_at):
+        want = "open" if side == EXIT_SIDE else "blind"
+        sc = _line_class(shaft_names[n])
+        for k, st in enumerate(cap_sts):
+            p = by_id[st[0]]
+            kind, cc = _cap_kind(p), _line_class(p["name"])
+            if (kind and kind != want) or (cc and sc and cc != sc):
+                continue
+            said = re.search(rf"(?<![\d.]){D[n]:g}(?![\d.])", f"{p['name']} {p.get('description') or ''}")
+            cand.append((-(4 * (kind == want) + 2 * (cc is not None and cc == sc) + (1 if said else 0)), j, k))
+    used_s: set[int] = set()
+    used_c: set[int] = set()
+    out: list[tuple[int, tuple[str, int]]] = []
+    for _s, j, k in sorted(cand):
+        if j in used_s or k in used_c:
+            continue
+        used_s.add(j)
+        used_c.add(k)
+        out.append((j, cap_sts[k]))
+    return sorted(out)
+
+
 def _line_order(shafts: list[dict[str, Any]]) -> list[str]:
     """The shafts of a shaft line, input first, output last (by name), else in plan order."""
     rank = {"input": 0, "mid": 1, None: 1, "output": 2}
@@ -514,8 +567,19 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     ring_pool: list[dict[str, Any]] = []            # every DIN 471 retaining ring: pieces left, its one shaft Ø
     dowel_item: dict[str, dict[str, Any]] = {}      # sub -> the dowel standard part
     bearing_all: list[dict[str, Any]] = []          # every bearing standard part (shaft lines share them out)
+    # sub -> the screws the plan names for its bearing caps ({"id", "m"}): they hold the caps, not the cover
+    cap_fast: dict[str, dict[str, Any]] = {}
     for p in parts:
         text = f"{p['name']} {p['description']}"
+        if p["family"] == "standard" and re.search(r"bolt|screw", p["name"], re.IGNORECASE) \
+                and _CAP_FIXY.search(text) and p["sub"] not in cap_fast:
+            mm = re.search(r"\bM(\d{1,2})(?=\s*[x×]|\b)", text)
+            cap_fast[p["sub"]] = {"id": p["id"], "qty": int(p["qty"]),
+                                  "m": int(mm.group(1)) if mm and int(mm.group(1)) in CLEARANCE else None}
+    for p in parts:
+        text = f"{p['name']} {p['description']}"
+        if p["family"] == "standard" and any(c["id"] == p["id"] for c in cap_fast.values()):
+            continue  # the cap screws: only the caps take them (fast_item falls back to them below)
         if p["family"] == "standard" and re.search(r"bolt|screw", text, re.IGNORECASE):
             fast_item.setdefault(p["sub"], p["id"])
             h = _fastener_hint(text)
@@ -540,6 +604,11 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             bearing_all.append({"id": p["id"], "qty": int(p["qty"]), "designation": int(m.group(1)) if m else None})
         elif _DOWELY.search(text):
             dowel_item.setdefault(p["sub"], {"id": p["id"], "qty": int(p["qty"])})
+    for sb, c in cap_fast.items():  # a sub-assembly whose only screws are the cap screws: they are its fasteners
+        if sb not in fast_item:
+            fast_item[sb] = c["id"]
+            if c["m"]:
+                fast_hint.setdefault(sb, c["m"])
 
     def take_key(sub: str, size: tuple[float, float]) -> str | None:
         """The key item of ``sub`` one more keyed joint gets (one Toolbox size per item, at most its quantity), else
@@ -847,35 +916,82 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             dx = (od(mesh[0]) / 2 + od(mesh[1]) / 2) if mesh else max(hm["r"][n - 1] + hm["r"][n] + GAP,
                                                                       D[n - 1] / 2 + D[n] / 2 + 2 * GAP)
             hm["xs"].append(hm["xs"][-1] + dx)
-        # caps over the seats, in order: shaft by shaft, -Y wall then +Y wall
+        # caps over the seats, in seat order (shaft by shaft, -Y wall then +Y wall): every seat gets a cap the plan
+        # has. An open cap (the shaft passes through it) goes over a seat on the side the shaft leaves the housing
+        # (EXIT_SIDE), a blind cap over the other; "input" / "output" in a cap's name puts it on that shaft
         seats_at = [(n, side) for n, (k, _c) in enumerate(shafts_h)
                     for side in ((-1, 1) if spec[k]["bearing"]["seats"] >= 2 else (-1,))]
         cap_sts = [st for st in row if spec[st[0]]["role"] == "hub" and _CAPPY.search(by_id[st[0]]["name"])]
         caps: list[tuple[tuple[str, int], int, int]] = []
         cap_m = 0
-        if cap_sts:
-            ci = cap_sts[0][0]
-            cs = spec[ci]
-            co = iov.get(ci) or {}
-            mine = [st for st in cap_sts if st[0] == ci][:len(seats_at)]
-            Dc = max(D[n] for n, _side in seats_at[:len(mine)])
-            want = int(fast_hint.get(by_id[ci]["sub"]) or fastener_for(0.6 * Dc))
+        cap_item: str | None = None
+        assign = _assign_caps(cap_sts, seats_at, [by_id[k]["name"] for k, _c in shafts_h], D, by_id) if cap_sts else []
+        if assign:
+            by_cap: dict[str, list[int]] = {}
+            for j, st in assign:
+                by_cap.setdefault(st[0], []).append(j)
+            at_seat = {seats_at[j]: st[0] for j, st in assign}
+            csub = by_id[cap_sts[0][0]]["sub"]
+            cf = cap_fast.get(csub) or next(iter(cap_fast.values()), None)
+            Dall = max(D[seats_at[j][0]] for j, _st in assign)
+            want = int((cf or {}).get("m") or fast_hint.get(csub) or fastener_for(0.6 * Dall))
             for m in sorted((x for x in CLEARANCE if x <= max(want, 3)), reverse=True):
-                pcd = Dc + CLEARANCE[m] + 2.0       # 1 mm of wall between the seat and each screw hole
-                OD = float(co["OD"]) if "OD" in co else _r2(pcd + WASHER_OD[m])
-                fits = all((OD + OD) / 2 + 1.0 <= hm["xs"][n] - hm["xs"][n - 1] for n in range(1, len(shafts_h)))
-                if fits and OD >= pcd + CLEARANCE[m] + 2.0:
-                    cap_m = m
+                lig = max(LIGAMENT, LIGAMENT_D * m)
+                size: dict[str, tuple[float, float, float]] = {}  # cap item -> (seat Ø, PCD, OD)
+                for ci, js in by_cap.items():
+                    Dc = max(D[seats_at[j][0]] for j in js)
+                    pcd = math.ceil(2 * (Dc + TAP_DRILL[m] + 2 * lig) - 1e-9) / 2
+                    co = iov.get(ci) or {}
+                    size[ci] = (Dc, pcd, float(co["OD"]) if "OD" in co else _r2(pcd + WASHER_OD[m]))
+                fits = all(OD >= pcd + CLEARANCE[m] + 2.0 for _Dc, pcd, OD in size.values())
+                for n in range(1, len(shafts_h)):  # neighbouring caps on one wall keep 1 mm apart
+                    for sd in (-1, 1):
+                        a, b = at_seat.get((n - 1, sd)), at_seat.get((n, sd))
+                        if a and b and size[a][2] / 2 + size[b][2] / 2 + 1.0 > hm["xs"][n] - hm["xs"][n - 1] + 1e-9:
+                            fits = False
+                if not fits:
+                    continue
+                cap_m, cap_item = m, (cf or {}).get("id")
+                for ci, (Dc, pcd, OD) in size.items():
+                    cs, co = spec[ci], iov.get(ci) or {}
                     cs.update(OD=OD, od_given=True, pcd=_r2(pcd), cap_d=Dc)
                     if "H" not in co and cs["source"] == "assumed":
                         cs["H"] = float(round(max(8.0, 0.25 * Dc)))
-                    cs["bore"] = _r2(max(spec[k]["d"] for k, _c in shafts_h) + 2.0)  # the shaft passes through
-                    caps = [(st, seats_at[j][0], seats_at[j][1]) for j, st in enumerate(mine)]
-                    break
-            if not caps:
-                notes.append(f"{by_id[ci]['name']}: no cap fits over the bearing seats at these shaft centres; laid out "
-                             "on the housing instead.")
-        hm.update(caps=caps, cap_m=cap_m, D=D)
+                    through = [spec[shafts_h[seats_at[j][0]][0]]["d"] for j in by_cap[ci] if seats_at[j][1] == EXIT_SIDE]
+                    if through and _cap_kind(by_id[ci]) != "blind":
+                        cs["bore"] = _r2(max(through) + 2.0)  # the shaft passes through (the seal sits there)
+                        cs["cap"] = "open"
+                    else:
+                        cs.pop("bore", None)  # a blind cap closes the bore
+                        cs["cap"] = "blind"
+                    # the recess over the turning inner ring and shaft end: the bearing's mean diameter (between
+                    # the inner ring's OD and the outer ring's bore), so the cap bears on the outer ring only
+                    cs["relief"] = _r2(max((BEARINGS[spec[shafts_h[seats_at[j][0]][0]]["bearing"]["designation"]][0]
+                                            + D[seats_at[j][0]]) / 2 for j in by_cap[ci]))
+                caps = sorted(((st, seats_at[j][0], seats_at[j][1]) for j, st in assign),
+                              key=lambda x: seats_at.index((x[1], x[2])))
+                if cf and cf.get("m") and m != cf["m"]:
+                    notes.append(f"{by_id[cf['id']]['name']}: M{cf['m']} caps don't fit side by side at these shaft "
+                                 f"centres; the caps take M{m} instead.")
+                break
+        if cap_sts and not caps:
+            notes.append(f"{by_id[cap_sts[0][0]]['name']}: no cap fits over the bearing seats at these shaft "
+                         "centres; laid out on the housing instead.")
+        elif caps:
+            lig = max(LIGAMENT, LIGAMENT_D * cap_m)
+            notes.append("Bearing caps: " + "; ".join(
+                f"{by_id[st[0]]['name']}{f' #{st[1] + 1}' if ncopies_quiet(by_id[st[0]]) > 1 else ''} "
+                f"({spec[st[0]]['cap']}) over the {'+' if sd > 0 else '-'}Y seat of the "
+                f"{by_id[shafts_h[n][0]]['name']}" for st, n, sd in caps)
+                + f". Cap screws M{cap_m} in tapped holes (tap drill Ø{TAP_DRILL[cap_m]:g}) in the walls, on a PCD "
+                f"of seat Ø + tap drill + 2 × {lig:g} mm: at least {lig:g} mm of wall between the seat and each "
+                "tapped hole.")
+            missing = [seats_at[j] for j in range(len(seats_at)) if seats_at[j] not in at_seat]
+            if missing:
+                notes.append(f"{len(missing)} bearing seat{'s' if len(missing) != 1 else ''} without a cap in the "
+                             "plan (" + ", ".join(f"{'+' if sd > 0 else '-'}Y seat of the {by_id[shafts_h[n][0]]['name']}"
+                                                  for n, sd in missing) + ").")
+        hm.update(caps=caps, cap_m=cap_m, cap_item=cap_item, D=D)
         capped = {st for st, _n, _s in caps}
         rest = [st for st in row if st not in shafts_h and st not in capped]
         lid = next((k for k, kc in rest if kc == 0 and spec[k]["role"] == "block" and ncopies_quiet(by_id[k]) == 1
@@ -1539,13 +1655,17 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             pcd = _r2(ks["pcd"])
             plane = hm["y0"] if side < 0 else hm["y1"]
             a2 = [_r2(pos[0]), _r2(pos[2])]
+            sh_k = hm["shafts"][_n][0]
+            des = spec[sh_k]["bearing"]["designation"]
             add("hole_pattern", (host, 0), (k, c), {
-                "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
+                "fastener": f"M{m}", "fastener_size": m, "fastener_item": hm.get("cap_item") or fast_item.get(p["sub"]),
                 "count": count, "d": d, "pattern": "circular", "pcd": pcd, "centre": a2, "ax": "y",
                 "plane_z": _r2(plane), "normal": [0, side, 0], "positions": circle(a2, pcd, count), "through": False,
                 "tapped": {"d": TAP_DRILL[m], "depth": tap_depth(m), "thread": f"M{m}"},
+                "cap": ks.get("cap") or "open", "seat_D": BEARINGS[des][1], "bearing": str(des),
+                "relief": {"d": ks["relief"], "depth": CAP_RELIEF} if ks.get("relief") else None,
                 "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
-                ["A", "B", "C"], f"bearing cap over the {'+' if side > 0 else '-'}Y seat")
+                ["A", "B", "C"], f"{ks.get('cap') or 'open'} bearing cap over the {'+' if side > 0 else '-'}Y seat")
         else:  # hub / gear
             bottom = pos[2] - height(k) / 2
             if hs["role"] == "shaft":
@@ -1984,6 +2104,12 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
             else:
                 out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"], "tol": tol,
                             "label": f"hole {k + 1}"})
+        rl = d.get("relief") if which == "b" else None
+        if rl:  # a bearing cap: the recess in its mounting face over the turning inner ring (and the shaft end)
+            g = _axial(skel, side, d, d["centre"], d["plane_z"], d["plane_z"] + sa * float(rl["depth"]))
+            out.append({"type": "seat", **g, "d": float(rl["d"]), "tol": tol,
+                        "label": f"relief Ø{float(rl['d']):g} × {float(rl['depth']):g} deep in the mounting face (the "
+                                 "cap bears on the bearing's outer ring only, clear of the turning inner ring and shaft)"})
     elif f["kind"] == "shaft_bore":
         g = _axial(skel, side, d, d["axis"], d["z"][0])
         if which == "a":
@@ -2265,8 +2391,10 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
       geometry (a part can't be made):
         ``outgrown``, ``hole_diameter``, ``hole_edge``, ``rim``, ``cavity_breach``, ``hole_overlap``, ``keyway_rim``,
         ``washer_overlap``, ``fit_unknown``, ``bearing_depth``, ``bearing_wall``, ``bearing_bore``
+        ``ligament`` (warning) a bearing cap's tapped holes leave less than max(3 mm, 0.5 d) of wall to the seat
     """
     out: list[dict[str, Any]] = []
+    warn: list[dict[str, Any]] = []
 
     def add(code: str, text: str, items: list[str] | None = None, ifaces: list[str] | None = None) -> None:
         out.append({"code": code, "text": text, "items": list(items or []), "interfaces": list(ifaces or [])})
@@ -2342,6 +2470,14 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
             if gap < od - 1e-6:
                 add("washer_overlap", f"{f['id']}: Ø{d['d']:g} holes take M{m} bolts, whose washers (Ø{od:g}) "
                     f"overlap at {gap:.1f} mm between hole centres.", [f["a"]["item"], f["b"]["item"]], [f["id"]])
+            if d.get("seat_D") and d.get("pcd") and d.get("tapped"):  # a bearing cap's tapped holes beside the seat
+                lig = float(d["pcd"]) / 2 - float(d["seat_D"]) / 2 - float(d["tapped"]["d"]) / 2
+                need = max(LIGAMENT, LIGAMENT_D * int(d.get("fastener_size") or 0))
+                if lig < need - 1e-6:
+                    warn.append({"code": "ligament", "items": [f["a"]["item"], f["b"]["item"]], "interfaces": [f["id"]],
+                                 "text": f"{f['id']}: the {d['fastener']} tapped holes on PCD {d['pcd']:g} leave {lig:.1f} mm "
+                                         f"of wall to the Ø{d['seat_D']:g} bearing seat (at least {need:g} mm wanted). "
+                                         "Use smaller cap screws or a larger PCD."})
         if f["kind"] == "shaft_bore":
             h, s = fit_zones(f["data"]["d"], f["data"]["fit"])
             if h is None or s is None:
@@ -2380,7 +2516,8 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                         [f["a"]["item"]], [f["id"]])
     for x in out:
         x["severity"] = "error"
-    return out + [{"severity": "error", **x} for x in _layout_issues(skel, ifs)] + _bearing_issues(skel, ifs)
+    return (out + [{"severity": "error", **x} for x in _layout_issues(skel, ifs)] + _bearing_issues(skel, ifs)
+            + [{**x, "severity": "warning"} for x in warn])
 
 
 def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2777,6 +2914,11 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                             + ", ".join(where(h) for h in holes))
         if f["kind"] in ("bearing_seat", "bearing_journal"):
             bits.insert(0, f"{d['count']} × {d['bearing']} (bore {d['d']:g}, OD {d['D']:g}, width {d['B']:g})")
+        if f["kind"] == "hole_pattern" and d.get("cap") and which == "b":
+            bits.insert(0, (f"an open cap: the shaft passes through its Ø{it['bore']:g} bore (seal there)"
+                            if d["cap"] == "open" and it.get("bore") else "a blind cap: closed, no bore")
+                        + f", over the Ø{d['seat_D']:g} seat of bearing {d['bearing']}; flat mounting face (the "
+                        "bearing's outer ring is flush with the wall face, so no spigot)")
         lines.append(f"- {f['id']} {f['name']}: " + "; ".join(bits) + f" (position tolerance ±{d.get('position_tol', POS_TOL):g}).")
     cav = it.get("cavity")
     if cav:
