@@ -113,12 +113,14 @@ def _keyway_segment(radius: float, b: float) -> float:
 # ------------------------------------------------------------------ gears
 def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle: float = 20.0, bore: float = 0.0,
               hub_d: float = 0.0, hub_l: float = 0.0, keyway: bool | tuple[float, float] = False,
-              helix_angle: float = 0.0, name: str = "Gear teeth") -> tuple[Any, dict[str, Any]]:
-    """Spur (or helical) gear on Z = 0, axis Z, true involute flanks (no root fillet), standard addendum m and
-    dedendum 1.25 m, profile shift 0. Optional hub (Ø hub_d, length hub_l on the +Z face), through bore, and a hub
-    keyway on +Y (keyway=True: DIN 6885-1 for the bore; or (b, t2)). helix_angle (deg, at the pitch circle) twists
-    the teeth over the face width. Returns (part, expected) with expected = {"bbox", "volume", "solids", "gear"}."""
-    from build123d import Align, Box, Cylinder, Edge, Face, Pos, Solid, Vector, Wire, extrude
+              helix_angle: float = 0.0, name: str = "Gear teeth", z0: float = 0.0,
+              keyway_angle: float = 90.0) -> tuple[Any, dict[str, Any]]:
+    """Spur (or helical) gear from Z = z0 up, axis Z, true involute flanks (no root fillet), standard addendum m and
+    dedendum 1.25 m, profile shift 0, a tooth centred on +X. Optional hub (Ø hub_d, length hub_l on the +Z face),
+    through bore, and a hub keyway (keyway=True: DIN 6885-1 for the bore; or (b, t2)) on the side keyway_angle
+    degrees from +X about Z (default 90: +Y). helix_angle (deg, at the pitch circle) twists the teeth over the face
+    width. Returns (part, expected) with expected = {"bbox", "volume", "solids", "gear"}."""
+    from build123d import Align, Box, Cylinder, Edge, Face, Pos, Rot, Solid, Vector, Wire, extrude
 
     from aicad import fw
 
@@ -160,19 +162,21 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
         body = Solid.extrude_linear_with_rotation(face, Vector(0, 0, 0), Vector(0, 0, face_width), twist)
     else:
         body = extrude(face, face_width)
+    if z0:
+        body = Pos(0, 0, z0) * body
     label = f"{name} (m{module:g}, z{z}, α{pressure_angle:g}°{f', β{helix_angle:g}°' if helix_angle else ''})"
     part = fw.feature(label, body, module=module, teeth=z, face_width=face_width)
     area = g.area()
     vol = area * face_width
-    top = face_width
+    top = face_width  # height above z0
     if hub_d:
-        part = fw.feature("Hub", part + Pos(0, 0, face_width) * Cylinder(hub_d / 2, hub_l,
+        part = fw.feature("Hub", part + Pos(0, 0, z0 + face_width) * Cylinder(hub_d / 2, hub_l,
                                                                          align=(Align.CENTER, Align.CENTER, Align.MIN)),
                           d=hub_d, length=hub_l)
         vol += math.pi * hub_d ** 2 / 4 * hub_l
         top += hub_l
     if bore:
-        part = fw.feature(f"Bore Ø{bore:g}", part - Pos(0, 0, -0.5) * Cylinder(
+        part = fw.feature(f"Bore Ø{bore:g}", part - Pos(0, 0, z0 - 0.5) * Cylinder(
             bore / 2, top + 1, align=(Align.CENTER, Align.CENTER, Align.MIN)), d=bore)
         vol -= math.pi * bore ** 2 / 4 * top
     if keyway:
@@ -184,8 +188,10 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
         else:
             kb, kt2, src = float(keyway[0]), float(keyway[1]), "custom"
         depth = bore / 2 + kt2  # keyway floor measured from the bore axis
-        part = fw.feature(f"Keyway {kb:g}×{kt2:g} ({src})", part - Pos(0, 0, -0.5) * Box(
-            kb, depth, top + 1, align=(Align.CENTER, Align.MIN, Align.MIN)), b=kb, t2=kt2)
+        tool = Pos(0, 0, z0 - 0.5) * Box(kb, depth, top + 1, align=(Align.CENTER, Align.MIN, Align.MIN))  # on +Y
+        if keyway_angle != 90.0:
+            tool = Rot(0, 0, keyway_angle - 90.0) * tool
+        part = fw.feature(f"Keyway {kb:g}×{kt2:g} ({src})", part - tool, b=kb, t2=kt2)
         vol -= (kb * depth - _keyway_segment(bore / 2, kb)) * top
     sx, sy = _xy_extent(g.samples(), math.radians(twist))
     gear = {"pitch_d": 2 * g.rp, "tip_d": 2 * g.ra, "root_d": 2 * g.rf, "base_d": 2 * g.rb,
@@ -195,8 +201,8 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
 
 # ------------------------------------------------------------------ shafts
 def stepped_shaft(segments: list[tuple[float, float]], *, chamfer: float = 0.0, fillet: float = 0.0,
-                  name: str = "Shaft") -> tuple[Any, dict[str, Any]]:
-    """A revolved shaft along +Z from Z = 0: segments = [(diameter, length), ...] bottom to top. chamfer: 45° on
+                  name: str = "Shaft", z0: float = 0.0) -> tuple[Any, dict[str, Any]]:
+    """A revolved shaft along +Z from Z = z0: segments = [(diameter, length), ...] bottom to top. chamfer: 45° on
     both end faces' outer edges; fillet: radius in every concave shoulder corner. Returns (part, expected)."""
     from build123d import Axis, Plane, Polyline, make_face, revolve
 
@@ -216,7 +222,7 @@ def stepped_shaft(segments: list[tuple[float, float]], *, chamfer: float = 0.0, 
             pts += [(r[i], z), (r[i + 1], z)]
     pts += [(r[-1], z - c), (r[-1] - c, z)] if c else [(r[-1], z)]
     pts.append((0.0, z))
-    clean = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    clean = [(x, y + z0) for i, (x, y) in enumerate(pts) if i == 0 or (x, y) != pts[i - 1]]
     prof = make_face(Plane.XZ * Polyline(*clean, close=True))
     part = revolve(prof, Axis.Z, 360)
     vol = sum(math.pi * (d / 2) ** 2 * L for d, L in segments)
@@ -231,7 +237,7 @@ def stepped_shaft(segments: list[tuple[float, float]], *, chamfer: float = 0.0, 
             small = min(r[i], r[i + 1])
             if abs(r[i] - r[i + 1]) <= fillet:
                 raise ValueError("shoulder fillet must be smaller than the step height")
-            pts_f.append((small, 0.0, z))
+            pts_f.append((small, 0.0, z + z0))
             # Pappus: spandrel area (1 - pi/4) f^2 at a centroid 0.2234 f from each leg, outside the small radius
             vol += (1 - math.pi / 4) * fillet ** 2 * 2 * math.pi * (small + (10 - 3 * math.pi) / (12 - 3 * math.pi) * fillet)
         if pts_f:
@@ -243,11 +249,12 @@ def stepped_shaft(segments: list[tuple[float, float]], *, chamfer: float = 0.0, 
 
 
 def shaft_keyway(part: Any, d: float, z_center: float, length: float, *, b: float | None = None,
-                 t1: float | None = None, rounded: bool = True, name: str | None = None) -> tuple[Any, float]:
-    """Keyseat on the +Y side of a Ø d shaft whose axis is Z: DIN 6885-1 width and depth unless b/t1 are given,
-    `length` overall along Z centred on z_center, rounded (end-milled, form A) or square ends. Returns (part, removed
-    volume from the hand formula)."""
-    from build123d import Align, Box, Plane, Pos, SlotOverall, extrude
+                 t1: float | None = None, rounded: bool = True, name: str | None = None,
+                 angle: float = 90.0) -> tuple[Any, float]:
+    """Keyseat on a Ø d shaft whose axis is Z, on the side `angle` degrees from +X about Z (default 90: +Y): DIN
+    6885-1 width and depth unless b/t1 are given, `length` overall along Z centred on z_center, rounded (end-milled,
+    form A) or square ends. Returns (part, removed volume from the hand formula)."""
+    from build123d import Align, Box, Plane, Pos, Rot, SlotOverall, extrude
 
     from aicad import fw
 
@@ -262,6 +269,8 @@ def shaft_keyway(part: Any, d: float, z_center: float, length: float, *, b: floa
         tool = extrude(sk, t1 + 1)
     else:
         tool = Pos(0, floor, z_center) * Box(b, t1 + 1, length, align=(Align.CENTER, Align.MIN, Align.CENTER))
+    if angle != 90.0:
+        tool = Rot(0, 0, angle - 90.0) * tool
     label = name or f"Keyway {b:g}×{t1:g} (DIN 6885)"
     part = fw.feature(label, part - tool, b=b, t1=t1, length=length)
 

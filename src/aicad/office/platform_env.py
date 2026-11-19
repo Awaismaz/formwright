@@ -204,6 +204,101 @@ class PlatformEnv(orchestrator.Env):
         out["interrupted"] = out["interrupted"] or out["subtype"] == "stopped"
         return out
 
+    async def warm(self) -> None:
+        from aicad.agent import worker
+
+        await worker.warm(self.org_id)  # the warm worker the Studio builds of this organisation run on
+
+    async def design_direct(self, project_id: str, script: str, note: str) -> dict[str, Any]:
+        """A model script written without AI (``office.direct``), built exactly as the design agent's build tool
+        builds one (``tools.build_handler``: CHK-02..05, topology and the render now; exports, CHK-07 and CHK-08 on the
+        same warm worker in the background), then awaited until every check has run. The build becomes the project's
+        next revision; nothing is metered (no model call)."""
+        import time
+
+        from aicad.agent import tools
+        from aicad.agent.deferred import read_status
+        from aicad.agent.runner import is_verified
+        from aicad.platform.db import utcnow
+        from aicad.platform.models import User
+        from aicad.platform.plain import build_error
+        from aicad.platform.routers.projects import (
+            _complete_revision,
+            _snapshot,
+            _status_summary,
+            schedule_dims,
+            wait_finalized,
+            workspace_for,
+        )
+        from aicad.platform.services import notify_revision
+
+        db = self._db()
+        try:
+            p = self._project(db, project_id)
+            s = self._session(p)
+            ws = workspace_for(p)
+        finally:
+            db.close()
+        waited = 0
+        while s.busy and waited < 600:  # someone is using this part's Studio chat: wait for it
+            await asyncio.sleep(1)
+            waited += 1
+        if s.busy:
+            return {"ok": False, "error": "the part's Studio chat is busy"}
+        s.busy = True  # the Studio chat waits while the part is built (as for an agent turn)
+        s.publish({"type": "busy", "value": True})
+        vid = f"direct-{time.time_ns()}"
+        t0 = time.perf_counter()
+        ok = False
+        try:
+            await wait_finalized(project_id)
+            ws.mkdir(parents=True, exist_ok=True)
+            (ws / "model.py").write_text(script, encoding="utf-8")
+            s.publish({"type": "text", "text": note})
+            s.publish({"type": "tool", "id": vid, "name": "build", "brief": "Building from the interface spec"})
+            out = await tools.build_handler(ws, ws / "out", s.worker_key, s.deferred)({"script": "model.py"})
+            build_s = round(time.perf_counter() - t0, 2)
+            st = read_status(ws / "out") or {}
+            db = self._db()
+            try:
+                p = self._project(db, project_id)
+                if st.get("build_id"):
+                    p.last_status = _status_summary(st)
+                    p.builds += 1
+                    p.updated_at = utcnow()
+                    who = db.get(User, self.user_id)
+                    rev = _snapshot(p, ws, cause=note, kind="interface", by=who.name if who else None)
+                    if rev:
+                        notify_revision(db, p, rev, who, note)
+                        if st.get("exports_pending"):
+                            s.deferred.when_verified(st.get("build_id"), _complete_revision(ws, rev))
+                db.commit()
+            finally:
+                db.close()
+            if out.get("is_error") or st.get("error"):
+                return {"ok": False, "error": build_error(st.get("error"), st.get("checks")), "build_s": build_s}
+            final = await s.deferred.settle() or st  # CHK-07 round trip and CHK-08 repeatability
+            checks_s = round(time.perf_counter() - t0 - build_s, 2)
+            ok = is_verified(final)
+            db = self._db()
+            try:
+                p = self._project(db, project_id)
+                p.last_status = _status_summary(final)
+                db.commit()
+                schedule_dims(p, ws)  # the viewport dimensions of the editable parameters (no AI)
+            finally:
+                db.close()
+            return {"ok": ok, "build_s": build_s, "checks_s": checks_s,
+                    "error": None if ok else build_error(final.get("error"), final.get("checks"))}
+        except Exception as e:  # a worker failure: the design agent takes the ticket as before
+            log.exception("direct build failed")
+            return {"ok": False, "error": str(e) or type(e).__name__}
+        finally:
+            s.busy = False
+            s.publish({"type": "tool_result", "id": vid, "build": False, "is_error": not ok,
+                       "brief": "Built and verified" if ok else "The build did not pass its checks"})
+            s.publish({"type": "busy", "value": False})
+
     async def interrupt(self, project_id: str) -> None:
         from aicad.platform.routers.projects import _sessions
 
@@ -788,6 +883,15 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
                 tb = {**tb, "title": toolbox.spec(tb["code"]).title(params)}
             it = ((doc.get("skeleton") or {}).get("items") or {}).get(t["item_id"]) or {}
             if not standard and tb["code"] == "spur_gear" and it.get("role") == "gear" and interfaces.has_icd(doc):
+                from aicad.office import direct, icd
+
+                if direct.enabled(doc) and direct.plan(doc, t)["path"] == "direct":
+                    # the interfaces fix the gear: it is built from them (bore, hub keyway, the plan's material, true
+                    # involute) in seconds, never swapped for a plain Toolbox gear that drops the keyway and material
+                    return None
+                if any(f["type"] not in ("hole", "gear", "face") for f in
+                       icd.item_features(doc["skeleton"], doc["icd"]["interfaces"], t["item_id"])):
+                    return None  # a keyed bore: the Toolbox gear has none, the designer builds it (direct, no AI)
                 # a designed gear Hex takes from the Toolbox is made to its ICD: module, teeth, face width, bore
                 params = toolbox.normalize("spur_gear", {**params, "M": it["module"], "Z": it["teeth"],
                                                          "B": it["face_width"], **({"BORE": it["bore"]} if it.get("bore") else {})})
@@ -877,6 +981,12 @@ def assembly_allowed(org_id: str, god_paywall: bool) -> bool:
 
 async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False) -> None:
     """At ICD approval: Fitz assembles the program from placeholders (mates by interface name)."""
+    from aicad.agent import worker
+
+    # parts built from the interfaces (office.direct) start as soon as Run is pressed: have the engine warm by then
+    warm = asyncio.get_running_loop().create_task(worker.warm(org_id))
+    _ADVISORY.add(warm)
+    warm.add_done_callback(_ADVISORY.discard)
     if not assembly_allowed(org_id, god_paywall):
         save_assembly(root, pid, {"status": "unavailable", "summary": "Assembly Studio isn't included in your plan, "
                                   "so the live program assembly can't be built. Unlock the add-on, then rebuild it."},

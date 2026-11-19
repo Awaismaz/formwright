@@ -46,6 +46,7 @@ from aicad.office import (
     calibration,
     conformance,
     deliverables,
+    direct,
     ecn,
     estimates,
     gage,
@@ -510,6 +511,15 @@ class Env:
     async def interrupt(self, project_id: str) -> None:
         return None
 
+    async def warm(self) -> None:
+        """Start the program's geometry engine ahead of its first build."""
+        return
+
+    async def design_direct(self, project_id: str, script: str, note: str) -> dict[str, Any]:
+        """Build a model script written without AI (``direct``) through the Studio's build and check gate, as the
+        project's new revision. {ok (verified: CHK-02..08), build_s, checks_s, error}."""
+        return {"ok": False, "error": "building from the interface spec is not available here"}
+
     async def part_state(self, project_id: str) -> dict[str, Any]:
         """{builds, ok, checks, bbox, params, source} of the project's latest build."""
         raise NotImplementedError
@@ -584,6 +594,7 @@ class Runner:
         self.loop = asyncio.get_running_loop()
         self.max_seen = 0  # the most slot-taking stages that ever ran at once (tests assert the cap)
         self.main: asyncio.Task[None] | None = None
+        self.warming: asyncio.Task[None] | None = None  # the geometry engine starting for direct builds
 
     # ------------------------------------------------------------------ helpers
     def edit(self, fn: Callable[[dict[str, Any]], Any]) -> Any:
@@ -627,6 +638,9 @@ class Runner:
     async def run(self) -> None:
         try:
             self.edit(lambda d: recover(self.root, d, set(self.tasks)))
+            # parts built from the interfaces need the geometry engine at once: start it now, not on the first build
+            self.warming = asyncio.get_running_loop().create_task(self.env.warm())
+            self.warming.add_done_callback(lambda t: t.cancelled() or t.exception())
             while True:
                 info = await self.env.studio_info(self.load())
                 if self.tick(info):
@@ -784,6 +798,11 @@ class Runner:
         if tt.get("calibrated"):
             tt["calibrated"]["actual_min_now"] = actual  # reopened and finished again: shown, not learned twice
             return
+        if (tt.get("direct") or {}).get("path") == "direct" and not tt["direct"].get("superseded"):
+            # built from the interfaces in seconds: not a sample of the designer's rate (it would skew the estimates)
+            tt["calibrated"] = {"actual_min": actual, "learned": False, "at": store.now(),
+                                "why": "built from the interface spec (no AI)"}
+            return
         if tt.get("manual_work") or not actual:
             tt["calibrated"] = {"actual_min": actual, "learned": False, "at": store.now(),
                                 "why": "an engineer worked on it by hand" if tt.get("manual_work") else "no agent time"}
@@ -876,6 +895,17 @@ class Runner:
             self.edit(lambda d: self._fail(d, tid, f"{roster.agent(code)['name']} doesn't design parts. Reassign "
                                                    "the ticket to a designer (Mill, Chuck, Axel, Benny or Molly)."))
             return None
+        # a part the approved interfaces fix completely is built from them, without AI (no tokens, seconds)
+        seed: dict[str, Any] | None = None
+        dp = await self._direct_plan(doc, t)
+        if dp is not None and dp["path"] == "direct":
+            nxt = await self._direct(tid, dp)
+            if nxt != "agent":
+                return nxt
+            doc = self.load()
+            dp = None
+        elif dp is not None:
+            seed = dp.get("seed")
         b = budget_state(doc)
         if b["level"] == "stop" and not b["bypass"]:
             self.edit(lambda d: _set_run(service.ticket(d, tid), status="queued", next="design",
@@ -886,12 +916,21 @@ class Runner:
             return self._capacity(tid, "design", why)
         project_id = await self.env.ensure_project(self.root, self.pid, tid)
         lbl = self.label(tid, code)
+        seeded = False
+        if seed is not None:  # the interfaces fix the part but the brief asks for more: start the agent from them
+            res0 = await self.env.design_direct(project_id, seed["script"], direct.note(seed, seed=True))
+            seeded = bool(res0.get("ok"))
 
         def prep(d: dict[str, Any]) -> tuple[str, str]:
             tt = service.ticket(d, tid)
             r = run_of(tt)
             if tt["column"] != "in_design":
                 service.move(self.root, d, tid, "in_design", service.agent_actor(code))
+            prev = tt.get("direct") or {}
+            if dp is not None and not prev:
+                tt["direct"] = {"path": "agent", "reasons": dp["reasons"], "seeded": seeded, "at": store.now()}
+            elif prev.get("path") == "direct" and not prev.get("superseded"):
+                tt["direct"] = {**prev, "superseded": True}  # the agent works on it from here (findings, comments)
             pending = [c for c in tt["comments"] if c["id"] in (tt.get("inbox") or [])]
             for c in pending:
                 c["delivery"] = "delivered"
@@ -906,6 +945,8 @@ class Runner:
                 excerpt = icd_mod.excerpt(d["skeleton"], d["icd"], tt["item_id"])
             text = specialists.prompt(code, tt, feedback=fb, comments=pending, full=resume or not r.get("turns"),
                                       resume=resume, icd=excerpt, icd_notes=notes)
+            if seeded:
+                text += "\n\n" + direct.seed_prompt(dp["reasons"] if dp else [])
             shown = specialists.shown(tt, lbl, feedback=bool(fb), comments=bool(pending) and not fb,
                                       icd=bool(notes) and not fb)
             _set_run(tt, status="designing", next="design", feedback=None, resume=False,
@@ -978,6 +1019,76 @@ class Runner:
             return None
         return self.edit(after)
 
+    async def _direct_plan(self, doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any] | None:
+        """How this design turn runs (``direct.plan``), or None when the design agent must take it as it is: the
+        checker's findings or the engineer's comments to act on, a take-over, or a model that is no longer the one
+        the interfaces produced (an agent or an engineer changed it)."""
+        if not direct.enabled(doc) or t["kind"] != "part" or t.get("taken_over"):
+            return None
+        if run_of(t).get("feedback") or t.get("inbox"):
+            return None
+        prev = t.get("direct") or {}
+        if t.get("project_id"):
+            if prev.get("path") != "direct" or prev.get("superseded"):
+                return None
+            st = await self.env.part_state(t["project_id"])
+            if direct.sha(st.get("source") or "") != prev.get("sha"):
+                return None  # edited in the Design Studio since: never overwrite the engineer's work
+        return direct.plan(doc, t)
+
+    async def _direct(self, tid: str, dp: dict[str, Any]) -> str | None:
+        """Build the part from its interfaces: the script ``direct.plan`` wrote, through the same build and check
+        gate as an agent's build, then Gage. Returns the next stage, or "agent" when the build didn't pass."""
+        t = service.ticket(self.load(), tid)
+        code = t["specialist"]
+        project_id = await self.env.ensure_project(self.root, self.pid, tid)
+        lbl = self.label(tid, code)
+
+        def prep(d: dict[str, Any]) -> None:
+            tt = service.ticket(d, tid)
+            if tt["column"] != "in_design":
+                service.move(self.root, d, tid, "in_design", service.agent_actor(code))
+            tt.pop("icd_delta", None)  # the model is generated from the current ICD: nothing to tell anyone
+            tt.pop("cr_notes", None)
+            if "brief_read" not in tt["milestones"]:
+                service.set_milestone(self.root, d, tid, "brief_read", True, service.agent_actor(code))
+            _set_run(tt, status="designing", next="design", path="direct", stage_seen=[])
+            self.status(d, tt, code, f"{lbl} is building {tt['title']} from the interface spec (no AI)")
+        self.edit(prep)
+        t0 = time.time()
+        res = await self.env.design_direct(project_id, dp["script"], direct.note(dp))
+        secs = round(time.time() - t0, 1)
+
+        def after(d: dict[str, Any]) -> str | None:
+            tt = service.ticket(d, tid)
+            a = service.agent_actor(code)
+            if res.get("ok"):
+                tt["direct"] = {"path": "direct", "label": direct.LABEL, "kind": dp["kind"], "sha": dp["sha"],
+                                "summary": dp["summary"], "material": dp["material"], "features": dp["features"],
+                                "icd_version": dp["icd_version"], "version": dp["version"], "seconds": secs,
+                                "build_s": res.get("build_s"), "checks_s": res.get("checks_s"), "at": store.now()}
+                for m in ("first_build", "gates_pass", "self_review"):
+                    if m not in tt["milestones"]:
+                        service.set_milestone(self.root, d, tid, m, True, a)
+                service.emit(self.root, d, "ticket.direct", f"{lbl} built {service._label(tt)} from the interface "
+                             f"spec in {secs:.1f} s (no AI, 0 tokens): {dp['summary']}.", a, tid, seconds=secs)
+                if tt.get("taken_over") or tt.get("paused"):
+                    return "design"  # _halt records why (a resumed direct build is the same script again)
+                if tt.get("inbox") or tt.get("icd_delta") or tt.get("cr_notes"):
+                    return "design"  # comments / an ICD change arrived during the build
+                service.move(self.root, d, tid, "in_review", a)
+                _set_run(tt, status="reviewing", next="review", attempt=0, path="direct")
+                self.handoff(d, tt, code, "gage", f"{lbl} → Gage: {tt['title']} built from the interface spec (no "
+                             "AI), for inspection.")
+                return "review"
+            why = res.get("error") or "the build didn't pass its checks"
+            tt["direct"] = {"path": "agent", "fallback": True, "at": store.now(), "seeded": False,
+                            "reasons": [f"the build from the interface spec didn't pass ({why})"]}
+            _set_run(tt, path="agent")
+            log.warning("direct build of %s failed: %s", tid, why)
+            return "agent"
+        return self.edit(after)
+
     def _progress(self, d: dict[str, Any], tid: str, code: str, lbl: str, ev: dict[str, Any],
                   seen: set[str]) -> None:
         """Milestones and status lines from the agent's real events."""
@@ -1045,7 +1156,10 @@ class Runner:
                 findings += conformance.findings(icd_res)
         ai: dict[str, Any] | None = None
         hard = bool(findings)  # measurable failures (checks, ICD conformance): only these can block a part
-        if not findings:
+        # a part built from its interfaces, unchanged since and conforming: the AI note has nothing to judge that the
+        # measurements don't (the brief asked for nothing beyond the ICD, or it would have gone to the agent)
+        built_direct = direct.is_direct(t, state) and icd_res is not None
+        if not findings and not built_direct:
             b = budget_state(doc)
             prev = list(run_of(t).get("ai_findings") or [])
             ai = await self.env.review_ai(doc, t, state, None if b["bypass"] else b["remaining"], prev)
@@ -1092,6 +1206,9 @@ class Runner:
                     tt["review_notes"] = settled
                 elif ai and ai.get("note"):
                     note += f" Review note: {ai['note']}"
+                elif built_direct:
+                    note += (" It was built from the interface spec (no AI), so no AI review note was needed: the "
+                             "measurements above are the whole review.")
                 elif ai is None:
                     note += " (No AI review note this time: approved on the deterministic checks.)"
                 if ai and ai.get("notes") and not settled:
