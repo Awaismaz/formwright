@@ -7,6 +7,7 @@ import { cx } from "@/lib/format";
 import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
+import SpeedPanel from "./SpeedPanel";
 import { estimateMinutes, fmtEta, fmtMinutes, planPreview } from "./model";
 import type { Family, Plan, PlanPart, Program } from "./types";
 
@@ -41,7 +42,8 @@ export default function PlanReview({ program }: { program: Program }) {
   const canEdit = program.can_edit !== false;
   const k = program.constants;
   useEffect(() => { if (!dirty) setPlan(structuredClone(program.plan!)); }, [program.plan, dirty]);
-  const preview = useMemo(() => planPreview(plan, k, program.concurrency), [plan, k, program.concurrency]);
+  const preview = useMemo(() => planPreview(plan, k, program.concurrency, program.threads ?? null,
+    f => program.families.find(x => x.code === f)?.specialist ?? "mill"), [plan, k, program.concurrency, program.threads, program.families]);
   const team = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of plan.subassemblies) for (const p of s.parts) {
@@ -183,6 +185,7 @@ export default function PlanReview({ program }: { program: Program }) {
           </div>}
           <p className={cx("mt-3 text-[11px] text-muted")}>Estimates are complexity × calibrated minutes per part family; ranges, not promises.</p>
         </Card>
+        <Card className="p-4"><SpeedPanel program={program} plan={plan} /></Card>
       </aside>
 
       <Modal open={askOpen} onOpenChange={setAskOpen} title="Ask Archie to revise the plan"

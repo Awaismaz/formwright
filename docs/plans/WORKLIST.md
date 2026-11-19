@@ -35,4 +35,6 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 28 | Agent platform: LLMProvider interface (structured output, vision, metering) + second provider stub passing the same tests, SOLIDWORKS STEP export pathway with disclosure, Blender exports in the IO matrix | AGT-001, AGT-013, CAD-070, IO-008b | Done (merged; PD-59) |
 | 29 | Quality fixtures: golden assembly fixtures FX-04/05/06 (original designs, provenance, checks), advisory render similarity metric (logged, never gating) | ASM-012, EVAL-006 | Done (merged; PD-62) |
 | 30 | Studio follow-ups: sheet-metal corner relief + holes across bends in the flat + jog/miter flange; fw-edit for extrude/pattern/multi-feature edits; impact preview for tree actions (suppress/delete/reorder) and Ctrl+K commands | CAD-026 follow-ups, DS-035, ASM-018 follow-ups | Done (merged; ; PD-63) |
+| 31 | Design Office workflow: talk to Archie at every stage, speed and budget any time (per-agent threads, ETA preview), the ICD gate self-corrects and is never a dead end | CD-026, CD-027, CD-028 | Done (PD-65…PD-67) |
+| 32 | Layout builder sizes envelopes for their own features | CD-029 | Next |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |

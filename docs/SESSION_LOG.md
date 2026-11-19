@@ -4,6 +4,42 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (e) — Design Office: talk to Archie any time, speed and budget any time, the ICD gate self-corrects (CD-026, CD-027, CD-028)
+
+Founder asked: (1) talk to Archie after the first command, to change the program midway or get a status report;
+(2) change agents at a time and the token budget at any stage, with an ETA preview in plan review, and threads per
+agent (Molly ×3); (3) an F1 program stopped at the ICD gate after plan approval with problems and no action: "a dead
+end". Founder rule recorded: treat causes and workflows, never the instance; every recovery must exist in the
+product (Archie), because Claude is not there in production.
+
+**Done**
+- CD-026 Talk to Archie: `office/archie_chat.py`, routes `GET/POST /programs/{pid}/archie`, `POST .../archie/actions`,
+  LLM role `office_chat`, `ArchieChat.tsx` (header button, every stage, quick chips). Status is deterministic and free;
+  changes are proposals applied by the engineer (re-validated at apply).
+- CD-027 Speed and budget: per-agent threads in the orchestrator, ETA and planned timeline; `SpeedPanel.tsx` in plan
+  review and from the run bar; budget editable there.
+- CD-028 ICD gate: cause found: the layout can produce unbuildable parts (thin endplate with M3 holes, small mirror with
+  two M3 washers, 3 mm push rod hosting an 8 mm axle), the UI showed only the first of six problems, and a draft edit
+  was refused unless it cleared every problem at once, so no edit could ever pass. Now: self-fix at ICD creation,
+  all problems listed with the interface to edit, Fix with Archie (button + chat action), edits allowed when they add
+  no problem, Archie in chat can edit draft interfaces and resize part envelopes, run bar says the next step.
+  Reproduced on a temp copy of the founder's F1 program (not modified): 6 problems → 0 with 5 listed changes.
+
+**Verified**: `tests/test_office_archie_chat.py` (8: lanes maths, planned schedule, threads/budget API, chat status and
+proposals, AI turn metered with invalid actions dropped, crowded plan self-corrects, chat fix of leftovers, one edit at
+a time); office + LLM + AI-access suites 119 passed; `tsc`, vitest 133, vite build.
+
+**Also fixed**: "Fix with Archie" gave "Method Not Allowed" because the rebuilt page was served by a server still
+running the old backend (not restarted). Server restarted; and `web/src/lib/api.ts` now turns a 405 / unknown-route
+404 into "Formwright is being updated… reload" so a user never sees the raw message mid-deploy. Working rule: restart
+the server before rebuilding `web/dist` after backend changes.
+
+**Not done**: CD-029 (builder sizes envelopes for their own features: the cause behind the cause); adding/removing
+parts mid-program from the chat (PD-65); the founder's existing F1 program still shows its 6 problems until someone
+presses Fix with Archie or asks Archie in the chat (by design: no edits to founder data).
+
+**Next**: CD-029; a browser walkthrough of the chat + speed panel on a simulated program.
+
 ## 2026-11-19 (d) — Hosted server: AI for super-admins only (FW_AI_SUPERADMIN_ONLY)
 
 ### Done

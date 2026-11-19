@@ -21,8 +21,11 @@ ETA range (remaining agent time, a range, never a promise)
     W  = remaining effort in the subtree, sum(estimate_i x (100 - progress_i) / 100)
     CP = remaining critical path: a sub-assembly's integration waits for all of its children
     N  = concurrency (agents working in parallel, default 3, PD-36)
-    low  = ETA_LOW_FACTOR  x max(CP, W / N)    (perfect packing: no schedule beats this bound)
-    high = ETA_HIGH_FACTOR x (CP + W / N)      (Graham's bound for any greedy schedule)
+    Per-agent threads (CD-027, PD-66): an agent with k threads works at most k of its tickets at once. With
+    W_a = that agent's remaining effort, its lane takes at least L = max_a W_a / min(k_a, N); when every agent
+    with work has a thread count, N is also capped at the sum of their threads.
+    low  = ETA_LOW_FACTOR  x max(CP, W / N, L)    (perfect packing: no schedule beats this bound)
+    high = ETA_HIGH_FACTOR x (CP + max(W / N, L)) (greedy-schedule bound)
     The factors widen the range for estimate error until calibration (CD-015) narrows it.
 """
 
@@ -143,15 +146,48 @@ def critical_path(items: list[dict[str, Any]], tickets: list[dict[str, Any]], it
     return round(cp(item_id), 2)
 
 
+def clean_threads(raw: Any) -> dict[str, int]:
+    """{agent code: threads 1..MAX_CONCURRENCY}; anything else is dropped (codes are checked by the caller)."""
+    out: dict[str, int] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            if isinstance(k, str) and isinstance(v, (int, float)) and not isinstance(v, bool):
+                out[k] = max(1, min(MAX_CONCURRENCY, int(v)))
+    return out
+
+
+def lanes(tickets: Iterable[dict[str, Any]], threads: dict[str, int] | None, n: int) -> tuple[int, float]:
+    """(effective concurrency, slowest agent lane in minutes) for the remaining work of ``tickets``. An agent's
+    lane is its tickets' remaining effort over its threads; agents without a thread count share the pool."""
+    per: dict[str, float] = {}
+    for t in tickets:
+        w = remaining_min(t)
+        if w > 0:
+            per[t.get("specialist") or ""] = per.get(t.get("specialist") or "", 0.0) + w
+    if not threads:
+        return n, 0.0
+    bound, cap, pooled = 0.0, 0, False
+    for code, w in per.items():
+        k = threads.get(code)
+        if k:
+            bound = max(bound, w / min(k, n))
+            cap += min(k, n)
+        else:
+            pooled = True
+    return (n if pooled or not per else max(1, min(n, cap))), bound
+
+
 def eta(items: list[dict[str, Any]], tickets: list[dict[str, Any]], item_id: str,
-        concurrency: int = DEFAULT_CONCURRENCY) -> dict[str, float]:
+        concurrency: int = DEFAULT_CONCURRENCY, threads: dict[str, int] | None = None) -> dict[str, float]:
     n = max(1, min(MAX_CONCURRENCY, int(concurrency or DEFAULT_CONCURRENCY)))
     ids = set(subtree(items, item_id))
-    w = sum(remaining_min(t) for t in tickets if t["item_id"] in ids)
+    mine = [t for t in tickets if t["item_id"] in ids]
+    w = sum(remaining_min(t) for t in mine)
     cp = critical_path(items, tickets, item_id)
+    n_eff, lane = lanes(mine, threads, n)
     return {"remaining_min": round(w, 2), "critical_path_min": cp, "concurrency": n,
-            "low_min": round(ETA_LOW_FACTOR * max(cp, w / n), 1),
-            "high_min": round(ETA_HIGH_FACTOR * (cp + w / n), 1)}
+            "low_min": round(ETA_LOW_FACTOR * max(cp, w / n_eff, lane), 1),
+            "high_min": round(ETA_HIGH_FACTOR * (cp + max(w / n_eff, lane)), 1)}
 
 
 def constants(rates: dict[str, float] | None = None) -> dict[str, Any]:

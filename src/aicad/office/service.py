@@ -149,12 +149,31 @@ def gate(doc: dict[str, Any], code: str) -> dict[str, Any]:
     return next(g for g in doc["gates"] if g["code"] == code)
 
 
-def plan_estimate(plan: dict[str, Any], concurrency: int, rates: dict[str, float] | None = None) -> dict[str, Any]:
+def plan_estimate(plan: dict[str, Any], concurrency: int, rates: dict[str, float] | None = None,
+                  threads: dict[str, int] | None = None) -> dict[str, Any]:
     """Estimates for a plan that has no tickets yet (plan review shows what approval will create)."""
     items, tickets = _build(plan, "Program", "P", rates=rates)
     total = sum(t["estimate_min"] for t in tickets)
     return {"tickets": len(tickets), "estimate_min": round(total, 1),
-            "eta": estimates.eta(items, tickets, "root", concurrency)}
+            "eta": estimates.eta(items, tickets, "root", concurrency, threads)}
+
+
+def default_threads() -> dict[str, int]:
+    """New programs (PD-66): one thread per designer; Hex, Gage, Fitz, Ortho and Smithy share the office pool."""
+    return {c: 1 for c in roster.DESIGNERS}
+
+
+def set_threads(doc: dict[str, Any], raw: Any) -> dict[str, int]:
+    """Per-agent threads (CD-027): parallel sub-agents of one specialist, capped by the program's concurrency."""
+    clean = {k: v for k, v in estimates.clean_threads(raw).items() if k in roster.AGENT_CODES and k != "archie"}
+    doc["threads"] = clean
+    return clean
+
+
+def threads_of(doc: dict[str, Any]) -> dict[str, int] | None:
+    """None for programs from before per-agent threads: every agent shares the pool (the old behaviour)."""
+    t = doc.get("threads")
+    return t if isinstance(t, dict) else None
 
 
 def _ticket_brief(program: str, brief: str, sub: str, part: dict[str, Any]) -> str:
@@ -486,10 +505,10 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
     if items:
         ru = estimates.rollup(items, tickets)
         out["items"] = [{**it, "rollup": ru[it["id"]],
-                         "eta": estimates.eta(items, tickets, it["id"], doc["concurrency"])
+                         "eta": estimates.eta(items, tickets, it["id"], doc["concurrency"], threads_of(doc))
                          if it["kind"] != "part" else None} for it in items]
         out["rollup"] = ru["root"]
-        out["eta"] = estimates.eta(items, tickets, "root", doc["concurrency"])
+        out["eta"] = estimates.eta(items, tickets, "root", doc["concurrency"], threads_of(doc))
     else:
         out["rollup"] = None
         out["eta"] = None
@@ -516,9 +535,10 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
                            "blocked": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "blocked"),
                            "review": sum(1 for t in tickets if (t.get("run") or {}).get("status") == "awaiting_review")}
     out["review_gate"] = bool(doc.get("review_gate"))
+    out["threads"] = threads_of(doc)
     out["ecns"] = doc.get("ecns") or []
     if doc.get("plan") and doc["status"] == "plan_review":
-        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc))
+        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc), threads_of(doc))
     out["constants"] = estimates.constants(rates_of(doc))
     out["families"] = [{"code": f, "label": lbl, "specialist": s} for f, (lbl, s) in roster.FAMILIES.items()]
     return out

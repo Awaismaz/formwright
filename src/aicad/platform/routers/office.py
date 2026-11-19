@@ -58,12 +58,14 @@ from sqlalchemy import func, select
 
 from aicad.office import (
     OfficeInputError,
+    archie_chat,
     calibration,
     deliverables,
     interfaces,
     orchestrator,
     planner,
     program_assembly,
+    roster,
     service,
     store,
     timeline,
@@ -90,12 +92,14 @@ class ProgramIn(BaseModel):
     budget_tokens: int = Field(default=service.DEFAULT_BUDGET_TOKENS, ge=0, le=1_000_000)
     deliverables: bool = True  # Ortho and Smithy make the drawings, BOM and DFM summary after integration
     review_gate: bool = False  # every part waits for the engineer's approval after Gage passes it (CD-023)
+    threads: dict[str, int] | None = None  # per-agent threads (CD-027); default one per designer (PD-66)
 
 
 class ProgramPatch(BaseModel):
     name: str | None = None
     concurrency: int | None = Field(default=None, ge=1, le=12)
     budget_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
+    threads: dict[str, int] | None = None
     deliverables: bool | None = None
     review_gate: bool | None = None
 
@@ -159,6 +163,16 @@ class MilestoneIn(BaseModel):
 
 class CommentIn(BaseModel):
     text: str
+
+
+class ArchieIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+class ArchieActIn(BaseModel):
+    message: str
+    action: str
+    decision: str = "apply"  # "apply" | "dismiss"
 
 
 # ----------------------------------------------------------------------------- access helpers
@@ -327,6 +341,7 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     doc = service.new_program(name, brief, org.id, ctx.user.id, body.concurrency, body.budget_tokens, kind)
     doc["deliverables_auto"] = body.deliverables
     doc["review_gate"] = body.review_gate
+    service.set_threads(doc, body.threads if body.threads is not None else service.default_threads())
     service.emit(root, doc, "program.created", f"{ctx.user.name or 'Someone'} opened the program {name}.",
                  _actor(ctx))
     _start_planning(ctx, root, doc, kind)
@@ -376,6 +391,13 @@ def patch_program(pid: str, body: ProgramPatch, ctx: Ctx = Depends(verified_ctx)
             service.emit(root, doc, "program.review_gate", f"{ctx.user.name or 'Someone'} switched the per-part review "
                          f"gate {'on: every part waits for your approval after Gage' if body.review_gate else 'off'}.",
                          _actor(ctx), on=bool(body.review_gate))
+        if body.threads is not None:
+            before = service.threads_of(doc) or {}
+            after = service.set_threads(doc, {**before, **body.threads})
+            changed = [f"{roster.agent(k)['name']} {v}" for k, v in after.items() if before.get(k) != v]
+            if changed:
+                service.emit(root, doc, "program.threads", f"{ctx.user.name or 'Someone'} set agent threads: "
+                             f"{', '.join(changed)}.", _actor(ctx), threads=after)
         if body.budget_tokens is not None:
             doc["budget"]["tokens"] = body.budget_tokens
             o = doc.get("orchestrator") or {}
@@ -436,6 +458,14 @@ def _spawn_task(coro: Any) -> None:
 @router.patch("/programs/{pid}/icd/interfaces/{iid}")
 def edit_interface(pid: str, iid: str, body: IcdEditIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     return _view(_mutate(ctx, pid, lambda root, d: interfaces.edit(root, d, iid, body.values, _actor(ctx))))
+
+
+@router.post("/programs/{pid}/icd/fix")
+def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Archie adjusts the draft ICD so every part can be made (deterministic, no AI, no tokens; CD-028)."""
+    out: list[dict[str, Any]] = []
+    doc = _mutate(ctx, pid, lambda root, d: out.append(interfaces.fix(root, d, _actor(ctx))))
+    return {**_view(doc), "fix": out[0]}
 
 
 @router.post("/programs/{pid}/gates/icd/approve")
@@ -1114,3 +1144,156 @@ def program_motion_last(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str,
     if res:
         res["stale"] = res.get("signature") != aservice.geometry_signature(adoc)
     return {"motion": res or None}
+
+
+# ----------------------------------------------------------------------------- routes: talk to Archie (CD-026)
+def _chat_ai(ctx: Ctx, doc: dict[str, Any]) -> tuple[bool, int]:
+    """(AI turn available, token cap). Status reports never need it; without it the office reader answers."""
+    from aicad.office import fake_agents
+    from aicad.platform.routers.projects import can_run_agent
+
+    if fake_agents.enabled() or ctx.role == "viewer":
+        return False, 0
+    allowed, _, _ = can_run_agent(ctx)
+    if not allowed:
+        return False, 0
+    if ctx.god_on("bypass_tokens"):
+        return True, archie_chat.CHAT_MAX_TOKENS
+    org = ctx.require_org()
+    cap = min(archie_chat.CHAT_MAX_TOKENS, max(0, org.token_balance - metering.reserved(org.id)))
+    return cap >= 5, cap
+
+
+def _chat_view(ctx: Ctx, pid: str, doc: dict[str, Any] | None = None) -> dict[str, Any]:
+    doc = doc or _load(ctx, pid)
+    ai, _ = _chat_ai(ctx, doc)
+    return {"messages": archie_chat.with_labels(doc, archie_chat.history(_root(ctx), pid)), "ai": ai,
+            "can_edit": ctx.role != "viewer"}
+
+
+@router.get("/programs/{pid}/archie")
+def archie_history(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    return _chat_view(ctx, pid)
+
+
+@router.post("/programs/{pid}/archie")
+async def archie_say(pid: str, body: ArchieIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer talks to Archie at any stage. Status questions are answered from the program itself (no AI);
+    change requests come back as proposed actions that run only when the engineer applies them."""
+    _editor(ctx)
+    root = _root(ctx)
+    doc = _load(ctx, pid)
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(409, "Write a message first.")
+    with store.lock(pid):
+        hist = archie_chat.history(root, pid)
+        hist.append(archie_chat.user_message(text, _actor(ctx)))
+        archie_chat.save_history(root, pid, hist)
+    reply = None
+    ai, cap = (False, 0) if archie_chat.is_status(text) else _chat_ai(ctx, doc)
+    if ai:
+        god = ctx.god_on("bypass_tokens")
+        out, usd = "", None
+        try:
+            out, usd = await archie_chat.run_chat(store.program_dir(root, pid) / "archie",
+                                                  archie_chat.chat_prompt(root, doc, hist[:-1], text),
+                                                  None if god else cap * metering.USD_PER_TOKEN)
+        except Exception:  # any failure: the office reader answers instead
+            log.exception("Archie chat turn failed")
+        tokens = min(cap, metering.tokens_for_usd(usd)) if usd else 0
+        if tokens and not god:
+            debit(ctx.db, ctx.require_org(), tokens, "usage", f"Design Office · Archie on {doc['name']}", ctx.user,
+                  ref=pid)
+        track(ctx.db, "office_archie_chat", ctx.user, doc["org_id"], tokens=tokens, ok=bool(out))
+        ctx.db.commit()
+        if tokens and not god:
+            with store.lock(pid):
+                d = _load(ctx, pid)
+                d["budget"]["planning_tokens"] = int(d["budget"].get("planning_tokens", 0)) + tokens
+                store.save(root, d)
+                doc = d
+        prose, acts = archie_chat.parse_actions(doc, out)
+        if prose or acts:
+            reply = archie_chat.archie_message(prose or "Here is what I would do.", acts, kind="ai", tokens=tokens)
+    if reply is None:
+        t, acts, kind = archie_chat.offline_reply(doc, text, root)
+        reply = archie_chat.archie_message(t, acts, kind=kind)
+    with store.lock(pid):
+        hist = archie_chat.history(root, pid)
+        hist.append(reply)
+        archie_chat.save_history(root, pid, hist)
+    return _chat_view(ctx, pid, doc)
+
+
+async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, Any]) -> None:
+    """Run one proposed action through the same route as its button on the board."""
+    typ = a["type"]
+    t = archie_chat.find_ticket(doc, a.get("ticket", "")) if a.get("ticket") else None
+    if a.get("ticket") and t is None:
+        raise HTTPException(409, "That ticket is no longer on the program.")
+    if typ == "instruct":
+        ticket_comment(pid, t["id"], CommentIn(text=a["text"]), ctx)
+    elif typ == "reopen":
+        await ticket_control(pid, t["id"], ControlIn(action="reopen"), ctx)
+        ticket_comment(pid, t["id"], CommentIn(text=a["text"]), ctx)
+    elif typ in ("pause_ticket", "resume_ticket"):
+        await ticket_control(pid, t["id"], ControlIn(action=typ.split("_")[0]), ctx)
+    elif typ == "priority":
+        patch_ticket(pid, t["id"], TicketPatch(priority=a["priority"]), ctx)
+    elif typ == "pause_program":
+        await pause_program(pid, ctx)
+    elif typ == "resume_program":
+        await run_program(pid, ctx)
+    elif typ == "interface_change":
+        if (doc.get("icd") or {}).get("status") == "draft":
+            edit_interface(pid, a["interface"], IcdEditIn(values=a["values"]), ctx)
+        else:
+            await change_request(pid, CrIn(interface=a["interface"], values=a["values"], reason=a["reason"]), ctx)
+    elif typ == "resize_part":
+        _mutate(ctx, pid, lambda root, d: interfaces.resize(root, d, a["item"], a["size"], _actor(ctx)))
+    elif typ == "budget":
+        patch_program(pid, ProgramPatch(budget_tokens=a.get("tokens"), concurrency=a.get("concurrency"),
+                                        threads=a.get("threads")), ctx)
+    elif typ == "replan":
+        await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
+    elif typ == "fix_icd":
+        fix_icd(pid, ctx)
+    elif typ == "ecn":
+        items = [x["item_id"] for k in a["tickets"] if (x := archie_chat.find_ticket(doc, k)) is not None]
+        await raise_ecn(pid, EcnIn(reason=a["reason"], items=items), ctx)
+    else:
+        raise HTTPException(409, "Unknown action")
+
+
+@router.post("/programs/{pid}/archie/actions")
+async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Apply or dismiss one of Archie's proposed actions. Applying re-checks it against the program as it is now."""
+    _editor(ctx)
+    root = _root(ctx)
+    doc = _load(ctx, pid)
+    hist = archie_chat.history(root, pid)
+    m = next((x for x in hist if x["id"] == body.message and x["role"] == "archie"), None)
+    a = next((x for x in (m or {}).get("actions", []) if x["id"] == body.action), None)
+    if a is None:
+        raise HTTPException(404, "That proposal is gone.")
+    if a["status"] != "proposed":
+        raise HTTPException(409, "That proposal was already handled.")
+    if body.decision not in ("apply", "dismiss"):
+        raise HTTPException(409, "Apply or dismiss.")
+    status = "dismissed"
+    if body.decision == "apply":
+        cur = archie_chat.normalise(doc, {k: v for k, v in a.items() if k not in ("id", "status", "label")})
+        if cur is None:
+            raise HTTPException(409, "The program has moved on: this proposal no longer applies. Ask Archie again.")
+        await _apply_action(ctx, pid, doc, cur)
+        status = "applied"
+    with store.lock(pid):
+        hist = archie_chat.history(root, pid)
+        for x in hist:
+            if x["id"] == body.message:
+                for y in x.get("actions", []):
+                    if y["id"] == body.action:
+                        y.update(status=status, by=_actor(ctx), at=store.now())
+        archie_chat.save_history(root, pid, hist)
+    return {**_chat_view(ctx, pid), "program": _view(_load(ctx, pid))}

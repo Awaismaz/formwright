@@ -55,6 +55,15 @@ def create(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
         ic["status"] = "approved"
         return
     g.update(status="pending")
+    if ic["problems"]:  # Archie fixes his own layout first, and says what he changed (CD-028)
+        ov, steps, probs = autofix(doc, ic["overrides"])
+        if steps:
+            sk2, ifs2 = _rebuild(doc, ov)
+            doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, probs
+            skel = sk2
+            ic["history"].append({"version": 1, "at": store.now(), "by": "Archie", "kind": "fixed",
+                                  "text": "Archie adjusted his layout so every part can be made: "
+                                          + "; ".join(_fmt_step(s) for s in steps[:8]), "changes": []})
     n_items = len(skel["items"])
     service.emit(root, doc, "icd.drafted", f"Archie laid out {doc['name']}: {n_items} designed parts in the skeleton "
                  f"and {len(ic['interfaces'])} named interfaces. Review the interfaces (ICD) before part work starts.",
@@ -79,8 +88,10 @@ def edit(root: Path, doc: dict[str, Any], iid: str, values: dict[str, Any], acto
     ov = icd.apply_values(ic["overrides"], f, vals)
     sk2, ifs2 = _rebuild(doc, ov)
     probs = icd.problems(sk2, ifs2)
-    if probs:
-        raise OfficeInputError("That change can't be built: " + probs[0])
+    before = ic.get("problems") or []
+    if len(probs) > len(before):  # a draft may still have problems; an edit must not add one
+        new = [p for p in probs if p not in before] or probs
+        raise OfficeInputError("That change can't be built: " + new[0])
     d = icd.diff(doc["skeleton"], ic["interfaces"], sk2, ifs2)
     doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, probs
     lines = [icd.describe_change(c) for c in d["changes"]][:12]
@@ -90,6 +101,200 @@ def edit(root: Path, doc: dict[str, Any], iid: str, values: dict[str, Any], acto
     service.emit(root, doc, "icd.edited", f"{actor.get('name', 'Someone')} edited {iid} {f['name']}: "
                  + ("; ".join(lines[:3]) or "no change") + ".", actor, interface=iid)
     return icd.iface(ic, iid) or f
+
+
+RESIZABLE = {"block": ("L", "W", "H"), "hub": ("OD", "H"), "shaft": ("length",)}
+
+
+def resize(root: Path, doc: dict[str, Any], item: str, values: dict[str, Any], actor: dict[str, Any]) -> None:
+    """Change a part's envelope while the ICD is a draft (asked in the Archie chat). Must not add a problem."""
+    if not has_icd(doc):
+        raise OfficeInputError("This program has no interfaces document.")
+    ic = doc["icd"]
+    if ic["status"] != "draft":
+        raise OfficeInputError("The envelopes are frozen: the ICD is approved.")
+    it = doc["skeleton"]["items"].get(item)
+    if it is None:
+        raise OfficeInputError("Part not found in the layout.")
+    vals = {}
+    for k, v in (values or {}).items():
+        if k not in RESIZABLE.get(it["role"], ()) or isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise OfficeInputError(f"{k} can't be changed on {it['name']}.")
+        if not 0.5 <= float(v) <= 5000:
+            raise OfficeInputError(f"{k} must be between 0.5 and 5000 mm.")
+        vals[k] = float(v)
+    ov = copy.deepcopy(ic["overrides"])
+    ov.setdefault("items", {}).setdefault(item, {}).update(vals)
+    sk2, ifs2 = _rebuild(doc, ov)
+    probs = icd.problems(sk2, ifs2)
+    before = ic.get("problems") or []
+    if len(probs) > len(before):
+        raise OfficeInputError("That size can't be built: " + ([p for p in probs if p not in before] or probs)[0])
+    doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, probs
+    text = f"{actor.get('name', 'Someone')} resized {it['name']}: " + ", ".join(f"{k} {v:g} mm" for k, v in vals.items())
+    ic["history"].append({"version": ic["version"], "at": store.now(), "by": actor.get("name"), "kind": "edited",
+                          "text": text, "changes": []})
+    service.emit(root, doc, "icd.edited", text + ".", actor)
+
+
+# ----------------------------------------------------------------------------- Archie fixes the draft (CD-028)
+FIX_MAX_STEPS = 24
+
+
+def _candidates(f: dict[str, Any]) -> list[dict[str, Any]]:
+    """Small, conservative changes to one interface, in order of preference (least disruptive first)."""
+    d = f["data"]
+    out: list[dict[str, Any]] = []
+    if f["kind"] == "hole_pattern":
+        inset = float(d.get("inset") or 0)
+        if inset:
+            out += [{"inset": round(inset * k, 1)} for k in (0.75, 1.25, 0.6, 1.5, 0.5, 2.0)]
+        m = int(d.get("fastener_size") or str(d.get("fastener") or "M0").upper().lstrip("M") or 0)
+        smaller = sorted((x for x in icd.CLEARANCE if x < m), reverse=True)
+        out += [{"fastener": f"M{x}"} for x in smaller]
+        out += [{"count": c} for c in range(int(d.get("count") or 1) - 1, 0, -1)]
+        if smaller:
+            out += [{"fastener": f"M{smaller[-1]}", "count": c} for c in range(int(d.get("count") or 1) - 1, 0, -1)]
+    elif f["kind"] in ("shaft_bore", "dowel"):
+        dd = float(d.get("d") or 0)  # a shaft is sized for its load: never shrink it by more than 40 %
+        out += [{"d": round(dd * k, 1)} for k in (0.8, 0.6) if dd * k >= 2.0]
+    elif f["kind"] == "key":
+        ln = float(d.get("length") or 0)
+        out += [{"length": round(ln * k, 1)} for k in (0.75, 0.5) if ln * k >= 2]
+    return out
+
+
+def _implicated(sk: dict[str, Any], ifs: list[dict[str, Any]], probs: list[str]) -> list[dict[str, Any]]:
+    """Interfaces a problem names (IF-xx) or that touch an item a problem names ("Push rod: ...")."""
+    names = {it["name"]: i for i, it in sk["items"].items()}
+    items = {names[p.split(":", 1)[0]] for p in probs if p.split(":", 1)[0] in names}
+    ids = {p.split(":", 1)[0] for p in probs}
+    return [f for f in ifs if f["id"] in ids or f["a"]["item"] in items or f["b"]["item"] in items]
+
+
+def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], list[str]]:
+    """Greedy, deterministic: apply the least disruptive single-interface change that removes the most problems,
+    until none are left or nothing helps. Returns (overrides, steps, problems left)."""
+    ov = copy.deepcopy(overrides or {"items": {}, "interfaces": {}})
+    sk, ifs = _rebuild(doc, ov)
+    probs = icd.problems(sk, ifs)
+    steps: list[dict[str, Any]] = []
+    while probs and len(steps) < FIX_MAX_STEPS:
+        best: tuple[int, int, dict[str, Any], dict[str, Any], dict[str, Any]] | None = None
+        for f in _implicated(sk, ifs, probs):
+            for rank, cand in enumerate(_candidates(f)):
+                try:
+                    vals = icd.clean_values(f, cand)
+                    ov2 = icd.apply_values(ov, f, vals)
+                    sk2, ifs2 = _rebuild(doc, ov2)
+                except (OfficeInputError, ValueError, KeyError):
+                    continue
+                n = len(icd.problems(sk2, ifs2))
+                if n < len(probs) and (best is None or (n, rank) < (best[0], best[1])):
+                    best = (n, rank, f, vals, ov2)
+        if best is None:  # no interface change helps: grow the envelope of a part a problem names
+            names = {it["name"]: i for i, it in sk["items"].items()}
+            byid = {f["id"]: f for f in ifs}
+            tries: list[tuple[str, dict[str, Any] | None]] = [
+                (names[p.split(":", 1)[0]], None) for p in probs if p.split(":", 1)[0] in names]
+            for p in probs:  # "IF-14: ..." grows either side, together with a change to that interface
+                f0 = byid.get(p.split(":", 1)[0])
+                if f0 is not None:
+                    tries += [(f0["a"]["item"], f0), (f0["b"]["item"], f0)]
+            for item, f0 in dict.fromkeys((i, f0["id"] if f0 else None) for i, f0 in tries):
+                f0 = byid.get(f0) if f0 else None
+                extra = [{}] + (_candidates(f0) if f0 else [])
+                found = False
+                for rank, ch in enumerate(_grow(sk["items"][item])):
+                    if found:  # the least growth that helps this part is the one to take
+                        break
+                    for r2, cand in enumerate(extra):
+                        ov2 = copy.deepcopy(ov)
+                        ov2.setdefault("items", {}).setdefault(item, {}).update(ch)
+                        try:
+                            if cand:
+                                ov2 = icd.apply_values(ov2, f0, icd.clean_values(f0, cand))
+                            sk2, ifs2 = _rebuild(doc, ov2)
+                        except (OfficeInputError, ValueError, KeyError):
+                            continue
+                        n = len(icd.problems(sk2, ifs2))
+                        found = found or n < len(probs)
+                        if n < len(probs) and (best is None or (n, rank * 20 + r2) < (best[0], best[1])):
+                            best = (n, rank * 20 + r2, {"id": item, "name": sk["items"][item]["name"], "item": True,
+                                                        "iface": f0, "cand": cand}, ch, ov2)
+        if best is None:
+            break
+        _, _, f, vals, ov = best
+        if f.get("item"):
+            it = sk["items"][f["id"]]
+            before = dict(zip(("L", "W", "H"), it["size"], strict=False)) | {"OD": it["size"][0]}
+            steps.append({"item": f["id"], "name": f"{f['name']} envelope", "values": vals,
+                          "before": {k: before.get(k) for k in vals}})
+            if f.get("cand"):
+                g = f["iface"]
+                steps.append({"interface": g["id"], "name": g["name"], "values": f["cand"],
+                              "before": {k: g["data"].get(k) for k in f["cand"]}})
+        else:
+            before = {k: f["data"].get(k) for k in vals}
+            steps.append({"interface": f["id"], "name": f["name"], "values": vals, "before": before})
+        sk, ifs = _rebuild(doc, ov)
+        probs = icd.problems(sk, ifs)
+    return ov, steps, probs
+
+
+def _grow(it: dict[str, Any]) -> list[dict[str, Any]]:
+    """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot."""
+    L, W, H = (float(x) for x in it["size"])
+    if it["role"] == "block":
+        out = []
+        dims = sorted((("L", L), ("W", W), ("H", H)), key=lambda kv: kv[1])
+        for add in (2.0, 4.0, 8.0):
+            for k, v in dims[:2]:
+                out.append({k: round(v + add, 1)})
+        out.append({dims[0][0]: round(dims[0][1] + 4.0, 1), dims[1][0]: round(dims[1][1] + 8.0, 1)})
+        return out
+    if it["role"] == "hub":
+        out = []
+        if it.get("bore") and float(it["bore"]) + 2.0 > L:  # just enough rim around its bore
+            out.append({"OD": round(float(it["bore"]) + 2.0, 1)})
+        return out + [{"OD": round(L + add, 1)} for add in (2.0, 4.0, 8.0, 16.0)]
+    return []
+
+
+def _fmt_step(s: dict[str, Any]) -> str:
+    def v(x: Any) -> str:
+        return f"{x:g}" if isinstance(x, float) else str(x)
+    return f"{s.get('interface', '')} {s['name']}: ".lstrip() + ", ".join(
+        f"{k} {v(s['before'].get(k))} → {v(x)}" for k, x in s["values"].items())
+
+
+def fix(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
+    """Archie adjusts the draft ICD so it can be built (no AI). Every change is listed in the ICD history and the
+    activity; the engineer still reviews and approves the result."""
+    if not has_icd(doc):
+        raise OfficeInputError("This program has no interfaces document.")
+    ic = doc["icd"]
+    if ic["status"] != "draft":
+        raise OfficeInputError("The ICD is approved: interfaces change through a change request now.")
+    if not ic.get("problems"):
+        return {"steps": [], "problems": []}
+    ov, steps, probs = autofix(doc, ic["overrides"])
+    if steps:
+        sk2, ifs2 = _rebuild(doc, ov)
+        d = icd.diff(doc["skeleton"], ic["interfaces"], sk2, ifs2)
+        doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, probs
+        lines = [_fmt_step(s) for s in steps]
+        ic["history"].append({"version": ic["version"], "at": store.now(), "by": "Archie", "kind": "fixed",
+                              "text": f"Archie adjusted {len(steps)} interface value{'s' if len(steps) != 1 else ''} "
+                                      f"so the parts can be made: " + "; ".join(lines[:8]),
+                              "changes": d["changes"][:40]})
+        service.emit(root, doc, "icd.fixed", f"Archie adjusted {len(steps)} interface value"
+                     f"{'s' if len(steps) != 1 else ''} so every part can be made"
+                     + (f"; {len(probs)} problem{'s' if len(probs) != 1 else ''} still need you." if probs else
+                        ". Review and approve the interfaces.") + " " + "; ".join(lines[:3]),
+                     service.agent_actor("archie"), steps=steps)
+    _ = actor
+    return {"steps": steps, "problems": probs}
 
 
 def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:

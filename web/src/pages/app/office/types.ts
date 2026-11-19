@@ -162,7 +162,20 @@ export interface Program {
   calibration?: { profile: "live" | "simulated"; rates: Record<string, number>; at: string } | null;
   /** Phase 6 */
   review_gate?: boolean; ecns?: Ecn[];
+  /** Per-agent threads (CD-027): parallel sub-agents of one designer; null on programs from before (shared pool). */
+  threads?: Record<string, number> | null;
 }
+
+// ------------------------------------------------------------------ talking to Archie (CD-026)
+export interface ArchieAction {
+  id: string; type: string; label: string; status: "proposed" | "applied" | "dismissed"; ticket?: string;
+  by?: Actor; at?: string;
+}
+export interface ArchieMessage {
+  id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;
+  kind?: "status" | "ai" | "office"; tokens?: number; actions?: ArchieAction[];
+}
+export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 
 export interface ProgramSummary {
   id: string; name: string; key: string; status: ProgramStatus; planner: string; created_at: string; updated_at: string;

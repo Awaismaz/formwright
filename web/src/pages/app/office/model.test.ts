@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, fmtEta, fmtMinutes, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
+import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, etaRange, fmtEta, fmtMinutes, laneBound, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
 import type { Constants, Item, Plan, Ticket } from "./types";
 
 // Same numbers as src/aicad/office/estimates.py (the server sends them as `constants`).
@@ -41,7 +41,7 @@ describe("plan preview mirrors the server", () => {
       { id: "s2", name: "B", description: "", parts: [{ id: "p3", name: "Shaft", family: "turned", complexity: 2, qty: 1, description: "" }] },
     ] };
     // server: {'tickets': 6, 'estimate_min': 28.5, 'eta': {'low_min': 14.4, 'high_min': 35.8}}
-    expect(planPreview(plan, K, 3)).toEqual({ tickets: 6, estimate_min: 28.5, eta: { low_min: 14.4, high_min: 35.8 } });
+    expect(planPreview(plan, K, 3)).toMatchObject({ tickets: 6, estimate_min: 28.5, eta: { low_min: 14.4, high_min: 35.8 } });
   });
 });
 
@@ -108,5 +108,18 @@ describe("the running office (Phase 3)", () => {
   it("never lets Gage design", () => {
     expect(assignable("part")).not.toContain("gage");
     expect(assignable("integration")).toEqual(["fitz"]);
+  });
+});
+
+describe("per-agent threads (mirrors estimates.lanes / eta)", () => {
+  it("one Molly thread serialises her work; three threads split it; none keeps the pool", () => {
+    const work = { molly: 24 };
+    expect(laneBound(work, null, 3)).toEqual({ n: 3, lane: 0 });
+    expect(laneBound(work, { molly: 1 }, 3)).toEqual({ n: 1, lane: 24 });
+    expect(laneBound(work, { molly: 6 }, 2)).toEqual({ n: 2, lane: 12 });
+    expect(laneBound({ molly: 24, mill: 8 }, { molly: 1 }, 3)).toEqual({ n: 3, lane: 24 });
+    // the Python test: six 4-minute Molly parts, critical path 4
+    expect(etaRange(4, 24, work, 3, { molly: 1 }, K)).toEqual({ low_min: 19.2, high_min: 36.4 });
+    expect(etaRange(4, 24, work, 3, { molly: 3 }, K)).toEqual(etaRange(4, 24, work, 3, null, K));
   });
 });

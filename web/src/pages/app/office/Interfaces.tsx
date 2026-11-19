@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Circle, Crosshair, FileDiff, GitPullRequestArrow, History, Lock, Ruler, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Wand2, Circle, Crosshair, FileDiff, GitPullRequestArrow, History, Lock, Ruler, ShieldCheck, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
@@ -215,6 +215,7 @@ export default function Interfaces({ program }: { program: Program }) {
   const [sel, setSel] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const crs = useMemo(() => program.change_requests ?? [], [program.change_requests]);
   if (!icd) return <EmptyState icon={<FileDiff />} title="No interfaces document" body="This program was planned before the Design Office named interfaces. New programs get a skeleton and an ICD at the brief gate." />;
   const f = icd.interfaces.find(x => x.id === sel) ?? icd.interfaces[0];
@@ -228,6 +229,18 @@ export default function Interfaces({ program }: { program: Program }) {
       setConfirm(false);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setApproving(false); }
   };
+  const fix = async () => {
+    setFixing(true);
+    try {
+      const v = await api.post<Program & { fix: { steps: { name: string }[]; problems: string[] } }>(`${BASE}/programs/${program.id}/icd/fix`);
+      qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      const n = v.fix.steps.length, left = v.fix.problems.length;
+      if (!n) toast.warning("Archie found no safe change for these. Edit the interface named in the problem, or ask Archie in the chat.");
+      else if (left) toast.info(`Archie made ${n} change${n === 1 ? "" : "s"}; ${left} problem${left === 1 ? "" : "s"} still need you.`);
+      else toast.success(`Archie made ${n} change${n === 1 ? "" : "s"}: every part can be made. Review the history, then approve.`);
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setFixing(false); }
+  };
+  const probIface = (p: string) => icd.interfaces.find(x => p.startsWith(`${x.id}:`))?.id;
   return (
     <div className="space-y-3" data-icd>
       {icd.status === "draft" ? (
@@ -239,7 +252,20 @@ export default function Interfaces({ program }: { program: Program }) {
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted"><Lock className="h-3.5 w-3.5" />ICD v{icd.version} approved. Interfaces change through a change request; Archie decides.</div>
       )}
-      {icd.problems.length > 0 && <Card className="border-danger/40 bg-danger/5 p-3 text-[12.5px] text-danger"><AlertTriangle className="mr-1 inline h-4 w-4" />{icd.problems[0]}</Card>}
+      {icd.problems.length > 0 && <Card className="border-danger/40 bg-danger/5 p-3 text-[12.5px]" data-icd-problems>
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-[240px] flex-1">
+            <div className="font-semibold text-danger"><AlertTriangle className="mr-1 inline h-4 w-4" />
+              {icd.problems.length} problem{icd.problems.length === 1 ? "" : "s"} to clear before you can approve: these parts can't be made as laid out.</div>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.problems.map((p, i) => {
+              const id = probIface(p);
+              return <li key={i}>{p}{id && <button className="ml-1.5 text-primary underline-offset-2 hover:underline" onClick={() => setSel(id)}>Edit {id}</button>}</li>;
+            })}</ul>
+          </div>
+          {canEdit && icd.status === "draft" && <Button loading={fixing} icon={<Wand2 className="h-4 w-4" />} onClick={fix} data-testid="fix-icd">Fix with Archie</Button>}
+        </div>
+        <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>
+      </Card>}
       <SkeletonCard icd={icd} />
       <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)]">
         <Card className="overflow-x-auto">

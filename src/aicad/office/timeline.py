@@ -88,9 +88,13 @@ def critical_path(tickets: list[dict[str, Any]]) -> list[str]:
     return path
 
 
-def planned(tickets: list[dict[str, Any]], concurrency: int) -> dict[str, dict[str, Any]]:
-    """Planned start / end (minutes) and slot of every ticket: greedy list scheduling on estimates."""
+def planned(tickets: list[dict[str, Any]], concurrency: int,
+            threads: dict[str, int] | None = None) -> dict[str, dict[str, Any]]:
+    """Planned start / end (minutes) and slot of every ticket: greedy list scheduling on estimates. With per-agent
+    ``threads`` an agent runs at most that many of its tickets at once (CD-027)."""
     n = max(1, int(concurrency or 1))
+    threads = threads or {}
+    busy: dict[str, int] = {}
     chain, deps = chains(tickets)
     by = {t["id"]: t for t in tickets}
     done: dict[str, float] = {}
@@ -108,6 +112,10 @@ def planned(tickets: list[dict[str, Any]], concurrency: int) -> dict[str, dict[s
         for t in ready:
             if not free:
                 break
+            code = t.get("specialist") or ""
+            if threads.get(code) and busy.get(code, 0) >= threads[code]:
+                continue
+            busy[code] = busy.get(code, 0) + 1
             slot = free.pop(0)
             end = now + float(t["estimate_min"])
             out[t["id"]] = {"start": round(now, 4), "end": round(end, 4), "slot": slot}
@@ -118,12 +126,14 @@ def planned(tickets: list[dict[str, Any]], concurrency: int) -> dict[str, dict[s
         end, tid, slot = running.pop(0)
         now = end
         done[tid] = end
+        busy[by[tid].get("specialist") or ""] -= 1
         left.discard(tid)
         free.append(slot)
         free.sort()
         while running and abs(running[0][0] - now) < 1e-9:  # everything finishing at the same moment
             e2, t2, s2 = running.pop(0)
             done[t2] = e2
+            busy[by[t2].get("specialist") or ""] -= 1
             left.discard(t2)
             free.append(s2)
             free.sort()
@@ -192,7 +202,8 @@ def build(doc: dict[str, Any], events: list[dict[str, Any]] | None = None, now: 
     now = time.time() if now is None else now
     tickets = doc["tickets"]
     origin = origin_of(doc, events)
-    plan = planned(tickets, doc.get("concurrency") or 1)
+    th = doc.get("threads")
+    plan = planned(tickets, doc.get("concurrency") or 1, th if isinstance(th, dict) else None)
     crit = critical_path(tickets)
     rows = []
     lanes: dict[str, list[dict[str, Any]]] = {}

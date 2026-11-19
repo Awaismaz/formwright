@@ -41,28 +41,61 @@ export function integrationComplexity(children: number, k: Constants): number {
   return clampComplexity(Math.max(1, Math.ceil(children / 3)), k);
 }
 
-/** What approving this plan creates: ticket count, total estimate, and the ETA range (nothing done yet). */
-export function planPreview(plan: Plan, k: Constants, concurrency: number) {
+/** Designers that take per-agent threads (parallel sub-agents, CD-027). Hex, Gage, Fitz, Ortho, Smithy share the pool. */
+export const DESIGNER_CODES = ["mill", "chuck", "axel", "benny", "molly"] as const;
+export type Threads = Record<string, number>;
+
+/** Mirrors estimates.lanes: (effective concurrency, slowest agent lane in minutes) for remaining work per agent. */
+export function laneBound(work: Record<string, number>, threads: Threads | null | undefined, n: number): { n: number; lane: number } {
+  const codes = Object.keys(work).filter(c => (work[c] ?? 0) > 0);
+  if (!threads || Object.keys(threads).length === 0) return { n, lane: 0 };
+  let lane = 0, cap = 0, pooled = false;
+  for (const c of codes) {
+    const t = threads[c];
+    if (t) { lane = Math.max(lane, work[c]! / Math.min(t, n)); cap += Math.min(t, n); } else pooled = true;
+  }
+  return { n: pooled || codes.length === 0 ? n : Math.max(1, Math.min(n, cap)), lane };
+}
+
+/** Mirrors estimates.eta given the critical path, total remaining work and work per agent. */
+export function etaRange(cp: number, total: number, work: Record<string, number>, concurrency: number, threads: Threads | null | undefined, k: Constants) {
+  const n = Math.max(1, Math.min(12, concurrency || k.default_concurrency));
+  const b = laneBound(work, threads, n);
+  const [lf, hf] = k.eta_factors;
+  return { low_min: Math.round(lf * Math.max(cp, total / b.n, b.lane) * 10) / 10, high_min: Math.round(hf * (cp + Math.max(total / b.n, b.lane)) * 10) / 10 };
+}
+
+/** Remaining minutes per agent (the ticket's owner) for tickets on the board. */
+export function workByAgent(tickets: Pick<Ticket, "specialist" | "estimate_min" | "progress">[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const t of tickets) {
+    const w = t.estimate_min * (100 - t.progress) / 100;
+    if (w > 0) out[t.specialist] = (out[t.specialist] ?? 0) + w;
+  }
+  return out;
+}
+
+/** What approving this plan creates: ticket count, total estimate, the ETA range (nothing done yet) and the work per
+ * agent. ``spec`` maps a part family to its designer (the server's `families`). */
+export function planPreview(plan: Plan, k: Constants, concurrency: number, threads?: Threads | null, spec?: (f: Family) => string) {
   let total = 0, cpMax = 0, tickets = 0;
+  const work: Record<string, number> = {}, parts: Record<string, number> = {};
+  const add = (c: string, m: number, part = false) => { work[c] = (work[c] ?? 0) + m; if (part) parts[c] = (parts[c] ?? 0) + 1; };
   for (const s of plan.subassemblies) {
     let sub = 0, longest = 0;
     for (const p of s.parts) {
       const est = p.family === "standard" ? estimateMinutes("standard", 1, k) : estimateMinutes(p.family, p.complexity, k);
       sub += est; longest = Math.max(longest, est); tickets += 1;
+      add(spec ? spec(p.family) : "mill", est, true);
     }
     const integ = estimateMinutes("integration", integrationComplexity(s.parts.length, k), k);
-    total += sub + integ; tickets += 1;
+    total += sub + integ; tickets += 1; add("fitz", integ);
     cpMax = Math.max(cpMax, integ + longest);
   }
   const final = estimateMinutes("integration", integrationComplexity(plan.subassemblies.length, k), k);
-  total += final; tickets += 1;
+  total += final; tickets += 1; add("fitz", final);
   const cp = final + cpMax;
-  const n = Math.max(1, concurrency || k.default_concurrency);
-  const [lf, hf] = k.eta_factors;
-  return {
-    tickets, estimate_min: Math.round(total * 10) / 10,
-    eta: { low_min: Math.round(lf * Math.max(cp, total / n) * 10) / 10, high_min: Math.round(hf * (cp + total / n) * 10) / 10 },
-  };
+  return { tickets, estimate_min: Math.round(total * 10) / 10, eta: etaRange(cp, total, work, concurrency, threads, k), work, parts };
 }
 
 export interface Lane { item: Item | null; id: string; name: string; tickets: Ticket[] }

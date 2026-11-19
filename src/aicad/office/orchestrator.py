@@ -599,12 +599,21 @@ class Runner:
             if float(o.get("capacity_until") or 0) > now:
                 return False
             free = max(0, int(doc["concurrency"]) - len(self.tasks))
+            threads = service.threads_of(doc) or {}
+            busy: dict[str, int] = {}  # running work per agent: per-agent threads cap it (CD-027)
+            for x in doc["tickets"]:
+                if x["id"] in self.tasks:
+                    a = run_of(x).get("agent") or x["specialist"]
+                    busy[a] = busy.get(a, 0) + 1
             for t, stage in queue(doc, now):
                 if free <= 0:
                     break
                 if t["id"] in self.tasks:
                     continue
                 code = STAGE_AGENT.get(stage, t["specialist"])
+                if threads.get(code) and busy.get(code, 0) >= threads[code]:
+                    continue
+                busy[code] = busy.get(code, 0) + 1
                 lbl = self.label(t["id"], code)
                 close_wait(t)
                 _set_run(t, status=STATUS_OF[stage], next=stage, agent=code, agent_label=lbl,

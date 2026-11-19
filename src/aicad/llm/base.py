@@ -35,6 +35,7 @@ ROLES: tuple[str, ...] = (
     "draft_assist",   # 2D drafting assist (drawing/draft_assist.run_agent)
     "librarian",      # Assembly librarian: parts list reading (assembly/librarian.ask_ai)
     "reconcile",      # Branch merge: conflict reconciliation (platform/collab/reconcile.propose)
+    "office_chat",    # Design Office: talking to Archie during a program (office/archie_chat, CD-026)
 )
 
 # Capability names a provider declares (contract tests are gated on them).

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Lock, MoreHorizontal, PartyPopper, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Gauge, Lock, MoreHorizontal, PartyPopper, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
@@ -16,6 +16,8 @@ import Interfaces from "./Interfaces";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import TimelineView from "./TimelineView";
+import ArchieChat, { TalkToArchieButton } from "./ArchieChat";
+import SpeedPanel from "./SpeedPanel";
 import Tree from "./Tree";
 import { saveNative } from "@/components/NativeExport";
 import { budgetTone, fmtEta, fmtMinutes, orchestratorLabel, recentHandoffs } from "./model";
@@ -72,7 +74,7 @@ const TONE_CLS: Record<string, string> = {
 };
 
 /** Run / Pause for the whole program, the office's state, and an honest note on what running means. */
-function RunBar({ p }: { p: Program }) {
+function RunBar({ p, onSpeed }: { p: Program; onSpeed: () => void }) {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
@@ -98,6 +100,8 @@ function RunBar({ p }: { p: Program }) {
         : <Button loading={busy} icon={<Play className="h-4 w-4" />} onClick={() => act("run")}>{o?.state && o.state !== "idle" ? "Resume" : "Run"}</Button>)}
       <span className={cx("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium", TONE_CLS[st.tone])} aria-live="polite">
         {running && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />}{st.label}</span>
+      {canEdit && <Button variant="ghost" size="sm" icon={<Gauge className="h-4 w-4" />} onClick={onSpeed} data-speed-open>
+        {p.concurrency} agents{p.threads ? ` · ${Object.entries(p.threads).filter(([, n]) => n > 1).map(([c, n]) => `${c[0]!.toUpperCase()}${c.slice(1)} ×${n}`).join(", ")}` .replace(/ · $/, "") : ""} · {num(p.budget.tokens)} tokens</Button>}
       {o?.simulated && <span title="Development mode: agents are simulated and no AI is called"><Badge tone="warning"><FlaskConical className="mr-1 inline h-3 w-3" />Simulated agents</Badge></span>}
       {o?.bypass && <span title="God mode: the token budget is not enforced"><Badge tone="neutral">Budget bypass</Badge></span>}
       <p className="min-w-[260px] flex-1 text-[12px] text-muted">
@@ -105,7 +109,9 @@ function RunBar({ p }: { p: Program }) {
           ? <>Agents pick tickets by critical path, {p.concurrency} at a time. Hex tries the Toolbox and your parts first; each part is designed in its own Design Studio project; <b>Gage</b> checks every part before it is approved{p.review_gate ? <> and then <b>you</b> approve it (review gate on)</> : ""}; <b>Fitz</b> assembles each level{p.deliverables_auto !== false ? <>; then <b>Ortho</b> draws every part and the assembly with its BOM and <b>Smithy</b> reviews every part for manufacture</> : ""}. Comment, pause, reassign or take over any ticket.</>
           : o?.state === "stopped"
             ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
-            : p.icd?.status === "draft" ? <>Approve the interfaces (ICD) first: part work starts at that gate, against the numbers you approved.</>
+            : p.icd?.status === "draft" ? (p.icd.problems.length > 0
+              ? <><b>Next: the Interfaces tab.</b> {p.icd.problems.length} interface problem{p.icd.problems.length === 1 ? "" : "s"} must be cleared (press <b>Fix with Archie</b> there), then approve the ICD and press Run.</>
+              : <><b>Next: approve the interfaces (ICD)</b> on the Interfaces tab. Part work starts at that gate, against the numbers you approved; then press Run.</>)
               : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. Each part is built to its interfaces and swapped into the program assembly when Gage approves it. You can still move tickets and open parts by hand.</>}
       </p>
     </Card>
@@ -153,6 +159,8 @@ export default function ProgramPage() {
   const [open, setOpen] = useState<Ticket | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
+  const [speedOpen, setSpeedOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
   const handoffs = recentHandoffs(recent, now);
@@ -201,9 +209,10 @@ export default function ProgramPage() {
         </div>
         <div className="flex items-center gap-3">
           <LiveStrip recent={recent} live={live} />
+          <TalkToArchieButton onClick={() => setChatOpen(true)} />
           {canEdit && <Menu><MenuTrigger asChild><Button variant="ghost" size="sm" aria-label="Program actions"><MoreHorizontal className="h-4 w-4" /></Button></MenuTrigger>
             <MenuContent><MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/programs/${p.id}/export`, `${p.name}.fwprog`, "fwprog"); }}>Save as file (.fwprog)</MenuItem>
-            <MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Budget and agents…</MenuItem>
+            <MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Program settings…</MenuItem>
               <MenuItem danger icon={<Trash2 />} onSelect={() => setConfirm(true)}>Delete program</MenuItem></MenuContent></Menu>}
         </div>
       </div>
@@ -224,7 +233,7 @@ export default function ProgramPage() {
           <div className="min-w-[240px] flex-1 text-[13px]"><b>Review the interfaces before part work starts.</b> Archie named {p.icd!.interfaces.length} interfaces between the parts. Approve them on the Interfaces tab: the office can't run until then.</div>
           <Button variant="secondary" onClick={() => { params.set("tab", "interfaces"); setParams(params, { replace: true }); }}>Review interfaces</Button>
         </Card>}
-        <RunBar p={p} />
+        <RunBar p={p} onSpeed={() => setSpeedOpen(true)} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
           <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="deliverables">Deliverables{p.gates.some(g => g.code === "release" && g.status === "pending") ? " ·" : ""}</Tab><Tab value="timeline">Timeline</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
           <TabPanel value="board"><Board program={p} onOpen={setOpen} handoffs={handoffs} /></TabPanel>
@@ -246,6 +255,10 @@ export default function ProgramPage() {
       </>}
       <TicketDrawer program={p} ticket={open} onClose={() => setOpen(null)} />
       {budgetOpen && <BudgetDialog p={p} open={budgetOpen} onOpenChange={setBudgetOpen} />}
+      <Modal open={speedOpen} onOpenChange={setSpeedOpen} title="Speed and budget" description="Change them any time; the office picks the new numbers up with its next ticket.">
+        <SpeedPanel program={p} />
+      </Modal>
+      <ArchieChat program={p} open={chatOpen} onOpenChange={setChatOpen} />
       <Modal open={confirm} onOpenChange={setConfirm} title={`Delete ${p.name}?`}
         description="The program, its board and its history are removed. Design Studio parts and assemblies opened from tickets stay in Projects."
         footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>Cancel</Button><Button variant="danger" onClick={del}>Delete program</Button></>} />

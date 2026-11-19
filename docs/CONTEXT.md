@@ -110,10 +110,14 @@ Trial workspaces can use every Live module.
 **Testing note:** with several agents running, a few slow tests (mesh render, change notice, param edit) can fail
 under load and pass alone. Run the full suite on a quiet machine before deciding a failure is real.
 
+## Founder rule: fix causes and workflows (2026-11-19)
+
+When the founder reports a problem in the app, never fix the instance (their program or data). Find what generated the state and which workflow has no way out, fix that in the product, and make sure a user can recover inside the app on their own: the system corrects itself, or they tell Archie (in-program chat) and Archie proposes the fix. Claude is not available to users in production. Reproduce on temp copies only.
+
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-63).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-67).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,

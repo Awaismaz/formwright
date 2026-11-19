@@ -33,6 +33,9 @@ export function errorFrom(status: number, data: unknown): ApiError {
     return new ApiError(status, o.message, o.cta);
   }
   if (Array.isArray(d)) return new ApiError(status, "Please check the form fields.");
+  // the page is newer than the server (an update is rolling out): a route the server doesn't know yet
+  if (status === 405 || (status === 404 && d === "Not Found"))
+    return new ApiError(status, "Formwright is being updated and this action isn't ready on the server yet. Wait a moment and reload the page.");
   return new ApiError(status, typeof d === "string" ? d : `Request failed (${status})`);
 }
 
