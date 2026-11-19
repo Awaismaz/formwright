@@ -95,6 +95,7 @@ BRACKET_MIN = 10.0        # mm: the least bracket under a motor
 BEARING_SPAN = 4.0        # x the shaft Ø (at least 2 x the bearing OD): bearings of a shaft that carries nothing
 MOTOR = {"shaft_d": 14.0, "shaft_length": 30.0, "L": 180.0, "W": 120.0, "H": 120.0}  # assumed envelope (IEC 71-ish)
 CORNER = 30.0             # mm from a base's edges to a connector at its corner (a table's leg brackets)
+PIVOT_CLEAR = 2.0         # mm between a pivoting member's upper end and the base it hangs under
 _TOPPY = re.compile(r"\btop\b|table|desk|deck|shelf|seat|worktop|\blid\b", re.IGNORECASE)
 ROLE = {"shaft": "shaft", "spur_gear": "gear", "pulley": "hub", "hub": "hub", "spacer": "hub", "bearing_cap": "hub",
         "coupling": "hub"}
@@ -1536,19 +1537,31 @@ class _Layout:
             mx_, my = self.foot(m)
             e = mx_ / 2  # the pivot bore half the member's width from its upper end
             self.at[m] = [None] * self.ncopies(m)
+            bolt = next((self.comp[v] for v in x.via if self.comp.get(v) is not None and self.comp[v].kind == "fastener"),
+                        None)
+            mm = int(bolt.v("size")) if bolt is not None and bolt.v("size") and int(bolt.v("size")) in CLEARANCE else 8
+            if self.under:
+                # the pivot just under the top: the member's upper end PIVOT_CLEAR below the top's underside, its bore
+                # e under that; the bracket is at least deep enough to hold the bore with 1 mm of wall (it grows to
+                # it when sized smaller: the pivot rule sizes the bracket, not the other way round)
+                need = e + PIVOT_CLEAR + CLEARANCE[mm] / 2 + 1.0
+                if float(hs["H"]) < need - 1e-9:
+                    self.notes.append(f"{self.name(h)}: {float(hs['H']):g} deep grown to {_r2(need):g} so the pivot "
+                                      f"holds {self.name(m)}'s upper end {PIVOT_CLEAR:g} mm clear of the "
+                                      f"{self.name(self.base)}.")
+                    hs["H"] = _r2(need)
+                    if hs.get("planned"):  # a stated rule re-plans the depth (not a part outgrowing its plan)
+                        hs["planned"] = [hs["planned"][0], hs["planned"][1], max(hs["planned"][2], _r2(need))]
+                    self.at[h] = [None if q is None else [q[0], q[1], _r2(-T - need / 2)] for q in self.at[h]]
             for c in range(min(self.ncopies(m), self.ncopies(h))):
                 hp = self.at[h][c]
                 assert hp is not None
                 side = -1.0 if hp[1] > 0 else 1.0  # the host's inboard face
-                zp = hp[2]
+                zp = _r2(-T - PIVOT_CLEAR - e) if self.under else hp[2]
                 ym = hp[1] + side * (hy / 2 + my / 2)
                 self.at[m][c] = [_r2(hp[0]), _r2(ym), _r2(zp + e - float(ms["H"]) / 2)]
                 self.pivots.append({"x": x, "host": h, "member": m, "c": c, "axis": [_r2(hp[0]), _r2(zp)],
                                     "plane": _r2(hp[1] + side * hy / 2), "normal": [0, int(side), 0]})
-            if self.under and float(hs["H"]) / 2 < e + 2.0:
-                self.conflict(f"{self.name(m)}'s upper end ({e:g} above its pivot) would hit the "
-                              f"{self.name(self.base)}: {self.name(h)} is {float(hs['H']):g} tall.", [m, h, self.base],
-                              [x.id])
 
     def _pivot_joint(self, pv: dict[str, Any]) -> None:
         """A pivot bolt through the host and the member along Y: a one-hole bolted joint (head on the member, washers
