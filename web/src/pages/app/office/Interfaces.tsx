@@ -34,6 +34,8 @@ const DATA_ROWS: Record<Interface["kind"], [string, string][]> = {
     ["standard", "Table"]],
   key: [["standard", "Standard"], ["d", "Shaft Ø"], ["b", "Key width b"], ["h", "Key height h"], ["length", "Key length"], ["t1", "Shaft groove depth t1"],
     ["t2", "Hub groove depth t2"], ["axis", "Axis (X, Y)"], ["dir", "Keyway side (X, Y)"], ["z", "Along Z"]],
+  bearing_journal: [["bearing", "Bearing"], ["d", "Journal Ø (bore)"], ["shaft_fit", "Shaft fit"], ["D", "Outer ring Ø"], ["B", "Width"],
+    ["axis", "Axis (X, Z)"], ["z", "Along the axis"], ["journal_z", "Journal along the axis"], ["shoulder_z", "Shoulder at"], ["standard", "Table"]],
   dowel: [["standard", "Standard"], ["d", "Pin Ø"], ["length", "Pin length"], ["fit", "Hole / pin fit"], ["positions", "Positions (X, Y)"],
     ["plane_z", "Joint face Z"], ["joint", "Bolted joint"]],
 };
@@ -145,7 +147,7 @@ function Detail({ f, program, crs }: { f: Interface; program: Program; crs: Chan
       </div>
       <table className="w-full text-[12.5px]"><tbody>
         {ifaceAxis(data) !== "z" && <tr className="border-t border-border/60 first:border-0"><td className="py-1 pr-3 text-muted">Runs along</td>
-          <td className="py-1 font-mono text-[12px]">program {ifaceAxis(data).toUpperCase()} (gearbox side walls)</td></tr>}
+          <td className="py-1 font-mono text-[12px]">program {ifaceAxis(data).toUpperCase()} ({icd.skeleton.layout === "shaft_line" ? "shaft line, no housing" : "gearbox side walls"})</td></tr>}
         {DATA_ROWS[f.kind].filter(([k]) => data[k] !== undefined && data[k] !== null).map(([k, label]) => (
           <tr key={k} className="border-t border-border/60 first:border-0"><td className="py-1 pr-3 text-muted">{axisLabel(label, ifaceAxis(data))}</td><td className="py-1 font-mono text-[12px]">{fmt(data[k])}{["d", "pcd", "inset", "plane_z", "length", "flatness", "position_tol", "centre_distance", "face_width", "flush_z"].includes(k) ? " mm" : ""}</td></tr>))}
         {(() => { const t = data.tapped as { thread: string; d: number; depth: number } | undefined; return t ? (
@@ -257,7 +259,7 @@ export default function Interfaces({ program }: { program: Program }) {
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-[240px] flex-1">
             <div className="font-semibold text-danger"><AlertTriangle className="mr-1 inline h-4 w-4" />
-              {icd.problems.length} problem{icd.problems.length === 1 ? "" : "s"} to clear before you can approve: these parts can't be made as laid out.</div>
+              {icd.problems.length} problem{icd.problems.length === 1 ? "" : "s"} to clear before you can approve: these parts can't be made or assembled as laid out.</div>
             <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.problems.map((p, i) => {
               const id = probIface(p);
               return <li key={i}>{p}{id && <button className="ml-1.5 text-primary underline-offset-2 hover:underline" onClick={() => setSel(id)}>Edit {id}</button>}</li>;
@@ -268,6 +270,10 @@ export default function Interfaces({ program }: { program: Program }) {
         <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>
       </Card>}
       {(icd.look || icd.status === "draft") && <LayoutLook program={program} icd={icd} canEdit={!!canEdit} />}
+      {(icd.warnings?.length ?? 0) > 0 && <Card className="border-warning/40 bg-warning/5 p-3 text-[12.5px]" data-icd-warnings>
+        <div className="font-semibold text-warning"><AlertTriangle className="mr-1 inline h-4 w-4" />Layout warning{icd.warnings!.length === 1 ? "" : "s"} (approval is not blocked)</div>
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.warnings!.map((w, i) => <li key={i}>{w}</li>)}</ul>
+      </Card>}
       <SkeletonCard icd={icd} />
       <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)]">
         <Card className="overflow-x-auto">

@@ -101,7 +101,7 @@ def icd_gdt(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, frame: dic
         lax = f.get("ax") or "z"
         target = {"kind": "axis", "point": pt(icd.from_canon(lax, [f["c"][0], f["c"][1], z])),
                   "dir": vec(icd.from_canon(lax, [0.0, 0.0, 1.0])), "d": f["d"]}
-        if f.get("fit") and kinds.get(f["if"]) in ("shaft_bore", "bearing_seat"):
+        if f.get("fit") and kinds.get(f["if"]) in ("shaft_bore", "bearing_seat", "bearing_journal"):
             datums.append({"letter": next(letters), "target": target, "ref": f["if"], "label": f["label"]})
         refs = [face_of[i] for i in ifs if i in face_of]
         if refs and f.get("tol"):
