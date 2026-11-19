@@ -347,7 +347,7 @@ class Sel(BaseModel):
 
 
 class MateIn(BaseModel):
-    type: Literal["auto", "coincident", "flush", "distance", "angle", "concentric"] = "auto"
+    type: Literal["auto", "coincident", "flush", "distance", "angle", "concentric", "gear"] = "auto"
     a: Sel
     b: Sel
     value: float = 0.0
@@ -355,7 +355,7 @@ class MateIn(BaseModel):
 
 
 class MatePatch(BaseModel):
-    type: Literal["coincident", "flush", "distance", "angle", "concentric"] | None = None
+    type: Literal["coincident", "flush", "distance", "angle", "concentric", "gear"] | None = None
     a: Sel | None = None
     b: Sel | None = None
     value: float | None = None

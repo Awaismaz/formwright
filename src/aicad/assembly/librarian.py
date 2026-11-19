@@ -93,6 +93,22 @@ def _starts_item(chunk: str) -> bool:
     return bool(words) and not words <= (ACCESSORY | STOP | {"plain", "flat", "hex", "spring", "lock"})
 
 
+GEAR_PAIR = re.compile(r"\b(\d{2,3})\s*t?\s*/\s*(\d{2,3})\s*(?:t\b|teeth\b)", re.IGNORECASE)
+
+
+def _gear_pairs(clause: str) -> list[str]:
+    """"spur gear pair 1:3 m2 20T/60T" is two gears: one clause each ("spur gear m2 20T", "spur gear m2 60T")."""
+    m = GEAR_PAIR.search(clause)
+    if not m or not re.search(r"\b(gears?|pinion|spur)\b", clause, re.IGNORECASE):
+        return [clause]
+    rest = clause[:m.start()] + "{z}T" + clause[m.end():]
+    rest = re.sub(r"\b(?:a\s+)?pair\s+(?:of\s+)?", "", rest, flags=re.IGNORECASE)
+    rest = re.sub(r"\b\d+(?:\.\d+)?\s*:\s*\d+(?:\.\d+)?\b", "", rest)       # the ratio is in the teeth
+    rest = re.sub(r"\bgears\b", "gear", re.sub(r"^\s*(?:two|2|a|an)\s+", "", rest, flags=re.IGNORECASE))
+    rest = re.sub(r"\s+", " ", rest).strip()
+    return [rest.replace("{z}", m.group(1)), rest.replace("{z}", m.group(2))]
+
+
 def split(text: str) -> list[str]:
     """Clauses of a description. Accessories stay with their fastener ("bolts with washers and nuts"); a chunk
     after ',', 'and', 'plus', 'then' or 'with' starts a new item only when it reads like one."""
@@ -118,7 +134,7 @@ def split(text: str) -> list[str]:
                 cur = [c]
         if cur:
             out.append(" and ".join(cur))
-    return out[:24]
+    return [x for c in out for x in _gear_pairs(c)][:24]   # a gear pair is two items
 
 
 def parse_clause(text: str) -> Clause:
@@ -247,7 +263,8 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
                        "high", "shaft")
     if words & {"gear", "gears", "pinion"}:
         m = toolbox.match(core)
-        g = next((x for x in m if x["code"] == "spur_gear"), None)
+        g = next((x for x in m if x["code"] == "spur_gear"), None) or \
+            next((x for x in toolbox.match("spur gear " + core) if x["code"] == "spur_gear"), None)
         if g:
             return out("spur_gear", dict(g["params"]), g["prefilled"], "high" if len(g["prefilled"]) >= 2 else "medium",
                        "gear")

@@ -15,7 +15,10 @@ Honesty about the state:
   as a free spin (normal for fasteners and shafts).
 
 Equation counts per mate (independent constraints when the mate stands alone): coincident / flush / distance 3
-(normals aligned: 2, plane offset: 1), concentric 4 (axes parallel: 2, on line: 2), angle 1 (2 at 0° / 180°).
+(normals aligned: 2, plane offset: 1), concentric 4 (axes parallel: 2, on line: 2), angle 1 (2 at 0° / 180°),
+gear 3 (axes parallel: 2, distance between the axes = the centre distance: 1). A gear mesh mate holds two gear axes
+(or the shafts carrying them) at the centre distance m(z1 + z2)/2; the turning ratio itself lives in the motion
+joints (``motion.py``), since a mate fixes placement only.
 """
 
 from __future__ import annotations
@@ -30,11 +33,12 @@ import numpy as np
 from aicad.assembly import xform
 
 PLANE_MATES = ("coincident", "flush", "distance", "angle")
-AXIS_MATES = ("concentric",)
+AXIS_MATES = ("concentric", "gear")
 MATE_TYPES = PLANE_MATES + AXIS_MATES
-NEEDS = {"coincident": "plane", "flush": "plane", "distance": "plane", "angle": "plane", "concentric": "axis"}
+NEEDS = {"coincident": "plane", "flush": "plane", "distance": "plane", "angle": "plane", "concentric": "axis",
+         "gear": "axis"}
 LABEL = {"coincident": "Coincident", "flush": "Flush", "distance": "Distance", "angle": "Angle",
-         "concentric": "Concentric"}
+         "concentric": "Concentric", "gear": "Gear mesh"}
 TOL_MM = 1e-6       # a mate is satisfied when its positional residual is below this (mm)
 TOL_RAD = 1e-7      # ... and its angular residual below this (rad)
 H = 1e-6            # finite-difference step (scaled variables, mm)
@@ -62,12 +66,14 @@ class MateSpec:
     ra: Ref
     b: str
     rb: Ref
-    value: float = 0.0        # distance (mm) or angle (deg)
+    value: float = 0.0        # distance (mm), angle (deg) or gear centre distance (mm)
     flip: bool = False        # plane mates: aligned instead of anti-aligned; concentric: reverse the axis
 
     def eqs(self) -> int:
         if self.type == "concentric":
             return 4
+        if self.type == "gear":
+            return 3
         if self.type == "angle":
             return 2 if self._parallel() else 1
         return 3
@@ -140,14 +146,26 @@ def world(T: np.ndarray, ref: Ref) -> tuple[np.ndarray, np.ndarray]:
     return xform.pt(T, ref.p), xform.vec(T, ref.v)
 
 
+def _axis_offset(pa: np.ndarray, va: np.ndarray, pb: np.ndarray) -> np.ndarray:
+    """The perpendicular from axis a to the point pb (its length is the distance between parallel axes)."""
+    d = pb - pa
+    return d - va * float(d @ va)
+
+
+def _unit_offset(off: np.ndarray, va: np.ndarray) -> np.ndarray:
+    n = float(np.linalg.norm(off))
+    return off / n if n > 1e-12 else xform.perp(va)
+
+
 def residual(m: MateSpec, Ta: np.ndarray, Tb: np.ndarray, L: float) -> np.ndarray:
     pa, va = world(Ta, m.ra)
     pb, vb = world(Tb, m.rb)
     if m.type == "concentric":
         par = L * np.cross(va, vb)
-        d = pb - pa
-        off = d - va * float(d @ va)
-        return np.concatenate([par, off])
+        return np.concatenate([par, _axis_offset(pa, va, pb)])
+    if m.type == "gear":
+        par = L * np.cross(va, vb)
+        return np.concatenate([par, [float(np.linalg.norm(_axis_offset(pa, va, pb))) - m.value]])
     if m.type == "angle":
         th = m.angle_rad()
         if th < 1e-9:
@@ -164,10 +182,10 @@ def mate_error(m: MateSpec, Ta: np.ndarray, Tb: np.ndarray) -> tuple[float, floa
     """(positional error mm, angular error deg) of a mate at the given placements."""
     pa, va = world(Ta, m.ra)
     pb, vb = world(Tb, m.rb)
-    if m.type == "concentric":
+    if m.type in ("concentric", "gear"):
         ang = math.asin(min(1.0, float(np.linalg.norm(np.cross(va, vb)))))
-        d = pb - pa
-        return float(np.linalg.norm(d - va * float(d @ va))), math.degrees(ang)
+        dist = float(np.linalg.norm(_axis_offset(pa, va, pb)))
+        return (dist if m.type == "concentric" else abs(dist - m.value)), math.degrees(ang)
     c = float(np.clip(va @ vb, -1.0, 1.0))
     if m.type == "angle":
         return 0.0, abs(math.degrees(math.acos(c)) - math.degrees(m.angle_rad()))
@@ -207,6 +225,13 @@ def _mate_blocks(m: MateSpec, poses: dict[str, np.ndarray], insts: dict[str, Ins
         Q = float(d @ va) * I3 + np.outer(va, d)
         ja = np.vstack([L * (-_skew(vb)) @ dva, -P @ dpa - Q @ dva])
         jb = np.vstack([L * _skew(va) @ dvb, P @ dpb])
+    elif m.type == "gear":   # d|off| = u·d(off), u the unit offset; d(off) as in concentric
+        d = pb - pa
+        P = I3 - np.outer(va, va)
+        Q = float(d @ va) * I3 + np.outer(va, d)
+        u = _unit_offset(P @ d, va)
+        ja = np.vstack([L * (-_skew(vb)) @ dva, (u @ (-P @ dpa - Q @ dva))[None, :]])
+        jb = np.vstack([L * _skew(va) @ dvb, (u @ (P @ dpb))[None, :]])
     elif m.type == "angle":
         th = m.angle_rad()
         if th < 1e-9:
@@ -392,15 +417,17 @@ def prealign(m: MateSpec, poses: dict[str, np.ndarray], mover: str) -> np.ndarra
     T = poses[mover]
     po, vo = world(poses[other], ro)
     pm, vm = world(T, rm)
-    if m.type == "concentric":
+    if m.type in ("concentric", "gear"):
         target = vo if float(vm @ vo) >= 0 else -vo
         if m.flip:
             target = -target
         T = xform.about(xform.min_rot(vm, target), pm) @ T
         pm, vm = world(T, rm)
-        d = pm - po
-        T = xform.translate(-(d - vo * float(d @ vo))) @ T
-        return T
+        off = _axis_offset(po, vo, pm)
+        if m.type == "concentric":
+            return xform.translate(-off) @ T
+        # gear: along the current offset (the smallest move) to the centre distance
+        return xform.translate(_unit_offset(off, vo) * (m.value - float(np.linalg.norm(off)))) @ T
     if m.type == "angle":
         th = m.angle_rad()
         axis = np.cross(vo, vm)

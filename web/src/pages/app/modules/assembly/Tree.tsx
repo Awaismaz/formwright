@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import {
-  AlertTriangle, ArrowDownUp, Ban, Box, ChevronDown, ChevronRight, Circle, CircleDot, Eye, EyeOff, Link2, MoreHorizontal,
+  AlertTriangle, ArrowDownUp, Ban, Box, ChevronDown, ChevronRight, Circle, CircleDot, Cog, Eye, EyeOff, Link2, MoreHorizontal,
   Pencil, Pin, PinOff, RefreshCw, RotateCw, Ruler, Trash2, Wrench, Layers, Equal, TriangleRight,
 } from "lucide-react";
 import { cx } from "@/lib/format";
@@ -10,7 +10,7 @@ import type { AsmView, Instance, Mate, MateType } from "./types";
 export const MATE_ICON: Record<MateType, ReactNode> = {
   coincident: <Layers className="h-3.5 w-3.5" />, flush: <Equal className="h-3.5 w-3.5" />,
   concentric: <CircleDot className="h-3.5 w-3.5" />, distance: <Ruler className="h-3.5 w-3.5" />,
-  angle: <TriangleRight className="h-3.5 w-3.5" />,
+  angle: <TriangleRight className="h-3.5 w-3.5" />, gear: <Cog className="h-3.5 w-3.5" />,
 };
 
 /** SOLIDWORKS-style state prefix: (f) fixed, (-) under-defined, (+) over-defined, none when fully positioned. */

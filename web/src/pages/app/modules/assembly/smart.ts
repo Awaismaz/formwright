@@ -2,7 +2,7 @@ import type { SmartAction, SmartItem, SmartPlan, ToolboxParam } from "./types";
 
 export const SOURCE_LABEL: Record<SmartItem["source"], string> = { toolbox: "Toolbox", project: "Your part", new: "New design" };
 export const ACTION_LABEL: Record<SmartAction, string> = {
-  base: "base part", mount: "mount", seat: "on a shaft seat", dowel: "into holes", fasten: "fasten", place: "place", design: "not inserted",
+  base: "base part", train: "gear train", mount: "mount", seat: "on a shaft seat", dowel: "into holes", fasten: "fasten", place: "place", design: "not inserted",
 };
 
 export function confidenceTone(c: SmartItem["confidence"]): "success" | "warning" | "danger" {

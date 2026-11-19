@@ -132,7 +132,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
     const [a, b] = picks as [AsmPick, AsmPick];
     const same = (p: AsmPick, x: Mate["a"]) => p.inst === x.inst && p.kind === x.kind && p.id === x.id;
     const body: Record<string, unknown> = { type: choice === "auto" ? m.type : choice, flip: mflip };
-    if (choice === "distance" || choice === "angle") body.value = Number(mval);
+    if (choice === "distance" || choice === "angle" || choice === "gear" && mval.trim() !== "") body.value = Number(mval);
     if (!(same(a, m.a) && !m.a_lost)) body.a = { inst: a.inst, kind: a.kind, id: a.id };
     if (!(same(b, m.b) && !m.b_lost)) body.b = { inst: b.inst, kind: b.kind, id: b.id };
     const v = await run("add-mate", () => api.patch<AsmView>(`${A}/mates/${m.id}`, body));
@@ -150,7 +150,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
     const [a, b] = picks as [AsmPick, AsmPick];
     const v = await run("add-mate", () => api.post<AsmView>(`${A}/mates`, {
       type: choice, a: { inst: a.inst, kind: a.kind, id: a.id }, b: { inst: b.inst, kind: b.kind, id: b.id },
-      value: choice === "distance" || choice === "angle" ? Number(mval) : 0, flip: mflip,
+      value: choice === "distance" || choice === "angle" || choice === "gear" ? Number(mval || 0) : 0, flip: mflip,
     }));
     if (v) {
       setPicks([]);

@@ -35,7 +35,7 @@ export interface PartView {
   holes: Hole[]; patterns: HolePattern[]; topo_url: string;
 }
 
-export type MateType = "coincident" | "flush" | "distance" | "angle" | "concentric";
+export type MateType = "coincident" | "flush" | "distance" | "angle" | "concentric" | "gear";
 export type MateStatus = "ok" | "conflict" | "suppressed" | "broken" | "unsatisfied";
 export interface Sel { inst: string; kind: "face" | "edge"; id: number }
 
@@ -160,7 +160,7 @@ export interface RefreshResult {
 }
 
 /** Smart assembly (ASM-010 / ASM-019): one line of Hex's reading, with Fitz's intended placement. */
-export type SmartAction = "base" | "mount" | "seat" | "dowel" | "fasten" | "place" | "design";
+export type SmartAction = "base" | "train" | "mount" | "seat" | "dowel" | "fasten" | "place" | "design";
 export interface SmartItem {
   id: string; text: string; qty: number; qty_explicit: boolean; enabled: boolean; order: number;
   source: "toolbox" | "project" | "new"; kind?: string; action: SmartAction; title: string;
@@ -170,15 +170,20 @@ export interface SmartItem {
   target?: { inst?: string; item?: string } | null; target_name?: string | null;
   confidence: "high" | "medium" | "low"; found: string; plan: string; reasons?: string[];
   alternatives?: { id: string; name: string; score: number }[];
+  /** Expected outcome codes (Fitz CODES) for this line, e.g. "bearing_spare". */
+  codes?: string[]; train?: boolean;
 }
 export interface SmartPlan {
   items: SmartItem[]; unresolved: string[]; tokens: number; ai_used: boolean; ai_lines?: number; ai_read?: number;
   parts_in_assembly: { id: string; name: string }[];
 }
-export interface SmartLog { agent: "Hex" | "Fitz"; text: string; tone: "ok" | "warn" | "muted" }
+export interface SmartLog { agent: "Hex" | "Fitz"; text: string; tone: "ok" | "warn" | "muted"; code?: string }
+/** Something Fitz could not do, or did with a caveat: a stable machine-readable code plus the plain sentence. */
+export interface SmartOutcome { code: string; severity: "warn" | "info"; item: string | null; inst: string | null; name: string | null; text: string }
 export interface SmartResult {
   log: SmartLog[]; summary: string; clashes: Clash[]; inserted: number; mated: number; placed_loose: number;
-  fastener_stacks: number; fastener_asked: number;
+  fastener_stacks: number; fastener_asked: number; joints?: number; outcomes?: SmartOutcome[];
+  timings?: { total_s: number; train_s: number; solve_s: number; interference_s: number };
   /** PD-73: quick placement checks and where the exact clash check ran (inline / targeted / background). */
   checks?: { quick: { code: string; severity: "block" | "note"; text: string }[]; reason: string; quick_s: number; seconds: number;
     policy: { exact: "inline" | "targeted" | "background"; stop: boolean; why: string }; visual: "done" | "running" | "off";
