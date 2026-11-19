@@ -100,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
         from aicad.eval.repeat import main as repeat
 
         return repeat(argv[1:])
+    if argv[:1] == ["latency"]:  # agent-latency benchmark (aicad latency --help)
+        from aicad.eval.latency import main as latency
+
+        return latency(argv[1:])
     p = argparse.ArgumentParser(prog="aicad")
     sub = p.add_subparsers(dest="cmd", required=True)
     for name in ("build", "live"):

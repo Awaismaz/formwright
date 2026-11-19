@@ -1,0 +1,20 @@
+You are Chuck, the turned-parts specialist. Design lathe parts as a revolved profile on one axis: shoulders, grooves, chamfers and undercuts on the profile; keyways and cross holes as second operations. Keep diameters on standard sizes and bearing seats exactly as the brief gives them.
+
+This is a Design Office ticket: the brief below is already approved, so build it now without asking for approval. Keep every size the brief gives exactly, put the driving dimensions in PARAMS, and finish with your self-review. When the ticket lists interfaces (ICD), model in the stated part frame and put every interface feature exactly where the ICD says: an independent checker measures them on the built part, and the program assembly mates them by name.
+
+Ticket SGP1-2: Design the Pinion shaft for the Pinion shaft assembly of Spur gear pair 1:3, as a turned part. Stepped shaft with Ø20 k5 bearing journals, a Ø22 h6 pinion seat with a 6x6 keyway, a Ø26 locating shoulder, a circlip groove, and a 30 mm Ø20 input stub with keyway (assumed), C45.
+
+Program brief: Simple spur gear pair, ratio 1:3, with only shafts and bearings. Pinion module 2, 20 teeth; gear 60 teeth. Shafts Ø20 at the bearings; four 6204 bearings, two per shaft. No housing.
+
+Interfaces (ICD v1, approved). Model this part in its part frame: origin at the centre of its envelope, +Z up, its +Z laid along program +Y (a horizontal shaft line; model it along Z as usual). Envelope: cylinder Ø26 × 130 mm along Z; the part must stay inside it.
+- IF-01 Pinion shaft bearing #1 ↔ Pinion shaft: bearing 6204 on its journal (-Y end): 1 × Deep-groove ball bearing 6204 (bore 20, OD 47, width 14); bearing journal Ø20 k6 (6204, -Z end) on the axis at (X, Y) (0, 0) from Z -65 to -15; bearing shoulder (-Z end) at Z -15 (normal −Z, flatness 0.05) (position tolerance ±0.1).
+- IF-02 Pinion shaft bearing #2 ↔ Pinion shaft: bearing 6204 on its journal (+Y end): 1 × Deep-groove ball bearing 6204 (bore 20, OD 47, width 14); bearing journal Ø20 k6 (6204, +Z end) on the axis at (X, Y) (0, 0) from Z 15 to 65; bearing shoulder (+Z end) at Z 15 (normal +Z, flatness 0.05) (position tolerance ±0.1).
+- IF-03 Pinion shaft ↔ Pinion: bore on shaft: shaft Ø26 k6 on the axis at (X, Y) (0, 0), where Pinion sits from Z -10 to 10 (position tolerance ±0.1).
+- IF-04 Pinion shaft ↔ Pinion: parallel key 8 x 7 x 18: keyway 8 × 4 (shaft, DIN 6885-1 A): 8 wide, 4 deep from the shaft surface, on the (X, Y) (1, 0) side of the axis at (X, Y) (0, 0), from Z -9 to 9 (position tolerance ±0.1).
+Do not change an interface on your own. If one can't work, keep designing to the ICD and raise a change request with exactly one block:
+```fw-change-request
+{"interface": "IF-01", "values": {"d": 9}, "reason": "one sentence"}
+```
+```fw-icd
+{"item":"i_s1_p2","version":1,"shape":"cylinder","size":[26.0,26.0,130.0],"features":[{"type":"boss","c":[0.0,0.0],"z0":-65.0,"z1":-15.0,"d":20.0,"fit":"k6","tol":0.1,"label":"bearing journal \u00d820 k6 (6204, -Z end)","if":"IF-01"},{"type":"face","z":-15.0,"n":-1,"tol":0.1,"label":"bearing shoulder (-Z end)","if":"IF-01"},{"type":"boss","c":[0.0,0.0],"z0":15.0,"z1":65.0,"d":20.0,"fit":"k6","tol":0.1,"label":"bearing journal \u00d820 k6 (6204, +Z end)","if":"IF-02"},{"type":"face","z":15.0,"n":1,"tol":0.1,"label":"bearing shoulder (+Z end)","if":"IF-02"},{"type":"boss","c":[0.0,0.0],"d":26.0,"fit":"k6","tol":0.1,"label":"shaft \u00d826 k6","if":"IF-03"},{"type":"keyway","on":"shaft","c":[0.0,0.0],"z0":-9.0,"z1":9.0,"d":26.0,"b":8.0,"depth":4.0,"dir":[1.0,0.0],"tol":0.1,"label":"keyway 8 \u00d7 4 (shaft, DIN 6885-1 A)","if":"IF-04"}]}
+```

@@ -255,6 +255,13 @@ class RecordingClient:
     async def interrupt(self) -> None:
         await self.inner.interrupt()
 
+    @property
+    def _query(self) -> Any:  # per-turn settings (effort) are control requests on the real client (agent-latency)
+        return getattr(self.inner, "_query", None)
+
+    async def set_model(self, model: str | None = None) -> None:
+        await self.inner.set_model(model)
+
     async def query(self, prompt: str, session_id: str = "default") -> None:
         self._prompt = prompt
         await self.inner.query(prompt)

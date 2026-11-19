@@ -252,7 +252,7 @@ def test_turn_verdict_waits_for_the_deferred_checks(tmp_path: Path) -> None:
     assert runner.is_verified(st) and (s.out_dir / "part.step").is_file()  # complete before the result went out
     i_res = events.index(res[0])
     assert any(e["type"] == "tool_result" and e.get("brief") == "Verification complete" for e in events[:i_res])
-    assert client.prompts == ["make a plate"]
+    assert [p.split("\n\n[Project folder")[0] for p in client.prompts] == ["make a plate"]  # + the folder note
 
 
 def test_failed_deferred_check_gets_one_follow_up_and_is_never_verified(tmp_path: Path) -> None:
