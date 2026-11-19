@@ -34,6 +34,11 @@ export interface TicketRun {
   review_round?: number; next_try_at?: number; blocked?: string; started_at?: string;
 }
 export interface Reuse { source: "toolbox" | "project"; title: string; found: string; code?: string; project_id?: string }
+/** How the part was designed: built from the approved interfaces without AI, or by the design agent (and why). */
+export interface DesignPath {
+  path: "direct" | "agent"; label?: string; summary?: string; material?: string; seconds?: number; icd_version?: number;
+  reasons?: string[]; seeded?: boolean; superseded?: boolean; fallback?: boolean;
+}
 
 export interface Ticket {
   id: string; key: string; item_id: string; kind: "part" | "standard" | "integration" | "deliverable"; title: string; brief: string;
@@ -44,7 +49,7 @@ export interface Ticket {
   /** Phase 3: who holds the ticket now, its live status line, and the engineer's controls. */
   agent?: string; agent_label?: string | null; line?: string | null; run_status?: RunStatus | null; run?: TicketRun | null;
   paused?: boolean; taken_over?: boolean; priority?: "high" | "normal" | "low"; review_tokens?: number; spent?: number;
-  reuse?: Reuse | null; integration?: { summary?: string; clashes?: unknown[] } | null;
+  reuse?: Reuse | null; direct?: DesignPath | null; integration?: { summary?: string; clashes?: unknown[] } | null;
   /** Phase 4: Gage's interface conformance measurement of the latest build, and whether Fitz swapped it in. */
   icd_check?: IcdCheck | null; fitted?: boolean;
   /** Phase 5: deliverables (Ortho's drawings, Smithy's DFM), actual agent time and what it taught the estimates. */

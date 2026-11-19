@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ExternalLink, FileWarning, Hand, Library, MessageSquareWarning, Pause, Play, Puzzle, RotateCcw, Send, Undo2 } from "lucide-react";
+import { Bot, CheckCircle2, ExternalLink, FileWarning, Hand, Library, MessageSquareWarning, Pause, Play, Puzzle, RotateCcw, Ruler, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
@@ -12,7 +12,7 @@ import { useMoveTicket } from "./Board";
 import { assignable, fmtMinutes, runChip } from "./model";
 import PartPreview from "./PartPreview";
 import { errorTone, fmtError } from "./timeline";
-import type { Column, OfficeEvent, Program, Ticket } from "./types";
+import type { Column, DesignPath, OfficeEvent, Program, Ticket } from "./types";
 
 export function ActorBadge({ e, size = 24 }: { e: Pick<OfficeEvent, "actor">; size?: number }) {
   if (e.actor.kind === "agent" && e.actor.code) return <AgentAvatar code={e.actor.code} size={size} still />;
@@ -103,6 +103,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           {t.ecn && <div className="text-[11.5px] text-muted">Reopened by change notice <b>{t.ecn}</b>.</div>}
           {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
             <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
+          {t.direct && !t.reuse && <DesignPathNote d={t.direct} />}
           {t.icd_check && <div className={cx("rounded-md border p-2.5 text-[12.5px]", t.icd_check.ok ? "border-success/30 bg-success/5" : "border-danger/30 bg-danger/5")} data-icd-check>
             <div className="font-medium">{t.icd_check.ok ? `Interfaces conform to ICD v${t.icd_check.version}` : `Interfaces off ICD v${t.icd_check.version}`}{t.fitted ? " · swapped into the program assembly" : ""}</div>
             <ul className="mt-1 space-y-0.5 text-[11.5px]">
@@ -204,4 +205,22 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
       </div>
     </Modal>
   );
+}
+
+/** How the part was designed, said honestly: from the interfaces without AI, or by the design agent and why. */
+function DesignPathNote({ d }: { d: DesignPath }) {
+  if (d.path === "direct" && !d.superseded) {
+    return <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]" data-design-path="direct">
+      <Ruler className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+      <span><b>{d.label ?? "Built from the interface spec (no AI)"}</b>{d.seconds != null ? ` in ${d.seconds} s` : ""}: {d.summary}
+        {d.material ? `, ${d.material}` : ""}. Every size comes from ICD v{d.icd_version}; 0 tokens. Its parameters can be edited in the Design Studio without AI.</span></div>;
+  }
+  if (d.path === "direct") {
+    return <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]" data-design-path="direct-then-agent">
+      <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+      <span>Started from the interface spec (no AI); the designer has changed it since, for review findings or comments.</span></div>;
+  }
+  return <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]" data-design-path="agent">
+    <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+    <span>Designed with AI{d.seeded ? ", starting from a model built from the interface spec" : ""}: {(d.reasons ?? []).join("; ") || "the interfaces don't fix every size"}.</span></div>;
 }
