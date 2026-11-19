@@ -333,3 +333,30 @@ def test_parts_blocked_by_the_old_review_rules_heal_when_the_office_starts() -> 
     ins = doc["tickets"][3]  # a standard part not in stock goes to a designer instead of waiting (CD-031)
     assert ins["run"]["status"] == "queued" and ins["run"]["next"] == "design"
     assert ins["kind"] == "part" and ins["specialist"] == "chuck" and "bought-out part" in ins["brief"]
+
+
+def test_approved_parts_left_as_placeholders_go_back_to_fitz_when_the_office_starts() -> None:
+    """CD-035: a swap that failed (worker timeout) used to mark the part done while it stayed a placeholder, and the
+    sub-assembly then blocked "waiting for the real part" with nothing left to do."""
+    import tempfile
+    from pathlib import Path
+
+    from aicad.office import orchestrator, store
+
+    doc = {"id": store.new_id(), "org_id": "o", "name": "P",
+           "assembly": {"status": "ready", "parts": {"i1": {"kind": "placeholder"}, "i2": {"kind": "real"}}},
+           "tickets": [
+               {"id": "t1", "key": "P-1", "title": "Floor", "kind": "part", "item_id": "i1", "project_id": "x",
+                "column": "approved", "specialist": "molly", "comments": [],
+                "run": {"status": "done", "line": "Fitz couldn't swap the part in: timed out after 300 s"}},
+               {"id": "t2", "key": "P-2", "title": "Tub", "kind": "part", "item_id": "i2", "project_id": "y",
+                "column": "approved", "specialist": "molly", "comments": [], "run": {"status": "done"}},
+               {"id": "t3", "key": "P-3", "title": "Assemble Body", "kind": "integration", "item_id": "s1",
+                "column": "changes_requested", "specialist": "fitz", "comments": [],
+                "run": {"status": "blocked", "next": "integrate",
+                        "blocked": "Fitz is still waiting for the real Floor: it has not been swapped in."}}]}
+    assert orchestrator.heal_review_blocks(Path(tempfile.mkdtemp()), doc) == 2
+    t1, t2, t3 = doc["tickets"]
+    assert t1["run"]["status"] == "queued" and t1["run"]["next"] == "fit"
+    assert t2["run"]["status"] == "done"
+    assert t3["run"]["status"] == "queued" and t3["run"]["next"] == "integrate"

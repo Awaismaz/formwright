@@ -362,7 +362,7 @@ class PlatformEnv(orchestrator.Env):
                                                     {i: k for i, (_, k, _) in batch.items()}, frames=frames or None)
             except Exception as e:
                 log.exception("swap-in failed")
-                return {"skipped": f"Fitz couldn't swap the part in: {e}"}
+                return {"error": f"Fitz couldn't swap the part in: {e}"}
             names = [service.ticket(doc, x)["title"] for x, _, _ in batch.values()]
             save_assembly(root, pid, state, f"Fitz swapped {', '.join(names)} into the program assembly.", event=False)
             last = state.get("last") or {}
@@ -608,6 +608,11 @@ class PlatformEnv(orchestrator.Env):
             ph = [k["title"] for k in kids if k["kind"] == "part" and
                   ((doc["assembly"].get("parts") or {}).get(k["item_id"]) or {}).get("kind") == "placeholder"]
             if ph and t["item_id"] != "root":
+                waiting = [k["id"] for k in kids if k["kind"] == "part" and k["column"] in service.DONE_COLUMNS and
+                           ((doc["assembly"].get("parts") or {}).get(k["item_id"]) or {}).get("kind") == "placeholder"]
+                if waiting:  # approved but not fitted yet: fit them first, then assemble (CD-035)
+                    return {"wait_fit": waiting, "why": f"Waiting for Fitz to swap the real {ph[0]}"
+                            + (f" and {len(ph) - 1} more" if len(ph) > 1 else "") + " in for the placeholders"}
                 return {"blocked": f"Fitz is still waiting for the real {ph[0]}: it has not been swapped in for its "
                                    "placeholder. Retry once it is approved."}
             std = [k for k in kids if k["kind"] == "standard"]

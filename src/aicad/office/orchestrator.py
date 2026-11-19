@@ -427,6 +427,20 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
     for t in doc["tickets"]:
         r = run_of(t)
         why = str(r.get("blocked") or "")
+        parts = (doc.get("assembly") or {}).get("parts") or {}
+        if t["kind"] == "part" and t["column"] in service.DONE_COLUMNS and r.get("status") == "done" \
+                and (parts.get(t["item_id"]) or {}).get("kind") == "placeholder" \
+                and (doc.get("assembly") or {}).get("status") == "ready" and t.get("project_id"):
+            _set_run(t, status="queued", next="fit", agent="fitz", fit_attempt=0,
+                     line=f"Fitz swaps {t['title']} in for its placeholder (an earlier swap didn't finish)")
+            out.append(t)
+            continue
+        if r.get("status") == "blocked" and t["kind"] == "integration" and (
+                why.startswith(("Fitz is still waiting for the real", "Fitz couldn't swap"))):
+            close_wait(t)
+            _set_run(t, status="queued", next="integrate", attempt=0, blocked=None, line="Back to Fitz")
+            out.append(t)
+            continue
         if r.get("status") == "blocked" and t["kind"] == "integration" \
                 and why.startswith("The sub-assembly's assembly document is missing"):
             close_wait(t)  # a fastener-kit level: it integrates now (CD-034)
@@ -1114,6 +1128,16 @@ class Runner:
                 service.move(self.root, d, tid, "in_design", f)
                 _set_run(tt, status="designing", next="design", line="The interfaces changed: back to the designer")
                 return "design"
+            if res.get("error"):  # the part stays a placeholder: try again, never mark it done (CD-035)
+                n = int(run_of(tt).get("fit_attempt") or 0) + 1
+                if n > MAX_ATTEMPTS + 1:
+                    _set_run(tt, fit_attempt=n, next="fit")
+                    self._fail(d, tid, f"{res['error']} ({n - 1} tries). Retry it, or rebuild the program assembly.")
+                    return None
+                _set_run(tt, status="retry", next="fit", fit_attempt=n, agent="fitz",
+                         next_try_at=time.time() + backoff(n, RETRY_BASE_S, RETRY_CAP_S),
+                         line=f"{res['error']}: Fitz tries again shortly")
+                return None
             if res.get("skipped"):
                 _set_run(tt, status="done", next=None, line=res["skipped"], agent="fitz")
                 return None
@@ -1138,7 +1162,7 @@ class Runner:
                              f"{tt['title']} clashes in the assembly. {desc[0]}")
                 return "design"
             tt["fitted"] = True
-            _set_run(tt, status="done", next=None, agent="fitz",
+            _set_run(tt, status="done", next=None, agent="fitz", fit_attempt=0,
                      line=f"Fitz swapped {tt['title']} in: interface mates re-attached, 0 clashes")
             service.emit(self.root, d, "ticket.fitted", f"Fitz swapped the real {tt['title']} in for its placeholder: "
                          "every interface mate re-attached by name, 0 clashes"
@@ -1170,6 +1194,14 @@ class Runner:
             f = service.agent_actor("fitz")
             if res.get("blocked"):
                 self._fail(d, tid, res["blocked"])
+                return
+            if res.get("wait_fit"):
+                for k in res["wait_fit"]:
+                    kt = service.ticket(d, k)
+                    if run_of(kt).get("status") not in ACTIVE:
+                        _set_run(kt, status="queued", next="fit", agent="fitz", fit_attempt=0,
+                                 line=f"Fitz swaps {kt['title']} in for its placeholder next")
+                _set_run(tt, status="queued", next="integrate", line=res["why"], agent="fitz")
                 return
             if res.get("assembly_id") and tt.get("assembly_id") != res["assembly_id"]:
                 tt["assembly_id"] = res["assembly_id"]

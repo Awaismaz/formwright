@@ -354,7 +354,16 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             problems += p
             aservice.run_solve(aroot, final)
             if analyse:
-                clashes = _clashes(await aservice.analyse(aroot, org_id, final))
+                # only the swapped parts against everything else (CD-035): the whole-program check grows with every
+                # real part and runs at the final assembly; here it timed out once ten parts went in together
+                ids = [i["id"] for i in final["instances"] if (i.get("office") or {}).get("item") in items]
+                keep = [c for c in clashes if _item_of(final, c["a"]) not in items and _item_of(final, c["b"]) not in items]
+                try:
+                    fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
+                    clashes = keep + [{**c, "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in fresh]
+                except aservice.WorkerError:
+                    problems.append("Fitz's clash check on these parts didn't finish in time; the final assembly's "
+                                    "check covers them.")
             astore.save(aroot, final)
     parts = dict(state.get("parts") or {})
     for i, key in updates.items():
