@@ -36,7 +36,7 @@ function Tile({ tool, i }: { tool: Tool; i: number }) {
       <div className="card relative flex h-full items-center gap-3 overflow-hidden p-3.5 transition duration-300 hover:-translate-y-0.5 hover:shadow-pop">
         <span className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/40 to-transparent opacity-0 transition-all duration-700 group-hover:left-[120%] group-hover:opacity-100 dark:via-white/10" />
         {logo ? (
-          <img src={logo} alt="" className="h-10 w-10 shrink-0 object-contain" />
+          <img src={logo} alt="" className="h-10 w-10 shrink-0 object-contain dark:rounded-[10px] dark:bg-white/95 dark:p-1" />
         ) : (
           <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] text-[13px] font-bold tracking-tight text-white shadow-sm"
             style={{ background: `linear-gradient(140deg, hsl(${tool.hue} 32% 42%), hsl(${tool.hue} 38% 26%))` }} aria-hidden>
