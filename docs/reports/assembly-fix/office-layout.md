@@ -83,9 +83,12 @@
 - WORKLIST row 35 "mounts_on layout tree stacks parts (tyres on the floor)": same family (parts with no usable
   interface placed loose, silently). Those parts now surface as `no_interface` problems at the gate; the stacking
   itself (hubs bolted on a block row) is a different cause and is not fixed here.
-- Behaviour change: the 2:1 standard gear reducer (caps that don't fit) and the rover test plan (tie rod hung on an
-  axle) now show a blocking `no_interface` problem at the gate (tests updated). The way out is Archie's re-plan or
-  editing the numbers; the other agent's Archie chat explains these.
+- Behaviour change: the 2:1 standard gear reducer (caps that don't fit) now shows a blocking `no_interface` problem
+  at the gate (test updated). The way out is Archie's re-plan or editing the numbers.
+- Follow-up after merge (master's report): crowded plans where Archie hangs a rod / pin on another shaft (`mounts_on`
+  an axle: the rover's tie rod, the Archie-chat test's push rod) got `no_interface`. Root cause fixed instead: a
+  shaft-role part whose host is a shaft now stands in a bore of the nearest block carrying that shaft (a
+  `shaft_bore`, noted in the skeleton). Those plans lay out buildable first time again with 0 problems.
 - Standard templates Conveyor (roller bearings in a sheet rail) and Linear stage (lead-screw end bearings) now show a
   `bearing_unplaced` warning (not blocking).
 - A designed gear Hex takes from the Toolbox gets no part drawing (the run drew Pinion, Input and Output shaft; the

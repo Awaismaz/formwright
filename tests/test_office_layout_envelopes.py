@@ -58,10 +58,11 @@ def _by_name(sk: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def test_a_crowded_plan_keeps_its_planned_envelopes() -> None:
     parts = _parts(ROVER)
     sk, ifs = icd.build(parts, "A rover display model.")
-    # the only problem: the tie rods Archie hung on an axle have no interface in this layout, so they would lie
-    # beside the rover; the gate says so (and blocks) instead of passing them silently
-    assert [(x["code"], x["items"]) for x in icd.issues(sk, ifs)] == [("no_interface", [TIE_ROD])]
-    assert icd.problems(sk, ifs)[0].startswith("Tie rod: no interface connects it")
+    assert icd.problems(sk, ifs) == []
+    # the tie rods Archie hung on an axle can't ride on it: they stand in a bore of the wheel arm carrying the axle
+    # (before, they lay beside the rover with no interface)
+    rods = [f for f in ifs if f["b"]["item"] == TIE_ROD]
+    assert rods and all(f["kind"] == "shaft_bore" and f["a"]["name"].startswith("Wheel arm") for f in rods)
     it = _by_name(sk)
     for p in parts:
         if p["family"] == "standard":
@@ -122,7 +123,7 @@ def test_an_envelope_beyond_the_plan_is_an_icd_problem_and_self_fix_respects_it(
                                  "family": q["family"], "qty": q["qty"], "description": q["description"],
                                  "parent_id": f"i_{s['id']}"})
     ov, steps, left = interfaces.autofix(doc, {"items": {}, "interfaces": {}})
-    assert [p.split(":")[0] for p in left] == ["Tie rod"] and steps  # (no interface: Archie can't fix that alone)
+    assert left == [] and steps
     sk2, _ifs2 = icd.build(icd.parts_from(doc), "", ov)
     t2 = _by_name(sk2)["Tab"]
     assert all(s <= 1.5 * q + 1e-6 for s, q in zip(t2["size"], t2["planned"], strict=True))
