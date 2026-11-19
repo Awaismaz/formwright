@@ -182,6 +182,79 @@ def _delta(x: np.ndarray, c: np.ndarray, L: float) -> np.ndarray:
     return xform.make(R, c - R @ c + x[3:])
 
 
+def _skew(v: np.ndarray) -> np.ndarray:
+    return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]])
+
+
+def _mate_blocks(m: MateSpec, poses: dict[str, np.ndarray], insts: dict[str, Inst], L: float) -> dict[str, np.ndarray]:
+    """d residual / d x for each side of a mate (rows x 6), x = (L w, t) as in ``_delta``."""
+    pa, va = world(poses[m.a], m.ra)
+    pb, vb = world(poses[m.b], m.rb)
+    I3 = np.eye(3)
+
+    def motion(iid: str, p: np.ndarray, v: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        c = xform.pt(poses[iid], insts[iid].ref_point)
+        # dp = w x (p - c) + t,  dv = w x v ; returned as (dp/dx, dv/dx), 3 x 6 each, x = (L w, t)
+        dp = np.hstack([-_skew(p - c) / L, I3])
+        dv = np.hstack([-_skew(v) / L, np.zeros((3, 3))])
+        return dp, dv
+
+    dpa, dva = motion(m.a, pa, va)
+    dpb, dvb = motion(m.b, pb, vb)
+    if m.type == "concentric":
+        d = pb - pa
+        P = I3 - np.outer(va, va)
+        Q = float(d @ va) * I3 + np.outer(va, d)
+        ja = np.vstack([L * (-_skew(vb)) @ dva, -P @ dpa - Q @ dva])
+        jb = np.vstack([L * _skew(va) @ dvb, P @ dpb])
+    elif m.type == "angle":
+        th = m.angle_rad()
+        if th < 1e-9:
+            ja, jb = L * dva, -L * dvb
+        elif th > math.pi - 1e-9:
+            ja, jb = L * dva, L * dvb
+        else:
+            ja, jb = L * (vb @ dva)[None, :], L * (va @ dvb)[None, :]
+    else:
+        sgn = -1.0 if m.aligned() else 1.0
+        d = pb - pa
+        ja = np.vstack([L * dva, (-va @ dpa + d @ dva)[None, :]])
+        jb = np.vstack([sgn * L * dvb, (va @ dpb)[None, :]])
+    return {m.a: ja, m.b: jb}
+
+
+def _components(mates: list[MateSpec], insts: dict[str, Inst]) -> list[tuple[list[str], list[MateSpec]]]:
+    """Independent sub-problems: free instances joined by mates (a fixed instance joins nothing: it can't move).
+    Each with its mates; a mate between a free and a fixed instance belongs to the free one's component."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for m in mates:
+        fa, fb = not insts[m.a].fixed, not insts[m.b].fixed
+        if fa:
+            find(m.a)
+        if fb:
+            find(m.b)
+        if fa and fb:
+            ra, rb = find(m.a), find(m.b)
+            if ra != rb:
+                parent[ra] = rb
+    groups: dict[str, tuple[list[str], list[MateSpec]]] = {}
+    order = {k: n for n, k in enumerate(insts)}
+    for iid in sorted(parent, key=order.__getitem__):
+        groups.setdefault(find(iid), ([], []))[0].append(iid)
+    for m in mates:
+        k = m.a if not insts[m.a].fixed else m.b if not insts[m.b].fixed else None
+        if k is not None:
+            groups[find(k)][1].append(m)
+    return list(groups.values())
+
+
 # ----------------------------------------------------------------------------- core
 class _Problem:
     def __init__(self, insts: dict[str, Inst], mates: list[MateSpec], L: float) -> None:
@@ -209,6 +282,33 @@ class _Problem:
         return np.concatenate([residual(m, poses[m.a], poses[m.b], self.L) for m in self.mates])
 
     def jac(self, poses: dict[str, np.ndarray]) -> np.ndarray:
+        """Analytic Jacobian (dense): the same derivatives as ``jac_numeric`` (central differences), exact."""
+        return self.jac_sparse(poses).toarray()
+
+    def jac_sparse(self, poses: dict[str, np.ndarray]) -> Any:
+        """Analytic Jacobian of every mate residual w.r.t. the free instances' small motions (ASM-023): a sparse
+        matrix (each mate touches at most two instances), built in one pass. With x = (L w, t) per instance, a world
+        point moves by w x (p - c) + t and a world direction by w x v (``_delta`` at x = 0)."""
+        from scipy import sparse
+
+        rows: list[np.ndarray] = []
+        cols: list[np.ndarray] = []
+        vals: list[np.ndarray] = []
+        for (r0, n), m in zip(self.rows, self.mates, strict=True):
+            for iid, blk in _mate_blocks(m, poses, self.insts, self.L).items():
+                if iid not in self.col:
+                    continue
+                c0 = self.col[iid]
+                rr, cc = np.meshgrid(np.arange(r0, r0 + n), np.arange(c0, c0 + 6), indexing="ij")
+                rows.append(rr.ravel())
+                cols.append(cc.ravel())
+                vals.append(blk.ravel())
+        if not rows:
+            return sparse.csr_matrix((self.m, self.n))
+        return sparse.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                                 shape=(self.m, self.n))
+
+    def jac_numeric(self, poses: dict[str, np.ndarray]) -> np.ndarray:
         J = np.zeros((self.m, self.n))
         for (r0, n), m in zip(self.rows, self.mates, strict=True):
             for side in ("a", "b"):
@@ -238,22 +338,30 @@ class _Problem:
 def _lm(prob: _Problem, poses: dict[str, np.ndarray], iters: int = 80) -> tuple[dict[str, np.ndarray], int]:
     if not prob.n or not prob.m:
         return poses, 0
+    from scipy import sparse
+    from scipy.sparse.linalg import spsolve
+
     lam = 1e-6
     r = prob.r(poses)
     cost = float(r @ r)
     it = 0
+    eye = sparse.identity(prob.n, format="csc")
     for it in range(1, iters + 1):
         if float(np.max(np.abs(r))) < 1e-10:
             break
-        J = prob.jac(poses)
+        J = prob.jac_sparse(poses)  # analytic and sparse: a 300-part assembly no longer takes minutes (ASM-023)
         g = J.T @ r
-        A = J.T @ J
+        A = (J.T @ J).tocsc()
+        dA = sparse.diags(np.maximum(A.diagonal(), 1e-9), format="csc")
         improved = False
         dx = np.zeros(prob.n)
         for _ in range(12):
             try:
-                dx = np.linalg.solve(A + lam * np.diag(np.maximum(np.diag(A), 1e-9)) + lam * np.eye(prob.n), -g)
-            except np.linalg.LinAlgError:
+                dx = np.asarray(spsolve(A + lam * dA + lam * eye, -g)).ravel()
+            except (np.linalg.LinAlgError, RuntimeError):
+                lam *= 10
+                continue
+            if not np.all(np.isfinite(dx)):
                 lam *= 10
                 continue
             cand = prob.step(poses, dx)
@@ -385,6 +493,41 @@ def _null_blocks(prob: _Problem, J: np.ndarray, blocks: dict[str, str]) -> tuple
     return prob.n - dim, null
 
 
+def _null_components(prob: _Problem, J: np.ndarray) -> tuple[int, np.ndarray]:
+    """Rank and null space of J, one SVD per independent group of instances (J is block diagonal over them after
+    reordering): the same space as one SVD of the whole J, without its cubic cost on a large assembly. The rank
+    tolerance is the whole-J rule, 1e-6 x its largest singular value (the largest over the blocks)."""
+    comps = _components(prob.mates, prob.insts)
+    pieces = []
+    smax = 0.0
+    for ids, mates in comps:
+        cols = [prob.col[i] + j for i in ids if i in prob.col for j in range(6)]
+        mids = {m.id for m in mates}
+        rws = [r for (r0, n), m in zip(prob.rows, prob.mates, strict=True) if m.id in mids for r in range(r0, r0 + n)]
+        if not cols:
+            continue
+        sub = J[np.ix_(rws, cols)] if rws else np.zeros((0, len(cols)))
+        if sub.shape[0]:
+            _u, sv, Vt = np.linalg.svd(sub)
+            smax = max(smax, float(sv[0]) if sv.size else 0.0)
+        else:
+            sv, Vt = np.zeros(0), np.eye(len(cols))
+        pieces.append((cols, sv, Vt))
+    tol = 1e-6 * max(1.0, smax)
+    rank = 0
+    blocks = []
+    for cols, sv, Vt in pieces:
+        r = int(np.sum(sv > tol))
+        rank += r
+        blocks.append((cols, Vt[r:].T))
+    null = np.zeros((prob.n, sum(b.shape[1] for _c, b in blocks)))
+    off = 0
+    for cols, b in blocks:
+        null[cols, off:off + b.shape[1]] = b
+        off += b.shape[1]
+    return rank, null
+
+
 def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str],
              blocks: dict[str, str] | None = None) -> tuple[dict[str, InstState], int, int]:
     insts = prob.insts
@@ -398,11 +541,7 @@ def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str
             if got is not None:
                 rank, null = got
             else:
-                s = np.linalg.svd(J, compute_uv=False)
-                tol = 1e-6 * max(1.0, float(s[0]) if s.size else 1.0)
-                rank = int(np.sum(s > tol))
-                _u, _s, Vt = np.linalg.svd(J)
-                null = Vt[rank:].T
+                rank, null = _null_components(prob, J)
         else:
             null = np.eye(prob.n)
     eqs = sum(m.eqs() for m in prob.mates)
@@ -417,6 +556,7 @@ def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str
             continue
         c0 = prob.col[iid]
         B = null[c0:c0 + 6, :]
+        B = B[:, np.any(B != 0.0, axis=0)]  # only the null vectors that move this instance (same ranks, far smaller)
 
         def rk(M: np.ndarray) -> int:
             if M.size == 0:
@@ -462,14 +602,23 @@ def solve(insts: dict[str, Inst], mates: list[MateSpec], L: float = 100.0,
     for m in mates:
         if m.a == m.b:
             raise ValueError("a mate needs two different instances")
+    start = dict(poses)
     prob = _Problem(insts, mates, L)
-    poses, its = _lm(prob, poses)
+    # only the groups of instances with an unsatisfied mate move (each group is independent of the others); after a
+    # hand edit that is the edited part's group, not the whole assembly (ASM-023)
+    start_ok = {m.id for m in mates if _satisfied(m, poses)[0]}
+    moving = [ms for _ids, ms in _components(mates, insts) if any(m.id not in start_ok for m in ms)]
+    its = 0
+    if moving:
+        sub = [m for ms in moving for m in ms]
+        poses, its = _lm(_Problem(insts, sub, L), poses)
     conflicts: list[str] = []
     if not all(_satisfied(m, poses)[0] for m in mates):
-        # isolate conflicts: add mates one at a time in creation order
-        poses = {k: v.T.copy() for k, v in insts.items()}
-        keep: list[MateSpec] = []
-        for m in mates:
+        # isolate conflicts: the mates satisfied at the start are consistent (one placement satisfies them all);
+        # add the others one at a time in creation order, in their own groups only
+        poses = dict(start)
+        keep: list[MateSpec] = [m for m in mates if m.id in start_ok]
+        for m in [m for m in mates if m.id not in start_ok]:
             trial = keep + [m]
             p1, k1 = _lm(_Problem(insts, trial, L), poses)
             its += k1
@@ -484,7 +633,8 @@ def solve(insts: dict[str, Inst], mates: list[MateSpec], L: float = 100.0,
                 keep, poses = trial, p1
             else:
                 conflicts.append(m.id)
-        prob = _Problem(insts, keep, L)
+        order = {m.id: k for k, m in enumerate(mates)}
+        prob = _Problem(insts, sorted(keep, key=lambda m: order[m.id]), L)
     states, _rank, redundant = _analyse(prob, poses, list(insts), blocks)
     mstates: dict[str, MateState] = {}
     for m in mates:

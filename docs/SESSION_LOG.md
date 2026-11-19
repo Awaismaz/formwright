@@ -101,6 +101,17 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f10) — F1 complete to the release gate; Assembly Studio solver scales
+
+F1: final assembly integrated, drawing set delivered (29 part sheets + assembly drawing, BOM, 49 balloons; 2 sheets
+flagged for a touch-up), manufacturing review done; the release gate waits for the founder. Applied the assembly
+agent's solver patch for Assembly Studio hand work: analytic sparse Jacobian, sparse LM step, only groups with a
+broken mate move, conflict isolation starts from the satisfied set, per-group DOF analysis (Centre body edit 3.1 s ->
+0.46 s; 315-instance worst case with a contradicting mate 53 s -> 6.7 s). Semantics: a newer satisfied mate that
+contradicts an older broken one now flags the older one. Tests: assembly + fixtures + office icd/orchestrator 107
+passed. Note: the agent's `uv sync --reinstall` ran once on the main repo's .venv (same locked versions); imports and
+the suites pass.
+
 ## 2026-11-19 (f9) — Assembly speed merged; drawing sets don't stop on one sheet (ASM-023, CD-039)
 
 Merged wip/asm-perf (pair cache, fasteners placed from the ICD, advisory background final check, block DOF analysis;

@@ -249,3 +249,115 @@ def test_block_dof_analysis_equals_the_whole_jacobian(monkeypatch: pytest.Monkey
     assert whole.dof > 0 and any(s.spin for s in whole.insts.values())
     for k, T in whole.poses.items():
         assert np.allclose(T, split.poses[k], atol=1e-12)
+
+
+def _rand_mates() -> tuple[dict[str, Any], list[Any]]:
+    import numpy as np
+
+    from aicad.assembly import solver
+
+    rng = np.random.default_rng(7)
+
+    def T() -> Any:
+        ax = rng.normal(size=3)
+        return xform.make(xform.rot(ax / np.linalg.norm(ax), float(rng.uniform(0, 3))), rng.uniform(-50, 50, 3))
+
+    def ref(kind: str) -> Any:
+        v = rng.normal(size=3)
+        return solver.Ref(kind, tuple(rng.uniform(-20, 20, 3)), tuple(v / np.linalg.norm(v)), 3.0)
+
+    insts = {"g": solver.Inst("g", xform.ident(), fixed=True), "a": solver.Inst("a", T(), ref_point=(1, 2, 3)),
+             "b": solver.Inst("b", T(), ref_point=(-4, 0, 2))}
+    mates = [solver.MateSpec("m1", "concentric", "a", ref("axis"), "b", ref("axis")),
+             solver.MateSpec("m2", "coincident", "g", ref("plane"), "a", ref("plane")),
+             solver.MateSpec("m3", "flush", "a", ref("plane"), "b", ref("plane")),
+             solver.MateSpec("m4", "distance", "b", ref("plane"), "a", ref("plane"), 7.5),
+             solver.MateSpec("m5", "angle", "a", ref("plane"), "b", ref("plane"), 35.0),
+             solver.MateSpec("m6", "angle", "g", ref("plane"), "b", ref("plane"), 0.0),
+             solver.MateSpec("m7", "angle", "a", ref("plane"), "b", ref("plane"), 180.0, True)]
+    return insts, mates
+
+
+def test_analytic_jacobian_equals_the_numerical_one() -> None:
+    """ASM-023: the solver's Jacobian is analytic and sparse; it must match central differences for every mate
+    type at arbitrary placements."""
+    import numpy as np
+
+    from aicad.assembly import solver
+
+    insts, mates = _rand_mates()
+    prob = solver._Problem(insts, mates, 60.0)
+    poses = {k: v.T for k, v in insts.items()}
+    Ja, Jn = prob.jac(poses), prob.jac_numeric(poses)
+    assert Ja.shape == Jn.shape and np.abs(Jn).max() > 1
+    assert np.allclose(Ja, Jn, atol=1e-6, rtol=1e-6)
+
+
+def test_a_hand_edit_moves_only_its_own_group_and_scales(monkeypatch: pytest.MonkeyPatch) -> None:
+    """300 blocks on a fixed base, each seated and centred on its own axis (independent groups). Moving one block
+    and solving moves that block back onto its mates and leaves every other placement bit-identical; the
+    iterative solve works on that block's 6 unknowns only (counted, not timed)."""
+    import numpy as np
+
+    from aicad.assembly import solver
+
+    top = solver.Ref("plane", (0.0, 0.0, 10.0), (0.0, 0.0, 1.0))
+    bottom = solver.Ref("plane", (0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+    bax = solver.Ref("axis", (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 4.0)
+    insts = {"base": solver.Inst("base", xform.ident(), fixed=True)}
+    mates = []
+    for k in range(300):
+        x, y = 30.0 * (k % 20), 30.0 * (k // 20)
+        insts[f"b{k}"] = solver.Inst(f"b{k}", xform.translate((x, y, 10)), ref_point=(0, 0, 5))
+        ax = solver.Ref("axis", (x, y, 0.0), (0.0, 0.0, 1.0), 4.0)
+        mates += [solver.MateSpec(f"c{k}", "coincident", "base", top, f"b{k}", bottom),
+                  solver.MateSpec(f"x{k}", "concentric", "base", ax, f"b{k}", bax)]
+    before = {k: v.T.copy() for k, v in insts.items()}
+    insts["b7"] = solver.Inst("b7", xform.translate((215.0, 2.0, 13.0)), ref_point=(0, 0, 5))
+    seen: list[int] = []
+    real = solver._Problem.jac_sparse
+
+    def counting(self: Any, poses: Any) -> Any:
+        seen.append(self.n)
+        return real(self, poses)
+
+    monkeypatch.setattr(solver._Problem, "jac_sparse", counting)
+    res = solver.solve(insts, mates, L=300)
+    assert all(ms.ok for ms in res.mates.values()) and not res.conflicts
+    assert np.allclose(xform.pt(res.poses["b7"], (0, 0, 0)), (210, 0, 10), atol=1e-9)
+    assert all(np.array_equal(res.poses[k], before[k]) for k in insts if k not in ("b7", "base"))
+    lm = [n for n in seen if n < 6 * 300]  # the iterative solve's Jacobians (the DOF analysis takes the whole J)
+    assert lm and all(n == 6 for n in lm)
+    assert res.status == "under_defined" and res.dof == 300  # every block keeps its spin
+
+
+def test_a_conflict_is_found_without_re_solving_every_mate() -> None:
+    """A contradicting mate on a 300-block assembly: only it is flagged, every other mate holds; isolation starts
+    from the mates the placement already satisfies, so it tries one mate, not all 600 in turn."""
+    from aicad.assembly import solver
+
+    top = solver.Ref("plane", (0.0, 0.0, 10.0), (0.0, 0.0, 1.0))
+    bottom = solver.Ref("plane", (0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+    bax = solver.Ref("axis", (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 4.0)
+    insts = {"base": solver.Inst("base", xform.ident(), fixed=True)}
+    mates = []
+    for k in range(300):
+        x, y = 30.0 * (k % 20), 30.0 * (k // 20)
+        insts[f"b{k}"] = solver.Inst(f"b{k}", xform.translate((x, y, 10)), ref_point=(0, 0, 5))
+        ax = solver.Ref("axis", (x, y, 0.0), (0.0, 0.0, 1.0), 4.0)
+        mates += [solver.MateSpec(f"c{k}", "coincident", "base", top, f"b{k}", bottom),
+                  solver.MateSpec(f"x{k}", "concentric", "base", ax, f"b{k}", bax)]
+    mates.append(solver.MateSpec("bad", "distance", "base", top, "b3", bottom, 5.0))
+    calls = {"n": 0}
+    real = solver._lm
+
+    def counting(prob: Any, poses: Any, iters: int = 80) -> Any:
+        calls["n"] += 1
+        return real(prob, poses, iters)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(solver, "_lm", counting)
+        res = solver.solve(insts, mates, L=300)
+    assert res.conflicts == ["bad"] and res.status == "over_defined"
+    assert all(v.ok for k, v in res.mates.items() if k != "bad")
+    assert calls["n"] <= 3  # the main solve, the one trial, its pre-aligned retry
