@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseSummaries, expectationGrid, fmt, rollingPassRate, sparkPath, suiteSummary, type GoldenCase, type GoldenRun } from "./golden";
+import { caseSummaries, expectationGrid, fmt, rollingPassRate, sparkPath, suiteSummary, trackLabel, trackOf, tracks, type GoldenCase, type GoldenRun } from "./golden";
 
 const run = (o: Partial<GoldenRun>): GoldenRun => ({
   run_id: Math.random().toString(36).slice(2), suite_id: "s1", at: "2026-11-20T10:00:00Z", sha: "abc", mode: "simulated",
@@ -54,6 +54,15 @@ describe("golden suite dashboard shaping", () => {
     expect(s.tokens).toEqual([5, 0]);
     expect(s.wallTotal).toBe(40);
     expect([s.lastAt, s.sha]).toEqual(["2026-11-20T12:01:00Z", "def"]);
+  });
+
+  it("keeps runs with server switches on their own track", () => {
+    const rs = [run({ passed: true }), run({ passed: false, flags: { FW_DESIGN_GRAPH: "1" }, at: "2026-11-20T12:00:00Z" })];
+    expect(trackOf(rs[1]!)).toBe("simulated · FW_DESIGN_GRAPH=1");
+    expect(tracks(rs)).toEqual(["simulated", "live", "simulated · FW_DESIGN_GRAPH=1"]);
+    expect(trackLabel("simulated · FW_DESIGN_GRAPH=1")).toBe("Simulated · FW_DESIGN_GRAPH=1");
+    expect(caseSummaries(cases, rs, "simulated")[0]!.latest!.passed).toBe(true);
+    expect(caseSummaries(cases, rs, "simulated · FW_DESIGN_GRAPH=1")[0]!.latest!.passed).toBe(false);
   });
 
   it("draws sparklines with gaps and flat series", () => {

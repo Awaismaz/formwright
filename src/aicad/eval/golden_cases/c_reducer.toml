@@ -15,6 +15,7 @@ brief = "Build a Single stage 3:1 reducer with Spur Gears"
 
 [sim]
 plan = "c_reducer.plan.json"
+intent = "c_reducer.intent.json"  # with FW_DESIGN_GRAPH=1: the live intent reply, replayed
 
 [limits]
 tokens = 400
@@ -24,8 +25,9 @@ wall_live_s = 1800
 [expect]
 complete = true
 light = false            # 18 part lines: the full path (plan gate, interfaces gate, run)
-parts = 18
+parts = 18               # the replayed plan's lines and pieces (another planner writes its own)
 pieces = 58
+only_simulated = ["parts", "pieces"]
 clashes = 0
 binned = 0
 loose = 0
@@ -51,18 +53,22 @@ n = 4                    # the cover joint
 [[expect.reuse]]
 title = "Hex nut M8"
 code = "hex_nut"
+modes = ["simulated"]    # ticket titles of the replayed plan
 
 [[expect.reuse]]
 title = "Washer M8"
 code = "washer"
+modes = ["simulated"]
 
 [[expect.reuse]]
 title = "Cap screw M6x16"
 code = "shcs"
+modes = ["simulated"]
 
 [[expect.reuse]]
 title = "Oil plug M16"
 code = ""                # not stocked: never substituted by another Toolbox family
+modes = ["simulated"]
 
 [[expect.distance]]
 a = { kind = "gear", pick = "smallest" }

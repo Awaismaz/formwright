@@ -14,6 +14,7 @@ fast = true
 
 [sim]
 planner = "standard"     # the office's own planner on this sentence (no AI)
+intent = "a_keyed_gear.intent.json"  # with FW_DESIGN_GRAPH=1: the live intent reply, replayed (design-graph report)
 
 [limits]
 tokens = 30              # live cap, platform tokens (Archie plan about 6, looks about 5; parts are built without AI)

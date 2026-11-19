@@ -214,3 +214,22 @@ def test_simulated_suite_fast_cases(tmp_path: Path) -> None:
         assert r["passed"], (r["case"], r.get("error"), r.get("stopped"), bad)
         assert r["metrics"]["tokens"] == 0 and r["mode"] == "simulated" and r["sha"]
     assert len(golden.read(tmp_path / "hist")) == 2
+
+
+def test_design_graph_runs_replay_the_recorded_intent_reply_and_nothing_else() -> None:
+    """``--env FW_DESIGN_GRAPH=1`` in simulated mode: the recorded intent reply answers the intent role; any other
+    model call trips the wire (simulated runs never spend)."""
+    import asyncio
+
+    from aicad.eval import golden_run
+    from aicad.llm.base import CallRequest
+
+    with_intent = {c["id"] for c in golden.load_cases() if c["sim"].get("intent_data")}
+    assert with_intent == {"keyed-gear", "gear-pair", "reducer"}
+    case = golden.load_cases(["a"])[0]
+    complete = golden_run._sim_llm(case["sim"]["intent_data"])
+    res = asyncio.run(complete(CallRequest(role="intent", system="", prompt="x")))
+    assert res.data["components"][0]["kind"] == "shaft" and res.metering.provider == "replay"
+    with pytest.raises(RuntimeError, match="live model call"):
+        asyncio.run(complete(CallRequest(role="supervisor", system="", prompt="x")))
+    assert golden_run.graph_on({"FW_DESIGN_GRAPH": "1"}) and not golden_run.graph_on({})

@@ -14,6 +14,7 @@ brief = "Simple spur gear pair, ratio 1:3, with only shafts and bearings. Pinion
 
 [sim]
 plan = "b_gear_pair.plan.json"   # Archie's plan, replayed (no AI)
+intent = "b_gear_pair.intent.json"  # with FW_DESIGN_GRAPH=1: the live intent reply (same mechanism), replayed
 
 [limits]
 tokens = 30

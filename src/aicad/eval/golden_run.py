@@ -98,6 +98,23 @@ def _replay_planner(plan: dict[str, Any]) -> Any:
     return run_agent
 
 
+def _sim_llm(intent: dict[str, Any] | None) -> Any:
+    """Simulated runs: the recorded intent reply for the design-graph planner (FW_DESIGN_GRAPH=1), else the
+    tripwire. No other model call is answered."""
+    async def complete(req: Any) -> Any:
+        from aicad.llm.base import CallResult, Metering
+
+        if intent is not None and getattr(req, "role", None) == "intent":
+            return CallResult(text=json.dumps(intent), metering=Metering(provider="replay", role="intent", model=None),
+                              data=intent)
+        return _no_live_ai()
+    return complete
+
+
+def graph_on(flags: dict[str, str] | None) -> bool:
+    return str((flags or {}).get("FW_DESIGN_GRAPH", "")).lower() in ("1", "true", "yes", "on")
+
+
 def reap_workers() -> None:
     from aicad.agent import worker as bworker
     from aicad.assembly import worker as aworker
@@ -155,7 +172,9 @@ def drive(c: Any, case: dict[str, Any], mode: str, cap: int | None, log: Any, ou
     from aicad.office import program_assembly
 
     sim = case.get("sim") or {}
-    archie = mode == "live" or "plan_data" in sim
+    # Archie plans live, or replays the case's plan, or (design-graph path) replays the recorded intent reply
+    archie = mode == "live" or "plan_data" in sim or (
+        graph_on({"FW_DESIGN_GRAPH": os.environ.get("FW_DESIGN_GRAPH", "")}) and "intent_data" in sim)
     lim = case.get("limits") or {}
     wall = float(lim.get(f"wall_{mode}_s") or 600)
     phases: dict[str, float] = out.setdefault("phases", {})
@@ -184,6 +203,14 @@ def drive(c: Any, case: dict[str, Any], mode: str, cap: int | None, log: Any, ou
     phases["plan"] = round(time.time() - t, 2)
     if v["status"] != "plan_review":
         raise Stop(f"planning ended in '{v['status']}'")
+    qs = (((v.get("plan") or {}).get("graph") or {}).get("questions")) or []
+    out["questions"] = len(qs)
+    if qs:  # design-graph plans (PD-110) ask before approval: the runner takes Archie's defaults, as a user may
+        ans = {q["id"]: q["default"] for q in qs if q.get("default")}
+        v = _ok(c.post(f"/api/office/programs/{pid}/plan/answers", json={"answers": ans}), "take Archie's defaults")
+        v = _poll(c, pid, lambda v: v["status"] != "planning", 600 if mode == "live" else 60)
+        if (((v.get("plan") or {}).get("graph") or {}).get("questions")):
+            raise Stop("Archie still has questions after his defaults were taken")
     log(f"  plan: {sum(len(s['parts']) for s in v['plan']['subassemblies'])} part lines "
         f"({phases['plan']:.1f} s){', small program' if v.get('light') else ''}")
 
@@ -322,7 +349,7 @@ def snapshot(c: Any, pid: str, drove: dict[str, Any]) -> dict[str, Any]:
         "loose_names": golden.loose_names(placed)[:12],
         "placeholders": sum(1 for i in insts if i["kind"] == "placeholder"),
         "blocked": blocked, "icd_problems": drove.get("icd_problems_first"),
-        "interfaces": len((v.get("icd") or {}).get("interfaces") or []),
+        "interfaces": len((v.get("icd") or {}).get("interfaces") or []), "questions": drove.get("questions") or 0,
         "conformance": {"ok": conf_ok, "total": conf_total}, "direct": direct, "no_ai": no_ai,
         "supervisor": sum(1 for e in sup if e.get("status") in ("applied", "asking", "done", "undone")),
         "supervisor_asking": sum(1 for e in sup if e.get("status") == "asking"),
@@ -358,7 +385,8 @@ def run_case(case: dict[str, Any], mode: str = "simulated", *, work: Path | None
     if sim:
         plan = (case.get("sim") or {}).get("plan_data")
         patches += [(planner, "run_agent", _replay_planner(plan) if plan else _no_live_ai),
-                    (gage, "run_review", _no_live_ai), (llm, "complete", _no_live_ai)]
+                    (gage, "run_review", _no_live_ai),
+                    (llm, "complete", _sim_llm((case.get("sim") or {}).get("intent_data") if graph_on(flags) else None))]
     rec: dict[str, Any] = {"schema": golden.SCHEMA, "run_id": uuid.uuid4().hex[:12], "at": _now(), "mode": mode,
                            "case": case["id"], "title": case["title"], "letter": case.get("letter"),
                            "cap": cap if mode == "live" else None, "flags": dict(flags or {})}
@@ -393,8 +421,9 @@ def run_case(case: dict[str, Any], mode: str = "simulated", *, work: Path | None
                 if rec.get("stopped"):
                     snap["stopped"] = rec["stopped"]
             fake_agents.reset()
-        rows = golden.evaluate(case, snap, mode)
-        rec.update(status=snap["status"], stopped=snap.get("stopped"), metrics=snap["metrics"],
+        plan_fixed = sim and not graph_on(flags)  # the case's own plan was replayed
+        rows = golden.evaluate(case, snap, mode, plan_fixed)
+        rec.update(status=snap["status"], stopped=snap.get("stopped"), metrics=snap["metrics"], plan_fixed=plan_fixed,
                    expectations=rows, passed=golden.passed(rows),
                    detail={"kinds": snap.get("kinds"), "tickets": snap.get("tickets"), "stacks": snap.get("stacks"),
                            "warnings": snap.get("warnings"), "fix": snap.get("fix"), "looks": snap.get("looks"),
@@ -455,6 +484,9 @@ def run_suite(cases: list[dict[str, Any]], mode: str = "simulated", *, work: Pat
     routes = golden.gather_routing()
     recs = []
     for case in cases:
+        if mode == "simulated" and graph_on(flags) and not (case.get("sim") or {}).get("intent_data"):
+            log(f"[{case['id']}] skipped: no recorded intent reply to replay on the design-graph path")
+            continue
         rec = run_case(case, mode, work=work, cap=cap, keep=keep, log=log, routing=routes, flags=flags)
         rec["suite_id"] = suite_id
         if record:

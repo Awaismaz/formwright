@@ -34,6 +34,25 @@ export interface SuiteSummary {
 
 const byTime = (a: GoldenRun, b: GoldenRun) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
 
+/** A run's track: its mode plus any server switches it ran with (trends never mix configurations). */
+export function trackOf(r: Pick<GoldenRun, "mode" | "flags">): string {
+  const f = Object.entries(r.flags ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`);
+  return [r.mode, ...f].join(" · ");
+}
+
+/** The tracks to offer: simulated and live always, then any switch tracks found in the history. */
+export function tracks(runs: GoldenRun[]): string[] {
+  const seen = new Set<string>(["simulated", "live"]);
+  for (const r of runs) seen.add(trackOf(r));
+  return [...seen];
+}
+
+export function trackLabel(t: string): string {
+  const [mode, ...rest] = t.split(" · ");
+  const m = mode === "live" ? "Live" : "Simulated";
+  return rest.length ? `${m} · ${rest.join(" · ")}` : m;
+}
+
 /** Rolling pass rate (0..1) over the last ``window`` runs at each run. */
 export function rollingPassRate(runs: GoldenRun[], window = 5): number[] {
   return runs.map((_, i) => {
@@ -42,12 +61,12 @@ export function rollingPassRate(runs: GoldenRun[], window = 5): number[] {
   });
 }
 
-/** One row per case: the latest run in this mode, its failing expectations and the trends across runs. */
-export function caseSummaries(cases: GoldenCase[], runs: GoldenRun[], mode: Mode, window = 5): CaseSummary[] {
+/** One row per case: the latest run in this track, its failing expectations and the trends across runs. */
+export function caseSummaries(cases: GoldenCase[], runs: GoldenRun[], track: string, window = 5): CaseSummary[] {
   const known = new Map(cases.map(c => [c.id, c]));
   for (const r of runs) if (!known.has(r.case)) known.set(r.case, { id: r.case, title: r.title, letter: r.letter, fast: false });
   return [...known.values()].map(c => {
-    const rs = runs.filter(r => r.case === c.id && r.mode === mode).sort(byTime);
+    const rs = runs.filter(r => r.case === c.id && trackOf(r) === track).sort(byTime);
     const latest = rs.length ? rs[rs.length - 1]! : null;
     const prev = rs.length > 1 ? rs[rs.length - 2]! : null;
     return {
@@ -62,11 +81,11 @@ export function caseSummaries(cases: GoldenCase[], runs: GoldenRun[], mode: Mode
 }
 
 /** The summary row: the latest results across cases and, per suite run, the share of cases passing, wall and tokens. */
-export function suiteSummary(rows: CaseSummary[], runs: GoldenRun[], mode: Mode): SuiteSummary {
+export function suiteSummary(rows: CaseSummary[], runs: GoldenRun[], track: string): SuiteSummary {
   const latest = rows.map(r => r.latest).filter((r): r is GoldenRun => !!r);
   const newest = latest.slice().sort(byTime).pop() ?? null;
   const suites = new Map<string, GoldenRun[]>();
-  for (const r of runs.filter(r => r.mode === mode).sort(byTime)) {
+  for (const r of runs.filter(r => trackOf(r) === track).sort(byTime)) {
     const k = r.suite_id || r.run_id;
     suites.set(k, [...(suites.get(k) ?? []), r]);
   }

@@ -6,6 +6,7 @@ A case is a brief plus hand-checked expectations, one TOML file in ``golden_case
     fast = true                           one of the cases the pytest hook runs
     [sim] planner = "standard"            simulated runs: the office's own planner on the brief (no AI), or
     [sim] plan = "<file>.plan.json"       Archie's plan, replayed (a recorded or reference plan; no AI)
+    [sim] intent = "<file>.intent.json"   a recorded intent reply, replayed when FW_DESIGN_GRAPH=1 (PD-110)
     [limits] tokens, wall_simulated_s, wall_live_s
     [expect] complete, light, parts (part lines), pieces, subs, tickets, kinds = {kind = pieces}, no_extras,
              instances, clashes, binned, loose, placeholders, blocked, icd_problems, conformance, direct_min (parts
@@ -77,7 +78,13 @@ def load_case(path: Path) -> dict[str, Any]:
             sim["plan_data"] = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
             raise CaseError(f"{path.name}: plan {sim['plan']}: {e}") from e
-    elif sim.get("planner", "standard") != "standard":
+    if "intent" in sim:
+        f = path.parent / str(sim["intent"])
+        try:
+            sim["intent_data"] = json.loads(f.read_text(encoding="utf-8"))["reply"]
+        except (OSError, ValueError, KeyError) as e:
+            raise CaseError(f"{path.name}: intent {sim['intent']}: {e}") from e
+    if "plan" not in sim and sim.get("planner", "standard") != "standard":
         raise CaseError(f"{path.name}: [sim] needs plan = <file> or planner = 'standard'")
     ex = case.setdefault("expect", {})
     unknown = set(ex) - set(COUNTS) - set(CHECKS) - {"complete", "light", "kinds", "no_extras", "conformance",
@@ -103,9 +110,14 @@ def load_cases(only: list[str] | None = None, folder: Path = CASES_DIR) -> list[
     return cases
 
 
-def applies(spec: dict[str, Any], mode: str) -> bool:
+def applies(spec: dict[str, Any], mode: str, plan_fixed: bool | None = None) -> bool:
+    """``modes = ["simulated"]`` means "only when the case's own plan is replayed" (its sizes fix the numbers)."""
     modes = spec.get("modes")
-    return not modes or mode in modes
+    if not modes:
+        return True
+    if "simulated" in modes and (plan_fixed if plan_fixed is not None else mode == "simulated"):
+        return True
+    return mode in modes and mode != "simulated"
 
 
 # ----------------------------------------------------------------------------- geometry on world boxes
@@ -282,9 +294,13 @@ def _geo(kind: str, n: int, spec: dict[str, Any], insts: list[dict[str, Any]],
     raise CaseError(f"unknown check {kind}")
 
 
-def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str) -> list[dict[str, Any]]:
+def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str, plan_fixed: bool | None = None
+             ) -> list[dict[str, Any]]:
     """Every expectation of the case against a run snapshot (see ``golden_run.snapshot``). ``ok`` None = not
-    measurable in this run (for example tokens in a simulated run)."""
+    measurable in this run (for example tokens in a simulated run). ``plan_fixed``: the case's own plan was replayed
+    (default: simulated runs); a live planner or the design-graph path makes its own plan, so plan-specific numbers
+    (``only_simulated`` counts, ``modes = ["simulated"]`` checks) don't apply."""
+    fixed = (mode == "simulated") if plan_fixed is None else plan_fixed
     ex = case.get("expect") or {}
     lim = case.get("limits") or {}
     m = snap.get("metrics") or {}
@@ -297,7 +313,7 @@ def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str) -> list[dict
     if "light" in ex:
         rows.append(_row("light", LABELS["light"], bool(m.get("light")) == bool(ex["light"]), bool(m.get("light")),
                          bool(ex["light"])))
-    sim_only = set(ex.get("only_simulated") or []) if mode != "simulated" else set()
+    sim_only = set(ex.get("only_simulated") or []) if not fixed else set()
     for k in COUNTS:
         if k in ex and k not in CHECKS and k not in sim_only:
             got = m.get(k)
@@ -326,7 +342,7 @@ def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str) -> list[dict
                          f"<= {ex['supervisor_max']}"))
     for kind in CHECKS:
         for n, spec in enumerate(ex.get(kind) or [], start=1):
-            if applies(spec, mode):
+            if applies(spec, mode, fixed):
                 try:
                     rows.append(_geo(kind, n, spec, insts, snap))
                 except (KeyError, TypeError, ValueError, re.error) as e:

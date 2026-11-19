@@ -5,15 +5,17 @@ import { ArrowDownRight, ArrowUpRight, Check, ChevronDown, ChevronRight, Minus, 
 import { api } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import { Badge, Card, EmptyState, PageLoader, Stat } from "@/components/ui";
-import { caseSummaries, expectationGrid, fmt, sparkPath, suiteSummary, type GoldenCase, type GoldenRun, type Mode } from "./golden";
+import { caseSummaries, expectationGrid, fmt, sparkPath, suiteSummary, trackLabel, trackOf, tracks, type GoldenCase, type GoldenRun } from "./golden";
 
 function Spark({ values, tone = "primary", w = 96, h = 22, title }: { values: (number | null)[]; tone?: "primary" | "success" | "accent"; w?: number; h?: number; title?: string }) {
   const d = sparkPath(values, w, h);
+  const one = values.filter(v => v !== null).length === 1 ? /M([\d.]+),([\d.]+)/.exec(d) : null;
   const color = tone === "success" ? "text-success" : tone === "accent" ? "text-accent" : "text-primary";
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className={cx("shrink-0", color)} role="img" aria-label={title}>
       {title && <title>{title}</title>}
-      {d ? <path d={d} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      {one ? <circle cx={Number(one[1])} cy={Number(one[2])} r={2.5} fill="currentColor" />
+        : d ? <path d={d} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
         : <line x1={2} x2={w - 2} y1={h / 2} y2={h / 2} className="text-border" stroke="currentColor" strokeDasharray="2 3" />}
     </svg>
   );
@@ -71,25 +73,27 @@ function Grid({ runs }: { runs: GoldenRun[] }) {
 
 export default function GoldenSuite() {
   const q = useQuery({ queryKey: ["admin", "golden"], queryFn: () => api.get<{ cases: GoldenCase[]; runs: GoldenRun[] }>("/api/admin/golden") });
-  const [mode, setMode] = useState<Mode>("simulated");
+  const [track, setTrack] = useState("simulated");
   const [open, setOpen] = useState<string | null>(null);
-  const rows = useMemo(() => (q.data ? caseSummaries(q.data.cases, q.data.runs, mode) : []), [q.data, mode]);
-  const sum = useMemo(() => suiteSummary(rows, q.data?.runs ?? [], mode), [rows, q.data, mode]);
+  const mode = track.startsWith("live") ? "live" : "simulated";
+  const rows = useMemo(() => (q.data ? caseSummaries(q.data.cases, q.data.runs, track) : []), [q.data, track]);
+  const sum = useMemo(() => suiteSummary(rows, q.data?.runs ?? [], track), [rows, q.data, track]);
+  const offered = useMemo(() => tracks(q.data?.runs ?? []), [q.data]);
   if (q.isError) return <Card className="p-5 text-sm text-muted">The golden suite is available in God mode only.</Card>;
   if (!q.data) return <PageLoader />;
-  const runsOf = (id: string) => q.data.runs.filter(r => r.case === id && r.mode === mode);
+  const runsOf = (id: string) => q.data.runs.filter(r => r.case === id && trackOf(r) === track);
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-3xl text-sm text-muted">Each case is a brief with hand-checked expectations, run through the Design Office end to end. Simulated runs use simulated agents and spend nothing; live runs use the real agents with a token cap per case.</p>
-        <div className="inline-flex rounded-lg border border-border p-0.5 text-sm" role="tablist" aria-label="Mode">
-          {(["simulated", "live"] as const).map(m => (
-            <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)}
-              className={cx("rounded-md px-3 py-1", mode === m ? "bg-primary text-white" : "text-muted hover:text-text")}>{m === "simulated" ? "Simulated" : "Live"}</button>))}
+        <div className="inline-flex flex-wrap rounded-lg border border-border p-0.5 text-sm" role="tablist" aria-label="Runs">
+          {offered.map(t => (
+            <button key={t} role="tab" aria-selected={track === t} onClick={() => setTrack(t)}
+              className={cx("rounded-md px-3 py-1", track === t ? "bg-primary text-white" : "text-muted hover:text-text")}>{trackLabel(t)}</button>))}
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Stat label="Cases passing" value={`${sum.passing} of ${sum.cases}`} sub={sum.notRun ? `${sum.notRun} not run in this mode` : `${sum.failing} failing`} />
+        <Stat label="Cases passing" value={`${sum.passing} of ${sum.cases}`} sub={sum.notRun ? `${sum.notRun} not run on this track` : `${sum.failing} failing`} />
         <Stat label="Pass rate per suite run" value={sum.passRate.length ? `${Math.round((last(sum.passRate) ?? 0) * 100)}%` : "n/a"} sub={<Spark values={sum.passRate} tone="success" w={140} title="Share of cases passing, per suite run" />} />
         <Stat label="Wall time, latest runs" value={`${sum.wallTotal} s`} sub={<Spark values={sum.wall} w={140} title="Suite wall time per run (s)" />} />
         <Stat label={mode === "live" ? "Tokens, latest runs" : "Tokens (simulated metering)"} value={sum.tokensTotal} sub={sum.lastAt ? `Last run ${ago(sum.lastAt)} at ${sum.sha}` : "No runs yet"} />
@@ -115,7 +119,7 @@ export default function GoldenSuite() {
                             {r.source && <div className="text-xs text-muted">{r.source}</div>}</div>
                         </div>
                       </td>
-                      <td className="px-4 py-2.5"><Result run={r.latest} changed={r.changed} />{r.latest && <div className="mt-0.5 text-[11px] text-muted">{ago(r.latest.at)} · {r.latest.sha}</div>}</td>
+                      <td className="px-4 py-2.5"><Result run={r.latest} changed={r.changed} />{r.latest && <div className="mt-0.5 text-[11px] text-muted" title={r.latest.dirty ? "Run with uncommitted changes on top of this commit" : undefined}>{ago(r.latest.at)} · {r.latest.sha}{r.latest.dirty ? "+" : ""}</div>}</td>
                       <td className="max-w-xs px-4 py-2.5 text-xs">
                         {r.latest?.error ? <span className="text-danger">{r.latest.error}</span>
                           : r.failing.length ? r.failing.slice(0, 3).map(f => <div key={f.id} className="truncate" title={`${f.label}: got ${fmt(f.got)}, want ${fmt(f.want)}`}><span className="text-danger">{f.label}</span> <span className="text-muted">got {fmt(f.got)}, want {fmt(f.want)}</span></div>)
@@ -123,10 +127,10 @@ export default function GoldenSuite() {
                         {r.failing.length > 3 && <div className="text-muted">and {r.failing.length - 3} more</div>}
                         {r.latest?.stopped && <div className="truncate text-muted" title={r.latest.stopped}>Stopped: {r.latest.stopped}</div>}
                       </td>
-                      <td className="px-4 py-2.5"><div className="flex items-center gap-2"><Spark values={r.wall} title="Wall time per run (s)" /><span className="tabular-nums">{fmt(last(r.wall) ?? null)} s</span></div></td>
-                      <td className="px-4 py-2.5"><div className="flex items-center gap-2"><Spark values={r.tokens} tone="accent" title="Tokens per run" /><span className="tabular-nums">{fmt(last(r.tokens) ?? null)}</span></div></td>
+                      <td className="px-4 py-2.5"><div className="flex items-center gap-2"><Spark values={r.wall} title="Wall time per run (s)" /><span className="whitespace-nowrap tabular-nums">{r.runs ? `${fmt(last(r.wall) ?? null)} s` : "n/a"}</span></div></td>
+                      <td className="px-4 py-2.5"><div className="flex items-center gap-2"><Spark values={r.tokens} tone="accent" title="Tokens per run" /><span className="whitespace-nowrap tabular-nums">{fmt(last(r.tokens) ?? null)}</span></div></td>
                       <td className="px-4 py-2.5"><div className="flex items-center gap-2"><Spark values={r.passRate} tone="success" title="Pass rate, last 5 runs" /><span className="tabular-nums">{r.runs ? `${Math.round((last(r.passRate) ?? 0) * 100)}%` : "n/a"}</span></div></td>
-                      <td className="px-4 py-2.5 tabular-nums text-muted">{r.passes} / {r.runs}</td>
+                      <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-muted">{r.passes} / {r.runs}</td>
                     </tr>
                     {isOpen && (
                       <tr><td colSpan={7} className="bg-panel2/60 px-4 py-3">
@@ -142,7 +146,7 @@ export default function GoldenSuite() {
                             {r.latest.flags && Object.keys(r.latest.flags).length > 0 && <span>switches <b className="font-mono font-semibold text-text">{Object.entries(r.latest.flags).map(([k, v]) => `${k}=${v}`).join(" ")}</b></span>}
                           </div>
                           <Grid runs={runsOf(r.id)} />
-                        </> : <span className="text-xs text-muted">No {mode} run of this case yet.</span>}
+                        </> : <span className="text-xs text-muted">No run of this case on this track yet.</span>}
                       </td></tr>)}
                   </Fragment>);
               })}
