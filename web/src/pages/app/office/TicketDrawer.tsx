@@ -10,6 +10,7 @@ import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE } from "./api";
 import { useMoveTicket } from "./Board";
 import { assignable, fmtMinutes, runChip } from "./model";
+import PartPreview from "./PartPreview";
 import { errorTone, fmtError } from "./timeline";
 import type { Column, OfficeEvent, Program, Ticket } from "./types";
 
@@ -83,6 +84,8 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               {!t.run && !done && <div className="mt-1 text-[11.5px] text-muted">Waiting for the office: press Run on the program, or start it by hand.</div>}
             </div>
           </div>
+          {t.project_id && (t.kind === "part" || t.kind === "standard") && t.milestones.includes("first_build") &&
+            <PartPreview projectId={t.project_id} version={t.updated_at} done={done} onOpen={() => nav(`/app/projects/${t.project_id}`)} />}
           {t.run_status === "awaiting_review" && <div className="rounded-md border border-warning/40 bg-warning/5 p-3" data-review-gate>
             <div className="flex items-center gap-1.5 text-[13px] font-semibold"><MessageSquareWarning className="h-4 w-4 text-warning" />Waiting for your review</div>
             <p className="mt-0.5 text-[12px] text-muted">Gage passed this part. The program's review gate holds it here until you approve it for assembly or send it back to {spec} with a note.</p>

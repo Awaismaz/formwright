@@ -4,6 +4,12 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (f4) — Part preview in the ticket (CD-033)
+
+Founder: clicking a completed part should show a preview instead of going to the Design Studio. The ticket drawer now
+embeds the 3D viewer on the part's latest build (from the first build on). F1 after the batched-fitting restart: one
+Fitz swap took all waiting parts; "Assemble Fasteners" started at once.
+
 ## 2026-11-19 (f3) — Fitting batches; waiting swaps don't hold agent slots (CD-032)
 
 Founder: centre body parts all done, why no assembly? Cause: every approved part is swapped into the program
