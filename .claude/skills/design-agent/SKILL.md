@@ -11,7 +11,7 @@ contract with the others. Change them together.
 | Layer | File | Contract |
 |---|---|---|
 | Instructions | `src/aicad/agent/prompt.py` (`CAD_AGENT_INSTRUCTIONS`, appended to the `claude_code` preset) | workflow, model-script contract, honesty and talk rules |
-| Session | `src/aicad/agent/session.py` | `BUILTIN_TOOLS` + `CAD_TOOLS` allow-list, `permission_mode="dontAsk"`, `setting_sources=[]` (isolated from any developer `.claude`, including this repo's skills), PreToolUse `make_guard` (paths inside workspace; WebFetch only `build123d.readthedocs.io`), `MAX_TURNS=80`, resume by `session_id` |
+| Session | `src/aicad/agent/session.py` | `BUILTIN_TOOLS` + `CAD_TOOLS` allow-list, `permission_mode="dontAsk"`, `setting_sources=[]` (isolated from any developer `.claude`, including this repo's skills), PreToolUse `make_guard` (paths inside workspace; WebFetch only `build123d.readthedocs.io`), `MAX_TURNS=80`, resume by `session_id` ; cost isolation (agent-cost): `strict_mcp_config=True` + `harness_env()` (`ENABLE_CLAUDEAI_MCP_SERVERS=false`, 5-minute prompt cache), `include_partial_messages=True` for per-call usage |
 | UI wording | `session.py` `friendly_step`, `friendly_result`, `_SCRUB`, `scrub()` | no file names, tools, code, Python, library or model ids reach the UI (DS-014, CLAUDE.md rule) |
 | Structured blocks | `extract_questions` (`fw-questions`), `extract_recognition` (`fw-recognition`), `agent/blocks.py` `extract_brief` (`fw-brief`, CAD-028) and `extract_review` (`fw-review`, AGT-006: reconciled with `out/status.json`, can never pass a failed gate) | JSON in a fenced block; the block is stripped from the visible text and rendered as chips, tree data, the brief card or the Self-review panel |
 | PropertyManager edits | `agent/edits.py` `extract_edit` (`fw-edit`, DS-035): small edits (fillet / chamfer / shell / hole / an existing hand-made feature / extrude depth / pattern count-spacing / parameters; `edits: [...]` = several, one PM step each, impact previewed as a `sequence`) resolved on `out/topo.json` and validated by `studio.validate_feature`; `design_state` adds a one-line `[Design state for quick edits: ...]` to short build prompts (never shown) | the session publishes `{"type": "edit"}`; the Studio opens the real PM pre-filled (`studio/agentEdit.ts`), the user presses OK; the agent writes no code |
@@ -24,6 +24,14 @@ contract with the others. Change them together.
 | Editable params | `runner.editable_params` / `param_meta` | only top-level `NAME = <number>` lines declared in `PARAMS`; PARAM_META limits enforced server-side |
 
 ## Rules when editing
+- **Cost: keep the harness isolated.** On a claude.ai login the Claude Code harness loads the logged-in user's claude.ai
+  connectors (Atlassian, Microsoft 365, Vanta, ...) a second after start: ~311k tokens of tool schemas in every call
+  after the first, which made a cold turn cost $3. Every `ClaudeAgentOptions` (session and `llm/claude_sdk.py`) must
+  keep `strict_mcp_config=True` and `env=harness_env()`. Check with a free `/context` query (a local command; pass it
+  from Python, not as a Git Bash argument, which rewrites `/context` to a path and makes it a paid prompt).
+- The run record's `calls` / `cost_breakdown` show each model call's input, cache writes (1h/5m), cache reads, output,
+  wall time and tool results. The live meter prices the same stream usage; per-turn hard cap `FW_AGENT_TURN_CAP_USD`
+  (default 2.50) on top of the run budget. Opt-ins: `FW_AGENT_EFFORT`, `FW_AGENT_CACHE_TTL=1h`.
 - If you rename a check string, tool name or block tag, update `friendly_result`, the extractors and `Chat.tsx`
   in the same change.
 - Every new identifier the agent might echo (helper names, file names, variable conventions) gets a `_SCRUB` entry.
