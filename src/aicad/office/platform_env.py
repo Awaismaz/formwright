@@ -337,8 +337,24 @@ class PlatformEnv(orchestrator.Env):
         if doc is None:
             raise orchestrator.Stop("program deleted")
         t = service.ticket(doc, tid)
-        if not t.get("project_id"):
+        tb_gear = (t.get("reuse") or {}).get("source") == "toolbox" and (t.get("reuse") or {}).get("code") == "spur_gear" \
+            and t["item_id"] in ((doc.get("skeleton") or {}).get("items") or {})
+        if not t.get("project_id") and not tb_gear:
             return {"skipped": "Nothing to swap in: the part has no Design Studio build."}
+        if tb_gear:  # a designed gear Hex took from the Toolbox (sized to the ICD): it goes in like a built part. The
+            # Toolbox gear runs from Z 0 to its face width with a tooth on +X: its ICD frame is that, moved down B / 2
+            from aicad.assembly import service as aservice
+            from aicad.office import frames as rigid
+
+            r = t["reuse"]
+            key = await aservice.ensure_toolbox_part(_aroot(self.org_id), self.org_id, "spur_gear", r["params"])
+            t["icd_check"] = {**(t.get("icd_check") or {}), "part_key": key,
+                              "frame": rigid.frame(rigid.IDENT, [0.0, 0.0, -float(r["params"]["B"]) / 2])}
+            with store.lock(pid):
+                d = store.load(root, pid)
+                if d is not None:
+                    service.ticket(d, tid)["icd_check"] = t["icd_check"]
+                    store.save(root, d)
         key = (t.get("icd_check") or {}).get("part_key") or await self.real_part(t["project_id"])
         if (doc.get("assembly") or {}).get("status") == "ready" and tid not in _FITTED.get(pid, {}):
             # the exact checks run here, outside the program lock, into the pair cache (ASM-023): the swap under the
@@ -747,6 +763,12 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
             if params is None:
                 params = toolbox.normalize(tb["code"], {})
                 tb = {**tb, "title": toolbox.spec(tb["code"]).title(params)}
+            it = ((doc.get("skeleton") or {}).get("items") or {}).get(t["item_id"]) or {}
+            if not standard and tb["code"] == "spur_gear" and it.get("role") == "gear" and interfaces.has_icd(doc):
+                # a designed gear Hex takes from the Toolbox is made to its ICD: module, teeth, face width, bore
+                params = toolbox.normalize("spur_gear", {**params, "M": it["module"], "Z": it["teeth"],
+                                                         "B": it["face_width"], **({"BORE": it["bore"]} if it.get("bore") else {})})
+                tb = {**tb, "title": toolbox.spec("spur_gear").title(params), "read": True}
             if not tb.get("read") and tb.get("kind") != "fastener":
                 note = " (default size: the brief gives none, check it)"
             elif tb.get("kind") == "fastener" and not (tb.get("fasten") or {}).get("size"):

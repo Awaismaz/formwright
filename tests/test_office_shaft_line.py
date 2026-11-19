@@ -148,7 +148,7 @@ def test_shaft_lines_generalise() -> None:
     mid = [f["data"]["z"] for f in ifs if f["kind"] == "bearing_journal" and f["a"]["name"] == "Intermediate shaft"]
     assert mid == [[-29, -15], [40, 54]]
     # the same train with no names: the compound rule (1, 2, 1 gears on 3 shafts) gives the same layout
-    sk2, ifs2 = icd.build(_parts(_plan(_g("Gear 1", "m2 18 teeth"), _g("Gear 2", "m2 54 teeth"),
+    sk2, _ifs2 = icd.build(_parts(_plan(_g("Gear 1", "m2 18 teeth"), _g("Gear 2", "m2 54 teeth"),
                                        _g("Gear 3", "m2 18 teeth"), _g("Gear 4", "m2 54 teeth"),
                                        _s("Shaft A"), _s("Shaft B"), _s("Shaft C"), _b(6))), "")
     assert [v["copies"][0] for v in sk2["items"].values()][:4] == [[0, 0, 0], [72, 0, 0], [72, 25, 0], [144, 25, 0]]
@@ -233,7 +233,7 @@ def test_shaft_line_placeholders_conform_and_the_shafts_turn(tmp_path: Path) -> 
     assert icd.KIND_LABEL["bearing_journal"] == "bearing on journal"
     ov = icd.apply_values({}, ifs[0], icd.clean_values(ifs[0], {"designation": 6004}))
     assert ov["items"][S_IN]["designation"] == 6004
-    sk2, ifs2 = icd.build(_parts(PAIR), "", ov)
+    _sk2, ifs2 = icd.build(_parts(PAIR), "", ov)
     d = next(f for f in ifs2 if f["kind"] == "bearing_journal")["data"]
     assert (d["designation"], d["D"], d["B"]) == ("6004", 42, 12)
     assert math.isclose(d["z"][1] - d["z"][0], 12)
