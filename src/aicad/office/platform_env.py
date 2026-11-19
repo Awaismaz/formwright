@@ -33,6 +33,18 @@ log = logging.getLogger("aicad.office.env")
 RATE_LIMIT = re.compile(r"\b(rate[ -]?limit|usage limit|too many requests|overloaded|429)\b", re.IGNORECASE)
 
 
+
+def _icd_excerpt(doc: dict[str, Any], t: dict[str, Any]) -> str | None:
+    """This part's approved interfaces, as the designer got them (Gage judges against what governs)."""
+    from aicad.office import icd, interfaces
+
+    if interfaces.has_icd(doc) and t["item_id"] in doc["skeleton"]["items"]:
+        return icd.excerpt(doc["skeleton"], doc["icd"], t["item_id"])
+    return None
+
+
+_FITTED: dict[str, dict[str, dict[str, Any]]] = {}  # program -> ticket -> swap result from a batch (CD-032)
+
 class PlatformEnv(orchestrator.Env):
     def __init__(self, root: Path, doc: dict[str, Any]) -> None:
         o = doc.get("orchestrator") or {}
@@ -243,7 +255,7 @@ class PlatformEnv(orchestrator.Env):
 
     # ------------------------------------------------------------------ Gage's review note
     async def review_ai(self, doc: dict[str, Any], t: dict[str, Any], state: dict[str, Any],
-                        budget: int | None) -> dict[str, Any] | None:
+                        budget: int | None, previous: list[str] | None = None) -> dict[str, Any] | None:
         from aicad.platform import metering
         from aicad.platform.models import Organization, User
         from aicad.platform.services import debit, track
@@ -261,7 +273,8 @@ class PlatformEnv(orchestrator.Env):
         fn = fake_agents.fake_review if self.simulated else gage.run_review
         try:
             text, usd = await fn(store.program_dir(store.org_root(_data_dir(), self.org_id), doc["id"]) / "gage",
-                                 gage.review_prompt(t, state), None if self.god_tokens else cap * metering.USD_PER_TOKEN)
+                                 gage.review_prompt(t, state, _icd_excerpt(doc, t), previous),
+                                 None if self.god_tokens else cap * metering.USD_PER_TOKEN)
         except Exception:
             log.exception("Gage review note failed")
             return None
@@ -328,21 +341,39 @@ class PlatformEnv(orchestrator.Env):
             return {"skipped": "Nothing to swap in: the part has no Design Studio build."}
         key = (t.get("icd_check") or {}).get("part_key") or await self.real_part(t["project_id"])
         async with program_assembly.lock(pid):
+            ready = _FITTED.setdefault(pid, {}).pop(tid, None)
+            if ready is not None:  # swapped in with an earlier batch while this ticket waited (CD-032)
+                return ready
             doc = store.load(root, pid)
             if doc is None:
                 raise orchestrator.Stop("program deleted")
             if (doc.get("assembly") or {}).get("status") != "ready":
                 return {"skipped": "Fitz will place this part when the program assembly is built."}
+            # one assembly update for every approved part waiting to go in: one rebuild, one clash check
+            batch = {t["item_id"]: (tid, key, (t.get("icd_check") or {}).get("frame"))}
+            for x in doc["tickets"]:
+                xk = (x.get("icd_check") or {}).get("part_key")
+                if x["id"] != tid and orchestrator.run_of(x).get("next") == "fit" and xk and x.get("project_id") \
+                        and x["item_id"] in doc["skeleton"]["items"] and x["item_id"] not in batch:
+                    batch[x["item_id"]] = (x["id"], xk, (x.get("icd_check") or {}).get("frame"))
+            frames = {i: fr for i, (_, _, fr) in batch.items() if fr and not fr.get("identity")}
             try:
-                fr = (t.get("icd_check") or {}).get("frame")
-                state = await program_assembly.swap(_aroot(self.org_id), self.org_id, doc, {t["item_id"]: key},
-                                                    frames={t["item_id"]: fr} if fr and not fr.get("identity") else None)
+                state = await program_assembly.swap(_aroot(self.org_id), self.org_id, doc,
+                                                    {i: k for i, (_, k, _) in batch.items()}, frames=frames or None)
             except Exception as e:
                 log.exception("swap-in failed")
                 return {"skipped": f"Fitz couldn't swap the part in: {e}"}
-            save_assembly(root, pid, state, f"Fitz swapped {t['title']} into the program assembly.", event=False)
-        last = state.get("last") or {}
-        return {"last": last, "problems": last.get("problems") or [], "mates": state.get("mates")}
+            names = [service.ticket(doc, x)["title"] for x, _, _ in batch.values()]
+            save_assembly(root, pid, state, f"Fitz swapped {', '.join(names)} into the program assembly.", event=False)
+            last = state.get("last") or {}
+            out: dict[str, dict[str, Any]] = {}
+            for item, (xt, _, _) in batch.items():
+                mine = (last.get("by_item") or {}).get(item, last.get("clashes") if len(batch) == 1 else [])
+                out[xt] = {"last": {**last, "clashes": mine or []}, "problems": last.get("problems") or [],
+                           "mates": state.get("mates"), "batch": len(batch)}
+            own = out.pop(tid)
+            _FITTED[pid].update(out)
+        return own
 
     async def decide_cr(self, root: Path, pid: str, cid: str) -> dict[str, Any]:
         return await decide_cr(root, pid, cid, self)

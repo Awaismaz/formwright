@@ -28,15 +28,17 @@ from aicad.office import roster, service, store
 
 MAX_MESSAGES = 200
 MAX_TEXT = 2000
-CHAT_MAX_TOKENS = 80  # hard cap (platform tokens) for one AI chat turn; a status report costs none
+CHAT_MAX_TOKENS = 150  # hard cap (platform tokens) for one AI chat turn; the "Status report" chip costs none
 HISTORY_TURNS = 8
 
 ACTION_TYPES = ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority", "pause_program",
-                "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part")
+                "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked")
 
 CHAT_INSTRUCTIONS = """You are Archie, the Chief Designer of a mechanical design office. The engineering manager \
 talks to you while a program is planned or in work. You see the program state below. Answer in plain engineering \
-language, in at most five short sentences. Never mention files, tools, code, models or how you work inside.
+language. When asked why something happens, diagnose it from the evidence below (review findings, blocked \
+reasons, interfaces, recent events): name the tickets, the cause and the fix, then propose the actions that fix it. \
+Keep it under eight sentences. Never mention files, tools, code, models or how you work inside.
 
 If the manager asks for a change, do not claim it is done. Propose the concrete actions that would make it, in \
 exactly one fenced block (omit the block when no action is needed):
@@ -59,6 +61,8 @@ approved: a part's envelope in mm (block: L, W, H; round part: OD, H; shaft: len
 out. "concurrency" is how many agents work at once in total; "threads" is parallel sub-agents of one designer \
 (mill, chuck, axel, benny, molly).
 - {"type": "replan", "notes": "what to change"}: only while the plan waits for approval.
+- {"type": "retry_blocked"}: put every blocked part back to work under the current review rules (a part that \
+passes every measurable check is approved with Gage's open points recorded) and run the office.
 - {"type": "fix_icd"}: while the interfaces wait for approval and have problems: adjust them so every part can be made (smallest safe changes, listed for review).
 - {"type": "ecn", "reason": "why", "tickets": ["KEY", ...]}: only after the program is released.
 Parts can't be added to or removed from an approved plan: say so and suggest a new program or an ECN instead."""
@@ -178,6 +182,11 @@ def status_report(root: Path, doc: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def blocked(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tickets waiting for the engineer after the office gave up on them (review rounds, failed builds)."""
+    return [t for t in doc["tickets"] if (t.get("run") or {}).get("status") == "blocked" and not t.get("taken_over")]
+
+
 # --------------------------------------------------------------------------- reading the message
 def find_ticket(doc: dict[str, Any], ref: str) -> dict[str, Any] | None:
     ref = (ref or "").strip()
@@ -203,13 +212,32 @@ def mentioned(doc: dict[str, Any], text: str) -> list[dict[str, Any]]:
 
 
 def is_status(text: str) -> bool:
+    """Only a bare status request is answered from the template (free, no AI): "Status report", "status?",
+    "progress". Anything with a question in it (why, what's wrong, how to fix) goes to Archie's AI turn."""
+    words = re.findall(r"[a-z']+", text.lower())
+    return 0 < len(words) <= 3 and bool(_STATUS.search(text)) and not re.search(
+        r"\b(why|how|what|issue|problem|fix|solve|wrong|stuck|blocked)\b", text, re.IGNORECASE)
+
+
+def asks_status(text: str) -> bool:
+    """Broad reading for the office reader (no AI): any short question about progress, ETA or what is happening."""
     return bool(_STATUS.search(text)) and len(text) < 200 and not re.search(
         r"\b(change|make|add|increase|decrease|reduce|use|switch|set|instead|should|must)\b", text, re.IGNORECASE)
 
 
 def offline_reply(doc: dict[str, Any], text: str, root: Path) -> tuple[str, list[dict[str, Any]], str]:
     """Deterministic answer: (text, proposed actions, kind)."""
-    if is_status(text):
+    stuck = blocked(doc)
+    if doc["status"] in ("active", "complete") and stuck and re.search(
+            r"\b(stuck|blocked|review|sent back|retry|rejected|gage|strict|resolve|unblock)\w*", text, re.IGNORECASE):
+        n = len(stuck)
+        names = ", ".join(f"{t['key']} {t['title']}" for t in stuck[:6]) + ("…" if n > 6 else "")
+        msg = (f"{n} part{'s are' if n != 1 else ' is'} blocked: {names}. Under the current review rules the approved "
+               "interfaces govern, and when only advisory points remain, a part that passes every measurable check "
+               "is approved with those points recorded for you. I'll put the blocked parts back to work and run the "
+               "office; a part that really fails a check comes back to you with the reason.")
+        return msg, [{"type": "retry_blocked"}], "office"
+    if asks_status(text):
         return status_report(root, doc), [], "status"
     st = doc["status"]
     running = (doc.get("orchestrator") or {}).get("state") == "running"
@@ -288,6 +316,21 @@ def chat_prompt(root: Path, doc: dict[str, Any], hist: list[dict[str, Any]], tex
             vals = ", ".join(f"{k}={v}" for k, v in _editable(i).items())
             lines.append(f"- {i['id']} {i.get('name', '')}: {vals}")
     lines.append("Status: " + status_report(root, doc))
+    trouble = [t for t in doc["tickets"] if (t.get("run") or {}).get("status") == "blocked"
+               or int((t.get("run") or {}).get("review_round") or 0) > 0]
+    if trouble:
+        lines.append("Review history of parts sent back or blocked (Gage's latest findings):")
+        for t in trouble[:25]:
+            r = t.get("run") or {}
+            last = next((c["text"] for c in reversed(t.get("comments") or [])
+                         if (c.get("by") or {}).get("code") == "gage"), "")
+            lines.append(f"- {t['key']} {t['title']}: {r.get('status')}, {int(r.get('review_round') or 0)} send-backs"
+                         + (f"; blocked: {str(r['blocked'])[:200]}" if r.get("blocked") else "")
+                         + (f"; Gage: {' '.join(last.split())[:300]}" if last else ""))
+    evs = [e for e in store.events(root, doc["id"], limit=400)
+           if e["type"] not in ("agent.status", "ticket.milestone", "ticket.moved", "ticket.claimed")][-15:]
+    if evs:
+        lines.append("Recent events:\n" + "\n".join(f"- {e['text'][:200]}" for e in evs))
     convo = [f"{'Manager' if m['role'] == 'user' else 'Archie'}: {m['text'][:600]}"
              for m in hist[-HISTORY_TURNS:]]
     if convo:
@@ -337,6 +380,8 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
         return out
     if typ in ("pause_program", "resume_program"):
         return {"type": typ} if st == "active" else None
+    if typ == "retry_blocked":
+        return {"type": typ} if st in ("active", "complete") and blocked(doc) else None
     if typ == "fix_icd":
         icd = doc.get("icd") or {}
         return {"type": typ} if icd.get("status") == "draft" and icd.get("problems") else None
@@ -428,6 +473,10 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         return "Set " + " and ".join(bits)
     if typ == "replan":
         return f"Re-plan with: {a['notes']}"
+    if typ == "retry_blocked":
+        n = len(blocked(doc))
+        return (f"Retry the {n} blocked part{'s' if n != 1 else ''} under the current review rules and run the "
+                "office")
     if typ == "resize_part":
         return f"Resize {a['part']}: " + ", ".join(f"{k} {v:g} mm" for k, v in a["size"].items())
     if typ == "fix_icd":

@@ -4,6 +4,48 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (f3) — Fitting batches; waiting swaps don't hold agent slots (CD-032)
+
+Founder: centre body parts all done, why no assembly? Cause: every approved part is swapped into the program
+assembly under one lock, one at a time (~1.5-2.5 min each, 138 mates re-checked), and each waiting swap held one of
+the 10 agent slots: 9 Fitz copies waiting, "Assemble Fasteners" (all parts done) couldn't get a slot, and the centre
+body waited on two queued swaps. Fix: one swap takes all waiting parts at once; swaps sit outside the slot count.
+
+## 2026-11-19 (f2) — F1 unstuck by the product itself; Archie understands questions (CD-031)
+
+Founder: fix what is stuck on F1 and make sure it can't happen in other programs; Archie always gives the predefined
+status instead of understanding the problem. Cause of the second, from the F1 chat file: the status shortcut matched
+any message with "stuck", "progress", "update"… so "Why is it happening? What's the issue and solution?" never reached
+the AI (the one AI turn, "Can we finish sooner?", diagnosed correctly). The founder's stored login no longer works
+(changed), so F1 was fixed through the product: a self-heal on office start (legacy review blocks back to Gage; a
+standard part not in stock to a designer) plus a server restart. Result: 25 of 40 parts approved or fitting, the M3
+insert with Chuck, the rest in review; one real failure left (Front wishbone pair hole 2 modelled at +15 where the ICD
+says -15: mirrored) waits for the founder, named. Verified: tests (see commit), F1 state read after restart.
+
+## 2026-11-19 (f) — Review that converges: Gage judges against the ICD, AI points are advisory (CD-030)
+
+Founder: F1 parts mostly stuck after 3 send-backs; maybe Gage too strict. Diagnosis on a temp copy of the program
+(founder data untouched): 21 of 40 tickets blocked. Causes: (1) Gage's AI instructions judged only against the
+ticket brief and never saw the approved ICD, while the layout had sized envelopes far past the plan (tub 3492 mm vs
+~380, floor 4878 vs 560, pylon 584 vs 40): the designer must follow the ICD, Gage rejected it, nobody could resolve
+it; (2) my CD-028 self-fix grew three parts past their brief (push rod 3→10, mirror 10→14, endplate 4→6) and Gage
+rejected exactly those; (3) Gage raised new points each round (moving goalposts) and minor points counted as
+rejections; (4) the AI note, designed as advisory, could block forever. Some send-backs were real model errors
+(stray geometry on a tyre, four wishbones side by side): those still go back.
+
+**Done**: Gage prompt with the part's ICD excerpt and governing order, blocking vs notes, earlier findings re-checked;
+orchestrator: after 2 AI-only rounds a part passing every measurable check is approved by Archie with the open points
+recorded; blocked message names the failing check; chat action "retry the stuck parts". Layout cause handed to a
+parallel agent (CD-029 extended: respect planned envelopes, size parts for their own features, flag >1.5× plan as an
+ICD problem, self-fix capped at 1.5× plan).
+
+**Verified**: new orchestrator test (Gage never stops → approved by Archie after 2 rounds with notes; prompts carry
+the ICD and earlier findings; a legacy-blocked part recovers from the chat); office suites (see commit).
+
+**For the founder's F1**: open Talk to Archie and say the parts are stuck (or press the chip): one Apply retries all
+21 under the new rules. Its approved ICD keeps the oversized envelopes until CD-029 lands and an ECN / new program
+uses it.
+
 ## 2026-11-19 (e) — Design Office: talk to Archie any time, speed and budget any time, the ICD gate self-corrects (CD-026, CD-027, CD-028)
 
 Founder asked: (1) talk to Archie after the first command, to change the program midway or get a status report;

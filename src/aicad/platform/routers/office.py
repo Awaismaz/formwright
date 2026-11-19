@@ -1259,6 +1259,14 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
     elif typ == "fix_icd":
         fix_icd(pid, ctx)
+    elif typ == "retry_blocked":
+        for t in archie_chat.blocked(_load(ctx, pid)):
+            try:
+                await ticket_control(pid, t["id"], ControlIn(action="retry"), ctx)
+            except HTTPException:
+                continue  # an agent picked it up meanwhile
+        if (_load(ctx, pid).get("orchestrator") or {}).get("state") != "running":
+            await run_program(pid, ctx)
     elif typ == "ecn":
         items = [x["item_id"] for k in a["tickets"] if (x := archie_chat.find_ticket(doc, k)) is not None]
         await raise_ecn(pid, EcnIn(reason=a["reason"], items=items), ctx)

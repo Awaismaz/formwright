@@ -365,7 +365,8 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                  solve=((final or {}).get("solve") or {}).get("status"), mates=len((final or {}).get("mates") or []))
     names = {i: sk["items"][i]["name"] for i in sk["items"]}
     mine = [c for c in clashes if _item_of(final, c["a"]) in items or _item_of(final, c["b"]) in items]
-    state["last"] = {"items": sorted(items), "clashes": mine, "problems": problems,
+    by_item = {i: [c for c in mine if i in (_item_of(final, c["a"]), _item_of(final, c["b"]))] for i in items}
+    state["last"] = {"items": sorted(items), "clashes": mine, "by_item": by_item, "problems": problems,
                      "text": ", ".join(names.get(i, i) for i in sorted(items))}
     return state
 

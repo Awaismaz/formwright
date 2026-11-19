@@ -108,7 +108,9 @@ def test_gage_deterministic_review() -> None:
     assert "CHK-09" in gage.deterministic(t, failing)[0]
     assert gage.deterministic(t, {"builds": 0}) == ["There is no build of this part yet."]
     r = gage.parse_review('ok\n```fw-gage\n{"verdict": "changes", "findings": ["Hole too close to edge"]}\n```')
-    assert r == {"verdict": "changes", "findings": ["Hole too close to edge"], "note": "ok"}
+    assert r == {"verdict": "changes", "findings": ["Hole too close to edge"], "notes": [], "note": "ok"}
+    r = gage.parse_review('ok\n```fw-gage\n{"verdict": "approve", "findings": [], "notes": ["Name the slot"]}\n```')
+    assert r is not None and r["verdict"] == "approve" and r["notes"] == ["Name the slot"]
     assert gage.parse_review("no block")is None
     assert gage.parse_review('```fw-gage\n{"verdict": "changes", "findings": []}\n```')["verdict"] == "approve"
 
@@ -325,7 +327,7 @@ def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
     assert g_good[1].startswith("Approved") and good["run"]["review_round"] == 1
     g_bad = [cm["text"] for cm in bad["comments"] if cm["by"].get("code") == "gage"]
     assert len(g_bad) == gage.MAX_SENDBACKS + 1 and bad["column"] == "changes_requested"
-    assert bad["agent_state"] == "blocked" and "sent Bad shaft back 3 times" in bad["line"]
+    assert bad["agent_state"] == "blocked" and "sent Bad shaft back 3 times; a measurable check still fails" in bad["line"]
     # the findings went back to the part agent as its next message
     assert any("This part was sent back" in p and "inside 32 × 32" in p for p in fake_agents.STATS["prompts"])
     inbox = c.get("/api/office/home").json()["inbox"]
@@ -461,3 +463,53 @@ def test_ticket_view_states() -> None:
     assert service.ticket_view(t)["agent_state"] == "idle" and service.ticket_view(t)["agent"] == "mill"
     t["run"], t["column"] = None, "in_review"
     assert service.ticket_view(t)["agent_state"] == "review"
+
+
+def test_advisory_review_points_never_block_a_part_that_passes_every_check(office: Any,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """CD-030: Gage's AI points can send a part back MAX_SENDBACKS times; then a part whose measurable checks and
+    interfaces pass is approved by Archie with the points recorded, never left waiting (the F1 dead end)."""
+    from aicad.office import archie_chat, store
+    from aicad.platform.config import get_settings
+
+    prompts: list[str] = []
+    real = fake_agents.fake_review
+
+    async def spy(folder: Any, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+        prompts.append(prompt)
+        return await real(folder, prompt, budget_usd)
+
+    monkeypatch.setattr(fake_agents, "fake_review", spy)
+    fake_agents.SCRIPT.append((r"Spacer", {"gage_changes": 99}))  # Gage never stops finding something
+    c = office
+    v = _program(c, "advisory@x.com")
+    pid = v["id"]
+    c.post(f"/api/office/programs/{pid}/run")
+    v = _wait(c, pid, lambda v: _tk(v, "Spacer")["column"] in ("approved", "integrated")
+              or (_tk(v, "Spacer").get("run") or {}).get("status") == "blocked")
+    sp = _tk(v, "Spacer")
+    assert sp["column"] in ("approved", "integrated"), sp["run"]
+    g = [cm["text"] for cm in sp["comments"] if cm["by"].get("code") == "gage"]
+    assert len(g) == gage.MAX_SENDBACKS + 1 and g[-1].startswith("Approved by Archie after 2 review rounds")
+    assert "chamfer" in g[-1] and sp["review_notes"]
+    # Gage judged against the approved interfaces and re-checked its earlier findings
+    sp_prompts = [p for p in prompts if "Spacer" in p]
+    assert all("Approved interfaces for this part" in p for p in sp_prompts)
+    assert "Earlier findings" in sp_prompts[-1] and "chamfer" in sp_prompts[-1]
+    v = _wait(c, pid, lambda v: v["orchestrator"]["state"] == "complete")
+    # a part left blocked by the old rules (the F1 programs) recovers from the Archie chat
+    root = store.org_root(get_settings().data_dir, v["org_id"])
+    with store.lock(pid):
+        d = store.load(root, pid)
+        t = next(x for x in d["tickets"] if x["title"] == "Base plate")
+        t["column"] = "changes_requested"
+        t["run"] = {**t["run"], "status": "blocked", "next": "review", "review_round": 3,
+                    "line": "Gage sent Base plate back 3 times."}
+        store.save(root, d)
+    monkeypatch.setattr(archie_chat, "run_chat", spy)  # never called: the office reader answers
+    m = c.post(f"/api/office/programs/{pid}/archie", json={"text": "Parts are stuck after review, resolve it"}).json()
+    m = m["messages"][-1]
+    assert [a["type"] for a in m["actions"]] == ["retry_blocked"] and "1 blocked part" in m["actions"][0]["label"]
+    r = c.post(f"/api/office/programs/{pid}/archie/actions", json={"message": m["id"], "action": "a1"})
+    assert r.status_code == 200, r.text
+    v = _wait(c, pid, lambda v: _tk(v, "Base plate")["column"] in ("approved", "integrated"))

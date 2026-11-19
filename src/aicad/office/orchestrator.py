@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -395,7 +396,56 @@ def recover(root: Path, doc: dict[str, Any], skip: set[str] | frozenset[str] = f
     if n:
         service.emit(root, doc, "program.resumed", f"The server restarted: {n} ticket{'s' if n != 1 else ''} "
                      "picked up where they stopped.", service.agent_actor("archie"))
-    return n
+    healed = heal_review_blocks(root, doc)
+    return n + healed
+
+
+_ROUND = re.compile(r"\b(insert|bush|bushing|pin|dowel|spacer|standoff|stand-off|nut|washer|rivet|collar|sleeve|"
+                    r"bearing|seal|o-ring|circlip|shaft|roller)\b", re.IGNORECASE)
+
+
+def to_designer(root: Path, doc: dict[str, Any], t: dict[str, Any]) -> str:
+    """A standard part Hex couldn't find becomes a part ticket for a designer (turned parts to Chuck, else Mill)."""
+    fam = "turned" if _ROUND.search(t["title"]) else "machined"
+    t["kind"], t["family"] = "part", fam
+    t["specialist"] = roster.specialist_for(fam)
+    t["estimate_min"] = estimates.estimate_minutes(fam, max(1, int(t.get("complexity") or 1)), service.rates_of(doc))
+    if "Model it as a bought-out part" not in t["brief"]:
+        t["brief"] = (f"{t['title']}: no stock part in the Toolbox or the company's parts. Model it as a bought-out "
+                      "part to its standard catalogue sizes (state the standard you follow), simple and accurate at "
+                      "its interfaces.\n\n" + t["brief"])
+    service.emit(root, doc, "ticket.updated", f"{service._label(t)}: not in stock, so "
+                 f"{roster.agent(t['specialist'])['name']} models it.", service.agent_actor("hex"), t["id"])
+    return str(t["specialist"])
+
+
+def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
+    """Parts left waiting by the review rules before CD-030 (AI points could block forever) go back to Gage under
+    the current rules: AI-only points end in an approval with the points recorded; a measurable failure comes back
+    to the engineer with the failing check named. Runs whenever the office starts on a program."""
+    out = []
+    for t in doc["tickets"]:
+        r = run_of(t)
+        why = str(r.get("blocked") or "")
+        if r.get("status") == "blocked" and why.startswith("Hex couldn't find") and t["kind"] == "standard" \
+                and not t.get("taken_over"):
+            close_wait(t)
+            to_designer(root, doc, t)
+            _set_run(t, status="queued", next="design", attempt=0, blocked=None,
+                     line=f"Not in stock: {roster.agent(t['specialist'])['name']} models it")
+            out.append(t)
+            continue
+        if r.get("status") == "blocked" and r.get("next") == "review" and why.startswith("Gage sent") \
+                and "measurable check" not in why and not t.get("taken_over"):
+            close_wait(t)
+            _set_run(t, status="queued", next="review", attempt=0, blocked=None,
+                     line="Back to Gage under the current review rules")
+            out.append(t)
+    if out:
+        service.emit(root, doc, "program.healed", f"Archie put {len(out)} part{'s' if len(out) != 1 else ''} blocked "
+                     "by the old review rules back to Gage: advisory points no longer block a part that passes every "
+                     "measurable check.", service.agent_actor("archie"), tickets=[t["key"] for t in out])
+    return len(out)
 
 
 # ============================================================================ the platform boundary
@@ -430,7 +480,7 @@ class Env:
         raise NotImplementedError
 
     async def review_ai(self, doc: dict[str, Any], t: dict[str, Any], state: dict[str, Any],
-                        budget: int | None) -> dict[str, Any] | None:
+                        budget: int | None, previous: list[str] | None = None) -> dict[str, Any] | None:
         return None
 
     async def integrate(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
@@ -598,7 +648,10 @@ class Runner:
                 return not self.tasks
             if float(o.get("capacity_until") or 0) > now:
                 return False
-            free = max(0, int(doc["concurrency"]) - len(self.tasks))
+            fitting = {x["id"] for x in doc["tickets"] if x["id"] in self.tasks and run_of(x).get("status") == "fitting"}
+            # swapping a part into the program assembly is one shared step (it batches every part waiting): it
+            # never takes an agent slot from design, review or integration work (CD-032)
+            free = max(0, int(doc["concurrency"]) - (len(self.tasks) - len(fitting)))
             threads = service.threads_of(doc) or {}
             busy: dict[str, int] = {}  # running work per agent: per-agent threads cap it (CD-027)
             for x in doc["tickets"]:
@@ -606,12 +659,16 @@ class Runner:
                     a = run_of(x).get("agent") or x["specialist"]
                     busy[a] = busy.get(a, 0) + 1
             for t, stage in queue(doc, now):
-                if free <= 0:
-                    break
                 if t["id"] in self.tasks:
                     continue
+                if stage == "fit":
+                    if fitting:
+                        continue
+                    fitting.add(t["id"])
+                elif free <= 0:
+                    continue
                 code = STAGE_AGENT.get(stage, t["specialist"])
-                if threads.get(code) and busy.get(code, 0) >= threads[code]:
+                if stage != "fit" and threads.get(code) and busy.get(code, 0) >= threads[code]:
                     continue
                 busy[code] = busy.get(code, 0) + 1
                 lbl = self.label(t["id"], code)
@@ -621,7 +678,8 @@ class Runner:
                 service.emit(self.root, doc, "ticket.claimed", f"{lbl} picked up {service._label(t)}.",
                              service.agent_actor(code), t["id"], stage=stage, agent=code)
                 claims.append((t["id"], stage))
-                free -= 1
+                if stage != "fit":
+                    free -= 1
             return False
 
         stop = self.edit(fn)
@@ -746,10 +804,12 @@ class Runner:
                 if parent:
                     self.handoff(d, tt, "hex", "fitz", f"Hex → Fitz: {tt['title']} is in stock, ready for assembly.")
                 return None
-            if tt["kind"] == "standard":
-                self._fail(d, tid, f"Hex couldn't find {tt['title']} in the Toolbox or your parts. Pick a "
-                                   "component by hand, or reassign the ticket to a designer.")
-                return None
+            if tt["kind"] == "standard":  # not in stock: a designer models it to its catalogue sizes (CD-031)
+                spec = to_designer(self.root, d, tt)
+                self.handoff(d, tt, "hex", spec, f"Hex → {roster.agent(spec)['name']}: {tt['title']} is not in the "
+                             "Toolbox or your parts, model it as a bought-out part to its catalogue sizes.")
+                _set_run(tt, status="designing", next="design")
+                return "design"
             spec = tt["specialist"]
             self.handoff(d, tt, "hex", spec, f"Hex → {roster.agent(spec)['name']}: no stock part for "
                          f"{tt['title']}, design it.")
@@ -919,13 +979,16 @@ class Runner:
             if icd_res is not None:
                 findings += conformance.findings(icd_res)
         ai: dict[str, Any] | None = None
+        hard = bool(findings)  # measurable failures (checks, ICD conformance): only these can block a part
         if not findings:
             b = budget_state(doc)
-            ai = await self.env.review_ai(doc, t, state, None if b["bypass"] else b["remaining"])
+            prev = list(run_of(t).get("ai_findings") or [])
+            ai = await self.env.review_ai(doc, t, state, None if b["bypass"] else b["remaining"], prev)
             if ai and ai.get("verdict") == "changes":
                 findings = list(ai.get("findings") or [])
 
         def fn(d: dict[str, Any]) -> str | None:
+            nonlocal findings
             tt = service.ticket(d, tid)
             g = service.agent_actor("gage")
             tt["review_tokens"] = int(tt.get("review_tokens") or 0) + int((ai or {}).get("tokens") or 0)
@@ -938,6 +1001,12 @@ class Runner:
             if tt.get("icd_delta") or (tt.get("inbox") and not findings):
                 _set_run(tt, status="designing", next="design")  # the ICD changed (or comments came) meanwhile
                 return "design"
+            n0 = int(r.get("review_round") or 0) + 1
+            settled: list[str] = []
+            if findings and not hard and n0 > gage.MAX_SENDBACKS:
+                # the AI note is advisory: after the rounds it may take, a part that passes everything measurable
+                # is approved and its open findings are recorded for the engineer (CD-030, PD-68)
+                settled, findings = findings, []
             if not findings:
                 note = "Approved: the latest build passes every gating check and carries the sizes the brief gives."
                 if icd_res is not None:
@@ -950,10 +1019,18 @@ class Runner:
                     if fr and not fr.get("identity"):
                         note += (f" The part is modelled in its own frame ({fr['label']} from the ICD part frame): "
                                  "Gage measured it there and Fitz places it through that frame.")
-                if ai and ai.get("note"):
+                if settled:
+                    note = (f"Approved by Archie after {n0 - 1} review rounds: every measurable check passes"
+                            + (" and the part matches its interfaces" if icd_res is not None else "")
+                            + ". Gage's remaining points are advisory and recorded for you here (reopen the ticket "
+                            "if one matters):\n" + "\n".join(f"- {f}" for f in settled))
+                    tt["review_notes"] = settled
+                elif ai and ai.get("note"):
                     note += f" Review note: {ai['note']}"
                 elif ai is None:
                     note += " (No AI review note this time: approved on the deterministic checks.)"
+                if ai and ai.get("notes") and not settled:
+                    note += "\nNotes (not blocking):\n" + "\n".join(f"- {x}" for x in ai["notes"])
                 service.comment(self.root, d, tid, note, g)
                 tt["comments"][-1]["delivery"] = "stored"
                 if gated(d, tt):  # the program's per-part review gate: the engineer approves before assembly
@@ -964,7 +1041,9 @@ class Runner:
                                  "for your review (approve it, or request changes with a note).", g, tid)
                     return None
                 service.move(self.root, d, tid, "approved", g)
-                _set_run(tt, status="done", line=f"Gage approved {tt['title']}", agent="gage", feedback=None)
+                _set_run(tt, status="done", agent="gage", feedback=None, ai_findings=None,
+                         line=(f"Approved by Archie with {len(settled)} open review note"
+                               f"{'s' if len(settled) != 1 else ''}" if settled else f"Gage approved {tt['title']}"))
                 if parent:
                     self.handoff(d, tt, "gage", "fitz", f"Gage → Fitz: {tt['title']} approved for assembly.")
                 if (d.get("assembly") or {}).get("status") in ("ready", "building") and \
@@ -978,11 +1057,12 @@ class Runner:
             tt["comments"][-1]["delivery"] = "stored"
             if n > gage.MAX_SENDBACKS:
                 _set_run(tt, review_round=n)
-                self._fail(d, tid, f"Gage sent {tt['title']} back {n} times. It needs your decision: comment, "
-                                   "take over, or approve it yourself.")
+                self._fail(d, tid, f"Gage sent {tt['title']} back {n} times; a measurable check still fails: "
+                                   f"{findings[0]} It needs your decision: comment, take over, or approve it yourself.")
                 return None
             service.move(self.root, d, tid, "changes_requested", g)
             _set_run(tt, status="designing", next="design", review_round=n, feedback=findings,
+                     ai_findings=None if hard else findings,
                      line=f"Gage sent {tt['title']} back: {findings[0]}")
             self.handoff(d, tt, "gage", spec, f"Gage → {sname}: {tt['title']} sent back. {findings[0]}")
             return "design"

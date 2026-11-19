@@ -235,3 +235,74 @@ def test_draft_icd_edits_are_allowed_while_other_problems_remain(app_client: Any
     r = c.patch(f"/api/office/programs/{pid}/icd/interfaces/{f['id']}", json={"values": {"flatness": 0.08}})
     assert r.status_code == 200, r.text
     assert len(r.json()["icd"]["problems"]) == n
+
+
+# ------------------------------------------------------------------ Archie understands questions; the office self-heals
+def test_only_a_bare_status_request_skips_the_ai() -> None:
+    assert archie_chat.is_status("Status report") and archie_chat.is_status("status?")
+    for q in (("Most of the items getting stuck on Changes Requested stage. Why is it happening? What's the issue "
+              "and solution?"), "What's blocked?", "why is progress slow", "How do we fix the review loop?"):
+        assert not archie_chat.is_status(q), q
+    assert archie_chat.asks_status("What's the status?")  # the office reader (no AI) still answers it
+
+
+def test_a_real_question_goes_to_archie_with_the_review_history(app_client: Any,  # noqa: F811
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    from test_platform import signup
+
+    from aicad.office import store
+    from aicad.platform.config import get_settings
+
+    seen: list[str] = []
+
+    async def fake_chat(folder: Any, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+        seen.append(prompt)
+        return "The tub is blocked on an advisory point.\n```fw-office-actions\n[{\"type\": \"retry_blocked\"}]\n```", 0.05
+
+    monkeypatch.setattr(archie_chat, "run_chat", fake_chat)
+    c = app_client
+    signup(c, "why@x.com")
+    pid = _create(c)["id"]
+    v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={}).json()
+    root = store.org_root(get_settings().data_dir, v["org_id"])
+    with store.lock(pid):
+        d = store.load(root, pid)
+        t = next(x for x in d["tickets"] if x["kind"] == "part")
+        t["column"] = "changes_requested"
+        t["run"] = {"status": "blocked", "next": "review", "review_round": 3, "blocked": "Gage sent it back 3 times."}
+        t["comments"].append({"id": "c1", "by": {"kind": "agent", "code": "gage", "name": "Gage"}, "t": "",
+                              "text": "Changes requested:\n- Envelope 14 mm against the brief's ~10 mm."})
+        store.save(root, d)
+    m = c.post(f"/api/office/programs/{pid}/archie", json={"text": "Items are stuck. Why, and what's the fix?"}).json()
+    m = m["messages"][-1]
+    assert m["kind"] == "ai" and [a["type"] for a in m["actions"]] == ["retry_blocked"]
+    assert "Review history" in seen[0] and "Envelope 14 mm" in seen[0] and "3 send-backs" in seen[0]
+
+
+def test_parts_blocked_by_the_old_review_rules_heal_when_the_office_starts() -> None:
+    from aicad.office import orchestrator
+
+    def tk(i: int, why: str, nxt: str = "review") -> dict[str, Any]:
+        return {"id": f"t{i}", "key": f"P-{i}", "title": f"Part {i}", "kind": "part", "specialist": "molly",
+                "column": "changes_requested", "comments": [],
+                "run": {"status": "blocked", "next": nxt, "review_round": 3, "blocked": why}}
+
+    from aicad.office import store
+
+    doc = {"id": store.new_id(), "org_id": "o", "name": "P", "tickets": [
+        tk(1, "Gage sent Mirror back 3 times. It needs your decision: comment, take over, or approve it yourself."),
+        tk(2, "Gage sent Rod back 3 times; a measurable check still fails: CHK-04 fails."),
+        tk(3, "Hex couldn't find M3 insert.", "hex"),
+        {**tk(4, "Hex couldn't find M3 heat-set insert in the Toolbox or your parts.", "hex"), "kind": "standard",
+         "title": "M3 heat-set insert", "family": "standard", "specialist": "hex", "brief": "Brass insert.",
+         "complexity": 1}]}
+    import tempfile
+    from pathlib import Path
+
+    root = Path(tempfile.mkdtemp())
+    assert orchestrator.heal_review_blocks(root, doc) == 2
+    assert doc["tickets"][0]["run"]["status"] == "queued" and doc["tickets"][0]["run"]["next"] == "review"
+    assert [t["run"]["status"] for t in doc["tickets"][1:3]] == ["blocked", "blocked"]
+    ins = doc["tickets"][3]  # a standard part not in stock goes to a designer instead of waiting (CD-031)
+    assert ins["run"]["status"] == "queued" and ins["run"]["next"] == "design"
+    assert ins["kind"] == "part" and ins["specialist"] == "chuck" and "bought-out part" in ins["brief"]
