@@ -20,6 +20,7 @@ request that already timed out), and a worker that is slow to start or times out
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import os
 import sys
@@ -136,6 +137,7 @@ class Worker:
         self.lock = asyncio.Lock()
         self.cmd = cmd or [sys.executable, "-I", "-m", "aicad.agent.worker"]
         self._seq = 0
+        self.last_used = time.monotonic()
 
     async def _start(self) -> None:
         self.proc = await asyncio.create_subprocess_exec(
@@ -194,6 +196,7 @@ class Worker:
                 return {"ok": False, "rc": -1, "error": STARTING, "starting": True}
             assert self.proc and self.proc.stdin and self.proc.stdout
             self.jobs += weight
+            self.last_used = time.monotonic()
             self._seq += 1
             rid = self._seq
             deadline = time.monotonic() + timeout
@@ -221,13 +224,52 @@ class Worker:
 
 
 _workers: dict[str, Worker] = {}
+# Each warm build worker holds a CAD kernel (~300-500 MB). Keep at most this many alive per app; beyond it, workers
+# idle for IDLE_EVICT_S are stopped (least recently used first). The idle floor is far above a build's background
+# CHK-07/08 chain, which needs the shape its worker kept: a worker with pending verification is never evicted.
+MAX_LIVE = int(os.environ.get("FW_MAX_BUILD_WORKERS", "4") or 4)
+IDLE_EVICT_S = 600.0
+
+
+def _kill(w: Worker) -> None:
+    if w.proc is not None and w.proc.returncode is None:
+        try:
+            w.proc.kill()
+        except ProcessLookupError:
+            pass
+    w.proc = None
+
+
+def evict_idle(workers: dict[str, Any], keep: int = MAX_LIVE, idle_s: float = IDLE_EVICT_S) -> list[str]:
+    """Stop the least recently used idle workers until at most ``keep`` are alive. Returns the evicted keys."""
+    live = [(k, w) for k, w in workers.items() if w.proc is not None and w.proc.returncode is None]
+    now, out = time.monotonic(), []
+    for k, w in sorted(live, key=lambda kw: kw[1].last_used):
+        if len(live) - len(out) <= keep:
+            break
+        if not w.lock.locked() and now - w.last_used >= idle_s:
+            _kill(w)
+            out.append(k)
+    return out
 
 
 def get_worker(key: str) -> Worker:
     w = _workers.get(key)
     if w is None:
+        evict_idle(_workers, keep=max(0, MAX_LIVE - 1))
         w = _workers[key] = Worker()
     return w
+
+
+def kill_all() -> None:
+    """Kill every build worker of this process (no event loop needed: test teardown, interpreter exit)."""
+    for w in list(_workers.values()):
+        _kill(w)
+    _workers.clear()
+
+
+# Windows does not kill child processes with their parent: never leave CAD workers behind at interpreter exit
+atexit.register(kill_all)
 
 
 async def build(key: str, script: Path, out: Path, determinism: bool = True, timeout: float = 180,

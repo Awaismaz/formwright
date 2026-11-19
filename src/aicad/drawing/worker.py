@@ -12,6 +12,7 @@ Protocol (one JSON object per line):
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import os
 import sys
@@ -19,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from aicad.agent.worker import Worker, child_env
+from aicad.agent.worker import MAX_LIVE, Worker, child_env, evict_idle
 from aicad.drawing import DrawingInputError
 
 
@@ -76,6 +77,7 @@ _workers: dict[str, DrawingWorker] = {}
 def get_worker(key: str) -> DrawingWorker:
     w = _workers.get(key)
     if w is None:
+        evict_idle(_workers, keep=max(0, MAX_LIVE - 1))
         w = _workers[key] = DrawingWorker()
     return w
 
@@ -96,6 +98,20 @@ async def shutdown_all() -> None:
     for w in list(_workers.values()):
         await w.stop()
     _workers.clear()
+
+
+def kill_all() -> None:
+    for w in list(_workers.values()):
+        if w.proc is not None and w.proc.returncode is None:
+            try:
+                w.proc.kill()
+            except ProcessLookupError:
+                pass
+        w.proc = None
+    _workers.clear()
+
+
+atexit.register(kill_all)
 
 
 if __name__ == "__main__":
