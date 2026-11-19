@@ -315,7 +315,78 @@ def prealign(m: MateSpec, poses: dict[str, np.ndarray], mover: str) -> np.ndarra
     return xform.translate(err * na) @ T
 
 
-def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str]) -> tuple[dict[str, InstState], int, int]:
+BLOCKS_FROM_COLS = 600  # free columns (100 instances) above which leaf blocks are analysed on their own
+
+
+def _null_blocks(prob: _Problem, J: np.ndarray, blocks: dict[str, str]) -> tuple[int, np.ndarray] | None:
+    """Rank and null space of J when some instances form leaf blocks (a fastener stack: its mates join only its own
+    members and the parts it clamps). Exact, the same space as the SVD of the whole J: with P the other columns and
+    J = [[J1, 0], [A_k, B_k]] row-blocked per leaf block k, x is in the null space iff J1 xP = 0,
+    (I - B_k B_k^+) A_k xP = 0 for every k, and xS_k = -B_k^+ A_k xP + null(B_k) z_k. The big SVD (the whole
+    assembly, cubic in its size) becomes one over the parts plus one small SVD per block. None: not applicable."""
+    by: dict[str, list[str]] = {}
+    for iid in prob.free:
+        if iid in blocks:
+            by.setdefault(blocks[iid], []).append(iid)
+    if not by:
+        return None
+    rows_of: dict[str, list[int]] = {}
+    rows_p: list[int] = []
+    for (r0, n), m in zip(prob.rows, prob.mates, strict=True):
+        ks = {blocks[x] for x in (m.a, m.b) if x in blocks and x in prob.col}
+        if len(ks) > 1:
+            return None  # a mate between two blocks: not leaves
+        idx = list(range(r0, r0 + n))
+        if ks:
+            rows_of.setdefault(ks.pop(), []).extend(idx)
+        else:
+            rows_p.extend(idx)
+    cols = lambda ids: [prob.col[i] + j for i in ids for j in range(6)]
+    pcols = cols([i for i in prob.free if i not in blocks])
+    # the whole-J rule is 1e-6 x its largest singular value; sqrt(|J|_1 |J|_inf) bounds that from above, cheaply
+    aj = np.abs(J)
+    smax = float(np.sqrt(aj.sum(axis=0).max() * aj.sum(axis=1).max())) if J.size else 1.0
+    tol = 1e-6 * max(1.0, smax)
+    cons = [J[np.ix_(rows_p, pcols)]] if rows_p and pcols else []
+    parts: dict[str, tuple[list[int], np.ndarray, np.ndarray]] = {}
+    for k, ids in by.items():
+        sc, rk_ = cols(ids), rows_of.get(k, [])
+        if not rk_:
+            parts[k] = (sc, np.zeros((len(sc), len(pcols))), np.eye(len(sc)))
+            continue
+        B = J[np.ix_(rk_, sc)]
+        A = J[np.ix_(rk_, pcols)] if pcols else np.zeros((len(rk_), 0))
+        U, sv, Vt = np.linalg.svd(B)
+        r = int(np.sum(sv > tol))
+        if pcols:
+            cons.append(U[:, r:].T @ A)
+        Bp = Vt[:r].T @ np.diag(1.0 / sv[:r]) @ U[:, :r].T
+        parts[k] = (sc, -(Bp @ A), Vt[r:].T)
+    if pcols:
+        M = np.vstack(cons) if cons else np.zeros((0, len(pcols)))
+        if M.shape[0]:
+            _u, sm, Vm = np.linalg.svd(M)
+            rp = int(np.sum(sm > tol))
+            Np = Vm[rp:].T
+        else:
+            Np = np.eye(len(pcols))
+    else:
+        Np = np.zeros((0, 0))
+    dim = Np.shape[1] + sum(v[2].shape[1] for v in parts.values())
+    null = np.zeros((prob.n, dim))
+    if pcols:
+        null[pcols, :Np.shape[1]] = Np
+    off = Np.shape[1]
+    for sc, G, Ns in parts.values():
+        if Np.shape[1]:
+            null[sc, :Np.shape[1]] = G @ Np
+        null[sc, off:off + Ns.shape[1]] = Ns
+        off += Ns.shape[1]
+    return prob.n - dim, null
+
+
+def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str],
+             blocks: dict[str, str] | None = None) -> tuple[dict[str, InstState], int, int]:
     insts = prob.insts
     states: dict[str, InstState] = {}
     rank = 0
@@ -323,11 +394,15 @@ def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str
     if prob.n:
         if prob.m:
             J = prob.jac(poses)
-            s = np.linalg.svd(J, compute_uv=False)
-            tol = 1e-6 * max(1.0, float(s[0]) if s.size else 1.0)
-            rank = int(np.sum(s > tol))
-            _u, _s, Vt = np.linalg.svd(J)
-            null = Vt[rank:].T
+            got = _null_blocks(prob, J, blocks) if blocks and prob.n > BLOCKS_FROM_COLS else None
+            if got is not None:
+                rank, null = got
+            else:
+                s = np.linalg.svd(J, compute_uv=False)
+                tol = 1e-6 * max(1.0, float(s[0]) if s.size else 1.0)
+                rank = int(np.sum(s > tol))
+                _u, _s, Vt = np.linalg.svd(J)
+                null = Vt[rank:].T
         else:
             null = np.eye(prob.n)
     eqs = sum(m.eqs() for m in prob.mates)
@@ -371,9 +446,10 @@ def _analyse(prob: _Problem, poses: dict[str, np.ndarray], all_ids: Iterable[str
 
 
 def solve(insts: dict[str, Inst], mates: list[MateSpec], L: float = 100.0,
-          prealign_ids: Iterable[str] = ()) -> Result:
+          prealign_ids: Iterable[str] = (), blocks: dict[str, str] | None = None) -> Result:
     """Solve all mates from the current placements. ``prealign_ids``: mates just added (pre-aligned first when
-    their moving instance has no other mates)."""
+    their moving instance has no other mates). ``blocks``: instance -> leaf block (fastener stack) id, so a large
+    assembly's degrees of freedom are analysed block by block (same result, ``_null_blocks``)."""
     L = max(float(L), 1.0)
     poses = {k: v.T.copy() for k, v in insts.items()}
     for mid in prealign_ids:
@@ -409,7 +485,7 @@ def solve(insts: dict[str, Inst], mates: list[MateSpec], L: float = 100.0,
             else:
                 conflicts.append(m.id)
         prob = _Problem(insts, keep, L)
-    states, _rank, redundant = _analyse(prob, poses, list(insts))
+    states, _rank, redundant = _analyse(prob, poses, list(insts), blocks)
     mstates: dict[str, MateState] = {}
     for m in mates:
         ok, e_mm, e_deg = _satisfied(m, poses)

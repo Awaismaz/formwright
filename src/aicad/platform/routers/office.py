@@ -520,7 +520,8 @@ def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
                                "state": p.get("kind") or ("toolbox" if t["kind"] == "standard" else None),
                                "progress": t["progress"]}
     return {"status": state.get("status"), "summary": state.get("summary"), "clashes": state.get("clashes") or [],
-            "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer"}
+            "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer",
+            "check": state.get("check")}  # PD-71: the advisory whole-program clash check
 
 
 @router.post("/programs/{pid}/assembly/rebuild")

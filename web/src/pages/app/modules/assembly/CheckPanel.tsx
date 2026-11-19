@@ -74,7 +74,7 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
                 </tbody>
               </table>
             </div>
-            <p className="mt-2 text-[11.5px] text-muted">Mated pairs, plus neighbours closer than 5 % of the assembly size (about {Math.max(1, Math.round(an.clearance.near_mm))} mm here). Click a row to show the gap.</p>
+            <p className="mt-2 text-[11.5px] text-muted">Mated pairs, plus neighbours closer than 5 % of the assembly size, at most 25 mm (about {Math.max(1, Math.round(an.clearance.near_mm))} mm here). Click a row to show the gap.</p>
           </Section>
           <div className="flex items-start gap-2 px-4 py-3 text-[11.5px] leading-snug text-muted"><Info className="mt-px h-3.5 w-3.5 shrink-0" />{an.note}</div>
         </div>

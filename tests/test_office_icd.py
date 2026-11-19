@@ -10,6 +10,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from test_office_orchestrator import _events, _program, _tk, _wait, office  # noqa: F401  (fixture)
 
@@ -317,10 +318,6 @@ def test_gate_placeholders_and_assembly_from_minute_one(office: Any) -> None:  #
 
 def test_parts_swap_in_and_keep_every_mate(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from aicad.assembly import store as astore
-    from aicad.office import program_assembly
-
-    # the geometric fastener auto-fit is off in the office for now (PD-71 interim); this test keeps it covered
-    monkeypatch.setattr(program_assembly, "GEOMETRIC_FASTENER_FIT", True)
 
     c = office
     fake_agents.SCRIPT.append((r"Design the Bracket", {"icd_shift": 0.5, "omit_turns": 1}))
@@ -351,6 +348,24 @@ def test_parts_swap_in_and_keep_every_mate(office: Any, monkeypatch: pytest.Monk
     base_doc = astore.load(aroot, st["subs"]["i_s1"])
     assert sum(1 for g in base_doc["groups"] if g.get("kind") == "fastener") == 4
     assert sum(1 for g in final["groups"] if g.get("kind") == "fastener") >= 4
+    # PD-71: the stacks came straight from the ICD (no probe); the kernel's probe of the same holes agrees: same
+    # stack, same grip, the screw on the hole axis with its head on the bracket
+    from aicad.assembly import service as aservice
+    from aicad.assembly import xform
+
+    org = c.get("/api/auth/me").json()["org"]["id"]
+    for g in [g for g in base_doc["groups"] if g.get("kind") == "fastener"]:
+        plan = c.portal.call(aservice.propose, aroot, org, base_doc, [g["hole"]], g["spec"]["style"], "both", False)
+        pr, prop = plan["holes"][0]["probe"], plan["holes"][0]["proposal"]
+        assert prop["ok"] and prop["summary"] == g["spec"]["summary"], (prop.get("error"), g["spec"]["summary"])
+        assert g["spec"]["grip"] == pytest.approx(pr["grip"], abs=1e-3)
+        screw = next(i for i in base_doc["instances"] if i.get("group") == g["id"]
+                     and i["source"].get("code") in ("hex_bolt", "shcs"))
+        T = xform.from12(screw["T"])
+        w = T[:3, 3] - np.asarray(pr["axis"]["p"])
+        u = np.asarray(pr["axis"]["u"])
+        assert np.linalg.norm(w - u * float(w @ u)) < 1e-6 and abs(abs(float(T[:3, 2] @ u)) - 1) < 1e-9
+    assert all(m["ok"] for m in base_doc["solve"]["mates"].values())
     ev = _events(c, pid)
     fitted = [e for e in ev if e["type"] == "ticket.fitted"]
     assert {e["data"]["item"] for e in fitted} == {BASE, BRACKET, SPACER}

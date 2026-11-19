@@ -541,3 +541,33 @@ def test_a_fastener_kit_subassembly_integrates_instead_of_blocking(office: Any) 
     assert not blocked, blocked
     kit = _tk(v, "Assemble Fasteners")
     assert kit["column"] == "integrated" and "kit of 2 bought-out parts" in kit["run"]["line"]
+
+
+def test_integration_retries_after_a_worker_timeout(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CD-036 / ASM-023: a worker timeout while Fitz integrates a level is retried with backoff, never a block, and
+    nothing it placed is lost (the retry finds the same stacks and pairs)."""
+    from aicad.assembly.service import WorkerError
+    from aicad.office import program_assembly
+
+    real = program_assembly.integrate
+    seen: list[str] = []
+
+    async def flaky(aroot: Any, org_id: str, prog: dict[str, Any], level: str, std: Any) -> dict[str, Any]:
+        seen.append(level)
+        if seen.count(level) == 1 and level != "root":
+            raise WorkerError("timed out after 60 s")
+        return await real(aroot, org_id, prog, level, std)
+
+    monkeypatch.setattr(program_assembly, "integrate", flaky)
+    c = office
+    v = _program(c, "retry@x.com")
+    pid = v["id"]
+    c.post(f"/api/office/programs/{pid}/run")
+    v = _wait(c, pid, lambda v: v["orchestrator"]["state"] == "complete"
+              or any((t.get("run") or {}).get("status") == "blocked" for t in v["tickets"]), timeout=180)
+    blocked = [(t["title"], (t.get("run") or {}).get("line")) for t in v["tickets"]
+               if (t.get("run") or {}).get("status") == "blocked"]
+    assert not blocked, blocked
+    assert v["status"] == "complete" and all(t["column"] == "integrated" for t in v["tickets"])
+    subs = [x for x in seen if x != "root"]
+    assert subs and all(subs.count(x) == 2 for x in set(subs))  # each level: one timeout, one retry that passed

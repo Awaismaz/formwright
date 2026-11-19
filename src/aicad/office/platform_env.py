@@ -340,6 +340,19 @@ class PlatformEnv(orchestrator.Env):
         if not t.get("project_id"):
             return {"skipped": "Nothing to swap in: the part has no Design Studio build."}
         key = (t.get("icd_check") or {}).get("part_key") or await self.real_part(t["project_id"])
+        if (doc.get("assembly") or {}).get("status") == "ready" and tid not in _FITTED.get(pid, {}):
+            # the exact checks run here, outside the program lock, into the pair cache (ASM-023): the swap under the
+            # lock finds them there, so swaps and integrations of other levels don't queue behind the geometry
+            pre = {x["item_id"]: ((x.get("icd_check") or {}).get("part_key"), (x.get("icd_check") or {}).get("frame"))
+                   for x in doc["tickets"] if x["item_id"] in doc["skeleton"]["items"] and (x["id"] == tid or (
+                       orchestrator.run_of(x).get("next") == "fit" and x.get("project_id")))}
+            pre[t["item_id"]] = (key, (t.get("icd_check") or {}).get("frame"))
+            try:
+                await program_assembly.prewarm_swap(
+                    _aroot(self.org_id), self.org_id, doc, {i: k for i, (k, _) in pre.items() if k},
+                    {i: fr for i, (_, fr) in pre.items() if fr and not fr.get("identity")})
+            except Exception:
+                log.warning("swap prewarm failed", exc_info=True)
         async with program_assembly.lock(pid):
             ready = _FITTED.setdefault(pid, {}).pop(tid, None)
             if ready is not None:  # swapped in with an earlier batch while this ticket waited (CD-032)
@@ -642,7 +655,12 @@ class PlatformEnv(orchestrator.Env):
                      or doc["assembly"].get("summary")}
             if t["item_id"] == "root":
                 state["clashes"] = res["clashes"]
+                state["check"] = {"status": "running", "at": store.now()}
             save_assembly(root, pid, state, None, event=False)
+        if t["item_id"] == "root":  # PD-71: the whole-program clash check, advisory, after and outside the lock
+            task = asyncio.get_running_loop().create_task(advisory_check(root, pid, tid, self.org_id))
+            _ADVISORY.add(task)
+            task.add_done_callback(_ADVISORY.discard)
         return {**res, "children": [k["id"] for k in kids]}
 
 
@@ -735,6 +753,37 @@ def _aroot(org_id: str) -> Path:
     from aicad.assembly import store as astore
 
     return astore.org_root(_data_dir(), org_id)
+
+
+_ADVISORY: set[asyncio.Task[Any]] = set()
+
+
+async def advisory_check(root: Path, pid: str, tid: str, org_id: str) -> dict[str, Any] | None:
+    """Run the advisory whole-program clash check (PD-71) and record it: ``assembly.check`` (the Assembly tab) and a
+    note on the final-assembly ticket. Never moves a ticket or blocks the program; a failure is a note too."""
+    doc = store.load(root, pid)
+    if doc is None:
+        return None
+    try:
+        out = await program_assembly.advisory_check(_aroot(org_id), org_id, doc)
+    except Exception as e:
+        log.warning("advisory clash check failed", exc_info=True)
+        out = {"status": "failed", "clashes": [], "at": store.now(),
+               "text": f"Fitz's whole-program clash check didn't finish ({e}). It is advisory: nothing was held up. "
+                       "Run Check in Assembly Studio on the final assembly to see clashes."}
+    with store.lock(pid):
+        d = store.load(root, pid)
+        if d is None or not d.get("assembly"):
+            return out
+        d["assembly"]["check"] = {k: v for k, v in out.items() if k != "clashes"} | {"count": len(out["clashes"])}
+        if out["status"] == "done":
+            d["assembly"]["clashes"] = out["clashes"]
+        t = next((x for x in d["tickets"] if x["id"] == tid), None)
+        if t is not None:
+            service.comment(root, d, tid, out["text"], service.agent_actor("fitz"))
+            t["comments"][-1]["delivery"] = "stored"
+        store.save(root, d)
+    return out
 
 
 def save_assembly(root: Path, pid: str, state: dict[str, Any], text: str | None, event: bool = True,

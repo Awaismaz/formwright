@@ -37,5 +37,6 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 30 | Studio follow-ups: sheet-metal corner relief + holes across bends in the flat + jog/miter flange; fw-edit for extrude/pattern/multi-feature edits; impact preview for tree actions (suppress/delete/reorder) and Ctrl+K commands | CAD-026 follow-ups, DS-035, ASM-018 follow-ups | Done (merged; ; PD-63) |
 | 31 | Design Office workflow: talk to Archie at every stage, speed and budget any time (per-agent threads, ETA preview), the ICD gate self-corrects and is never a dead end | CD-026, CD-027, CD-028 | Done (PD-65…PD-67) |
 | 32 | Layout builder respects planned envelopes and sizes parts for their own features | CD-029 | Done (merged; PD-69) |
+| 34 | Assembly speed: pair cache, fasteners from the ICD, advisory background final check, layout placement instead of solving | ASM-023, CD-035..038 | Done (merged; PD-70, PD-71) |
 | 33 | Review that converges: Gage against the ICD, AI points advisory, retry stuck parts from chat; office self-heals, Archie understands questions | CD-030, CD-031 | Done (PD-68) |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |

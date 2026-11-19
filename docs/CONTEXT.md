@@ -114,10 +114,16 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 
 When the founder reports a problem in the app, never fix the instance (their program or data). Find what generated the state and which workflow has no way out, fix that in the product, and make sure a user can recover inside the app on their own: the system corrects itself, or they tell Archie (in-program chat) and Archie proposes the fix. Claude is not available to users in production. Reproduce on temp copies only.
 
+## Founder rule: parts are checked, assemblies are placed (2026-11-19, PD-71)
+
+Assembling must be quicker than modelling. Parts are quality-checked (Gage, swap-in); Design Office assembly steps place
+fasteners straight from the ICD and do no geometry checking; the whole-program clash check is advisory, runs after the
+final assembly in the background and never blocks. Assembly checks go through the pair cache (ASM-023, PD-70).
+
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
-the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-69).
+the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-72).
 
 **Live on main (merged + pushed today):** punch-list reconciliation; Design Office plan + phase 2 (programs, Archie
 planner, Jira board, roll-up/ETA, roster, 11 animated agent avatars); smart assembly (Hex picks Toolbox/own parts,
