@@ -7,6 +7,7 @@ VERSION). Mates reference exact part-local geometry (``refs.json``) and are solv
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -844,7 +845,7 @@ async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dic
     if not made:
         raise AssemblyInputError(next((h["proposal"].get("error") for h in plan["holes"] if h["proposal"].get("error")),
                                       "No fastener could be fitted."))
-    run_solve(root, doc)
+    await asyncio.to_thread(run_solve, root, doc)  # off the event loop: the app stays responsive (CD-037)
     new_ids = [i["id"] for i in doc["instances"] if i["id"] not in before]
     clashes = await stack_clashes(root, org_id, doc, new_ids)
     return {"inserted": made, "plan": plan, "clashes": clashes}

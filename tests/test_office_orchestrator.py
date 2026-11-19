@@ -292,17 +292,20 @@ def test_concurrency_cap_is_never_exceeded(office: Any) -> None:
     v = _program(c, "cap@x.com", plan, concurrency=2)
     pid = v["id"]
     c.post(f"/api/office/programs/{pid}/run")
-    seen = 0
+    seen = fits = 0
     t0 = time.time()
     while time.time() - t0 < 90:
         v = c.get(f"/api/office/programs/{pid}").json()
-        seen = max(seen, sum(1 for t in v["tickets"] if (t.get("run") or {}).get("status") in orchestrator.ACTIVE))
+        st = [(t.get("run") or {}).get("status") for t in v["tickets"]]
+        # CD-032: Fitz's swap-in is one shared step outside the agent slots (at most one at a time)
+        seen = max(seen, sum(1 for x in st if x in orchestrator.ACTIVE and x != "fitting"))
+        fits = max(fits, sum(1 for x in st if x == "fitting"))
         if v["status"] == "complete":
             break
         time.sleep(0.03)
     assert v["status"] == "complete"
-    assert seen <= 2 and fake_agents.STATS["max_active"] <= 2
-    assert orchestrator._runners.get(pid) is None or orchestrator._runners[pid].max_seen <= 2
+    assert seen <= 2 and fits <= 1 and fake_agents.STATS["max_active"] <= 2
+    assert orchestrator._runners.get(pid) is None or orchestrator._runners[pid].max_seen <= 3
 
 
 def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:

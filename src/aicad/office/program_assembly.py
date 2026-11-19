@@ -257,9 +257,9 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
                     inst["office"] = {"program": prog["id"], "item": item, "copy": c}
             if not any(i["fixed"] for i in adoc["instances"]) and adoc["instances"]:
                 adoc["instances"][0]["fixed"] = True
-            _n, p = relink(aroot, adoc, sk, ifaces, None)
+            _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, None))
             problems += p
-            aservice.run_solve(aroot, adoc)
+            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
             astore.save(aroot, adoc)
         sub_docs[sub["id"]] = adoc
     fid = state.get("final")
@@ -274,9 +274,9 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
         for i in final["instances"]:
             o = i.get("office") or {}
             i["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
-        _n, p = relink(aroot, final, sk, ifaces, None, top_only=True)
+        _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, None, top_only=True))
         problems += p
-        aservice.run_solve(aroot, final)
+        await asyncio.to_thread(aservice.run_solve, aroot, final)
         an = await aservice.analyse(aroot, org_id, final)
         astore.save(aroot, final)
     clashes = _clashes(an)
@@ -335,9 +335,9 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                     # stacks fitted through the old part no longer fit
                     for g in [g for g in adoc["groups"] if (g.get("hole") or {}).get("inst") == inst["id"]]:
                         aservice.remove_group(adoc, g["id"])
-            _n, p = relink(aroot, adoc, sk, ifaces, items)
+            _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, items))
             problems += p
-            aservice.run_solve(aroot, adoc)
+            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
     async with locks.hold(state["final"], locks.OFFICE):
@@ -346,13 +346,13 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             for g in final.get("subassemblies") or []:
                 src = sub_docs.get(next((s for s, a in state["subs"].items() if a == g["assembly_id"]), ""))
                 if src is not None:
-                    aservice.sync_subassembly(aroot, final, g["id"], src)
+                    await asyncio.to_thread(aservice.sync_subassembly, aroot, final, g["id"], src)
             for inst in final["instances"]:
                 o = inst.get("office") or {}
                 inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
-            _n, p = relink(aroot, final, sk, ifaces, items, top_only=True)
+            _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, items, top_only=True))
             problems += p
-            aservice.run_solve(aroot, final)
+            await asyncio.to_thread(aservice.run_solve, aroot, final)
             if analyse:
                 # only the swapped parts against everything else (CD-035): the whole-program check grows with every
                 # real part and runs at the final assembly; here it timed out once ten parts went in together
@@ -537,7 +537,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     stats["binned"] += 1
                 say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
                     "by hand", "muted")
-            aservice.run_solve(aroot, adoc)
+            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
             astore.save(aroot, adoc)
             # every part was clash-checked when Fitz swapped it in; here only the fastener stacks just fitted are new
             # (CD-036: the whole sub-assembly used to be re-checked, minutes on detailed parts)
@@ -555,11 +555,11 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 sub = next((s for s, a in state["subs"].items() if a == g["assembly_id"]), None)
                 src = astore.load(aroot, state["subs"][sub]) if sub else None
                 if src is not None:
-                    aservice.sync_subassembly(aroot, final, g["id"], src)
+                    await asyncio.to_thread(aservice.sync_subassembly, aroot, final, g["id"], src)
             for inst in final["instances"]:
                 o = inst.get("office") or {}
                 inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0 and not o.get("bin")
-            relink(aroot, final, sk, ifaces, None, top_only=True)
+            await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, None, top_only=True))
             if level == "root":
                 # bolted joints between sub-assemblies: Fitz's auto-fit (ISO 4017 + washers + ISO 4032)
                 joints = [f for f in ifaces if f["kind"] == "hole_pattern"
@@ -583,7 +583,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (ISO auto-fit)")
                     except AssemblyInputError as e:
                         say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
-            aservice.run_solve(aroot, final)
+            await asyncio.to_thread(aservice.run_solve, aroot, final)
             if level == "root":  # the whole-program check, once, at the final assembly
                 an = await aservice.analyse(aroot, org_id, final)
                 clashes = _clashes(an)
