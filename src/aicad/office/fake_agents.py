@@ -56,8 +56,19 @@ def delay() -> float:
         return 0.0
 
 
+def _env_script() -> list[tuple[str, dict[str, Any]]]:
+    """``FW_OFFICE_FAKE_SCRIPT``: a JSON list of [regex, behaviour] for a dev server (a walkthrough that needs a part
+    to get stuck, for instance ``[["Spacer", {"icd_shift": 3, "omit_turns": 99}]]``)."""
+    raw = os.environ.get("FW_OFFICE_FAKE_SCRIPT", "")
+    try:
+        d = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return [(str(x[0]), dict(x[1])) for x in d if isinstance(x, list) and len(x) == 2 and isinstance(x[1], dict)]
+
+
 def behaviour(brief: str) -> dict[str, Any]:
-    for rx, b in SCRIPT:
+    for rx, b in [*SCRIPT, *_env_script()]:
         if re.search(rx, brief, re.IGNORECASE | re.DOTALL):
             return b
     rx = os.environ.get("FW_OFFICE_FAKE_DEFECTS")

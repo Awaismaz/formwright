@@ -397,23 +397,33 @@ def measure(skel: dict[str, Any], doc_icd: dict[str, Any], item: str, info: dict
     return {**_measure(skel, doc_icd, item, info, refs), "frame": fr}
 
 
-def findings(res: dict[str, Any]) -> list[str]:
-    """Gage's findings: one sentence per failed feature, measured against specified."""
-    out = []
+def finding_items(res: dict[str, Any]) -> list[dict[str, Any]]:
+    """Gage's findings with what each one measures: ``{"rule", "key", "text"}``. ``rule`` is ``conformance`` (an
+    interface feature, ``key`` = "IF-n:feature", or the part frame) or ``envelope``; Archie's rule overrides name a
+    feature by its key (``office.supervisor``)."""
+    out: list[dict[str, Any]] = []
     fr = res.get("frame") or {}
     if fr and not fr.get("identity") and not res.get("ok"):
-        out.append(f"Measured in the part's own frame ({fr['label']}): model it in the ICD part frame, or fix the "
-                   "features below.")
+        out.append({"rule": "conformance", "key": "frame",
+                    "text": f"Measured in the part's own frame ({fr['label']}): model it in the ICD part frame, or fix "
+                            "the features below."})
     if not res["envelope"]["ok"]:
         e = res["envelope"]
-        out.append(f"The part leaves its envelope: {e['measured']}; the ICD gives {e['spec']}.")
+        out.append({"rule": "envelope", "key": "envelope",
+                    "text": f"The part leaves its envelope: {e['measured']}; the ICD gives {e['spec']}."})
     for r in res["interfaces"]:
         for row in r["rows"]:
             if not row["ok"]:
-                out.append(f"{r['interface']} {r['name']}: {row['feature']} specified {row['spec']}, measured "
-                           f"{row['measured']}.")
-    seen: list[str] = []
+                out.append({"rule": "conformance", "key": f"{r['interface']}:{row['feature']}",
+                            "text": f"{r['interface']} {r['name']}: {row['feature']} specified {row['spec']}, measured "
+                                    f"{row['measured']}."})
+    seen: list[dict[str, Any]] = []
     for f in out:  # a feature shared by two interfaces is reported once
-        if f.split(": ", 1)[-1] not in [s.split(": ", 1)[-1] for s in seen]:
+        if f["text"].split(": ", 1)[-1] not in [s["text"].split(": ", 1)[-1] for s in seen]:
             seen.append(f)
     return seen[:12]
+
+
+def findings(res: dict[str, Any]) -> list[str]:
+    """Gage's findings: one sentence per failed feature, measured against specified."""
+    return [f["text"] for f in finding_items(res)]

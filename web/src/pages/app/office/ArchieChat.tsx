@@ -8,6 +8,7 @@ import { Badge, Button } from "@/components/ui";
 import { VerdictBadge } from "@/components/VisualCheck";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
+import { SupervisorQuestion } from "./ArchieLog";
 import type { ArchieChat as Chat, ArchieMessage, Program } from "./types";
 
 const QUICK: Record<string, string[]> = {
@@ -80,6 +81,7 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
                 {m.visual.image && <a href={m.visual.image} target="_blank" rel="noreferrer"><img src={m.visual.image} alt="The assembly from four sides" className="max-h-[160px] w-full rounded object-contain" /></a>}
                 <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted"><VerdictBadge v={m.visual.verdict} />Visual check, advisory{m.visual.tokens ? ` · ${m.visual.tokens} tokens` : ""}</div>
               </div>}
+              {(m.questions ?? []).map(qq => <SupervisorQuestion key={qq.action} program={program} q={qq} canEdit={canEdit} />)}
               {(m.actions ?? []).map(a => (
                 <div key={a.id} className={cx("mt-1.5 rounded-md border px-2.5 py-2 text-[12.5px]", a.status === "proposed" && !a.stale ? "border-primary/30" : "border-border opacity-75")} data-archie-action={a.type}>
                   <div>{a.label}</div>
@@ -91,7 +93,7 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
                       : <Badge tone={a.status === "applied" ? "success" : "neutral"}>{a.status === "applied" ? `Applied${a.by ? ` by ${a.by.name}` : ""}` : a.status === "dismissed" ? "Dismissed" : "Proposed"}</Badge>}
                   </div>
                 </div>))}
-              <div className="mt-1 text-[10.5px] text-muted">{m.kind === "status" ? "From the program, no AI" : m.kind === "ai" ? "Archie (AI)" : m.kind === "look" ? "Archie looked" : "Office"} · {ago(m.t)}</div>
+              <div className="mt-1 text-[10.5px] text-muted">{m.kind === "status" ? "From the program, no AI" : m.kind === "ai" ? "Archie (AI)" : m.kind === "look" ? "Archie looked" : m.kind === "supervisor" ? (m.supervisor?.mode === "ai" ? "Archie supervising (AI)" : m.supervisor?.mode === "simulated" ? "Archie supervising · Simulated" : "Archie supervising, no AI") : "Office"} · {ago(m.t)}</div>
             </div>
           </div>)}
         {busy && <div className="flex items-center gap-2 text-[12px] text-muted"><AgentAvatar code="archie" size={22} state="working" />Archie is looking at the board…</div>}

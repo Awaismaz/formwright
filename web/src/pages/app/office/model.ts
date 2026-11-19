@@ -1,6 +1,6 @@
 /** Pure Design Office helpers: formatting, board lanes, and the plan-review estimate preview.
  * The preview mirrors src/aicad/office/estimates.py exactly (same constants, sent by the server). */
-import type { AgentState, ChangeRequest, Column, Constants, Family, Interface, Item, LiveInstance, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
+import type { AgentState, ChangeRequest, Column, Constants, Family, GateFix, Interface, Item, LiveInstance, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
 
 export const COLUMN_STATE: Record<Column, AgentState> = {
   backlog: "idle", ready: "idle", in_design: "working", in_review: "review", changes_requested: "blocked",
@@ -304,4 +304,24 @@ export function liveCounts(insts: LiveInstance[]): { placeholders: number; real:
     if (i.bin || i.fastener || i.kind === "toolbox") standard += 1; else if (i.kind === "placeholder") placeholders += 1; else real += 1;
   }
   return { placeholders, real, standard };
+}
+
+/** What "Fix with Archie" did, in words: which step ran, what is fixed, what he did or proposes, what is still open.
+ * A click must never look like it did nothing. */
+export function fixLines(fix: GateFix): { headline: string; lines: string[]; open: string[]; asked: string[] } {
+  const n = fix.steps.length;
+  const a = fix.archie;
+  const done = a?.done ?? [], asked = a?.asked ?? [];
+  const bits = [n ? `Fixed ${n} size${n === 1 ? "" : "s"} automatically` : "No size change could help"];
+  if (a?.ran) {
+    if (done.length) bits.push(`Archie made ${done.length} fix${done.length === 1 ? "" : "es"} himself`);
+    if (asked.length) bits.push(`Archie proposes ${asked.length === 1 ? "a plan change" : `${asked.length} plan changes`}: answer in the chat`);
+    if (!done.length && !asked.length) bits.push("Archie looked and has no safe change to propose");
+  } else if (a && !a.ran) bits.push("what numbers can't fix needs your decision");
+  const left = fix.problems.length;
+  if (!left) bits.push("every part can be made: review and approve");
+  else if (!asked.length) bits.push(`${left} problem${left === 1 ? "" : "s"} still open`);
+  const head = bits.join("; ") + ".";
+  return { headline: head.charAt(0).toUpperCase() + head.slice(1), lines: [...done.map(x => `Done: ${x}.`), ...asked.map(x => `Proposed: ${x}.`)],
+    open: left ? (a?.open?.length ? a.open : fix.problems) : [], asked };
 }
