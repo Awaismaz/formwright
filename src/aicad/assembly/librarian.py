@@ -198,14 +198,81 @@ def default_dowel_length(d: float) -> float:
     return float(next((x for x in DOWEL_L if x >= want - 1e-9), DOWEL_L[-1]))
 
 
+# ----------------------------------------------------------------------------- what kind of part a clause names
+# The part a clause names is the last part noun of its leading phrase: "Hex nut M8 for the flange bolts" is a nut,
+# "Oil plug M16, with sealing washer" a plug, "Pinion key, DIN 6885" a key, "Bearing 6204, held by a circlip" a
+# bearing. Hex reads only that family; a noun the Toolbox doesn't stock (a plug, a breather, a seal), or a different
+# kind of a stocked noun (a lock washer is not an ISO 7089 plain washer, a taper roller bearing not a ball bearing),
+# is never read as some other part (live gear reducer run 2026-11-19: "Hex nut M8" and "Washer M8" became hex bolts,
+# "Oil plug M16" a washer).
+LEAD_SPLIT = re.compile(r"[,.;:(]|\b(?:with|for|on|onto|to|in|of|from|that|which|held|holds?|located|against|by|and|"
+                        r"fixes|fixing|joining|joins|clamping|clamps|supporting|supports|used|fitted|between)\b")
+HEAD = re.compile(r"\b(keys?|circlips?|seeger|(?:retaining|snap) rings?|471|bearings?|gears?|pinions?|shafts?|axles?|"
+                  r"bolts?|screws?|nuts?|washers?|dowels?|pins?|standoffs?|spacers?|"
+                  # nouns the Toolbox has no family for: "not stocked" (designed as a bought-out part)
+                  r"plugs?|breathers?|vents?|seals?|o-?rings?|gaskets?|springs?|nipples?|rivets?|inserts?|grommets?|"
+                  r"clips?|couplings?|collars?|caps?|covers?|bush(?:es|ings?)?|sleeves?|magnets?|dipsticks?|"
+                  r"sight ?glass(?:es)?|studs?)\b")
+FAMILY = {"key": "key", "keys": "key", "circlip": "ring", "circlips": "ring", "seeger": "ring", "471": "ring",
+          "bearing": "bearing", "bearings": "bearing", "gear": "gear", "gears": "gear", "pinion": "gear",
+          "pinions": "gear", "shaft": "shaft", "shafts": "shaft", "axle": "shaft", "axles": "shaft",
+          "bolt": "fastener", "bolts": "fastener", "screw": "fastener", "screws": "fastener", "nut": "nut",
+          "nuts": "nut", "washer": "washer", "washers": "washer", "dowel": "dowel", "dowels": "dowel", "pin": "pin",
+          "pins": "pin", "standoff": "standoff", "standoffs": "standoff", "spacer": "standoff", "spacers": "standoff"}
+FAMILY_CODES = {"fastener": ("hex_bolt", "shcs"), "nut": ("hex_nut",), "washer": ("washer",), "key": ("parallel_key",),
+                "ring": ("retaining_ring",), "bearing": ("bearing",), "gear": ("spur_gear",), "shaft": ("shaft",),
+                "dowel": ("dowel",), "pin": ("dowel",), "standoff": ("standoff",)}
+# a different kind of a stocked noun (the Toolbox has ISO 4017 / 4762 screws, ISO 4032 nuts, ISO 7089 washers,
+# DIN 6885 A keys, DIN 471 rings, deep-groove ball bearings, ISO 8734 dowels and spur gears)
+OTHER_KIND = {
+    "fastener": re.compile(r"\b(?:set|grub|wood|self[- ]?tapping|tapping|countersunk|csk|button|pan|shoulder|eye|"
+                           r"carriage|anchor|banjo|thumb|wing|u|t|tee|expansion)[- ]?(?:head\s+)?(?:bolts?|screws?)\b"),
+    "nut": re.compile(r"\b(?:lock|nyloc|wing|acorn|dome|cap|t|tee|cage|slotted|castle|castellated|flange|coupling|"
+                      r"square|jam|thin|weld|rivet|knurled|prevailing[- ]torque)[- ]?nuts?\b"),
+    "washer": re.compile(r"\b(?:lock|spring|tab|wave|serrated|star|tooth(?:ed)?|fender|sealing|bonded|thrust|"
+                         r"belleville|conical|split|crinkle|shim)[- ]?washers?\b"),
+    "bearing": re.compile(r"\b(?:needle|roller|taper(?:ed)?|thrust|plain|sleeve|linear|angular[- ]contact|spherical|"
+                          r"self[- ]aligning|flanged|pillow[- ]block|housed|cam[- ]follower|slewing)\b"),
+    "key": re.compile(r"\b(?:woodruff|gib(?:[- ]head)?|taper)\b"),
+    "ring": re.compile(r"\b(?:internal|bore|housing)\s+(?:\w+\s+)?(?:circlips?|rings?)\b|\bdin\s*472\b"),
+    "pin": re.compile(r"\b(?:spring|roll|cotter|split|clevis|taper|grooved|slotted|hinge|shear|tension)[- ]?pins?\b"),
+    "dowel": re.compile(r"\b(?:spring|roll|taper|grooved|slotted|tension)[- ]?(?:dowels?|pins?)\b"),
+    "gear": re.compile(r"\b(?:helical|bevel|worm|rack|internal|ring|planet(?:ary)?|sun|herringbone|spiral|hypoid|"
+                       r"crown|face)\s+(?:gears?|pinions?|wheels?)\b|\bworm\b"),
+}
+
+
+def kind_of(text: str) -> tuple[str, str]:
+    """(family, head noun) of the part a clause names: family "" when no part noun leads the clause, "unstocked"
+    when the Toolbox has no such part (or only a different kind of it)."""
+    t = _norm(text).lower()
+    lead = LEAD_SPLIT.split(t)[0]
+    heads = HEAD.findall(lead)
+    if not heads:
+        return "", ""
+    head = heads[-1]
+    fam = FAMILY.get(head) or ("ring" if re.fullmatch(r"(?:retaining|snap) rings?", head) else "unstocked")
+    if fam == "key" and re.search(r"\b(?:allen|hex) keys?\b", lead):
+        return "unstocked", head  # a hex key is a tool
+    rx = OTHER_KIND.get(fam)
+    if rx is not None and rx.search(lead):
+        return "unstocked", head
+    return fam, head
+
+
 def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
     """Deterministic reading of one clause into a Toolbox component with parameters, or None.
 
-    Returns {code, params, title, standard, confidence, read (param names taken from the text), kind, fasten?}."""
+    Returns {code, params, title, standard, confidence, read (param names taken from the text), kind, fasten?}.
+    The part noun that leads the clause picks the family (``kind_of``): a nut is read as a nut or not at all."""
     t = _norm(core).lower()
     words = _nouns(t)
     d, L = _size(t)
     found: dict[str, Any] | None = None
+    fam, _head = kind_of(t)
+    if fam == "unstocked":
+        return None
+    lead = LEAD_SPLIT.split(t)[0]
 
     def out(code: str, vals: dict[str, float], read: list[str], conf: str, kind: str = "part",
             **kw: Any) -> dict[str, Any] | None:
@@ -217,9 +284,12 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         return {"code": code, "params": p, "title": c.title(p), "standard": c.standard, "name": c.name,
                 "confidence": conf, "read": sorted(read), "kind": kind, **kw}
 
-    is_fastener = bool(FASTENER_WORDS.search(t)) and not re.search(r"\b(set ?screw|grub)\b", t)
+    is_fastener = fam == "fastener" or (not fam and bool(FASTENER_WORDS.search(t))
+                                        and not re.search(r"\b(set ?screw|grub)\b", t))
     if is_fastener:
-        style = "shcs" if re.search(r"\b(cap screws?|socket|allen|shcs|4762)\b", t) else "hex_bolt"
+        shcs = r"\b(cap screws?|socket|allen|shcs|4762)\b"
+        style = ("hex_bolt" if re.search(r"\bhex\b|\b401[47]\b", lead) and not re.search(shcs, lead) else
+                 "shcs" if re.search(shcs, lead) or re.search(shcs, t) else "hex_bolt")
         washers = "none" if re.search(r"\bno washers?\b|\bwithout washers?\b", t) else \
             ("head" if re.search(r"\bwasher under the head\b|\bhead washer\b", t) else "both")
         if d is None:
@@ -230,15 +300,9 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         r = out(style, vals, list(vals), "high" if L else "medium", "fastener",
                 fasten={"style": style, "washers": washers, "size": int(d), "length": L})
         return r
-    # keys and retaining rings before anything their host's noun would pick ("Pinion key", "Gear shaft circlip"),
-    # when the part named first is one: the last part noun of the leading phrase ("Pinion key, DIN 6885 6x6x18" is
-    # a key; "Bearing 6204, held by a circlip" is a bearing)
-    lead = re.split(r"[,.;:(]|\b(?:with|for|on|onto|to|in|of|from|that|which|held|holds?|located|against|by|and)\b",
-                    t)[0]
-    heads = re.findall(r"\b(keys?|circlips?|seeger|(?:retaining|snap) rings?|471|bearings?|gears?|pinions?|shafts?|"
-                       r"axles?|bolts?|screws?|nuts?|washers?|dowels?|pins?)\b", lead)
-    head = heads[-1] if heads else ""
-    if head in ("key", "keys") and not re.search(r"\b(?:allen|hex) keys?\b", t):
+    # keys and retaining rings before anything their host's noun would pick ("Pinion key", "Gear shaft circlip"):
+    # the family is the last part noun of the leading phrase (``kind_of``)
+    if fam == "key":
         g = re.search(r"\b(\d{1,2})\s*x\s*(\d{1,2})\s*x\s*" + NUM, t)
         row = next((hi for (_lo, hi), v in toolbox.KEY_ROWS
                     if g and (v[0], v[1]) == (int(g.group(1)), int(g.group(2)))), None)
@@ -251,7 +315,7 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         return {"code": "parallel_key", "params": None, "title": "Parallel key DIN 6885 A (size from the shaft)",
                 "standard": "DIN 6885-1 A", "name": "Parallel key", "confidence": "medium", "read": [],
                 "kind": "key"}
-    if re.fullmatch(r"circlips?|seeger|(?:retaining|snap) rings?|471", head):
+    if fam == "ring":
         dd = _dia(t)
         g = re.search(r"\bfor (?:a |an )?" + NUM + r"\s*(?:mm)?\s*shaft", t)
         dd = dd or (float(g.group(1)) if g else None)
@@ -260,11 +324,11 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         return {"code": "retaining_ring", "params": None, "title": "Retaining ring DIN 471 (size from the shaft)",
                 "standard": "DIN 471", "name": "Retaining ring for shafts", "confidence": "medium", "read": [],
                 "kind": "retaining_ring"}
-    if words & {"nut", "nuts"} and d is not None:
-        return out("hex_nut", {"D": d}, ["D"], "high")
-    if words & {"washer", "washers"} and d is not None:
-        return out("washer", {"D": d}, ["D"], "high")
-    if words & {"bearing", "bearings"}:
+    if fam == "nut" or (not fam and words & {"nut", "nuts"} and d is not None):
+        return out("hex_nut", {"D": d}, ["D"], "high") if d is not None else out("hex_nut", {}, [], "low")
+    if fam == "washer" or (not fam and words & {"washer", "washers"} and d is not None):
+        return out("washer", {"D": d}, ["D"], "high") if d is not None else out("washer", {}, [], "low")
+    if fam == "bearing" or (not fam and words & {"bearing", "bearings"}):
         b = re.search(r"\b(6[02]0\d)\b", t)
         if b and int(b.group(1)) in toolbox.BEARING:
             return out("bearing", {"SERIES": float(b.group(1))}, ["SERIES"], "high", "bearing")
@@ -272,7 +336,8 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         return {"code": "bearing", "params": None, "title": "Ball bearing (size from the shaft)", "standard": "ISO 15",
                 "name": "Deep-groove ball bearing", "confidence": "medium", "read": [], "kind": "bearing",
                 "bore": bore}
-    if words & {"dowel", "dowels"} or re.search(r"\b(locating|dowel) pins?\b", t) or (words & {"pin", "pins"} and _dia(t)):
+    if fam == "dowel" or (fam in ("", "pin") and (words & {"dowel", "dowels"} or re.search(r"\b(locating|dowel) pins?\b", t)
+                                                   or (words & {"pin", "pins"} and _dia(t)))):
         dd, ll = _dxl(t)
         mm_ = re.search(NUM + r"\s*mm\s+(?:dowel|pin|locating)", t)
         dd = dd or _dia(t) or (float(mm_.group(1)) if mm_ else None)
@@ -281,7 +346,7 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
             return out("dowel", {}, [], "low", "dowel")
         read = ["D"] + (["L"] if ll else [])
         return out("dowel", {"D": dd, "L": ll or default_dowel_length(float(dd))}, read, "high" if ll else "medium", "dowel")
-    if words & {"shaft", "shafts", "axle"} and not words & {"collar", "coupling"}:
+    if fam == "shaft" or (not fam and words & {"shaft", "shafts", "axle"} and not words & {"collar", "coupling"}):
         dd, ll = _dxl(t)
         dd = dd or _dia(t)
         ll = ll or _length(t)
@@ -291,16 +356,18 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
             key_l = min(40.0, max(b + 2, round(0.4 * ll)))
             return out("shaft", {"D": dd, "L": ll, "KEY_L": key_l}, ["D"] + (["L"] if _length(t) or _dxl(t)[1] else []),
                        "high", "shaft")
-    if words & {"gear", "gears", "pinion"}:
+    if fam == "gear" or (not fam and words & {"gear", "gears", "pinion"}):
         m = toolbox.match(core)
         g = next((x for x in m if x["code"] == "spur_gear"), None) or \
             next((x for x in toolbox.match("spur gear " + core) if x["code"] == "spur_gear"), None)
         if g:
             return out("spur_gear", dict(g["params"]), g["prefilled"], "high" if len(g["prefilled"]) >= 2 else "medium",
                        "gear")
-    if words & {"standoff", "standoffs", "spacer", "spacers"} and d is not None:
+    if (fam == "standoff" or (not fam and words & {"standoff", "standoffs", "spacer", "spacers"})) and d is not None:
         L = L or _length(t)
         return out("standoff", {"D": d, **({"L": L} if L else {})}, ["D"] + (["L"] if L else []), "medium")
+    if fam:
+        return None  # the named part is this family or nothing: never another kind of part
     m = toolbox.match(core)
     if m and m[0]["score"] >= 2:
         g = m[0]

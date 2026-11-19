@@ -612,6 +612,31 @@ def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str
     return {"inst": ib["id"], "hole": kb, "probe": probe}
 
 
+def _integration_order(t: dict[str, Any]) -> int:
+    """Fasteners first, then nuts and washers (counted against the stacks), then the rest (stable in plan order)."""
+    r = t.get("reuse") or {}
+    if r.get("kind") == "fastener" or r.get("code") in ("hex_bolt", "shcs"):
+        return 0
+    return 1 if r.get("code") in ("hex_nut", "washer") else 2
+
+
+def _stack_hardware(aroot: Path, adoc: dict[str, Any]) -> dict[tuple[str, float], int]:
+    """Washers and nuts in this assembly's fastener stacks: {(code, D): count}."""
+    from aicad.assembly import store as astore
+
+    stacks = {g["id"] for g in adoc.get("groups") or [] if g.get("kind") == "fastener"}
+    out: dict[tuple[str, float], int] = {}
+    for i in adoc["instances"]:
+        if i.get("group") not in stacks:
+            continue
+        p = astore.part(aroot, i["part"]) or {}
+        code = p.get("code")
+        if code in ("hex_nut", "washer") and (p.get("params") or {}).get("D") is not None:
+            k = (str(code), float(p["params"]["D"]))
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
 def plan_stacks(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], joints: list[dict[str, Any]],
                 fitted: set[tuple[str, int]]) -> list[dict[str, Any]]:
     """Every hole of these bolted joints that has no stack yet, as ``icd_stack`` plans it (``fitted`` is updated)."""
@@ -637,7 +662,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     sk, ifaces = prog["skeleton"], prog["icd"]["interfaces"]
     state = prog["assembly"]
     log: list[dict[str, str]] = []
-    stats = {"stacks": 0, "asked": 0, "binned": 0}
+    stats = {"stacks": 0, "asked": 0, "binned": 0, "unplaced": 0, "in_stacks": 0}
     unchecked = False  # the whole-program clash check didn't finish: never report "0 clashes" then
     seated: dict[str, int] = {}
 
@@ -658,9 +683,18 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
             bin_x = env["min"][0]
             sub_items = [x["id"] for x in prog["items"] if x["kind"] == "subassembly"]
             bin_x += 120.0 * (sub_items.index(level) if level in sub_items else 0)
-            for t in standard:
+            # fasteners first, then the plan's nuts and washers (they are the stacks' own when the sizes match),
+            # then everything else
+            stack_hw: dict[tuple[str, float], int] | None = None
+            for t in sorted(standard, key=_integration_order):
                 r = t.get("reuse") or {}
                 if r.get("source") != "toolbox":
+                    if t["kind"] == "standard" and not t.get("_kit") and t["item_id"] not in sk["items"]:
+                        # a bought-out part Hex didn't stock (a plug, a seal): modelled by a designer, but the ICD has
+                        # no place for it, so it is reported, never left lying beside the program
+                        stats["unplaced"] += int(t.get("qty") or 1)
+                        say(f"{t['title']} has no interface in the ICD, so Fitz didn't place it ({int(t.get('qty') or 1)}"
+                            " in the BOM as planned): fit it by hand in Assembly Studio", "warn")
                     continue
                 kind, code = r.get("kind"), r.get("code")
                 is_fastener = kind == "fastener" or code in ("hex_bolt", "shcs")
@@ -708,7 +742,10 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     stats["asked"] += want
                     planned = planned[:want]
                     if not planned:
-                        say(f"{t['title']}: no bolted joint inside this sub-assembly; put in the parts bin", "warn")
+                        stats["unplaced"] += want
+                        say(f"{t['title']}: no bolted joint of the ICD inside this sub-assembly takes it, so Fitz "
+                            f"didn't place it ({want} in the BOM as planned)", "warn")
+                        continue
                     else:
                         # PD-71: straight from the ICD (positions, thickness, size): no probe, no clash check
                         try:
@@ -720,15 +757,44 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         stats["stacks"] += res["inserted"]
                         errs = sorted({h["proposal"]["error"] for h in res["plan"]["holes"]
                                        if not h["proposal"]["ok"] and h["proposal"].get("error")})
+                        stack_hw = None  # the stacks changed: count their washers and nuts again
                         if res["inserted"]:
                             summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
+                            extra = int(t.get("qty") or 1) - res["inserted"] if not t.get("_kit") else 0
+                            stats["unplaced"] += max(0, extra)
                             say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()} from the ICD: "
                                 + "; ".join(summ)
-                                + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else "")
+                                + (f" ({extra} more than the ICD's joints take: not placed, in the BOM as planned)"
+                                   if extra > 0 else "")
                                 + (f". Not fitted: {errs[0]}" if errs else ""),
-                                "ok" if res["inserted"] >= want else "warn")
+                                "ok" if extra <= 0 and not errs else "warn")
                             continue
-                        say(f"Fitz couldn't fit {t['title']}: {errs[0] if errs else 'no standard stack fits'}", "warn")
+                        stats["unplaced"] += want
+                        say(f"Fitz couldn't fit {t['title']}: {errs[0] if errs else 'no standard stack fits'} "
+                            f"({want} not placed, in the BOM as planned)", "warn")
+                        continue
+                if code in ("hex_nut", "washer") and not t.get("_kit") and (r.get("params") or {}).get("D"):
+                    # the plan's nuts / washers for its bolts: the ICD's stacks carry their own (ISO 4032 / 7089), so
+                    # the plan's are those when the size matches; the rest are more than the joints use
+                    if stack_hw is None:
+                        stack_hw = _stack_hardware(aroot, adoc)
+                    D = float(r["params"]["D"])
+                    want = int(t.get("qty") or 1)
+                    used = min(want, stack_hw.get((code, D), 0))
+                    stack_hw[(code, D)] = stack_hw.get((code, D), 0) - used
+                    stats["in_stacks"] += used
+                    stats["unplaced"] += want - used
+                    what = "nuts" if code == "hex_nut" else "washers"
+                    if used == want:
+                        say(f"{t['title']}: all {want} are in the bolt stacks Fitz fitted from the ICD")
+                    elif used:
+                        say(f"{t['title']}: {used} of {want} are in the bolt stacks Fitz fitted from the ICD; the other "
+                            f"{want - used} are more than the joints use (not placed, in the BOM as planned)", "warn")
+                    else:
+                        say(f"{t['title']}: no bolt stack of the ICD here uses M{D:g} {what}"
+                            + (" (its joints are tapped into the part)" if code == "hex_nut" else "")
+                            + f", so Fitz didn't place them ({want} in the BOM as planned)", "warn")
+                    continue
                 # everything else (and fasteners that found no joint): the parts bin, beside the program, no clash
                 try:
                     key = await aservice.ensure_toolbox_part(aroot, org_id, code, r.get("params") or {})
@@ -798,6 +864,9 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
         bits.append(f"seated {n} {what}{'s' if n != 1 else ''} per the ICD")
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
+    if stats["unplaced"]:
+        bits.append(f"{stats['unplaced']} planned part{'s' if stats['unplaced'] != 1 else ''} not placed (more than "
+                    "the ICD uses, or no interface: see the notes)")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)
     # PD-71: integration measures no clashes, so it never states a count ("0 clashes" was said under "2 clashes"
     # in the live run 2026-11-19); the final assembly's whole-program check reports them (``clash_status``)
