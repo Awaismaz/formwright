@@ -141,3 +141,11 @@ message), `src/aicad/assembly/librarian.py`, `placeholder.py`, `render.py`, `vis
   whenever every ICD feature is representable (now including the hub keyway), regardless of "with a keyway"
   wording; the part is "make" in the plan's material, measured against the ICD at swap-in.
 * **PD-d — bearing corner as a 45° chamfer of r_s min** (inside the ISO 582 r_s min arc) rather than a fillet.
+
+## Final gate (after merging main cd6b97a ← 1c11058, worker housekeeping)
+Run file by file, workers checked after each: `test_toolbox_keys` 12 passed (incl. the end-to-end live plan),
+`test_library` 11, `test_office_icd` + `test_office_shaft_line` 23, `test_assembly_trains` 8, `test_fixtures_asm` 10,
+`test_assembly_visual` 26, `test_office_direct` 10, `test_office_polish` 12, `test_office_phase5` 9,
+`test_office_orchestrator` 21 — all passed. `ruff check src tests` clean, `tsc --noEmit` clean, `vite build` ok
+(before the last two merges, which touched only landing assets and test housekeeping). The whole suite was not run in
+one go (founder's PC resource rule).
