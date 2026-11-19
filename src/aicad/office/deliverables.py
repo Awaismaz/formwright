@@ -197,16 +197,26 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
         if not ts and r["kind"] in ("project", "placeholder"):
             t0 = by_project.get(part_projects.get(r.get("part_key") or ""))
             ts = [t0] if t0 else []
+        stacked = False
         if not ts and r["kind"] == "toolbox":
+            # parts Fitz put in the bolt stacks: the plan's item of the same Toolbox code and size (the M6 washers of
+            # the cap screws are not the plan's "Washer M8")
             code = str(r.get("code") or "")
-            cands = [x for x in by_code.get(code, []) if x["id"] not in seen]
+            D = (r.get("params") or {}).get("D")
+            cands = [x for x in by_code.get(code, []) if x["id"] not in seen
+                     and (D is None or ((x.get("reuse") or {}).get("params") or {}).get("D") in (None, D))]
             ts = cands[:1]
+            stacked = bool(ts)
         ts = [x for x in ts if x["id"] not in seen]
         t = ts[0] if ts else None
         qty = int(r["qty"])
+        placed = qty
+        binned = any((inst_items.get(i) or {}).get("bin") for i in r.get("instances") or [])
         planned = sum(int(x.get("qty") or 1) for x in ts)
-        if ts and (r["kind"] != "toolbox" or any((inst_items.get(i) or {}).get("bin") for i in r.get("instances") or [])):
-            qty = max(qty, planned)
+        if ts and (r["kind"] != "toolbox" or stacked or binned):
+            qty = max(qty, planned)  # the plan's quantity is what is bought; the description says how many are placed
+        surplus = (f"From the plan: {placed} placed by the ICD, {qty - placed} more than the ICD uses (not placed)"
+                   if r["kind"] == "toolbox" and t is not None and qty > placed and not binned else "From the plan")
         each = r.get("mass_each_g")
         # a designed part Hex made from a Toolbox generator (a gear sized to the ICD) is still made, in the plan's
         # material, not bought (live gear run 2026-11-19: "Steel C45, buy" for a 42CrMo4 pinion)
@@ -222,7 +232,7 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
                             ("Placeholder: still in design" if r["kind"] == "placeholder" else
                              "Company part, reused" if t is not None and (t.get("reuse") or {}).get("source") == "project"
                              else "Designed in this program") if r["kind"] != "toolbox" else
-                            ("From the plan" if t is not None else "Added by Fitz for the bolted joints")),
+                            (surplus if t is not None else "Added by Fitz for the bolted joints")),
             "ticket": t["id"] if t is not None else None,
             "key": ", ".join(x["key"] for x in ts) if ts else None,
             "part_key": r.get("part_key"), "instances": r.get("instances") or []})
