@@ -78,7 +78,38 @@ loop is solved and said. Freeze then rebuild gives the same layout on all five.
 
 ## Parity on the existing layout tests
 
-PARITY
+Method (`docs/reports/connection-layout/parity.py`, a pytest plugin, one test file per pytest call): every
+`icd.build` the six existing layout test files make still returns the template layout (the tests run unchanged and
+pass); beside it, the plugin reads that layout back into a design graph (`adapt.from_parts`), re-solves the graph
+with the connection solver and compares items, copies, sizes (0.01 mm), interfaces (kind, sides, copies) and every
+interface number. This measures whether the connections alone recover the template's layout.
+
+| Test file | Template layout | Builds | Identical | Positions match | Differs | Template used | Errors |
+|---|---|---:|---:|---:|---:|---:|---:|
+| test_design_graph.py | gearbox | 30 | 29 | 1 | 0 | 0 | 0 |
+| test_design_graph.py | shaft_line | 20 | 20 | 0 | 0 | 0 | 0 |
+| test_office_gearbox_caps.py | gearbox | 3 | 0 | 3 | 0 | 0 | 0 |
+| test_office_icd.py | block | 38 | 0 | 0 | 4 | 34 | 0 |
+| test_office_icd.py | gearbox | 1 | 1 | 0 | 0 | 0 | 0 |
+| test_office_phase6_layout.py | block | 1 | 0 | 0 | 0 | 1 | 0 |
+| test_office_phase6_layout.py | gearbox | 4 | 4 | 0 | 0 | 0 | 0 |
+| test_office_shaft_line.py | block | 1 | 0 | 0 | 1 | 0 | 0 |
+| test_office_shaft_line.py | row | 1 | 0 | 0 | 0 | 1 | 0 |
+| test_office_shaft_line.py | shaft_line | 11 | 10 | 1 | 0 | 0 | 0 |
+| test_office_small.py | shaft_line | 8 | 8 | 0 | 0 | 0 | 0 |
+| **Total** | | **118** | **72** | **5** | **5** | **36** | **0** |
+
+Every shaft line, shaft sub-assembly and gearbox the tests build is recovered from its connections (72 identical,
+number for number, interface ids included). The 5 "positions match": 4 gearbox covers that the template also pins
+with dowels (the solver does not emit dowel pins in bolted joints yet), and 1 shaft line whose second shaft takes a
+different bearing size than the first from one shared bearing line (one graph component holds one size). The 5
+"differs" are block-only plans (conveyor, gripper, enclosure, fixture templates, and plate-mounted vertical shafts)
+read back as blocks bolted on blocks: the solver's simple rule (children in a row on the host, hosts not grown to the
+row) differs from the template's station layout. In the office those plans have no graph and are not role plans, so
+they keep the template; the 36 "template used" are layouts the solver hands back on purpose (vertical shafts in a
+block, rows, a plate-mounted gearbox). The recorded golden graphs (keyed gear, gear pair) are identical to the
+template (`test_parity_with_the_template_on_the_golden_cases`); the reducer's graph now states M8 cover bolts
+(PD-135), which the template reads as M6.
 
 ## Browser check (port 8809, simulated agents, the live reducer reply replayed)
 
@@ -133,4 +164,20 @@ before the PD-114 fastener sizes (caps then M4).
 
 ## Gate
 
-GATE
+`uv run ruff check src tests` clean; `npx tsc --noEmit` clean; `npm test` 157 passed; `npx vite build` ok (after
+`git merge main`, see below). Pytest, two files per call, CAD workers of this worktree reaped after each pair:
+`test_design_graph` + `test_connection_layout` 53, `test_office_icd` + `test_office_shaft_line` 23,
+`test_office_gearbox_caps` + `test_office_small` 27, `test_office_phase6_layout` + `test_office_layout_envelopes` 9
+(and with `test_office_gearbox_caps` again after the base-choice change: 21), `test_office_direct` +
+`test_assembly_visual` 36, `test_office` + `test_office_polish` 32, `test_office_orchestrator` +
+`test_office_phase6_review_ecn` 26, `test_golden` 10: all passed. Golden suite simulated: graph path 10 of 10, old
+path 6 of 10 (table above). The full suite was not run in one go (resource rule).
+
+Disclosed changes outside `graph/`: `office/icd.py` (journals and optional flush on a bearing seat, `layout_conflict`,
+per-copy `no_interface`, `part_unplaced`, slot cavities and their excerpt, pin bores along an axis in `seated`, rings
+by role, base choice by role, `belt_drive` label), `office/interfaces.py` (graph and role layouts, rebuilds),
+`office/program_assembly.py` and `office/platform_env.py` (fastener styles per joint, kit race),
+`office/visual_office.py` (next-level clusters), `eval/golden_cases` (graph replies, R3) and `tests/test_golden.py`
+(the master asked for the golden acceptance; the runner and dashboard are untouched). `test_office_icd`'s conveyor
+template failed the new per-copy gate (its side rail #2 floated: the founder's bug class); fixed in the template's
+base choice, not in the test.
