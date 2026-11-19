@@ -4,7 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, LayoutTemplate, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
-import { cx, PAGE } from "@/lib/format";
+import { useSession } from "@/lib/session";
+import { cx, num, PAGE } from "@/lib/format";
 import { Badge, Button, Card, Field, Input, PageHeader } from "@/components/ui";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
@@ -16,6 +17,8 @@ const EXAMPLES = [
   { name: "Robot gripper", brief: "Parallel two-jaw gripper for a cobot with an ISO 9409-1-50-4-M6 flange. 40 mm stroke, 150 N grip force, pneumatic actuator in a machined aluminium housing, replaceable printed nylon fingers for 30–60 mm round parts." },
 ];
 
+const DEFAULT_BUDGET = 3000; // service.DEFAULT_BUDGET_TOKENS
+
 export default function NewProgram() {
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -25,12 +28,18 @@ export default function NewProgram() {
   const [concurrency, setConcurrency] = useState(3);
   const [deliverables, setDeliverables] = useState(true);
   const [reviewGate, setReviewGate] = useState(false);
-  const [budget, setBudget] = useState(3000);
+  const { me } = useSession();
+  const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
+  const wallet = me?.org ? Math.max(0, me.org.token_balance) : null;
+  // the default budget is at most what the workspace has left (a trial wallet is 1,000; the default 3,000)
+  const fallback = unlimited || wallet === null ? DEFAULT_BUDGET : Math.min(DEFAULT_BUDGET, wallet);
+  const [budget, setBudget] = useState<number | null>(null);
+  const shown = budget ?? fallback;
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
     try {
-      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: budget, deliverables, review_gate: reviewGate });
+      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: shown, deliverables, review_gate: reviewGate });
       qc.invalidateQueries({ queryKey: ["office-home"] });
       nav(`/app/office/programs/${p.id}`);
     } catch (e) {
@@ -78,8 +87,13 @@ export default function NewProgram() {
               <Field label="Agents in parallel" hint="Used for ETA ranges now, and as the cap when auto-run arrives.">
                 <Input type="number" min={1} max={12} value={concurrency} onChange={e => setConcurrency(Math.max(1, Math.min(12, Number(e.target.value) || 1)))} />
               </Field>
-              <Field label="Token budget" hint="Shown against spend on the board.">
-                <Input type="number" min={0} step={100} value={budget} onChange={e => setBudget(Math.max(0, Number(e.target.value) || 0))} />
+              <Field label="Token budget" hint={unlimited ? "Shown against spend on the board (God mode: tokens are not charged)."
+                : wallet === null ? "Shown against spend on the board."
+                  : wallet < DEFAULT_BUDGET ? `Defaults to your remaining wallet, ${num(wallet)} tokens (less than the usual ${num(DEFAULT_BUDGET)}). The office stops at the budget.`
+                    : `Shown against spend on the board; your wallet has ${num(wallet)} tokens.`}>
+                <Input type="number" min={0} step={100} value={shown} onChange={e => setBudget(Math.max(0, Number(e.target.value) || 0))} data-budget-input />
+                {!unlimited && wallet !== null && shown > wallet && <p className="mt-1 text-[11.5px] text-warning" data-budget-over>
+                  Above your wallet ({num(wallet)} tokens): the office stops when the wallet runs out, before this budget.</p>}
               </Field>
             </div>
             <label className="mt-3 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={deliverables} onChange={e => setDeliverables(e.target.checked)} />

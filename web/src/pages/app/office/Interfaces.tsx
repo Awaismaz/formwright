@@ -221,6 +221,7 @@ export default function Interfaces({ program }: { program: Program }) {
   const [approving, setApproving] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [fixing, setFixing] = useState(false);
+  const [separating, setSeparating] = useState(false);
   const crs = useMemo(() => program.change_requests ?? [], [program.change_requests]);
   if (!icd) return <EmptyState icon={<FileDiff />} title="No interfaces document" body="This program was planned before the Design Office named interfaces. New programs get a skeleton and an ICD at the brief gate." />;
   const f = icd.interfaces.find(x => x.id === sel) ?? icd.interfaces[0];
@@ -246,6 +247,17 @@ export default function Interfaces({ program }: { program: Program }) {
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setFixing(false); }
   };
   const probIface = (p: string) => icd.interfaces.find(x => p.startsWith(`${x.id}:`))?.id;
+  // parts with no interface (PD-85 blocks them by default): the engineer may record that they are meant to be apart
+  const loose = (icd.issues ?? []).filter(x => x.code === "no_interface" && x.severity === "error").flatMap(x => x.items);
+  const looseOf = (p: string) => (icd.issues ?? []).find(x => x.code === "no_interface" && x.severity === "error" && x.text === p)?.items[0];
+  const separate = async (items: string[] | null, keep = true) => {
+    setSeparating(true);
+    try {
+      const v = await api.post<Program>(`${BASE}/programs/${program.id}/icd/separate`, { items, keep });
+      qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      toast.success(keep ? "Recorded: kept as separate parts. It's in the interfaces history." : "Recorded: the part must be connected again.");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setSeparating(false); }
+  };
   return (
     <div className="space-y-3" data-icd>
       {icd.status === "draft" ? (
@@ -264,17 +276,29 @@ export default function Interfaces({ program }: { program: Program }) {
               {icd.problems.length} problem{icd.problems.length === 1 ? "" : "s"} to clear before you can approve: these parts can't be made or assembled as laid out.</div>
             <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.problems.map((p, i) => {
               const id = probIface(p);
-              return <li key={i}>{p}{id && <button className="ml-1.5 text-primary underline-offset-2 hover:underline" onClick={() => setSel(id)}>Edit {id}</button>}</li>;
+              const item = looseOf(p);
+              return <li key={i}>{p}{id && <button className="ml-1.5 text-primary underline-offset-2 hover:underline" onClick={() => setSel(id)}>Edit {id}</button>}
+                {item && canEdit && icd.status === "draft" && <button className="ml-1.5 text-primary underline-offset-2 hover:underline disabled:opacity-50" disabled={separating}
+                  onClick={() => void separate([item])} data-keep-separate={item}>Keep as a separate part</button>}</li>;
             })}</ul>
           </div>
-          {canEdit && icd.status === "draft" && <Button loading={fixing} icon={<Wand2 className="h-4 w-4" />} onClick={fix} data-testid="fix-icd">Fix with Archie</Button>}
+          <div className="flex flex-col items-stretch gap-1.5">
+            {canEdit && icd.status === "draft" && loose.length < icd.problems.length && <Button loading={fixing} icon={<Wand2 className="h-4 w-4" />} onClick={fix} data-testid="fix-icd">Fix with Archie</Button>}
+            {canEdit && icd.status === "draft" && loose.length > 1 && <Button variant="secondary" loading={separating} onClick={() => void separate(null)} data-testid="keep-all-separate">Keep all {loose.length} as separate parts</Button>}
+          </div>
         </div>
-        <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>
+        {loose.length > 0 && <p className="mt-2 text-[11.5px] text-muted">A part with no interface would be placed beside the assembly. If that is what you want (a kit, or parts made on their own), keep it as a separate part: your decision is recorded in the history below and it no longer blocks approval.</p>}
+        {loose.length < icd.problems.length && <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>}
       </Card>}
       {(icd.look || icd.status === "draft") && <LayoutLook program={program} icd={icd} canEdit={!!canEdit} />}
       {(icd.warnings?.length ?? 0) > 0 && <Card className="border-warning/40 bg-warning/5 p-3 text-[12.5px]" data-icd-warnings>
         <div className="font-semibold text-warning"><AlertTriangle className="mr-1 inline h-4 w-4" />Layout warning{icd.warnings!.length === 1 ? "" : "s"} (approval is not blocked)</div>
-        <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.warnings!.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        <ul className="mt-1.5 list-disc space-y-0.5 pl-5">{icd.warnings!.map((w, i) => {
+          const kept = (icd.separate ?? []).find(x => w.startsWith(`${x.name}: kept as a separate part`));
+          return <li key={i} data-icd-separate={kept?.item}>{w}{kept?.by && <span className="text-muted"> Recorded by {kept.by}{kept.at ? `, ${ago(kept.at)}` : ""}.</span>}
+            {kept && canEdit && icd.status === "draft" && <button className="ml-1.5 text-primary underline-offset-2 hover:underline disabled:opacity-50" disabled={separating}
+              onClick={() => void separate([kept.item], false)}>Connect it instead</button>}</li>;
+        })}</ul>
       </Card>}
       <SkeletonCard icd={icd} />
       <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)]">

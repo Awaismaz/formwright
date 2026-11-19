@@ -172,7 +172,8 @@ class PlatformEnv(orchestrator.Env):
         s.brief_approved = True  # the ticket brief was approved at the program's brief gate (CAD-028 skip path)
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         s.subscribers.add(q)
-        out: dict[str, Any] = {"rate_limited": False, "interrupted": False, "tokens": 0, "subtype": None}
+        out: dict[str, Any] = {"rate_limited": False, "interrupted": False, "tokens": 0, "subtype": None,
+                               "budget_stopped": False, "budget": budget}
 
         def handle(ev: dict[str, Any]) -> None:
             if ev.get("type") in ("text", "error") and RATE_LIMIT.search(str(ev.get("text") or "")):
@@ -180,6 +181,8 @@ class PlatformEnv(orchestrator.Env):
             if ev.get("type") == "result":
                 out["subtype"] = ev.get("subtype")
                 out["tokens"] = int(ev.get("tokens_charged") or 0)
+                # the session cut the turn at its run budget: the designer had not finished (live run 2026-11-19)
+                out["budget_stopped"] = out["budget_stopped"] or bool(ev.get("budget_stopped"))
             try:
                 on_event(ev)
             except Exception:
@@ -806,8 +809,7 @@ class PlatformEnv(orchestrator.Env):
                 return res
             state = {**doc["assembly"], "at": store.now(), "summary": res.get("program_summary")
                      or doc["assembly"].get("summary")}
-            if t["item_id"] == "root":
-                state["clashes"] = res["clashes"]
+            if t["item_id"] == "root":  # the count comes from the whole-program check below (clash_status)
                 state["check"] = {"status": "running", "at": store.now()}
             save_assembly(root, pid, state, None, event=False)
         if t["item_id"] == "root":  # PD-71: the whole-program clash check, advisory, after and outside the lock
@@ -1095,7 +1097,8 @@ async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str
                                       "summary": f"Fitz couldn't build the program assembly: {e}"},
                           "Fitz couldn't build the program assembly from placeholders.")
             return
-        save_assembly(root, pid, state, state["summary"], clashes=len(state["clashes"]))
+        save_assembly(root, pid, state, state["summary"].rstrip(".") + "; "
+                      + program_assembly.clash_status(state)["text"] + ".", clashes=len(state["clashes"]))
 
 
 # ---------------------------------------------------------------------------- deliverables (CD-014)
