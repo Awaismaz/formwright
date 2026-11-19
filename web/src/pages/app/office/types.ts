@@ -240,8 +240,15 @@ export interface ArchieMessage {
   visual?: { level: string; image: string | null; verdict: VisualVerdict | null; quick: QuickFinding[] | null; tokens?: number };
 }
 export interface ArchieQuestion {
-  action: string; question: string; why?: string; options: { id: "approve" | "decline"; label: string }[];
+  action: string; question: string; why?: string; options: { id: "approve" | "decline"; label: string; action?: string }[];
+  /** Alternatives (one problem, several ways to clear it): one option per action, choosing one declines the others. */
+  actions?: string[]; chosen?: string | null;
   answered?: "approve" | "decline"; by?: Actor; at?: string;
+}
+/** "Fix with Archie" at the interfaces gate: the number fix, then Archie on what numbers can't fix. */
+export interface GateFix {
+  steps: { name?: string }[]; problems: string[];
+  archie?: { ran: boolean; mode?: "ai" | "rules" | "simulated"; done?: string[]; asked?: string[]; open: string[] } | null;
 }
 export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 

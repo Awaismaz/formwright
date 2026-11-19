@@ -60,7 +60,7 @@ DEBOUNCE_S = 2.0                        # triggers that arrive together make one
 STUCK_MIN = 20.0                        # a working ticket with no update for this long is stuck
 GATE_STALE_MIN = 30.0                   # the interfaces gate blocked with problems for this long
 BUDGET_NEAR = 0.9                       # share of the program budget that counts as "near its limit"
-MAX_ACTIONS = 3                         # actions per pass
+MAX_ACTIONS = 4                         # actions per pass
 LOG_MAX = 300
 PENDING_MAX = 40
 
@@ -108,7 +108,8 @@ NEVER_RELAXED = ("The gating build checks (a valid, closed solid that exports) a
 
 MINOR_TOOLS = frozenset({"retry", "pause", "reassign", "send_back", "approve_with_notes"})
 TOOLS = ("retry", "pause", "reassign", "send_back", "approve_with_notes", "relax_rule", "keep_separate",
-         "remove_part", "add_part", "resize_part", "edit_part", "change_interface", "budget")
+         "remove_part", "add_part", "set_qty", "resize_part", "edit_part", "change_interface", "budget")
+PLAN_TOOLS = frozenset({"remove_part", "add_part", "set_qty"})
 _STANDALONE = re.compile(r"\b(kit|separate(?:ly)?|on (?:their|its) own|stand-?alone|loose|spares?|individual(?:ly)?|"
                          r"not assembled|no assembly)\b", re.IGNORECASE)
 
@@ -150,6 +151,7 @@ procedural rule), "feature": "feature key (optional, conformance)", "expiry": "r
 - {"tool": "keep_separate", "parts": ["part name"]}: parts with no interface that are meant to be on their own.
 - {"tool": "remove_part", "part": "part name"} / {"tool": "add_part", "sub": "sub-assembly", "part": {"name": "...", \
 "family": "machined|turned|sheet|plastic|gear", "qty": 1, "description": "..."}}: before part work starts.
+- {"tool": "set_qty", "part": "part name", "qty": integer}: before part work starts (e.g. two bearings per shaft).
 - {"tool": "resize_part", "part": "part name", "size": {"L": 120}}: before the interfaces are approved.
 - {"tool": "edit_part", "ticket": "KEY", "description": "the requirement to add to the part's brief"}
 - {"tool": "change_interface", "interface": "IF-n", "values": {"field": number}}
@@ -406,7 +408,7 @@ def take_triggers(root: Path, pid: str, now: float | None = None, force: bool = 
                     continue
                 out.append({"kind": "repeat" if n >= 1 else "blocked", "ticket": t["id"], "text": why, "sig": sig})
             else:
-                sig = _sig(p["kind"], p.get("ticket"), p.get("text"))
+                sig = _sig(p["kind"], p.get("ticket"), p.get("text"), p.get("at") if p.get("asked") else "")
                 if sig in seen and not force:
                     continue
                 out.append({**p, "sig": sig})
@@ -420,7 +422,8 @@ def take_triggers(root: Path, pid: str, now: float | None = None, force: bool = 
         if len(seen) > 500:
             for k in sorted(seen, key=lambda k: str(seen[k].get("at") if isinstance(seen[k], dict) else ""))[:100]:
                 seen.pop(k, None)
-        store.save(root, doc)
+        if pend or out:  # a heartbeat that finds nothing writes nothing (the program's "last changed" stays true)
+            store.save(root, doc)
         return out
 
 
@@ -670,15 +673,11 @@ def rule_plan(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[s
             diag.append(f"{x['text']}.")
             acts.append({"tool": "remove_part", "part": x["part"], "why": "The brief rules this kind of part out."})
         elif x["kind"] == "gate":
-            from aicad.office import interfaces
-
-            loose = interfaces.unconnected(doc)
-            cause = "interfaces"
-            diag.append(f"The interfaces gate has been blocked for a while: {why[:220]}")
-            if loose:
-                names = [doc["skeleton"]["items"][i]["name"] for i in loose if i in doc["skeleton"]["items"]]
-                acts.append({"tool": "keep_separate", "parts": names, "why": "These parts have no interface; keep them "
-                             "as separate parts if that is what the brief means."})
+            g = gate_plan(doc, asked=bool(x.get("asked")))
+            cause = g["cause"]
+            diag.append(g["diagnosis"])
+            acts += g["actions"]
+            says += g["says"]
         elif x["kind"] == "looks_wrong" and t is not None:
             diag.append(f"The visual check on {t['title']} says it looks wrong ({why[:160]}); measurements decide, "
                         "and none confirmed it.")
@@ -845,15 +844,21 @@ def check(doc: dict[str, Any], a: dict[str, Any], facts: dict[str, dict[str, Any
         if n is None:
             return None, "no unconnected part to keep separate"
         return {**base, "items": n["items"], "parts": n["parts"]}, ""
-    if tool in ("remove_part", "add_part"):
+    if tool in PLAN_TOOLS:
         if not _plan_editable(doc):
             return None, ("part work has started: adding or removing parts now is an engineering change (or a new "
                           "program), not a plan edit")
-        if tool == "remove_part":
+        if tool in ("remove_part", "set_qty"):
             name = str(a.get("part") or "").strip().lower()
             hits = [(s, p) for s, p in _plan_parts(doc) if p["name"].lower() == name]
             if len(hits) != 1:
                 return None, "no such part in the plan"
+            if tool == "set_qty":
+                q = a.get("qty")
+                if not isinstance(q, int) or isinstance(q, bool) or not 1 <= q <= 64 or q == int(hits[0][1].get("qty") or 1):
+                    return None, "that quantity changes nothing"
+                return {**base, "part": hits[0][1]["name"], "sub": hits[0][0], "qty": q,
+                        "before": int(hits[0][1].get("qty") or 1)}, ""
             if len(_plan_parts(doc)) <= 1:
                 return None, "the plan would be empty"
             return {**base, "part": hits[0][1]["name"], "sub": hits[0][0]}, ""
@@ -921,6 +926,8 @@ def classify(doc: dict[str, Any], a: dict[str, Any]) -> tuple[str, str]:
         return "major", "program settings are yours to change"
     if tool in ("remove_part", "add_part"):
         return "major", "it adds or removes a part"
+    if tool == "set_qty":
+        return "major", "it changes how many of a part the plan has"
     if tool == "change_interface":
         if a.get("icd_status") == "approved":
             return "major", "it changes an approved interface"
@@ -973,6 +980,8 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         return f"Remove {a['part']} from the plan"
     if tool == "add_part":
         return f"Add {a['part']['name']} to {a['sub']}"
+    if tool == "set_qty":
+        return f"Plan {a['qty']} × {a['part']} instead of {a.get('before', '?')}"
     if tool == "resize_part":
         return f"Resize {a['part']}: " + ", ".join(f"{k} {v:g} mm" for k, v in a["size"].items())
     if tool == "edit_part":
@@ -1164,39 +1173,44 @@ async def execute(root: Path, pid: str, a: dict[str, Any], env: Any = None,
     if tool == "keep_separate":
         _edit(root, pid, lambda d: interfaces.keep_separate(root, d, a["items"], True, actor))
         return "Recorded at the interfaces gate.", {"kind": "separate", "items": a["items"]}
-    if tool in ("remove_part", "add_part"):
+    if tool in PLAN_TOOLS:
         def fn3(d: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             old = copy.deepcopy(d["plan"])
             stage = d["status"]
-            note = (f"Archie removed {a['part']}: {a['why']}" if tool == "remove_part"
-                    else f"Archie added {a['part']['name']} to {a['sub']}: {a['why']}")
-            if stage == "plan_review":
-                subs = [{**x, "parts": [dict(p) for p in x["parts"]]} for x in d["plan"]["subassemblies"]]
-                for x in subs:
-                    if tool == "remove_part":
-                        x["parts"] = [p for p in x["parts"] if p["name"] != a["part"]]
-                    elif x["name"] == a["sub"]:
-                        x["parts"].append(dict(a["part"]))
-                from aicad.office import planner, scope
+            note = (f"Archie removed {a['part']}: {a['why']}" if tool == "remove_part" else
+                    f"Archie planned {a['qty']} × {a['part']} instead of {a.get('before')}: {a['why']}"
+                    if tool == "set_qty" else f"Archie added {a['part']['name']} to {a['sub']}: {a['why']}")
+            subs = [{**x, "parts": [dict(p) for p in x["parts"]]} for x in d["plan"]["subassemblies"]]
+            for x in subs:
+                if tool == "remove_part":
+                    x["parts"] = [p for p in x["parts"] if p["name"] != a["part"]]
+                elif tool == "set_qty":
+                    for p in x["parts"]:
+                        if p["name"] == a["part"]:
+                            p["qty"] = a["qty"]
+                elif x["name"] == a["sub"]:
+                    x["parts"].append(dict(a["part"]))
+            subs = [x for x in subs if x["parts"]]
+            from aicad.office import planner, scope
 
-                p2 = planner.normalise_plan({**d["plan"], "subassemblies": [x for x in subs if x["parts"]]},
-                                            d["plan"]["source"])
-                if p2 is None:
-                    raise OfficeInputError("The plan would be empty.")
+            p2 = planner.normalise_plan({**d["plan"], "subassemblies": subs}, d["plan"]["source"])
+            if p2 is None:
+                raise OfficeInputError("The plan would be empty.")
+            if stage == "plan_review":
                 d["plan"] = {**d["plan"], **p2, "edited": True,
                              "note": ((d["plan"].get("note") or "") + " " + note).strip()}
                 d["light"] = scope.light_info(d["plan"], d.get("brief") or "")
                 service.emit(root, d, "plan.revised", note, actor)
                 return "The plan in review changed; approve it as usual.", {"kind": "plan", "stage": stage, "plan": old}
-            change = {"notes": note}
-            if tool == "remove_part":
-                change["remove"] = a["part"]
-            else:
-                change["add"] = {"sub": a["sub"], "part": a["part"]}
-            service.revise_plan(root, d, change, actor)
+            # at the interfaces gate, nothing started: the plan changes and the program is laid out again (the ICD
+            # is derived again from the new plan and the gate checks it again)
+            service.revise_plan(root, d, {"notes": note, "plan": {"subassemblies": subs}}, actor)
             service.approve_plan(root, d, None, approved_by and service.user_actor(approved_by.get("name", "Engineer"),
                                                                                   approved_by.get("id")) or actor)
-            return ("The plan changed and the program was laid out again: the interfaces wait for your approval.",
+            n = len((d.get("icd") or {}).get("problems") or [])
+            return ("The plan changed and the program was laid out again: "
+                    + ("the interfaces have no problem left and wait for your approval." if not n else
+                       f"{n} interface problem{'s' if n != 1 else ''} still open."),
                     {"kind": "plan", "stage": "icd", "plan": old})
         outcome, undo = _edit(root, pid, fn3)
         return outcome, undo
@@ -1366,12 +1380,20 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
         done: list[dict[str, Any]] = []
         asked: list[dict[str, Any]] = []
         skipped: list[str] = []
+        checked = []
         for a in plan.get("actions") or []:
             norm, why_not = check(doc, a, facts, wallet)
             if norm is None:
                 skipped.append(f"{a.get('tool')}: {why_not}")
                 continue
-            cls, cls_why = classify(doc, norm)
+            checked.append((a, norm, *classify(doc, norm)))
+        ptok = store.new_id()[:6]
+        # alternatives (one problem, several ways to clear it): the engineer picks one, so a group with any major
+        # option is asked as a whole
+        major_groups = {a["alt"] for a, _n, c, _w in checked if a.get("alt") and c == "major"}
+        for a, norm, cls, cls_why in checked:
+            if a.get("alt") in major_groups and cls == "minor":
+                cls, cls_why = "major", "it is one of several ways to clear the problem: your choice"
             title = describe(doc, norm)
             base = {"tool": norm["tool"], "action": norm, "title": title, "why": norm.get("why") or "",
                     "class": cls, "class_why": cls_why, "cause": plan.get("cause"), "diagnosis": plan.get("diagnosis"),
@@ -1391,6 +1413,8 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
                                                                          outcome=f"Not done: {ex}"))
                 done.append(e)
             else:
+                if a.get("alt"):
+                    base["group"] = f"{ptok}:{a['alt']}"
                 e = _edit(root, pid, lambda d, b=base: _entry(d, **b, status="asking",
                                                               outcome="Waiting for your decision"))
                 asked.append(e)
@@ -1416,13 +1440,29 @@ def _tell(root: Path, pid: str, plan: dict[str, Any], done: list[dict[str, Any]]
         else:
             parts.append(f"I tried to {e['title'][0].lower() + e['title'][1:]}, but: {e['outcome']}")
     if asked:
-        parts.append("This needs your decision first: " + "; ".join(f"{e['title']} ({e['class_why']})"
-                                                                    for e in asked) + ".")
+        grouped = len({e.get("group") for e in asked if e.get("group")}) == 1 and all(e.get("group") for e in asked)             and len(asked) > 1
+        parts.append(("These are the ways to clear it; pick one in the question below: " if grouped else
+                      "This needs your decision first: ")
+                     + "; ".join(f"{e['title']} ({e['class_why']})" for e in asked) + ".")
     if not parts:
         return None
-    questions = [{"action": e["id"], "question": f"{e['title']}?", "why": e["why"],
-                  "options": [{"id": "approve", "label": "Yes, do it"}, {"id": "decline", "label": "No, leave it"}]}
-                 for e in asked]
+    questions: list[dict[str, Any]] = []
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for e in asked:
+        if e.get("group"):
+            groups.setdefault(e["group"], []).append(e)
+            if len(groups[e["group"]]) > 1:
+                continue
+        questions.append({"action": e["id"], "question": f"{e['title']}?", "why": e["why"],
+                          "options": [{"id": "approve", "label": "Yes, do it"}, {"id": "decline", "label": "No, leave it"}]})
+    for es in groups.values():  # alternatives: one question, one choice each (choosing one declines the others)
+        if len(es) < 2:
+            continue
+        q = next(x for x in questions if x["action"] == es[0]["id"])
+        q.update(question="Which change should I make?", actions=[e["id"] for e in es],
+                 why="; ".join(f"{e['title']}: {e['why'].rstrip('.')}" for e in es if e["why"])[:600] + ".",
+                 options=[{"id": "approve", "action": e["id"], "label": e["title"]} for e in es]
+                 + [{"id": "decline", "label": "None of these"}])
     msg = archie_chat.post(root, pid, "\n\n".join(parts), [], kind="supervisor", questions=questions,
                            supervisor={"mode": how, "entries": [e["id"] for e in done + asked]})
 
@@ -1435,6 +1475,106 @@ def _tell(root: Path, pid: str, plan: dict[str, Any], done: list[dict[str, Any]]
                          None, done=len(done), asked=len(asked))
     _edit(root, pid, link)
     return msg
+
+
+# ============================================================================ "Fix with Archie" at the interfaces gate
+def gate_plan(doc: dict[str, Any], asked: bool = False) -> dict[str, Any]:
+    """What numbers can't fix at the interfaces gate, read deterministically: each blocking problem with why it is
+    still open and the plan change that clears it (alternatives grouped: the engineer picks one)."""
+    from aicad.office import icd, interfaces, scope
+
+    ic = doc.get("icd") or {}
+    sk = doc.get("skeleton") or {}
+    items = sk.get("items") or {}
+    issues = [x for x in icd.issues(sk, ic.get("interfaces") or []) if x.get("severity", "error") == "error"] \
+        if sk else []
+    acts: list[dict[str, Any]] = []
+    open_: list[str] = []
+    named, excluded = scope.mentions(str(doc.get("brief") or ""))
+    housing_ok = not ({"housing", "plate", "support"} & excluded) and not (
+        scope.exclusive(str(doc.get("brief") or "")) and not ({"housing", "plate", "support"} & named))
+    subs = [s["name"] for s in (doc.get("plan") or {}).get("subassemblies") or []]
+    from aicad.office.visual_office import BASE_PART, HOUSING_PART
+
+    loose = interfaces.unconnected(doc)
+    if loose:
+        names = [items[i]["name"] for i in loose if i in items]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        open_.append(f"{listed}: no interface connects {'it' if len(names) == 1 else 'them'}, and no number change "
+                     "can make one; it is a decision about the plan")
+        acts.append({"tool": "keep_separate", "parts": names, "alt": "loose",
+                     "why": "Kept apart on purpose (a kit, or parts made on their own); recorded at the gate."})
+        if _plan_editable(doc) and len(names) == 1 and len(_plan_parts(doc)) > 1:
+            acts.append({"tool": "remove_part", "part": names[0], "alt": "loose",
+                         "why": "Not needed in this program: the plan goes on without it."})
+    codes = {x["code"] for x in issues}
+    if "shaft_support" in codes and _plan_editable(doc):
+        shafts = sum(1 for it in items.values() if it.get("role") == "shaft")
+        bearing = next((p for _s, p in _plan_parts(doc) if re.search(r"bearing", p["name"], re.IGNORECASE)), None)
+        why_open = ("a shaft runs in fewer than two bearings and nothing else carries it; that is a part count, not a "
+                    "number on an interface")
+        open_.append(why_open)
+        if bearing is not None:
+            acts.append({"tool": "set_qty", "part": bearing["name"], "qty": max(2, 2 * max(1, shafts)), "alt": "support",
+                         "why": "Two bearings per shaft, one either side of what it carries."})
+        if housing_ok and subs:
+            acts.append({"tool": "add_part", "sub": subs[0], "part": dict(HOUSING_PART), "alt": "support",
+                         "why": "A housing carries the shaft on its bearings."})
+        if bearing is not None and not housing_ok:
+            acts.append({"tool": "remove_part", "part": bearing["name"], "alt": "support",
+                         "why": "No bearings: the shaft with what it carries is delivered as a sub-assembly."})
+    if codes & {"row_layout", "no_mount", "no_host"} and _plan_editable(doc):
+        open_.append("the parts have nothing to mount on, so the layout puts them side by side; that needs a part, "
+                     "not a number")
+        if housing_ok and subs:
+            acts.append({"tool": "add_part", "sub": subs[0], "part": dict(HOUSING_PART), "alt": "mount",
+                         "why": "A housing carries the shafts on their bearings."})
+            acts.append({"tool": "add_part", "sub": subs[0], "part": dict(BASE_PART), "alt": "mount",
+                         "why": "A base plate with bearing supports."})
+    for x in issues:
+        if x["code"] in ("no_interface", "shaft_support", "row_layout", "no_mount", "no_host"):
+            continue
+        open_.append(f"{x['text']} (no safe number change clears it: change the plan, or edit the interface it names)")
+    if not issues and ic.get("problems"):
+        open_ += [str(p) for p in ic["problems"][:4]]
+    diag = ("Numbers alone can't clear the interfaces: " + "; ".join(open_[:5]) + "." if open_ else
+            "The interfaces have no problem left.")
+    says = []
+    if open_ and not acts:
+        says.append("I have no safe change to propose for these: tell me in the chat what the parts should do, or "
+                    "edit the interface the problem names.")
+    return {"cause": "plan" if acts else "interfaces", "diagnosis": diag, "actions": acts[:MAX_ACTIONS],
+            "says": says, "open": open_}
+
+
+async def fix_gate(root: Path, pid: str, actor: dict[str, Any], env: Any = None) -> dict[str, Any]:
+    """The interfaces gate's "Fix with Archie": (1) the free number fix (``interfaces.fix``, no AI); (2) when problems
+    remain and the supervisor is on, Archie diagnoses them and acts (minor: applied; major: asked in the chat with
+    clickable choices); (3) a plain account of what was fixed, what he did or proposes and what is still open."""
+    from aicad.office import interfaces
+
+    steps = _edit(root, pid, lambda d: interfaces.fix(root, d, actor))
+    out: dict[str, Any] = {"steps": steps["steps"], "problems": steps["problems"]}
+    if not steps["problems"]:
+        return out
+    if not enabled():
+        out["archie"] = {"ran": False, "open": gate_plan(store.load(root, pid) or {})["open"]}
+        return out
+
+    def trig(d: dict[str, Any]) -> None:
+        s = sup(d)
+        s["pending"] = (s["pending"] + [{"kind": "gate", "ticket": None, "asked": True, "at": round(time.time(), 3),
+                                         "text": f"the engineer asked Archie to fix: {d['icd']['problems'][0]}"}])
+    _edit(root, pid, trig)
+    res = await run_pass(root, pid, env, force=True)
+    doc = store.load(root, pid) or {}
+    log_ = {e["id"]: e for e in (doc.get("supervisor") or {}).get("log") or []}
+    out["problems"] = list((doc.get("icd") or {}).get("problems") or [])
+    out["archie"] = {"ran": bool(res.get("ran")), "mode": res.get("mode"),
+                     "done": [log_[i]["title"] for i in res.get("done") or [] if log_.get(i, {}).get("status") == "applied"],
+                     "asked": [log_[i]["title"] for i in res.get("asked") or [] if i in log_],
+                     "open": gate_plan(doc)["open"] if out["problems"] else []}
+    return out
 
 
 # ============================================================================ the engineer's answer, undo
@@ -1476,6 +1616,12 @@ async def decide(root: Path, pid: str, aid: str, choice: str, actor: dict[str, A
             service.emit(root, d, f"supervisor.{status}", f"{actor.get('name', 'Someone')} "
                          f"{'approved' if choice == 'approve' else 'declined'} Archie's proposal: {x['title']}. "
                          f"{outcome}", actor, None, action=aid)
+            if x.get("group"):  # alternatives: the others are settled by this answer
+                for y in sup(d)["log"]:
+                    if y.get("group") == x["group"] and y["id"] != aid and y["status"] == "asking":
+                        y.update(status="declined", outcome="You chose another option" if choice == "approve"
+                                 else f"Declined by {actor.get('name', 'the engineer')}",
+                                 decided={"by": actor.get("name"), "at": store.now(), "choice": "decline"})
             return x
         x = _edit(root, pid, fn)
     _answer_question(root, pid, aid, choice, actor)
@@ -1503,8 +1649,8 @@ def _answer_question(root: Path, pid: str, aid: str, choice: str, actor: dict[st
         hist = archie_chat.history(root, pid)
         for m in hist:
             for q in m.get("questions") or []:
-                if q.get("action") == aid:
-                    q.update(answered=choice, by=actor, at=store.now())
+                if q.get("action") == aid or aid in (q.get("actions") or []):
+                    q.update(answered=choice, chosen=aid if choice == "approve" else None, by=actor, at=store.now())
         archie_chat.save_history(root, pid, hist)
 
 

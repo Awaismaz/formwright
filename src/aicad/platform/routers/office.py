@@ -567,11 +567,21 @@ def edit_interface(pid: str, iid: str, body: IcdEditIn, ctx: Ctx = Depends(verif
 
 
 @router.post("/programs/{pid}/icd/fix")
-def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Archie adjusts the draft ICD so every part can be made (deterministic, no AI, no tokens; CD-028)."""
-    out: list[dict[str, Any]] = []
-    doc = _mutate(ctx, pid, lambda root, d: out.append(interfaces.fix(root, d, _actor(ctx))))
-    return {**_view(doc), "fix": out[0]}
+async def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """"Fix with Archie" at the interfaces gate. Step 1: the smallest safe number changes (deterministic, no AI, no
+    tokens; CD-028). Step 2, when problems remain: Archie supervising (WORKLIST 49) diagnoses what numbers can't fix
+    and acts (minor: done and logged; major: plan changes asked in the program chat with clickable choices). The answer
+    says what was fixed, what he did or proposes, and what is still open and why."""
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    try:
+        res = await supervisor.fix_gate(_root(ctx), pid, _actor(ctx), _sup_env(ctx, doc))
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
+    doc = _load(ctx, pid)
+    if res.get("archie") and not (doc.get("icd") or {}).get("problems"):
+        _look_at_layout(ctx, pid, doc)  # cleared: Archie looks at the new layout once
+    return {**_view(doc), "fix": res}
 
 
 @router.post("/programs/{pid}/icd/separate")
@@ -1459,7 +1469,7 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
     elif typ == "replan":
         await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
     elif typ == "fix_icd":
-        fix_icd(pid, ctx)
+        await fix_icd(pid, ctx)
     elif typ == "keep_separate":
         await keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
     elif typ == "revise_plan":
@@ -1522,6 +1532,9 @@ async def supervisor_decide(pid: str, aid: str, body: SupervisorDecideIn,
     audit(ctx.db, "office.supervisor_decision", ctx.user, doc["org_id"], target=pid, step=aid,
           choice=body.choice, status=e.get("status"), tool=e.get("tool"))
     ctx.db.commit()
+    doc = _load(ctx, pid)
+    if e.get("status") == "applied" and (doc.get("icd") or {}).get("status") == "draft":
+        _look_at_layout(ctx, pid, doc)  # the plan changed at the gate: Archie looks at the new layout
     return _sup_view(ctx, pid)
 
 

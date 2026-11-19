@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, etaRange, fmtEta, fmtMinutes, laneBound, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
+import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, etaRange, fixLines, fmtEta, fmtMinutes, laneBound, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
 import type { Constants, Item, Plan, Ticket } from "./types";
 
 // Same numbers as src/aicad/office/estimates.py (the server sends them as `constants`).
@@ -121,5 +121,18 @@ describe("per-agent threads (mirrors estimates.lanes / eta)", () => {
     // the Python test: six 4-minute Molly parts, critical path 4
     expect(etaRange(4, 24, work, 3, { molly: 1 }, K)).toEqual({ low_min: 19.2, high_min: 36.4 });
     expect(etaRange(4, 24, work, 3, { molly: 3 }, K)).toEqual(etaRange(4, 24, work, 3, null, K));
+  });
+});
+
+describe("fixLines: Fix with Archie never looks like it did nothing", () => {
+  it("says which step ran", () => {
+    expect(fixLines({ steps: [{}, {}, {}], problems: [] }).headline).toBe("Fixed 3 sizes automatically; every part can be made: review and approve.");
+    const r = fixLines({ steps: [], problems: ["Shaft: runs in 1 bearing"], archie: { ran: true, done: [], asked: ["Plan 2 × Ball bearing 6204 instead of 1", "Add Housing to A"], open: ["a shaft runs in fewer than two bearings"] } });
+    expect(r.headline).toBe("No size change could help; Archie proposes 2 plan changes: answer in the chat.");
+    expect(r.lines).toEqual(["Proposed: Plan 2 × Ball bearing 6204 instead of 1.", "Proposed: Add Housing to A."]);
+    expect(r.open).toEqual(["a shaft runs in fewer than two bearings"]);
+    const k = fixLines({ steps: [{}], problems: [], archie: { ran: true, done: ["Keep Input shaft and Output shaft as separate parts"], asked: [], open: [] } });
+    expect(k.headline).toBe("Fixed 1 size automatically; Archie made 1 fix himself; every part can be made: review and approve.");
+    expect(fixLines({ steps: [], problems: ["x"], archie: { ran: false, open: ["x is open"] } }).headline).toBe("No size change could help; what numbers can't fix needs your decision; 1 problem still open.");
   });
 });

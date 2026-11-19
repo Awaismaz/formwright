@@ -49,11 +49,12 @@ export function SupervisorQuestion({ program, q, canEdit }: { program: Program; 
       {q.why && <div className="mb-1.5 text-[11.5px] text-muted">{q.why}</div>}
       <div className="flex flex-wrap gap-1.5">
         {q.options.map(o => {
-          const on = q.answered === o.id;
-          return <button key={o.id} disabled={!live || !!busy} data-choice={o.id}
-            onClick={() => void call(o.id, `/actions/${q.action}/decide`, { choice: o.id }, () => o.id === "approve" ? "Done: Archie applied it" : "Archie leaves it as it is")}
+          const key = `${o.id}:${o.action ?? q.action}`;
+          const on = q.answered === o.id && (o.id === "decline" || !q.actions || q.chosen === (o.action ?? q.action));
+          return <button key={key} disabled={!live || !!busy} data-choice={o.id} data-option-action={o.action ?? q.action}
+            onClick={() => void call(key, `/actions/${o.action ?? q.action}/decide`, { choice: o.id }, () => o.id === "approve" ? "Done: Archie applied it" : "Archie leaves it as it is")}
             className={cx("rounded-full border px-2.5 py-1 text-[12px] transition", on ? "border-primary bg-primary text-white" : "border-border bg-panel hover:border-primary hover:text-primary", !live && !on && "opacity-50")}>
-            {busy === o.id ? "…" : o.label}</button>;
+            {busy === key ? "…" : o.label}</button>;
         })}
         {q.answered && <span className="self-center text-[11px] text-muted">{q.answered === "approve" ? "Approved" : "Declined"}{q.by ? ` by ${q.by.name}` : ""}{q.at ? ` ${ago(q.at)}` : ""}</span>}
       </div>

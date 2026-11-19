@@ -20,6 +20,7 @@ from aicad.llm.stub import StubProvider
 from aicad.office import (
     archie_chat,
     deliverables,
+    icd,
     interfaces,
     orchestrator,
     planner,
@@ -634,3 +635,111 @@ def test_an_interface_change_on_an_approved_icd_is_major(tmp_path: Path) -> None
     assert n is not None, why
     assert supervisor.classify(doc, n) == ("major", "it changes an approved interface")
     assert supervisor.describe(doc, n).startswith(f"Change request on interface {i['id']}: fastener → M6")
+
+
+def test_a_stale_interfaces_gate_with_standalone_parts_is_cleared_by_archie(tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gate waits with two unconnected shafts; the brief says they are made on their own: keep-separate is minor."""
+    monkeypatch.setenv("FW_OFFICE_SUPERVISOR_AI", "0")
+    root = store.org_root(tmp_path, "org1")
+    doc = service.new_program("Kit", "Two shafts made on their own, no housing", "org1", "u1", 2, 1000, "standard")
+    service.set_plan(root, doc, planner.normalise_plan(KIT, "standard"), ENG)
+    service.approve_plan(root, doc, None, ENG)
+    store.save(root, doc)
+    pid = doc["id"]
+    assert doc["icd"]["problems"] and not supervisor.detect(doc)  # fresh: not stale yet
+    later = supervisor._ts(doc["updated_at"]) + supervisor.GATE_STALE_MIN * 60 + 5
+    assert [x["kind"] for x in supervisor.detect(doc, later)] == ["gate"]
+
+    async def go() -> None:
+        res = await supervisor.run_pass(root, pid, None, now=later)
+        assert len(res["done"]) == 1 and not res["asked"]
+        d = store.load(root, pid)
+        e = d["supervisor"]["log"][-1]
+        assert e["tool"] == "keep_separate" and e["class"] == "minor" and e["status"] == "applied"
+        assert d["icd"]["problems"] == [] and d["icd"]["history"][-1]["by"] == "Archie"
+        assert supervisor.view(d)["log"][0]["undoable"] is True
+        supervisor.undo(root, pid, e["id"], ENG)
+        assert store.load(root, pid)["icd"]["problems"]  # blocks again until connected or kept separate
+        # a heartbeat that finds nothing new writes nothing
+        rev = store.load(root, pid)["rev"]
+        assert (await supervisor.run_pass(root, pid, None, now=later))["ran"] is False
+        assert store.load(root, pid)["rev"] == rev
+
+    asyncio.run(go())
+
+
+# ============================================================================ "Fix with Archie" at the interfaces gate
+ONE_BEARING = {"subassemblies": [{"name": "Shaft unit", "parts": [
+    {"name": "Shaft", "family": "turned", "complexity": 2, "qty": 1, "description": "Ø20 x 100"},
+    {"name": "Spur gear", "family": "gear", "complexity": 2, "qty": 1, "description": "m2 30 teeth"},
+    {"name": "Ball bearing 6204", "family": "standard", "complexity": 1, "qty": 1, "description": "6204"}]}]}
+
+
+def _at_gate(tmp_path: Path, brief: str, plan: dict[str, Any]) -> tuple[Path, str]:
+    root = store.org_root(tmp_path, "org1")
+    doc = service.new_program("Gate", brief, "org1", "u1", 2, 1000, "standard")
+    service.set_plan(root, doc, planner.normalise_plan(plan, "standard"), ENG)
+    service.approve_plan(root, doc, None, ENG)
+    store.save(root, doc)
+    return root, doc["id"]
+
+
+def test_fix_with_archie_clears_shaft_support_with_a_plan_change_the_engineer_picks(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The founder's question: "If you can tell me how to fix it, why can't Archie?" The number fix can't make a
+    bearing; Archie proposes the plan changes that clear it (alternatives), applies the one picked, and the gate is
+    checked again on the new layout."""
+    monkeypatch.setenv("FW_OFFICE_SUPERVISOR_AI", "0")
+    root, pid = _at_gate(tmp_path, "A shaft carrying a spur gear, on one 6204 ball bearing.", ONE_BEARING)
+    d = store.load(root, pid)
+    assert [x["code"] for x in icd.issues(d["skeleton"], d["icd"]["interfaces"]) if x["severity"] == "error"] == [
+        "shaft_support"]
+
+    async def go() -> None:
+        res = await supervisor.fix_gate(root, pid, ENG)
+        assert res["steps"] == [] and res["problems"]  # step 1: no number change can make a bearing
+        a = res["archie"]
+        assert a["ran"] and a["done"] == [] and len(a["asked"]) == 2
+        assert a["asked"][0] == "Plan 2 × Ball bearing 6204 instead of 1" and a["asked"][1].startswith("Add Housing")
+        assert any("fewer than two bearings" in x for x in a["open"])
+        q = archie_chat.history(root, pid)[-1]["questions"]
+        assert len(q) == 1 and q[0]["question"] == "Which change should I make?"  # alternatives: one question
+        opts = q[0]["options"]
+        assert [o["id"] for o in opts] == ["approve", "approve", "decline"] and opts[-1]["label"] == "None of these"
+        x = await supervisor.decide(root, pid, opts[0]["action"], "approve", ENG)
+        assert x["status"] == "applied" and "no problem left" in x["outcome"]
+        d = store.load(root, pid)
+        assert d["icd"]["problems"] == [] and d["status"] == "active"  # laid out again, the gate checked again
+        assert [p["qty"] for _s, p in supervisor._plan_parts(d) if p["name"] == "Ball bearing 6204"] == [2]
+        other = next(e for e in d["supervisor"]["log"] if e["id"] == opts[1]["action"])
+        assert other["status"] == "declined" and other["outcome"] == "You chose another option"
+        assert archie_chat.history(root, pid)[-1]["questions"][0]["chosen"] == opts[0]["action"]
+        supervisor.undo(root, pid, x["id"], ENG)  # a plan edit not yet built: undone, the problem is back
+        assert store.load(root, pid)["icd"]["problems"]
+
+    asyncio.run(go())
+
+
+def test_fix_with_archie_on_unconnected_parts_asks_and_never_looks_idle(tmp_path: Path,
+                                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FW_OFFICE_SUPERVISOR_AI", "0")
+    root, pid = _at_gate(tmp_path, "Two shafts for the pump", KIT)
+    assert len(interfaces.unconnected(store.load(root, pid))) == 2
+
+    async def go() -> None:
+        res = await supervisor.fix_gate(root, pid, ENG)
+        a = res["archie"]
+        assert res["steps"] == [] and a["ran"] and a["asked"] == ["Keep Input shaft and Output shaft as separate parts"]
+        assert "no number change can make one" in a["open"][0]
+        e = store.load(root, pid)["supervisor"]["log"][-1]
+        assert e["class"] == "major" and e["class_why"] == "only you can say a part is meant to have no interface"
+        await supervisor.decide(root, pid, e["id"], "approve", ENG)
+        assert store.load(root, pid)["icd"]["problems"] == []
+        # with the supervisor off the button still says what is open and why (no silent click)
+        monkeypatch.setenv("FW_OFFICE_SUPERVISOR", "0")
+        root2, pid2 = _at_gate(tmp_path / "b", "Two shafts for the pump", KIT)
+        r2 = await supervisor.fix_gate(root2, pid2, ENG)
+        assert r2["archie"]["ran"] is False and r2["archie"]["open"]
+
+    asyncio.run(go())

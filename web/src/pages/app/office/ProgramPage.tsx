@@ -202,6 +202,11 @@ export default function ProgramPage() {
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  useEffect(() => {  // "Answer Archie in the chat" from the Interfaces tab
+    const open = () => setChatOpen(true);
+    window.addEventListener("fw-open-archie", open);
+    return () => window.removeEventListener("fw-open-archie", open);
+  }, []);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
   const handoffs = recentHandoffs(recent, now);
