@@ -264,27 +264,34 @@ def known_loose(doc: dict[str, Any], adoc: dict[str, Any], findings: list[dict[s
     loose_items |= separate
     loose = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in loose_items}
     kept = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in separate}
-    # parts joined to the rest only at the next level up (four leg-and-bracket pairs in a "Legs" sub-assembly, each
-    # bolted to the top in another one: the founder's "TEST Project"): apart here by design, attached there
-    here = {(i.get("office") or {}).get("item") for i in adoc["instances"]}
-    partners: dict[str, set[str]] = {}
+    # a sub-assembly holds only its own parts: a part copy joined by an interface to a part of another level (each
+    # leg on its own bracket, each bracket on the table top of another sub-assembly) is apart here and assembled in
+    # the final assembly, where the same check runs over everything (TEST Project after its revision, 2026-11-20)
+    level = {(i.get("office") or {}).get("item") for i in adoc["instances"]} - {None}
+    outside: dict[tuple[str, int], str] = {}
     for f in ifs:
-        partners.setdefault(f["a"]["item"], set()).add(f["b"]["item"])
-        partners.setdefault(f["b"]["item"], set()).add(f["a"]["item"])
-    above = {i for i in items if partners.get(i) and partners[i] - here}
-    inst_item = {i["id"]: (i.get("office") or {}).get("item") for i in adoc["instances"]}
+        for s, o in (("a", "b"), ("b", "a")):
+            if f[s]["item"] in level and f[o]["item"] not in level and f[o]["item"] in items:
+                outside.setdefault((f[s]["item"], int(f[s].get("copy") or 0)),
+                                  str(items[f[o]["item"]].get("name") or f[o].get("name") or "a part"))
+    held = {i["id"]: outside[k] for i in adoc["instances"] if (k := ((i.get("office") or {}).get("item"),
+                                                                       int((i.get("office") or {}).get("copy") or 0)))
+            in outside}
+    placed = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in items}
     out = []
     for f in findings:
         its = set(f.get("items") or [])
-        designed = {inst_item.get(x) for x in its} & set(items)
-        if f["code"] == "floating" and designed & above:  # the cluster hangs together and joins upward
-            out.append({**f, "severity": "note", "text": f["text"] + " They are joined to the rest at the next level "
-                        "up (their interfaces connect them to parts of another sub-assembly)."})
-            continue
         if f["code"] in ("floating", "row") and its and len(its - kept) <= 1 and kept & its:
             continue  # only parts the engineer kept separate (and at most one other) touch nothing: as decided
         if f["code"] == "floating" and its and its <= loose:
             f = {**f, "severity": "note", "text": f["text"] + " The approved layout gives it no interface."}
+        elif f["code"] == "floating" and its and its & set(held):
+            host = held[next(i for i in f["items"] if i in held)]
+            f = {**f, "severity": "note", "text": f["text"] + f" It is joined to {host} of another sub-assembly: the "
+                                                               "final assembly checks it there."}
+        elif f["code"] == "row" and its and (mine := {i for i in its if i in placed}) and mine <= set(held):
+            f = {**f, "severity": "note", "text": f["text"] + " Each of them is joined to a part of another "
+                                                               "sub-assembly: the final assembly checks them there."}
         out.append(f)
     return out
 
@@ -322,9 +329,17 @@ def level_message(t: dict[str, Any], look: dict[str, Any]) -> tuple[str, list[di
         line = look.get("line") or ""  # the reason already carries the visual line when a measurement confirmed it
         extra = f"\n{line}" if line and line not in bullets else ""
         if found:  # a placement measurement: the interfaces placed it so
-            tip = ("The interfaces place every part, so this comes from the layout or the plan. I can rebuild the "
-                   "program assembly from the approved interfaces and retry the step; if it stops again, the layout "
-                   "needs a change (tell me what, or raise a change request on the Interfaces tab).")
+            from aicad.office import supervisor
+
+            tip = ("The interfaces place every part, so this comes from the layout or the plan, not from the parts. "
+                   "A revision of the program fixes it at any stage: the layout and the interfaces are derived again, "
+                   "what is built is kept where its interfaces don't change, and the parts that must change are "
+                   "reopened. " + ("I'm working out that revision now and will ask you with the full list of what it "
+                                   "keeps and redoes." if supervisor.enabled() else
+                                   "Tell me what should carry what (or ask me to check now on the Archie tab) and "
+                                   "I'll propose it."))
+            return ((f"I stopped {t['key']} {t['title']}: {what} isn't assembled as the interfaces say.\n{bullets}"
+                     f"{extra}" + (f"\n- {loose}" if loose else "") + f"\n\n{tip}"), [])
         else:  # the picture, confirmed by a measured clash between the flagged parts
             tip = ("A measured clash between the flagged parts confirms what the picture shows. Look at the clash in "
                    "the assembly view: if a part is wrong, reopen it with a note; if the interface is wrong, raise a "

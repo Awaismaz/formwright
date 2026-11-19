@@ -108,8 +108,11 @@ NEVER_RELAXED = ("The gating build checks (a valid, closed solid that exports) a
 
 MINOR_TOOLS = frozenset({"retry", "pause", "reassign", "send_back", "approve_with_notes"})
 TOOLS = ("retry", "pause", "reassign", "send_back", "approve_with_notes", "relax_rule", "keep_separate",
-         "remove_part", "add_part", "set_qty", "resize_part", "edit_part", "change_interface", "budget")
+         "remove_part", "add_part", "set_qty", "resize_part", "edit_part", "change_interface", "budget",
+         "revise_program")
 PLAN_TOOLS = frozenset({"remove_part", "add_part", "set_qty"})
+_PLACEMENT = re.compile(r"touches nothing|touch nothing|floating|not assembled|in a row|no interface places|"
+                        r"apart from|lie apart|on the floor", re.IGNORECASE)
 _STANDALONE = re.compile(r"\b(kit|separate(?:ly)?|on (?:their|its) own|stand-?alone|loose|spares?|individual(?:ly)?|"
                          r"not assembled|no assembly)\b", re.IGNORECASE)
 
@@ -156,8 +159,20 @@ procedural rule), "feature": "feature key (optional, conformance)", "expiry": "r
 - {"tool": "edit_part", "ticket": "KEY", "description": "the requirement to add to the part's brief"}
 - {"tool": "change_interface", "interface": "IF-n", "values": {"field": number}}
 - {"tool": "budget", "tokens": integer, "concurrency": integer}: never above what the wallet allows.
-Use an empty list when nothing should be done, and say why. At most three actions. Never mention files, code, \
-models, prompts or how you work inside."""
+- {"tool": "revise_program", "changes": [change, ...]}: revise the program at any stage, also after parts are \
+approved or integrated: the layout and the interfaces are derived again (ICD v+1), parts whose interface features \
+change are reopened with a precise instruction, kept parts are re-placed, the assemblies that hold a change run \
+again. Use it when a measured placement problem (a part or a copy floating, parts in a row, a copy with no \
+interface) comes from the layout or the plan, or to add, remove or re-size parts after work started. Changes: \
+{"op": "base", "part": "name"} (the part everything else is carried by), {"op": "mount", "part": "name", "on": \
+"name"} (every copy of the part sits on its own copy of the host when the counts match), {"op": "size", "part": \
+"name", "envelope": [L, W, H]} (mm; a part that stands upright has its long side as H), {"op": "qty", "part": "name", \
+"qty": n}, {"op": "add", "sub": "sub-assembly", "part": {"name", "family", "qty", "description", "envelope", \
+"mounts_on"}}, {"op": "remove", "part": "name"}, {"op": "describe", "part": "name", "description": "..."}, \
+{"op": "relayout"} (only lay it out again). The office computes what it keeps, re-places, redesigns, adds and \
+removes, and asks the engineer with that list.
+Never tell the engineer to start a new program: revise this one. Use an empty list when nothing should be done, \
+and say why. At most three actions. Never mention files, code, models, prompts or how you work inside."""
 
 _BLOCK = re.compile(r"```fw-supervisor\s*\n(.*?)\n?```", re.DOTALL)
 
@@ -511,6 +526,10 @@ def state_view(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[
     if doc.get("plan") and doc["status"] in ("plan_review",) or archie_chat.can_revise(doc):
         lines.append("Plan: " + "; ".join(f"{x['name']}: " + ", ".join(p["name"] for p in x.get("parts", []))
                                           for x in (doc.get("plan") or {}).get("subassemblies") or []))
+    else:
+        from aicad.office import revision
+
+        lines += revision.context_lines(doc)
     lines.append("Rules you may relax: " + "; ".join(
         f"{k} ({v['what']}; {'measures geometry' if v['measures'] else 'procedural'})" for k, v in RULES.items()))
     return "\n".join(lines)
@@ -585,6 +604,33 @@ def rule_plan(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[s
         why = str(x.get("text") or "")
         low = why.lower()
         n_said = len(diag) + len(says)
+        if x["kind"] in ("blocked", "repeat") and t is not None and t["kind"] == "integration" \
+                and _PLACEMENT.search(low):
+            from aicad.office import revision
+
+            if any(a["tool"] == "revise_program" for a in acts):
+                continue  # the same layout stops this level too: the one revision covers it
+            cand = revision.propose(doc)
+            if cand is not None:
+                cause = "plan"
+                loose = cand["placement"]["before"]
+                diag.append(f"{t['key']} {t['title']} stopped on a measured placement problem ({why[:200]}). The "
+                            "parts are fine; the layout is not: " + "; ".join(loose[:3]) + ". Numbers on one interface "
+                            "can't fix that, but a revision of the program can: " + "; ".join(
+                                revision.describe_ops(cand["ops"])) + ".")
+                ev.append(f"{t['key']}: " + (loose[0] if loose else why[:200]))
+                acts.append({"tool": "revise_program", "changes": cand["ops"],
+                             "why": "Every copy gets its own joints, so nothing is left floating; what is already "
+                                    "built is kept where its interfaces don't change."})
+                continue
+            cause = "plan"
+            diag.append(f"{t['key']} {t['title']} stopped on a measured placement problem ({why[:200]}): it comes "
+                        "from the layout or the plan, not from the parts.")
+            says.append("I found no revision of the layout that leaves nothing floating by itself. Tell me what "
+                        "should carry what (for example \"the top is the base and each leg sits on its own "
+                        "bracket\") and I'll revise the program with that, keeping what is built where I can. Only "
+                        "if you'd rather begin again from the brief is a new program the way out.")
+            continue
         if x["kind"] in ("blocked", "repeat") and t is not None:
             f = facts.get(t["id"]) or {}
             keys = _feature_keys(t)
@@ -844,10 +890,28 @@ def check(doc: dict[str, Any], a: dict[str, Any], facts: dict[str, dict[str, Any
         if n is None:
             return None, "no unconnected part to keep separate"
         return {**base, "items": n["items"], "parts": n["parts"]}, ""
+    if tool in PLAN_TOOLS and not _plan_editable(doc):
+        # part work has started: the same change is a revision of the program (ICD v+1), never a new program
+        op = {"remove_part": {"op": "remove", "part": a.get("part")}, "set_qty": {"op": "qty", "part": a.get("part"),
+                                                                                "qty": a.get("qty")},
+              "add_part": {"op": "add", "sub": a.get("sub"), "part": a.get("part")}}[tool]
+        return check(doc, {"tool": "revise_program", "why": why, "changes": [op]}, facts, wallet)
+    if tool == "revise_program":
+        from aicad.office import revision
+
+        try:
+            cand = revision.candidate(doc, a.get("changes") or a.get("ops") or [])
+        except OfficeInputError as e:
+            return None, str(e).rstrip(".")
+        if not cand["ok"]:
+            return None, cand["why"].rstrip(".")
+        busy = revision.busy_tickets(doc, cand["impact"])
+        if busy:
+            return None, f"{busy[0]} is in the middle of a step"
+        return {**base, "changes": cand["ops"], "impact": revision.view(cand), "icd_version":
+                int((doc.get("icd") or {}).get("version") or 1), "title": revision.title(cand, doc),
+                **({"engineer_asked": True} if a.get("engineer_asked") else {})}, ""
     if tool in PLAN_TOOLS:
-        if not _plan_editable(doc):
-            return None, ("part work has started: adding or removing parts now is an engineering change (or a new "
-                          "program), not a plan edit")
         if tool in ("remove_part", "set_qty"):
             name = str(a.get("part") or "").strip().lower()
             hits = [(s, p) for s, p in _plan_parts(doc) if p["name"].lower() == name]
@@ -924,6 +988,12 @@ def classify(doc: dict[str, Any], a: dict[str, Any]) -> tuple[str, str]:
         if a.get("tokens") is not None and a["tokens"] > int(a.get("before") or 0):
             return "major", "it raises the budget"
         return "major", "program settings are yours to change"
+    if tool == "revise_program":
+        imp = a.get("impact") or {}
+        if imp.get("replace_only") and a.get("engineer_asked"):
+            return "minor", "it only re-places parts, and you approved the plan change"
+        mw = list(imp.get("major_why") or []) or ["it changes the plan and the interfaces"]
+        return "major", " and ".join(mw)
     if tool in ("remove_part", "add_part"):
         return "major", "it adds or removes a part"
     if tool == "set_qty":
@@ -976,6 +1046,8 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         names = a.get("parts") or []
         return "Keep " + (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + \
             (" as a separate part" if len(names) == 1 else " as separate parts")
+    if tool == "revise_program":
+        return str(a.get("title") or "Revise the program")
     if tool == "remove_part":
         return f"Remove {a['part']} from the plan"
     if tool == "add_part":
@@ -1173,6 +1245,17 @@ async def execute(root: Path, pid: str, a: dict[str, Any], env: Any = None,
     if tool == "keep_separate":
         _edit(root, pid, lambda d: interfaces.keep_separate(root, d, a["items"], True, actor))
         return "Recorded at the interfaces gate.", {"kind": "separate", "items": a["items"]}
+    if tool == "revise_program":
+        from aicad.office import revision
+
+        rev = _edit(root, pid, lambda d: revise_now(root, d, a["changes"], actor, a.get("why") or "Archie's diagnosis",
+                                                    expect=a.get("icd_version")))
+        revision.spawn_rebuild(root, pid, env)
+        _wake(root, pid)
+        return (f"{rev['id']}: ICD v{rev['icd_from']} → v{rev['icd_to']}. {rev['summary']}. "
+                + (f"Reopened {', '.join(x['key'] for x in rev['reopened'])}. " if rev["reopened"] else "")
+                + (f"Assemblies run again: {', '.join(rev['reset'])}. " if rev["reset"] else "")
+                + "The office carries on to completion."), {"kind": "revision", "id": rev["id"]}
     if tool in PLAN_TOOLS:
         def fn3(d: dict[str, Any]) -> tuple[str, dict[str, Any]]:
             old = copy.deepcopy(d["plan"])
@@ -1260,6 +1343,43 @@ async def execute(root: Path, pid: str, a: dict[str, Any], env: Any = None,
         _wake(root, pid)
         return outcome, undo
     raise OfficeInputError("Unknown action")
+
+
+def revise_now(root: Path, d: dict[str, Any], changes: list[dict[str, Any]], actor: dict[str, Any], why: str,
+               expect: int | None = None, source: str = "archie") -> dict[str, Any]:
+    """Derive the revision again against the program as it is now and apply it, then set the office running so the
+    program goes on to completion (the caller holds the program lock)."""
+    from aicad.office import orchestrator, revision
+
+    if expect is not None and int((d.get("icd") or {}).get("version") or 1) != int(expect):
+        raise OfficeInputError("The interfaces changed since this was proposed: ask Archie again.")
+    cand = revision.candidate(d, changes)
+    if not cand["ok"]:
+        raise OfficeInputError(cand["why"])
+    rev = revision.apply(root, d, cand, actor, why=why, source=source)
+    o = d.get("orchestrator") or {}
+    if o.get("user_id") and o.get("state") != "running":
+        try:
+            orchestrator.start(root, d, actor, user_id=o["user_id"], god_tokens=bool(o.get("god_tokens")),
+                               god_paywall=bool(o.get("god_paywall")))
+        except OfficeInputError as e:  # the budget: said, and the revision stands
+            service.emit(root, d, "program.note", f"{rev['id']} is applied; the office didn't start: {e}", actor)
+    return rev
+
+
+def log_revision(d: dict[str, Any], rev: dict[str, Any], actor: dict[str, Any], source: str) -> dict[str, Any]:
+    """The Archie log entry of a revision the engineer made (chat Apply, the revision endpoint): same record as
+    Archie's own, with undo."""
+    imp = rev.get("impact") or {}
+    return _entry(d, tool="revise_program", action={"tool": "revise_program", "impact": imp, "changes": rev["ops"]},
+                  title=f"Revise the program to ICD v{rev['icd_to']} (" + "; ".join(rev["changes"][:4]) + f"): "
+                        f"{rev['summary']}", why=rev.get("why") or "",
+                  **{"class": "major", "class_why": "you asked for it"}, cause="plan", diagnosis="",
+                  evidence=list(imp.get("lines") or [])[:6], mode="engineer", tokens=0, usd=None,
+                  trigger=[source], ticket=None, status="applied",
+                  outcome=f"{rev['id']}: ICD v{rev['icd_from']} → v{rev['icd_to']}. {rev['summary']}.",
+                  undo={"kind": "revision", "id": rev["id"]},
+                  decided={"by": actor.get("name"), "at": store.now(), "choice": "approve"})
 
 
 def _wake(root: Path, pid: str) -> None:
@@ -1387,6 +1507,18 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
                 skipped.append(f"{a.get('tool')}: {why_not}")
                 continue
             checked.append((a, norm, *classify(doc, norm)))
+        if how == "ai" and not any(n["tool"] == "revise_program" for _a, n, _c, _w in checked) and (
+                any(x.startswith("revise_program:") for x in skipped)
+                or any(x["kind"] in ("blocked", "repeat") and _PLACEMENT.search(str(x.get("text") or ""))
+                       for x in triggers)):
+            # the model's revision could not be built (or he only described it): the office's own one, when it
+            # clears the problem, so the engineer always gets a one-click question, never only words
+            for a in rule_plan(doc, triggers, facts, wallet)["actions"]:
+                if a["tool"] == "revise_program":
+                    norm, why_not = check(doc, a, facts, wallet)
+                    if norm is not None:
+                        checked.append((a, norm, *classify(doc, norm)))
+                        break
         ptok = store.new_id()[:6]
         # alternatives (one problem, several ways to clear it): the engineer picks one, so a group with any major
         # option is asked as a whole
@@ -1439,6 +1571,10 @@ def _tell(root: Path, pid: str, plan: dict[str, Any], done: list[dict[str, Any]]
                          "it myself. It is in the Archie log.)")
         else:
             parts.append(f"I tried to {e['title'][0].lower() + e['title'][1:]}, but: {e['outcome']}")
+    for x in skipped:
+        if x.startswith("revise_program:") and not asked:
+            parts.append("I couldn't turn that revision into one the layout can build: " + x.split(":", 1)[1].strip()
+                         + ". Tell me what should change and I'll work it out again.")
     if asked:
         grouped = len({e.get("group") for e in asked if e.get("group")}) == 1 and all(e.get("group") for e in asked)             and len(asked) > 1
         parts.append(("These are the ways to clear it; pick one in the question below: " if grouped else
@@ -1453,8 +1589,11 @@ def _tell(root: Path, pid: str, plan: dict[str, Any], done: list[dict[str, Any]]
             groups.setdefault(e["group"], []).append(e)
             if len(groups[e["group"]]) > 1:
                 continue
+        imp = (e.get("action") or {}).get("impact")
         questions.append({"action": e["id"], "question": f"{e['title']}?", "why": e["why"],
-                          "options": [{"id": "approve", "label": "Yes, do it"}, {"id": "decline", "label": "No, leave it"}]})
+                          **({"impact": imp} if imp else {}),
+                          "options": [{"id": "approve", "label": "Yes, revise the program" if imp else "Yes, do it"},
+                                      {"id": "decline", "label": "No, leave it"}]})
     for es in groups.values():  # alternatives: one question, one choice each (choosing one declines the others)
         if len(es) < 2:
             continue
@@ -1682,6 +1821,10 @@ def undoable(doc: dict[str, Any], e: dict[str, Any]) -> str | None:
         return None if archie_chat.can_revise(doc) else "part work has started on the new plan"
     if k in ("separate", "resize", "interface"):
         return None if (doc.get("icd") or {}).get("status") == "draft" else "the interfaces were approved since"
+    if k == "revision":
+        from aicad.office import revision
+
+        return revision.undoable(doc, u["id"])
     return "this step can't be reversed"
 
 
@@ -1775,11 +1918,20 @@ def undo(root: Path, pid: str, aid: str, actor: dict[str, Any]) -> dict[str, Any
         elif k == "interface":
             interfaces.edit(root, d, u["interface"], u["values"], actor)
             res = "The interface has its earlier numbers."
+        elif k == "revision":
+            from aicad.office import revision
+
+            rv = revision.undo(root, d, u["id"], actor)
+            res = f"The program is back at ICD v{rv['icd_from']}, with the plan and the tickets as they were."
         e.update(status="undone", undone={"by": who, "at": store.now(), "outcome": res})
         service.emit(root, d, "supervisor.undone", f"{who} undid Archie's action: {e['title']}. {res}", actor, None,
                      action=aid)
         return e
     e = _edit(root, pid, fn)
+    if (e.get("undo") or {}).get("kind") == "revision":
+        from aicad.office import revision
+
+        revision.spawn_rebuild(root, pid)
     _wake(root, pid)
     return e
 
@@ -1791,7 +1943,8 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
     for e in reversed(s.get("log") or []):
         why = undoable(doc, e) if e.get("status") == "applied" else "n/a"
         log_.append({k: v for k, v in e.items() if k not in ("action", "undo")} | {
-            "undoable": why is None, "undo_why": None if why in (None, "n/a") else why})
+            "undoable": why is None, "undo_why": None if why in (None, "n/a") else why,
+            "impact": (e.get("action") or {}).get("impact")})
     ovs = []
     for o in reversed(s.get("overrides") or []):
         ovs.append({**{k: v for k, v in o.items() if k not in ("builds",)}, "scope_text": _scope_text(doc, o),

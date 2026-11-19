@@ -251,9 +251,13 @@ def _sub_base(prog: dict[str, Any], sub: str) -> str | None:
 
 
 async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
-                keys: dict[str, str] | None = None) -> dict[str, Any]:
+                keys: dict[str, str] | None = None, frames: dict[str, dict[str, Any]] | None = None,
+                keep_subs: set[str] | None = None) -> dict[str, Any]:
     """Create (or rebuild) every program assembly document. ``keys``: item -> part key for items that already have a
-    real part (the rest get placeholders). Returns the program's ``assembly`` record."""
+    real part (the rest get placeholders). ``frames``: item -> the frame Gage found for a real part modelled in
+    another frame (placed through it, as a swap-in does). ``keep_subs``: sub-assemblies a program revision didn't
+    touch: their documents (with the fasteners Fitz fitted) stay as they are. Returns the program's ``assembly``
+    record."""
     from aicad.assembly import service as aservice
     from aicad.assembly import store as astore
     from aicad.assembly import xform
@@ -269,6 +273,10 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
     sub_docs: dict[str, dict[str, Any]] = {}
     for sub in subs_of(prog):
         aid = (state.get("subs") or {}).get(sub["id"])
+        kept = astore.load(aroot, aid) if aid and sub["id"] in (keep_subs or set()) else None
+        if kept is not None:  # untouched by a revision: as integrated
+            sub_docs[sub["id"]] = kept
+            continue
         fresh = astore.new_doc(f"{prog['name']} · {sub['name']}"[:120], org_id, user_id, None)
         async with locks.hold(aid or fresh["id"], locks.OFFICE):  # the same lock as Assembly Studio's hand edits
             adoc = (astore.load(aroot, aid) if aid else None) or fresh
@@ -278,10 +286,11 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
             for item, v in sk["items"].items():
                 if v["sub"] != sub["id"]:
                     continue
+                f = (frames or {}).get(item) if parts[item]["kind"] == "real" else None
                 for c, _at in enumerate(v["copies"]):
-                    inst = aservice.add_instance(aroot, adoc, parts[item]["key"], T=place(sk, item, c), name=v["name"])
+                    inst = aservice.add_instance(aroot, adoc, parts[item]["key"], T=place(sk, item, c, f), name=v["name"])
                     inst["fixed"] = item == base and c == 0
-                    inst["office"] = {"program": prog["id"], "item": item, "copy": c}
+                    inst["office"] = {"program": prog["id"], "item": item, "copy": c, **({"frame": f} if f else {})}
             if not any(i["fixed"] for i in adoc["instances"]) and adoc["instances"]:
                 adoc["instances"][0]["fixed"] = True
             _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, None))
