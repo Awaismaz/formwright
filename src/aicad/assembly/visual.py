@@ -46,6 +46,7 @@ LOAD_S = 5.0
 VISION_S = 20.0
 VISION_MODEL = "haiku"    # the harness alias; the default (larger) model cost ~30 platform tokens a look, this ~2
 VISION_EFFORT = "low"
+VISION_TIMEOUT_S = 120.0  # a look never holds a step longer than this (one live look ran 400 s under load)
 OVERALL = ("looks_assembled", "looks_wrong", "unsure")
 STATUS = ("ok", "wrong", "unsure")
 PROBLEM_KINDS = ("floating", "row", "interpenetration", "orientation", "missing", "other")
@@ -560,7 +561,13 @@ async def look(scene: dict[str, Any], relations: list[dict[str, Any]], folder: P
         meta: dict[str, Any] = {}
     else:
         try:
-            text, usd, meta = await ask(folder, png, prompt(scene, relations, brief, notes, png.name), budget_usd)
+            import asyncio
+
+            text, usd, meta = await asyncio.wait_for(
+                ask(folder, png, prompt(scene, relations, brief, notes, png.name), budget_usd), VISION_TIMEOUT_S)
+        except TimeoutError:
+            return {**rec, "status": "failed", "error": "The visual check took too long and was skipped; the measured "
+                    "checks still apply.", "vision_s": round(time.perf_counter() - t0, 1)}
         except Exception as e:  # noqa: BLE001 - any provider failure: the visual check is simply missing
             from aicad.agent.session import scrub
 
