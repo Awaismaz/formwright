@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Archive, ArchiveRestore, Copy, Download, ExternalLink, FileDown, FileUp, FolderKanban, LayoutGrid, List, Lock, MoreHorizontal,
+  Archive, ArchiveRestore, Copy, Download, ExternalLink, FileDown, FileUp, FolderInput, FolderKanban, Folders, LayoutGrid, List, Lock, MoreHorizontal,
   Pencil, Plus, Ruler, ScanSearch, Search, Share2, Trash2, Users, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +19,8 @@ import ShareDialog from "@/components/collab/ShareDialog";
 import { PartExportDialog, saveNative } from "@/components/NativeExport";
 import { SolidworksExportDialog } from "@/components/SolidworksExport";
 import { START_ACCEPT, startFromFile } from "@/components/StartBox";
+import ProjectStrip from "@/components/memory/ProjectStrip";
+import ProjectPicker from "@/components/memory/ProjectPicker";
 
 type Sort = "updated" | "name" | "size" | "created";
 const SORTS: [Sort, string][] = [["updated", "Last updated"], ["name", "Name"], ["size", "Size"], ["created", "Date created"]];
@@ -33,6 +35,7 @@ function AccessChips({ p }: { p: Project }) {
       {a.team && <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ background: a.team.color }}><Users className="h-3 w-3" />{a.team.name}</span>}
       {!a.can_edit && <span className="inline-flex items-center gap-1 rounded bg-panel/90 px-1.5 py-0.5 text-[10.5px] font-medium text-muted" title={`You have ${LEVEL_TEXT[a.level].toLowerCase()} access`}><Lock className="h-3 w-3" />{a.can_comment ? "Comment" : "View"} only</span>}
       {a.guest && <span className="rounded bg-accent px-1.5 py-0.5 text-[10.5px] font-semibold text-white">Guest</span>}
+      {p.design_project && <span className="inline-flex max-w-[160px] items-center gap-1 rounded bg-panel/90 px-1.5 py-0.5 text-[10.5px] font-medium text-primary" title={`In the project ${p.design_project.name}`}><Folders className="h-3 w-3 shrink-0" /><span className="truncate">{p.design_project.name}</span></span>}
     </div>);
 }
 
@@ -59,6 +62,7 @@ export default function Projects() {
   const list = useQuery({ queryKey: ["projects", archived], enabled: !!me?.org, queryFn: () => api.get<{ items: Project[] }>(`/api/projects?archived=${archived}`) });
   const shared = useQuery({ queryKey: ["projects", "shared-with-me"], queryFn: () => api.get<{ items: Project[] }>("/api/shared-with-me") });
   const [sharing, setSharing] = useState<string | null>(null);
+  const [grouping, setGrouping] = useState<Project | null>(null);
 
   useEffect(() => { if (params.get("new") === "1") { setNewOpen(true); params.delete("new"); setParams(params, { replace: true }); } }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const s = params.get("q"); if (s) { setQ(s); params.delete("q"); setParams(params, { replace: true }); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,7 +90,7 @@ export default function Projects() {
   };
   const del = async () => {
     if (!confirm) return;
-    await call(() => api.del(`/api/projects/${confirm.id}`), "Project deleted");
+    await call(() => api.del(`/api/projects/${confirm.id}`), "Part deleted");
     setConfirm(null);
   };
   const duplicate = async (p: Project) => {
@@ -105,7 +109,7 @@ export default function Projects() {
   };
   const rename = async () => {
     if (!renaming?.name.trim()) return;
-    await call(() => api.patch(`/api/projects/${renaming.p.id}`, { name: renaming.name.trim() }), "Project renamed");
+    await call(() => api.patch(`/api/projects/${renaming.p.id}`, { name: renaming.name.trim() }), "Part renamed");
     setRenaming(null);
   };
   const rowMenu = (p: Project) => (
@@ -115,6 +119,7 @@ export default function Projects() {
         <MenuItem icon={<ExternalLink />} onSelect={() => window.open(`/app/projects/${p.id}`, "_blank", "noopener")}>Open in new tab</MenuItem>
         {!viewer && can(p.access, "edit") && <MenuItem icon={<Pencil />} onSelect={() => setRenaming({ p, name: p.name })}>Rename…</MenuItem>}
         {!viewer && !p.access?.guest && <MenuItem icon={<Copy />} onSelect={() => duplicate(p)}>Duplicate</MenuItem>}
+        {!viewer && can(p.access, "edit") && !p.access?.guest && <MenuItem icon={<FolderInput />} onSelect={() => setGrouping(p)}>{p.design_project ? "Move to another project…" : "Add to project…"}</MenuItem>}
         <MenuItem icon={<Share2 />} onSelect={() => setSharing(p.id)}>{can(p.access, "share") ? "Share…" : "Who has access"}</MenuItem>
         {p.builds > 0 && <MenuItem icon={<FileDown />} onSelect={() => setExporting(p)}>Download as .fwpart…</MenuItem>}
         {p.builds > 0 && <MenuItem icon={<Download />} onSelect={() => setSwExport(p)}>Export for SOLIDWORKS…</MenuItem>}
@@ -135,13 +140,15 @@ export default function Projects() {
       onDragLeave={e => { if (e.currentTarget === e.target) setDrag(false); }}
       onDrop={e => { e.preventDefault(); setDrag(false); void onFile(e.dataTransfer.files[0]); }}>
       <input ref={fileRef} type="file" accept={START_ACCEPT} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
-      <PageHeader title="Projects" subtitle="Each project holds a part: its model, checks, revisions, exports and design conversation."
+      <PageHeader title="Projects" subtitle="Projects group related parts. Each part has its own model, checks, revisions, exports and design conversation."
         actions={<>
           <Button variant="secondary" icon={<Download className="h-4 w-4" />} loading={allBusy} onClick={() => void downloadAll()}
             title="Every built project as Formwright parts (.fwpart) in one zip">Download all</Button>
           {!viewer && <Button variant="secondary" icon={<FileUp className="h-4 w-4" />} onClick={() => fileRef.current?.click()}
             title="Formwright files (.fwpart, .fwasm, .fwdrw, .fwprog), STEP, drawings or photos">Import</Button>}
-          {!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>}</>} />
+          {!viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New part</Button>}</>} />
+      {!archived && !q && <ProjectStrip canCreate={!viewer} />}
+      <h2 className="mb-3 text-[15px] font-semibold">Parts</h2>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:max-w-xs"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder={`Search by name, or by size: ${units === "in" ? "4.7 x 3.1 in" : "120x80x10"}`} className="px-9" aria-label="Search projects by name or size" />
@@ -171,9 +178,9 @@ export default function Projects() {
             : <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">{bySize.data.items.map(m => <MatchRow key={m.project.id} m={m} />)}</div>}
         </section>)}
       {list.isLoading ? <PageLoader /> : items.length === 0 ? (
-        <EmptyState icon={<FolderKanban className="h-6 w-6" />} title={q ? "No matching projects" : archived ? "No archived projects" : "No projects yet"}
+        <EmptyState icon={<FolderKanban className="h-6 w-6" />} title={q ? "No matching parts" : archived ? "No archived parts" : "No parts yet"}
           body={q ? <>Nothing is named like “{q}”. Try part of the name, or a size such as {units === "in" ? "4.7 x 3.1 in" : "120x80x10"}.</> : !archived ? "Describe a part from Home, or start from a template, a STEP file or a drawing." : undefined}
-          action={q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button> : !archived && !viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>} />
+          action={q ? <Button variant="secondary" onClick={() => setQ("")}>Clear search</Button> : !archived && !viewer && <Button icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New part</Button>} />
       ) : view === "grid" ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {items.map(p => <div key={p.id} className="relative"><ProjectCard p={p} units={units} /><AccessChips p={p} /><div className="absolute right-2 top-2 rounded bg-panel/90">{rowMenu(p)}</div></div>)}
@@ -182,7 +189,7 @@ export default function Projects() {
         <div className="card overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-panel2 text-left text-xs text-muted"><tr>
-              <th className="px-4 py-2.5 font-medium">Part</th><th className="px-4 py-2.5 font-medium">Status</th><th className="px-4 py-2.5 font-medium">Material</th>
+              <th className="px-4 py-2.5 font-medium">Part</th><th className="px-4 py-2.5 font-medium">Project</th><th className="px-4 py-2.5 font-medium">Status</th><th className="px-4 py-2.5 font-medium">Material</th>
               <th className="px-4 py-2.5 font-medium">Envelope ({unitLabel})</th><th className="px-4 py-2.5 font-medium">Volume</th>
               <th className="px-4 py-2.5 font-medium">Builds</th><th className="px-4 py-2.5 font-medium">Updated</th><th /></tr></thead>
             <tbody className="divide-y divide-border">
@@ -191,6 +198,7 @@ export default function Projects() {
                 return (
                   <tr key={p.id} className="hover:bg-panel2/60">
                     <td className="px-4 py-2.5"><Link to={`/app/projects/${p.id}`} className="font-medium hover:text-primary">{p.name}</Link><div className="text-xs text-muted">{p.created_by ? `by ${p.created_by}` : ""}</div></td>
+                    <td className="max-w-[160px] truncate px-4 py-2.5">{p.design_project ? <Link to={`/app/p/${p.design_project.id}`} className="text-primary hover:underline">{p.design_project.name}</Link> : <span className="text-muted">—</span>}</td>
                     <td className="px-4 py-2.5"><ProjectStatus p={p} /></td>
                     <td className="max-w-[180px] truncate px-4 py-2.5 text-muted">{p.last_status?.material ?? "—"}</td>
                     <td className="px-4 py-2.5 tabular-nums text-muted">{size(p.last_status?.fingerprint?.bbox, units).replace(/ (mm|in)$/, "") || "—"}</td>
@@ -213,11 +221,12 @@ export default function Projects() {
           </div>
         </section>)}
       {sharing && <ShareDialog projectId={sharing} open onOpenChange={o => !o && setSharing(null)} />}
+      {grouping && <ProjectPicker open onOpenChange={o => !o && setGrouping(null)} part={grouping} current={grouping.design_project} />}
       <NewProjectDialog open={newOpen} onOpenChange={setNewOpen} />
-      <Modal open={!!confirm} onOpenChange={o => !o && setConfirm(null)} title="Delete project?"
+      <Modal open={!!confirm} onOpenChange={o => !o && setConfirm(null)} title="Delete part?"
         description={<>“{confirm?.name}”, its model files, revisions and conversation will be permanently deleted.</>}
-        footer={<><Button variant="secondary" onClick={() => setConfirm(null)}>Cancel</Button><Button variant="danger" onClick={del}>Delete project</Button></>} />
-      <Modal open={!!renaming} onOpenChange={o => !o && setRenaming(null)} title="Rename project"
+        footer={<><Button variant="secondary" onClick={() => setConfirm(null)}>Cancel</Button><Button variant="danger" onClick={del}>Delete part</Button></>} />
+      <Modal open={!!renaming} onOpenChange={o => !o && setRenaming(null)} title="Rename part"
         footer={<><Button variant="secondary" onClick={() => setRenaming(null)}>Cancel</Button><Button onClick={rename} disabled={!renaming?.name.trim()}>Rename</Button></>}>
         <Input autoFocus value={renaming?.name ?? ""} maxLength={120} onChange={e => renaming && setRenaming({ ...renaming, name: e.target.value })} onKeyDown={e => e.key === "Enter" && rename()} aria-label="Project name" />
       </Modal>

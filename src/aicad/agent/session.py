@@ -372,7 +372,8 @@ class AgentSession:
         if self.mode != "build":
             shown, prompt = shown or prompt, (DISCUSS_PREFIX if self.mode == "discuss" else BRIEF_PREFIX) + prompt
         self.publish({"type": "user", "text": shown or prompt, "mode": self.mode})
-        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data|Design state)",
+        self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data|Design state|Project context|"
+                                    r"Designer preferences)",
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         self._run_costs, self._budget_hit, self._result_seen = {}, False, False

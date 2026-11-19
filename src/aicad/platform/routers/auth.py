@@ -309,7 +309,8 @@ def update_profile(body: ProfileIn, ctx: Ctx = Depends(auth_ctx)) -> dict[str, A
             raise HTTPException(422, "Invalid name")
         ctx.user.name = body.name.strip()
     if body.preferences is not None:
-        allowed = {"units", "theme", "notifications_email", "viewer_edges", "confirm_brief"}
+        allowed = {"units", "theme", "notifications_email", "viewer_edges", "confirm_brief", "memory_learning",
+                   "memory_use"}
         prefs = dict(ctx.user.preferences or {})
         prefs.update({k: v for k, v in body.preferences.items() if k in allowed})
         ctx.user.preferences = prefs

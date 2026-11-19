@@ -16,6 +16,7 @@ import type { TbMatch } from "./Toolbox";
 import ShopStatus, { phaseFor } from "./ShopStatus";
 import { BriefCard, SelfReview } from "./AgentCards";
 import EditCard from "./EditCard";
+import ContextChip from "@/components/memory/ContextChip";
 
 type ResultEv = Extract<AgentEvent, { type: "result" }> & { rev_before?: number | null; attachments?: string[] };
 type ChatItem =
@@ -212,7 +213,10 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     // cleared before the request: a quick reply (e.g. an edit that selects its own targets) can arrive before it returns
     if (clears) { onSelectionChange([]); onFeaturesChange?.([]); }
     try {
-      await api.post(`/api/projects/${project.id}/agent/chat`, { prompt: t, mode: m, skip_brief: skipBrief, brief_approved: briefApproved, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
+      const r = await api.post<{ remembered?: { scope: "project" | "personal"; text: string }[] }>(`/api/projects/${project.id}/agent/chat`, { prompt: t, mode: m, skip_brief: skipBrief, brief_approved: briefApproved, budget_tokens: runBudget ?? undefined, attachments: atts.map(({ name, mime, data_b64 }) => ({ name, mime, data_b64 })) });
+      for (const k of r?.remembered ?? []) // design memory: say what was kept, with a way to review it
+        toast.success(k.scope === "project" ? "Added to the project's decisions" : "Remembered as your preference", {
+          description: k.text, action: { label: "Review", onClick: () => nav(k.scope === "project" && project.design_project ? `/app/p/${project.design_project.id}` : "/app/settings?tab=memory") } });
       if (clears) { setText(""); setAtts([]); }
       setSkipBrief(false);
       try { sessionStorage.removeItem(`fw_starter_${project.id}`); } catch { /* ignore */ }
@@ -237,7 +241,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
   return (
     <section className="flex min-h-0 flex-col border-r border-border bg-panel">
       <div className="flex h-11 items-center gap-2 border-b border-border px-3">
-        <Sparkles className="h-4 w-4 text-accent" /><span className="text-sm font-semibold">Design agent</span>
+        <Sparkles className="h-4 w-4 shrink-0 text-accent" /><span className="shrink-0 text-sm font-semibold">Design agent</span>
+        {project.access?.guest ? null : <ContextChip projectId={project.id} partName={project.name} canEdit={!!project.access?.can_edit} />}
         <Tip content="New conversation (model files are kept)" side="bottom">
           <button className="ml-auto rounded p-1.5 text-muted hover:bg-text/5" onClick={() => api.post(`/api/projects/${project.id}/agent/reset`)}><RotateCcw className="h-4 w-4" /></button>
         </Tip>

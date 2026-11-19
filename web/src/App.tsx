@@ -26,6 +26,7 @@ const Admin = lazy(() => import("@/pages/admin/Admin"));
 const Office = lazy(() => import("@/pages/app/office"));
 const Why = lazy(() => import("@/pages/marketing/Why"));
 const ShareView = lazy(() => import("@/pages/ShareView"));
+const DesignProject = lazy(() => import("@/pages/app/DesignProject"));
 const MergeRequestPage = lazy(() => import("@/pages/app/MergeRequests"));
 const MergeRequestList = lazy(() => import("@/pages/app/MergeRequests").then(m => ({ default: m.MergeRequestList })));
 
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="projects" element={<Projects />} />
           <Route path="open-file" element={<OpenFileRoute />} />
           <Route path="projects/:id" element={<ProjectStudio />} />
+          <Route path="p/:id" element={<DesignProject />} />
           <Route path="projects/:id/merge" element={<MergeRequestList />} />
           <Route path="projects/:id/merge/:mid" element={<MergeRequestPage />} />
           <Route path="office/*" element={<Office />} />

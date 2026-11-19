@@ -34,6 +34,7 @@ def init_engine(url: str) -> Engine:
             cur.execute("PRAGMA journal_mode=WAL")
             cur.close()
     _Session = sessionmaker(bind=_engine, expire_on_commit=False)
+    from aicad.memory import tables as _memory_tables  # noqa: F401  (projects + design memory, additive)
     from aicad.platform import models  # noqa: F401  (register tables)
     from aicad.platform.collab import tables  # noqa: F401  (collaboration tables, additive)
 
