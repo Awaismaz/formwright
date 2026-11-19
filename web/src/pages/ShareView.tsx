@@ -64,7 +64,7 @@ export default function ShareView() {
             {tab === "drawing" && <img src={`${base}/drawing.svg`} alt="Drawing sheet" className="w-full rounded border border-border bg-white" />}
           </div>
           <div className="border-t border-border bg-panel2 px-3 py-2 text-[11.5px] text-muted">
-            {fp ? <>{fp.bbox.map(n => n.toFixed(1)).join(" × ")} mm · {num(fp.volume, 0)} mm³{d.status.material ? ` · ${d.status.material}` : ""}</> : "—"}
+            {fp ? <>{fp.bbox.map(n => n.toFixed(1)).join(" × ")} mm · {num(fp.volume, 0)} mm³{d.status.material ? ` · ${d.status.material}` : ""}</> : "n/a"}
             {d.expires_at && <div>Link expires {new Date(d.expires_at).toLocaleDateString()}</div>}
             <div className="mt-1">Geometry checks are deterministic; they don't certify a part for manufacture.</div>
           </div>

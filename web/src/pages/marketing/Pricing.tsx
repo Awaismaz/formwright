@@ -89,8 +89,8 @@ export default function Pricing() {
           </div>
           {run && <div className="mt-5 rounded-lg border border-border bg-panel p-4 text-xs leading-relaxed text-muted">
             <div className="mb-1 font-medium text-text">What a run costs</div>
-            A new part from a written brief typically uses <b className="text-text">{run.new.low}–{run.new.high} tokens</b> (measured; most about {run.new.typical}).
-            A change to an existing part usually uses {run.change.low}–{run.change.high}. Parameter edits, manual features, Toolbox parts and restores are free.
+            A new part from a written brief typically uses <b className="text-text">{run.new.low} to {run.new.high} tokens</b> (measured; most about {run.new.typical}).
+            A change to an existing part usually uses {run.change.low} to {run.change.high}. Parameter edits, manual features, Toolbox parts and restores are free.
             Every run shows a live meter, stops at the budget you set and is never charged beyond it.
           </div>}
         </div>

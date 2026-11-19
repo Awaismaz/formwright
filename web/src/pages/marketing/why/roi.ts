@@ -42,8 +42,8 @@ export const FALLBACK_PACKS: PackLike[] = [
 
 export const RATE_PRESETS = [
   { key: "us", label: "US employee", rate: 70, note: "BLS median pay × 1.4 overhead" },
-  { key: "consultancy", label: "Consultancy", rate: 110, note: "typical US$75–150/h" },
-  { key: "offshore", label: "Offshore", rate: 35, note: "typical US$25–50/h" },
+  { key: "consultancy", label: "Consultancy", rate: 110, note: "typical US$75 to 150/h" },
+  { key: "offshore", label: "Offshore", rate: 35, note: "typical US$25 to 50/h" },
 ] as const;
 
 export const WORKDAYS_PER_MONTH = 21;
@@ -74,7 +74,7 @@ export interface Inputs {
   complexity: Complexity;
   /** fully loaded engineer cost, US$/h */
   rate: number;
-  /** share of conventional hours the engineer still spends reviewing and signing off (0–1) */
+  /** share of conventional hours the engineer still spends reviewing and signing off (0 to 1) */
   review: number;
   plan: PlanLike;
   packs: PackLike[];
@@ -144,10 +144,10 @@ export const EXAMPLES: Example[] = [
     convHours: [3, 4.5], convCalendar: "same day", convSteps: "Revolve profile, keyway cut, groove, chamfers, drawing with section.",
     tokens: [150, 300], fwTime: "~5 min", fwSteps: "Brief, agent build, keyway sized from the standard table." },
   { key: "enclosure", title: "Electronics enclosure", body: "Two-part ABS enclosure: shelled base and lid, screw bosses, lip and groove, vents, PCB standoffs.",
-    convHours: [12, 18], convCalendar: "2–3 days", convSteps: "Base, shell, bosses, lip, lid, matching features, interference check, two drawings.",
+    convHours: [12, 18], convCalendar: "2 to 3 days", convSteps: "Base, shell, bosses, lip, lid, matching features, interference check, two drawings.",
     tokens: [600, 1000], fwTime: "~20 min", fwSteps: "Brief per part, agent edits, exact interference check in assembly." },
-  { key: "gearbox", title: "Planetary gearbox", body: "Single-stage planetary, 15–20 parts: sun, planets, ring, carrier, housing, bearings, fasteners, BOM and drawings.",
-    convHours: [60, 100], convCalendar: "2–3 weeks", convSteps: "Gear geometry, housing, carrier, standard parts, assembly mates, interference, BOM, drawing set.",
+  { key: "gearbox", title: "Planetary gearbox", body: "Single-stage planetary, 15 to 20 parts: sun, planets, ring, carrier, housing, bearings, fasteners, BOM and drawings.",
+    convHours: [60, 100], convCalendar: "2 to 3 weeks", convSteps: "Gear geometry, housing, carrier, standard parts, assembly mates, interference, BOM, drawing set.",
     tokens: [4000, 8000], fwTime: "a few hours", fwSteps: "Design Office plans the program; specialist agents model in parallel; Toolbox supplies bearings and fasteners." },
 ];
 
@@ -175,7 +175,7 @@ export function exampleCost(e: Example, rate: number, tokenPrice: number, review
 export const HIRE = {
   salary: 99_510,     // BLS OOH, mechanical engineers, median pay May 2023
   overhead: 1.4,      // wages ≈ 70% of total compensation (BLS ECEC)
-  cadSeat: 6_000,     // CAD + PDM seat, mid-point of US$4–8k/yr
+  cadSeat: 6_000,     // CAD + PDM seat, mid-point of US$4 to 8k/yr
   recruiting: 4_700,  // SHRM average cost per hire
   hoursPerYear: 2_080,
 };
@@ -203,8 +203,8 @@ export function usdShort(v: number) {
 
 export function range(r: [number, number], f: (n: number) => string) {
   const a = f(r[0]), b = f(r[1]);
-  return a === b ? a : `${a}–${b}`;
+  return a === b ? a : `${a} to ${b}`;
 }
 
-/** "US$210–280": one currency prefix for a money range. */
-export const usdRange = (r: [number, number]) => range(r, n => usd(n)).replace("–US$", "–");
+/** "US$210 to 280": one currency prefix for a money range. */
+export const usdRange = (r: [number, number]) => range(r, n => usd(n)).replace(" to US$", " to ");

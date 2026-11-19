@@ -48,7 +48,7 @@ function Bars({ title, conv, fw, fmt, detail }: { title: string; conv: number; f
       <figcaption className="text-xs font-medium text-muted">{title}</figcaption>
       <div className="mt-2 space-y-2">
         {rows.map(r => (
-          <div key={r.k} className="group grid grid-cols-[92px_1fr] items-center gap-3" title={`${r.k}: ${fmt(r.v)} — ${r.d}`}>
+          <div key={r.k} className="group grid grid-cols-[92px_1fr] items-center gap-3" title={`${r.k}: ${fmt(r.v)} (${r.d})`}>
             <span className="text-xs text-muted">{r.k}</span>
             <div className="flex items-center gap-2">
               <div className="h-5 min-w-[4px] origin-left rounded-r-[4px] transition-[width] duration-700 ease-out motion-reduce:transition-none"
@@ -125,7 +125,7 @@ export default function Calculator({ plans, packs, initial }: { plans: PlanLike[
           <div className="rounded-lg border border-border p-4">
             <div className="text-xs font-medium text-muted">{saving ? "Per year" : "Per year (extra)"}</div>
             <div className="mt-1 text-3xl font-semibold tracking-tight"><CountUp value={Math.abs(r.yearlySaving)} format={n => usd(n)} duration={500} /></div>
-            <div className="mt-1 text-xs text-muted">{r.speedUp > 0 ? `${r.speedUp.toFixed(1)}× more parts per engineer-hour` : "—"}</div>
+            <div className="mt-1 text-xs text-muted">{r.speedUp > 0 ? `${r.speedUp.toFixed(1)}× more parts per engineer-hour` : "n/a"}</div>
           </div>
         </div>
 
@@ -151,7 +151,7 @@ export default function Calculator({ plans, packs, initial }: { plans: PlanLike[
             ["Tokens used", `${r.tokens.toLocaleString()} (${r.extraTokens.toLocaleString()} extra)`],
             ["Top-up packs", usd(r.topups)],
             ["Pays for itself", r.paybackDays === null || r.paybackDays > WORKDAYS_PER_MONTH ? "not within the month" : r.paybackDays < 1 ? "within the first day" : `in ${Math.ceil(r.paybackDays)} working days`],
-            ["Speed-up", r.speedUp > 0 ? `${r.speedUp.toFixed(1)}× engineer-hours` : "—"],
+            ["Speed-up", r.speedUp > 0 ? `${r.speedUp.toFixed(1)}× engineer-hours` : "n/a"],
             ["First verified model", `${r.firstModelSpeedUp.toFixed(0)}× sooner`],
           ].map(([k, v]) => (
             <div key={k}><dt className="text-xs text-muted">{k}</dt><dd className="mt-0.5 font-medium tabular-nums">{v}</dd></div>

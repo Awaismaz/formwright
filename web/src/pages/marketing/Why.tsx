@@ -183,8 +183,8 @@ export default function Why() {
           {[
             { k: "Mechanical engineer", v: "≈ US$99,500/yr", sub: <>median pay<Sup n={1} /> → ≈ <b className="text-text">US${hire.hourly.toFixed(0)}/h</b> fully loaded at 1.4× overhead<Sup n={3} /></> },
             { k: "Mechanical drafter", v: "≈ US$65,000/yr", sub: <>median pay<Sup n={2} /> → ≈ <b className="text-text">US${loadedDrafter.toFixed(0)}/h</b> fully loaded<Sup n={3} /></> },
-            { k: "Design consultancy", v: "US$75–150/h", sub: <>typical US freelance and consultancy rates; offshore US$25–50/h (est.)<Sup n={5} /></> },
-            { k: "Hiring a new engineer", v: "≈ 44 days", sub: <>average time to fill and ≈ US$4,700 cost per hire<Sup n={4} />, then 3–6 months to full productivity (est.)</> },
+            { k: "Design consultancy", v: "US$75 to 150/h", sub: <>typical US freelance and consultancy rates; offshore US$25 to 50/h (est.)<Sup n={5} /></> },
+            { k: "Hiring a new engineer", v: "≈ 44 days", sub: <>average time to fill and ≈ US$4,700 cost per hire<Sup n={4} />, then 3 to 6 months to full productivity (est.)</> },
           ].map((c, i) => (
             <Reveal key={c.k} delay={i * 0.08} className="card h-full p-5">
               <div className="text-xs font-medium text-muted">{c.k}</div>
@@ -325,12 +325,12 @@ export default function Why() {
                 <thead className="bg-panel2 text-left text-[12px] text-muted"><tr><th className="px-4 py-2.5 font-medium">Work</th><th className="px-4 py-2.5 text-right font-medium">Tokens</th></tr></thead>
                 <tbody className="divide-y divide-border">
                   {[
-                    ["New part from a written brief", `${run.new.low}–${run.new.high}`, `typically ≈ ${run.new.typical}`],
-                    ["Agent change to an existing part", `${run.change.low}–${run.change.high}`, `typically ≈ ${run.change.typical}`],
+                    ["New part from a written brief", `${run.new.low} to ${run.new.high}`, `typically ≈ ${run.new.typical}`],
+                    ["Agent change to an existing part", `${run.change.low} to ${run.change.high}`, `typically ≈ ${run.change.typical}`],
                     ["Parameter edit, manual feature, Toolbox part, restore", "0"],
                     ["Drawing sheet, geometry checks, STEP / STL export", "0"],
                     ["Assembly mates, interference check, BOM", "0"],
-                    ["Design Office program, 15–20 parts (est.)", "4,000–8,000"],
+                    ["Design Office program, 15 to 20 parts (est.)", "4,000 to 8,000"],
                   ].map(([k, v, sub]) => <tr key={k}><td className="px-4 py-2.5">{k}</td><td className={cx("whitespace-nowrap px-4 py-2.5 text-right tabular-nums", v === "0" ? "font-semibold text-success" : "")}>{v === "0" ? "Free" : v}{sub && <div className="text-[11px] text-muted">{sub}</div>}</td></tr>)}
                 </tbody>
               </table>
