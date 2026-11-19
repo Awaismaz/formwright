@@ -172,6 +172,14 @@ def create_app() -> FastAPI:
                             status_code=503)
 
     from aicad.platform.collab.branches import RequestContextMiddleware
+    from aicad.platform.deps import AIAccessMiddleware
 
     app.add_middleware(RequestContextMiddleware)  # request method + active branch for permissions/workspaces
+    app.add_middleware(AIAccessMiddleware)  # FW_AI_SUPERADMIN_ONLY: may this request's user call AI
+
+    from aicad import llm
+
+    @app.exception_handler(llm.AIDisabledError)
+    async def ai_disabled(request: Request, exc: llm.AIDisabledError) -> JSONResponse:
+        return JSONResponse({"detail": llm.AI_OFF_MESSAGE}, status_code=403)
     return app

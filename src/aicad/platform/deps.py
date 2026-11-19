@@ -128,3 +128,39 @@ def superadmin_ctx(ctx: Ctx = Depends(auth_ctx)) -> Ctx:
     if not ctx.actor.is_superadmin:
         raise HTTPException(403, "Super-admin only")
     return ctx
+
+
+def ai_allowed(ctx: Ctx) -> bool:
+    """FW_AI_SUPERADMIN_ONLY: only super-admins (the real person, also while viewing as someone) may use AI."""
+    return not get_settings().ai_superadmin_only or ctx.actor.is_superadmin
+
+
+class AIAccessMiddleware:
+    """Pure ASGI middleware (FW_AI_SUPERADMIN_ONLY): marks each API request as allowed to call AI or not, so
+    `aicad.llm` refuses every model call made for a non-super-admin, whatever feature makes it."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") in ("http", "websocket") and get_settings().ai_superadmin_only:
+            from aicad import llm
+            from aicad.platform.db import session_factory
+
+            allowed = False
+            if str(scope.get("path", "")).startswith("/api/"):
+                db = session_factory()()
+                try:
+                    ctx = _load(Request(scope) if scope["type"] == "http" else _ConnAsRequest(scope), db)
+                    allowed = ctx is not None and ctx.actor.is_superadmin
+                finally:
+                    db.close()
+            llm.allow_ai(allowed)
+        await self.app(scope, receive, send)
+
+
+class _ConnAsRequest(Request):
+    """`_load` only reads cookies, headers and the client address, which a websocket scope has too."""
+
+    def __init__(self, scope: dict[str, Any]) -> None:
+        super().__init__({**scope, "type": "http"})

@@ -24,6 +24,8 @@ class Settings:
     database_url: str = field(default_factory=lambda: os.environ.get("FW_DATABASE_URL", ""))
     app_url: str = field(default_factory=lambda: os.environ.get("FW_APP_URL", "http://127.0.0.1:8765"))
     god_mode_requested: bool = field(default_factory=lambda: _bool("FW_GOD_MODE", True))
+    # Every AI feature (design agent, assistants, reviewers) for super-admins only; other accounts get none.
+    ai_superadmin_only: bool = field(default_factory=lambda: _bool("FW_AI_SUPERADMIN_ONLY", False))
     superadmin_emails: tuple[str, ...] = field(default_factory=lambda: tuple(
         e.strip().lower() for e in os.environ.get("FW_SUPERADMIN_EMAILS", "founder@formwright.dev").split(",")
         if e.strip()))

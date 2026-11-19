@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from aicad.llm.base import (
@@ -38,6 +39,7 @@ from aicad.llm.base import (
 )
 
 __all__ = [
+    "AI_OFF_MESSAGE",
     "CAP_AGENT",
     "CAP_COMPLETE",
     "CAP_STRUCTURED",
@@ -45,6 +47,7 @@ __all__ = [
     "DEFAULT_PROVIDER",
     "PROVIDER_NAMES",
     "ROLES",
+    "AIDisabledError",
     "CallRequest",
     "CallResult",
     "CapabilityError",
@@ -53,6 +56,7 @@ __all__ = [
     "ProviderError",
     "StructuredOutputError",
     "Usage",
+    "allow_ai",
     "complete",
     "describe",
     "get_provider",
@@ -65,6 +69,19 @@ DEFAULT_PROVIDER = "claude-sdk"
 PROVIDER_NAMES = ("claude-sdk", "anthropic-api", "stub", "replay")
 _instances: dict[str, LLMProvider] = {}
 _overrides: dict[str, LLMProvider] = {}  # role (or "*") -> provider, tests and benchmarks only
+# FW_AI_SUPERADMIN_ONLY: set per request by the platform (aicad.platform.deps.AIAccessMiddleware). None = no
+# request context (CLI, tests, benchmarks): allowed. False = the signed-in person may not use AI.
+_ai_allowed: ContextVar[bool | None] = ContextVar("fw_ai_allowed", default=None)
+AI_OFF_MESSAGE = "AI features are turned off for this account."
+
+
+class AIDisabledError(ProviderError):
+    """A model call was attempted for a request whose user may not use AI (FW_AI_SUPERADMIN_ONLY)."""
+
+
+def allow_ai(allowed: bool | None) -> None:
+    """Whether model calls are allowed for the rest of this request (and the tasks it starts)."""
+    _ai_allowed.set(allowed)
 
 
 def _make(name: str) -> LLMProvider:
@@ -124,6 +141,8 @@ def get_provider(role: str) -> LLMProvider:
 
     if role not in ROLES:
         raise ValueError(f"unknown model role {role!r}")
+    if _ai_allowed.get() is False:
+        raise AIDisabledError(AI_OFF_MESSAGE)
     p = _overrides.get(role) or _overrides.get("*")
     if p is None:
         name = provider_name(role)

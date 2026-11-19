@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response, Streami
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from aicad import llm
 from aicad.agent import worker
 from aicad.agent.runner import editable_params
 from aicad.agent.session import AgentSession
@@ -21,7 +22,7 @@ from aicad.platform import metering
 from aicad.platform.collab import branches, permissions
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory, utcnow
-from aicad.platform.deps import Ctx, in_grace, verified_ctx
+from aicad.platform.deps import Ctx, ai_allowed, in_grace, verified_ctx
 from aicad.platform.models import AgentRun, Organization, Project, User
 from aicad.platform.services import (
     audit,
@@ -366,6 +367,8 @@ def project_dict(p: Project, creator: str | None = None) -> dict[str, Any]:
 
 def can_run_agent(ctx: Ctx) -> tuple[bool, str | None, str | None]:
     """(allowed, reason, cta) for starting a design-agent run."""
+    if not ai_allowed(ctx):
+        return False, llm.AI_OFF_MESSAGE, None
     org = ctx.require_org()
     if ctx.role == "viewer":
         return False, "Viewers can't run the design agent. Ask an admin for engineer access.", None

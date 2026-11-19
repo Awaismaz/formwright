@@ -4,6 +4,20 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (d) — Hosted server: AI for super-admins only (FW_AI_SUPERADMIN_ONLY)
+
+### Done
+- The app is hosted at https://formwright.codingthebrains.com in development mode, so God mode is available. The founder asked that only the God mode super-admin uses AI and that other sign-ups get no AI.
+- New setting `FW_AI_SUPERADMIN_ONLY` (default off, so behaviour is unchanged unless it is set). When it is on:
+  - `can_run_agent` refuses non-super-admins with "AI features are turned off for this account." That covers the design agent chat, Design Office, collaboration, drafting and image-to-CAD, which already show this kind of message in the app.
+  - Backstop: `AIAccessMiddleware` (pure ASGI, `platform/deps.py`) marks each `/api` request with whether the real person (the actor, also while viewing as someone) is a super-admin. `aicad.llm.get_provider` then raises `AIDisabledError` for any model call made for anyone else. That covers every other AI feature (librarian, render refine falls back to its template, reviewers, planner, vision, reconcile), and the error shows as HTTP 403 with the same message. No request context (CLI, tests, benchmarks) means allowed.
+
+### Verified how
+- `tests/test_ai_access.py`: a regular user gets agent.allowed false, a 402 on chat and a 403 on a model call; a signed-out request gets a 403; the super-admin keeps AI; with the setting off everyone keeps AI. Ran `test_ai_access`, `test_platform` and `test_llm_providers` plus `ruff`; the CAD suites were skipped (no CAD code was touched).
+
+### Not done
+- The UI still shows AI buttons to regular users; they get the message when used. Hiding them needs a frontend flag (PD-64).
+
 ## 2026-11-19 (b) — Quality fixtures: golden assembly fixtures FX-04/05/06 + advisory render similarity (ASM-012, EVAL-006)
 
 Branch `wip/quality-fixtures` (worktree `fw-wt/quality-fixtures`), not merged. PD-62. No live model calls.
