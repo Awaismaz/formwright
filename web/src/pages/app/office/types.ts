@@ -1,3 +1,4 @@
+import type { QuickFinding, VisualRecord, VisualVerdict } from "@/components/VisualCheck";
 /** Design Office API shapes (src/aicad/platform/routers/office.py, src/aicad/office/service.py). */
 
 export type AgentState = "idle" | "working" | "review" | "blocked" | "done";
@@ -98,6 +99,8 @@ export interface Skeleton {
 export interface Icd {
   version: number; status: "draft" | "approved"; interfaces: Interface[]; history: IcdHistory[]; problems: string[];
   skeleton: Skeleton; fits: string[]; fasteners: string[]; bearings?: string[]; housing_fits?: string[];
+  /** PD-73: Archie's look at the drafted layout. */
+  look?: { at: string; verdict: VisualVerdict | null; quick: QuickFinding[]; image: boolean; line: string } | null;
 }
 export interface ChangeRequest {
   id: string; interface: string; interface_name: string; values: Record<string, unknown>; before: Record<string, unknown>;
@@ -119,6 +122,8 @@ export interface LiveInstance {
 }
 export interface LiveAssembly {
   status: AssemblyState["status"] | null; summary?: string | null; at?: string | null;
+  /** PD-73: the visual checks (layout, each integrated level), advisory. */
+  looks?: (VisualRecord & { image: string | null; name: string; level: string })[];
   /** PD-71: the whole-program clash check after the final assembly (advisory, never blocks). */
   check?: { status: "running" | "done" | "failed" | "skipped"; text?: string; at?: string; count?: number } | null;
   clashes: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
@@ -175,7 +180,10 @@ export interface ArchieAction {
 }
 export interface ArchieMessage {
   id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;
-  kind?: "status" | "ai" | "office"; tokens?: number; actions?: ArchieAction[];
+  kind?: "status" | "ai" | "office" | "look"; tokens?: number; actions?: ArchieAction[];
+  /** Archie spoke first (a look, a failure): founder 2026-11-19. */
+  unprompted?: boolean;
+  visual?: { level: string; image: string | null; verdict: VisualVerdict | null; quick: QuickFinding[] | null; tokens?: number };
 }
 export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 

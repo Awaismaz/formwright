@@ -1384,6 +1384,8 @@ async def checks_by_policy(root: Path, org_id: str, doc: dict[str, Any], res: di
     from aicad.assembly import visual
 
     t0 = time.perf_counter()
+    if res["log"] and res["log"][-1]["text"] == res["summary"]:
+        res["log"].pop()  # Fitz's closing line is written again below, with the clash check's outcome
     q = await asyncio.to_thread(visual.quick_doc, root, doc)
     for f in q["findings"]:
         res["log"].append({"agent": "Fitz", "text": f"Fitz measured: {f['text']}", "tone": "warn"})

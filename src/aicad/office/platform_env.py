@@ -618,6 +618,22 @@ class PlatformEnv(orchestrator.Env):
             return {"blocked": f"Fitz couldn't assemble this: {e}", "assembly_id": adoc["id"]}
         return {**res, "assembly_id": adoc["id"], "children": [k["id"] for k in kids]}
 
+    async def look_level(self, root: Path, pid: str, tid: str, res: dict[str, Any]) -> dict[str, Any] | None:
+        """PD-73: Fitz looks at the level he just integrated (quick placement checks + the visual check)."""
+        from aicad.office import visual_office
+
+        doc = store.load(root, pid)
+        if doc is None:
+            return None
+        t = service.ticket(doc, tid)
+        aid = res.get("assembly_id") or (((doc.get("assembly") or {}).get("final")) if t["item_id"] == "root"
+                                         else t.get("assembly_id"))
+        if not aid:
+            return None
+        return await visual_office.level_look(root, pid, tid, _aroot(self.org_id), aid, org_id=self.org_id,
+                                              user_id=self.user_id, god=self.god_tokens,
+                                              mode="simulated" if self.simulated else "ai")
+
     async def _integrate_program(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
         """Integration with an ICD: the level's assembly already holds its parts (placeholders swapped for the real
         parts); Fitz fits the level's fasteners into its bolted joints and re-checks. Nested: the final assembly

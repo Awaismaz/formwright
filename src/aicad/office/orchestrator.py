@@ -42,6 +42,7 @@ from typing import Any
 
 from aicad.office import (
     OfficeInputError,
+    archie_chat,
     calibration,
     conformance,
     deliverables,
@@ -54,6 +55,7 @@ from aicad.office import (
     specialists,
     store,
     timeline,
+    visual_office,
 )
 
 log = logging.getLogger("aicad.office.orchestrator")
@@ -513,6 +515,11 @@ class Env:
     async def integrate(self, root: Path, pid: str, tid: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    async def look_level(self, root: Path, pid: str, tid: str, res: dict[str, Any]) -> dict[str, Any] | None:
+        """PD-73: look at the level Fitz just integrated (quick placement checks + the visual check, advisory).
+        {stop, reason, line, ...} or None (nothing to look at)."""
+        return None
+
     # ---- Phase 4: interfaces, placeholders and the program assembly
     async def conformance(self, doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any] | None:
         """ICD conformance of the ticket's latest build (``conformance.measure``), or None when not measurable."""
@@ -801,7 +808,7 @@ class Runner:
             return False
         return bool(self.edit(fn))
 
-    def _fail(self, doc: dict[str, Any], tid: str, why: str) -> None:
+    def _fail(self, doc: dict[str, Any], tid: str, why: str, tell: bool = True) -> None:
         t = service.ticket(doc, tid)
         _set_run(t, status="blocked", line=why, blocked=why)
         open_wait(t, "blocked")
@@ -809,6 +816,8 @@ class Runner:
             service.move(self.root, doc, tid, "changes_requested", service.agent_actor("archie"))
         service.emit(self.root, doc, "ticket.blocked", f"{service._label(t)} needs you: {why}",
                      service.agent_actor(t["specialist"]), tid)
+        if tell:  # founder 2026-11-19: Archie tells the engineer what failed and what he proposes
+            visual_office.on_failure(self.root, doc, t, why)
 
     # ------------------------------------------------------------------ stage: Hex
     async def _hex(self, tid: str) -> str | None:
@@ -938,6 +947,9 @@ class Runner:
             wait = backoff(n, RETRY_BASE_S, RETRY_CAP_S)
             _set_run(tt, status="retry", next="design", attempt=n, next_try_at=time.time() + wait,
                      line=f"{lbl} stopped without a passing build: trying again in {wait:.0f} s")
+            if n == 1:
+                visual_office.on_failure(self.root, d, tt, f"{lbl} stopped without a build that passes the gating "
+                                         "checks.", retrying=True)
             service.emit(self.root, d, "ticket.retry", f"{service._label(tt)}: no passing build yet; retry {n} of "
                          f"{MAX_ATTEMPTS} in {wait:.0f} s.", service.agent_actor(code), tid, attempt=n)
             return None
@@ -1147,6 +1159,8 @@ class Runner:
                 _set_run(tt, status="retry", next="fit", fit_attempt=n, agent="fitz",
                          next_try_at=time.time() + backoff(n, RETRY_BASE_S, RETRY_CAP_S),
                          line=f"{res['error']}: Fitz tries again shortly")
+                if n == 1:
+                    visual_office.on_failure(self.root, d, tt, f"{res['error']}.", retrying=True)
                 return None
             if res.get("skipped"):
                 _set_run(tt, status="done", next=None, line=res["skipped"], agent="fitz")
@@ -1198,10 +1212,35 @@ class Runner:
                         status="integrating")
         self.edit(begin)
         res = await self.env.integrate(self.root, self.pid, tid)
+        look = None
+        if not (res.get("blocked") or res.get("error") or res.get("wait_fit")):
+            self.edit(lambda d: self.status(d, service.ticket(d, tid), "fitz", f"Fitz is looking at "
+                                            f"{t['title'].removeprefix('Assemble ')} before it is signed off"))
+            look = await self.env.look_level(self.root, self.pid, tid, res)
 
         def fn(d: dict[str, Any]) -> None:
             tt = service.ticket(d, tid)
             f = service.agent_actor("fitz")
+            if look:
+                text, acts = visual_office.level_message(tt, look)
+                tt["look"] = {k: look.get(k) for k in ("stop", "line", "image", "unconfirmed", "tokens")}
+                if look.get("stop"):
+                    self._fail(d, tid, look["reason"], tell=False)
+                    if text:
+                        archie_chat.post(self.root, self.pid, text, acts, kind="look",
+                                         visual={"level": tt["item_id"], "image": look.get("image"),
+                                                 "verdict": look.get("verdict"), "quick": look.get("quick"),
+                                                 "tokens": look.get("tokens")})
+                    return
+                if look.get("line"):
+                    service.comment(self.root, d, tid, look["line"], service.agent_actor("archie"))
+                    tt["comments"][-1]["delivery"] = "stored"
+                if text and (look.get("unconfirmed") or tt["item_id"] == "root"
+                             or (look.get("verdict") or {}).get("overall") != "looks_assembled"):
+                    archie_chat.post(self.root, self.pid, text, acts, kind="look",
+                                     visual={"level": tt["item_id"], "image": look.get("image"),
+                                             "verdict": look.get("verdict"), "quick": look.get("quick"),
+                                             "tokens": look.get("tokens")})
             if res.get("blocked"):
                 self._fail(d, tid, res["blocked"])
                 return
@@ -1213,6 +1252,8 @@ class Runner:
                 _set_run(tt, status="retry", next="integrate", attempt=n, agent="fitz",
                          next_try_at=time.time() + backoff(n, RETRY_BASE_S, RETRY_CAP_S),
                          line=f"{res['error']}: Fitz tries again shortly")
+                if n == 1:
+                    visual_office.on_failure(self.root, d, tt, f"{res['error']}.", retrying=True)
                 return
             if res.get("wait_fit"):
                 for k in res["wait_fit"]:

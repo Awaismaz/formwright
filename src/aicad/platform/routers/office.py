@@ -440,12 +440,26 @@ async def replan(pid: str, body: ReplanIn, ctx: Ctx = Depends(verified_ctx)) -> 
 
 
 @router.post("/programs/{pid}/gates/brief/approve")
-def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+async def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     doc = _mutate(ctx, pid, lambda root, d: service.approve_plan(root, d, body.plan, _actor(ctx)))
     track(ctx.db, "office_brief_approved", ctx.user, doc["org_id"], tickets=len(doc["tickets"]),
           edited=bool(doc["plan"].get("edited")))
     ctx.db.commit()
+    _look_at_layout(ctx, pid, doc)
     return _view(doc)
+
+
+def _look_at_layout(ctx: Ctx, pid: str, doc: dict[str, Any]) -> None:
+    """Archie looks at the drafted layout and tells the engineer in the program chat (founder 2026-11-19, PD-73)."""
+    from aicad.office import fake_agents, visual_office
+
+    if (doc.get("icd") or {}).get("status") != "draft" or ctx.role == "viewer":
+        return
+    from aicad.platform.routers.projects import can_run_agent
+
+    mode = "simulated" if fake_agents.enabled() else "ai" if can_run_agent(ctx)[0] else "none"
+    _spawn_task(visual_office.layout_look(_root(ctx), pid, org_id=ctx.require_org().id, user_id=ctx.user.id,
+                                          god=ctx.god_on("bypass_tokens"), mode=mode))
 
 
 # ----------------------------------------------------------------------------- routes: interfaces (CD-010..013)
@@ -521,7 +535,57 @@ def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
                                "progress": t["progress"]}
     return {"status": state.get("status"), "summary": state.get("summary"), "clashes": state.get("clashes") or [],
             "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer",
-            "check": state.get("check")}  # PD-71: the advisory whole-program clash check
+            "check": state.get("check"),  # PD-71: the advisory whole-program clash check
+            "looks": _looks(ctx, pid, doc)}  # PD-73: the visual checks (layout, each level), advisory
+
+
+def _looks(ctx: Ctx, pid: str, doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """The latest visual check of the layout and of each integrated level (advisory), newest level last."""
+    from aicad.assembly import store as astore
+    from aicad.assembly import visual
+
+    out: list[dict[str, Any]] = []
+    lay = visual.public(visual.load_record(store.program_dir(_root(ctx), pid) / "visual" / "layout"))
+    if lay:
+        out.append({**lay, "level": "layout", "name": "Layout (interfaces gate)",
+                    "image": f"/api/office/programs/{pid}/visual/layout.png" if lay.get("status") == "done" else None})
+    aroot = astore.org_root(get_settings().data_dir, ctx.require_org().id)
+    for t in doc["tickets"]:
+        if t["kind"] != "integration" or not t.get("assembly_id"):
+            continue
+        rec = visual.public(visual.load_record(astore.doc_dir(aroot, t["assembly_id"]) / "visual"))
+        if rec:
+            out.append({**rec, "level": t["item_id"], "name": t["title"],
+                        "image": f"/api/m/assembly/assemblies/{t['assembly_id']}/visual.png"
+                        if rec.get("status") == "done" else None})
+    return out
+
+
+@router.post("/programs/{pid}/visual/layout")
+async def look_at_layout(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Archie looks at the drafted layout again (quick checks, the visual check) and says what he sees in the chat."""
+    from aicad.office import fake_agents, visual_office
+    from aicad.platform.routers.projects import can_run_agent
+
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    if (doc.get("icd") or {}).get("status") != "draft":
+        raise HTTPException(409, "Archie looks at the layout while the interfaces wait for your approval.")
+    mode = "simulated" if fake_agents.enabled() else "ai" if can_run_agent(ctx)[0] else "none"
+    await visual_office.layout_look(_root(ctx), pid, org_id=ctx.require_org().id, user_id=ctx.user.id,
+                                    god=ctx.god_on("bypass_tokens"), mode=mode)
+    return _view(_load(ctx, pid))
+
+
+@router.get("/programs/{pid}/visual/layout.png")
+def layout_png(pid: str, ctx: Ctx = Depends(verified_ctx)) -> Any:
+    from fastapi.responses import FileResponse
+
+    _load(ctx, pid)
+    f = store.program_dir(_root(ctx), pid) / "visual" / "layout" / "assembly.png"
+    if not f.is_file():
+        raise HTTPException(404, "No picture yet")
+    return FileResponse(f, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @router.post("/programs/{pid}/assembly/rebuild")
@@ -1187,7 +1251,7 @@ async def archie_say(pid: str, body: ArchieIn, ctx: Ctx = Depends(verified_ctx))
     text = body.text.strip()
     if not text:
         raise HTTPException(409, "Write a message first.")
-    with store.lock(pid):
+    with archie_chat.chat_lock(pid):
         hist = archie_chat.history(root, pid)
         hist.append(archie_chat.user_message(text, _actor(ctx)))
         archie_chat.save_history(root, pid, hist)
@@ -1220,7 +1284,7 @@ async def archie_say(pid: str, body: ArchieIn, ctx: Ctx = Depends(verified_ctx))
     if reply is None:
         t, acts, kind = archie_chat.offline_reply(doc, text, root)
         reply = archie_chat.archie_message(t, acts, kind=kind)
-    with store.lock(pid):
+    with archie_chat.chat_lock(pid):
         hist = archie_chat.history(root, pid)
         hist.append(reply)
         archie_chat.save_history(root, pid, hist)
@@ -1260,6 +1324,8 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
     elif typ == "fix_icd":
         fix_icd(pid, ctx)
+    elif typ == "revise_plan":
+        _mutate(ctx, pid, lambda root, d: service.revise_plan(root, d, a, _actor(ctx)))
     elif typ == "retry_blocked":
         for t in archie_chat.blocked(_load(ctx, pid)):
             try:
@@ -1297,7 +1363,7 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
             raise HTTPException(409, "The program has moved on: this proposal no longer applies. Ask Archie again.")
         await _apply_action(ctx, pid, doc, cur)
         status = "applied"
-    with store.lock(pid):
+    with archie_chat.chat_lock(pid):
         hist = archie_chat.history(root, pid)
         for x in hist:
             if x["id"] == body.message:
