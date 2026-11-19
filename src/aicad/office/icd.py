@@ -43,6 +43,7 @@ from typing import Any
 
 from aicad.office import frames
 from aicad.toolbox import BEARING as _BEARING
+from aicad.toolbox import DIN471 as _DIN471
 
 # ----------------------------------------------------------------------------- constants (documented, PD-xx)
 CLEARANCE = {3: 3.4, 4: 4.5, 5: 5.5, 6: 6.6, 8: 9.0, 10: 11.0, 12: 13.5, 16: 17.5}  # ISO 273 medium series
@@ -68,17 +69,20 @@ GEAR_SPACE = 5.0     # mm between two gears on one shaft (a compound train)
 SHAFT_END = 10.0     # mm of shaft beyond each outer bearing face (at least half the shaft Ø)
 KIND_LABEL = {"hole_pattern": "bolted joint", "shaft_bore": "shaft / bore fit", "face": "seating face",
               "gear_mesh": "gear mesh", "bearing_seat": "bearing seat", "key": "keyed joint", "dowel": "dowel pins",
-              "bearing_journal": "bearing on journal"}
+              "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring"}
 EDITABLE = {"hole_pattern": ("fastener", "d", "count", "inset", "flatness", "position_tol"),
             "shaft_bore": ("d", "fit"), "face": ("flatness", "position_tol"),
             "gear_mesh": ("module", "teeth_a", "teeth_b"), "bearing_seat": ("designation", "housing_fit"),
-            "key": ("length",), "dowel": ("d",), "bearing_journal": ("designation",)}
+            "key": ("length",), "dowel": ("d",), "bearing_journal": ("designation",), "retaining_ring": ()}
 ROTATIONS = (0, 90, 180, 270)  # quarter turns of a part frame about +Z (Archie's ``rotate`` hint or an ICD edit)
 
 # Deep-groove ball bearings (the Toolbox table, ISO 15): designation -> (bore d, OD D, width B). 62xx first: the
 # office prefers the heavier series for shafts it sizes itself.
 
 BEARINGS: dict[int, tuple[float, float, float]] = {k: (float(v[0]), float(v[1]), float(v[2])) for k, v in _BEARING.items()}
+# DIN 471 external retaining rings (the Toolbox table): shaft d1 -> (s, b radial width, d2 groove Ø, m groove width,
+# n min groove edge distance)
+RINGS: dict[int, tuple[float, float, float, float, float]] = {k: tuple(float(x) for x in v) for k, v in _DIN471.items()}  # type: ignore[misc]
 HOUSING_FITS = ("H7", "J7", "K7")
 SHAFT_FIT_BEARING = "k6"  # rotating inner ring, normal load (ISO 286 values; verify against the bearing maker)
 # DIN 6885-1 form A parallel keys: shaft Ø (over, up to) -> (b, h, t1 shaft depth, t2 hub depth)
@@ -94,6 +98,7 @@ _SHAFTY = re.compile(r"shaft|axle|spindle|lead screw|ball screw|journal|arbor|\b
 _HUBBY = re.compile(r"cap|collar|spacer|bush|hub|pulley|ring|flange|locator|sleeve|wheel|drum|washer|disc|disk", re.IGNORECASE)
 _BEARINGY = re.compile(r"\bbearing|\b6[02]0\d\b", re.IGNORECASE)
 _KEYY = re.compile(r"\bkey(?:ed|way)?\b|feather key|parallel key", re.IGNORECASE)
+_RINGY = re.compile(r"circlips?|retaining rings?|snap rings?|seeger|\bDIN\s*471\b", re.IGNORECASE)
 _DOWELY = re.compile(r"\bdowel|\blocating pin", re.IGNORECASE)
 _CAPPY = re.compile(r"\bcap\b|end cover|bearing cover", re.IGNORECASE)
 _LIDDY = re.compile(r"cover|\blid\b", re.IGNORECASE)
@@ -504,6 +509,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     fast_item: dict[str, str] = {}
     bearing_item: dict[str, dict[str, Any]] = {}   # sub -> the bearing standard part (and its written designation)
     key_item: dict[str, str] = {}                   # sub -> a parallel-key standard part
+    key_pool: list[dict[str, Any]] = []             # every key standard part: pieces left, its one size (d, l)
+    ring_pool: list[dict[str, Any]] = []            # every DIN 471 retaining ring: pieces left, its one shaft Ø
     dowel_item: dict[str, dict[str, Any]] = {}      # sub -> the dowel standard part
     bearing_all: list[dict[str, Any]] = []          # every bearing standard part (shaft lines share them out)
     for p in parts:
@@ -515,15 +522,33 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 fast_hint.setdefault(p["sub"], h)
         if p["family"] != "standard":
             continue
-        if _BEARINGY.search(text):
+        # by name first: "Gear circlip" or "Pinion key" whose description mentions the 6204 next to it is no bearing
+        ringy = _RINGY.search(p["name"]) or (_RINGY.search(text) and not _BEARINGY.search(p["name"])
+                                             and not _KEYY.search(p["name"]))
+        keyy = not ringy and (_KEYY.search(p["name"]) or (_KEYY.search(text) and not _BEARINGY.search(text)
+                                                          and not _DOWELY.search(text)))
+        if ringy:
+            ring_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "name": p["name"], "d": None})
+        elif keyy:
+            key_item.setdefault(p["sub"], p["id"])
+            key_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "size": None})
+        elif _BEARINGY.search(text):
             m = re.search(r"\b(6[02]0\d)\b", text)
             bearing_item.setdefault(p["sub"], {"id": p["id"], "qty": int(p["qty"]),
                                                "designation": int(m.group(1)) if m else None})
             bearing_all.append({"id": p["id"], "qty": int(p["qty"]), "designation": int(m.group(1)) if m else None})
         elif _DOWELY.search(text):
             dowel_item.setdefault(p["sub"], {"id": p["id"], "qty": int(p["qty"])})
-        elif _KEYY.search(text):
-            key_item.setdefault(p["sub"], p["id"])
+
+    def take_key(sub: str, size: tuple[float, float]) -> str | None:
+        """The key item of ``sub`` one more keyed joint gets (one Toolbox size per item, at most its quantity), else
+        None: the keyway is still cut, there is just no planned key piece for it."""
+        for e in key_pool:
+            if e["sub"] == sub and e["left"] > 0 and e["size"] in (None, size):
+                e["left"] -= 1
+                e["size"] = size
+                return str(e["id"])
+        return None
     # quarter turns of part frames about +Z (Archie's ``rotate`` hint, or an edit at the ICD gate)
     for p in designed:
         r = (iov.get(p["id"]) or {}).get("rot", p.get("rotate"))
@@ -1494,7 +1519,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 add("key", (k, c), (host, hc), {
                     "d": hs["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl, "ax": "y",
                     "axis": a2, "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
-                    "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
+                    "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": take_key(p["sub"], (float(hs["d"]), kl)),
                     "standard": "DIN 6885-1 A", "position_tol": POS_TOL}, ["A", "B", "C"],
                     f"parallel key {kb:g} x {kh:g} x {kl:g}")
             below = under.get((k, c))
@@ -1539,7 +1564,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     add("key", (k, c), (host, hc), {
                         "d": hs["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl,
                         "axis": [_r2(pos[0]), _r2(pos[1])], "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
-                        "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
+                        "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": take_key(p["sub"], (float(hs["d"]), kl)),
                         "standard": "DIN 6885-1 A", "position_tol": POS_TOL}, ["A", "B", "C"],
                         f"parallel key {kb:g} x {kh:g} x {kl:g}")
                 below = under.get((k, c))
@@ -1587,6 +1612,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
 
     if line:  # shaft lines: per shaft its bearings on the journals, then its gears / hubs; the meshes last
         piece: dict[str, int] = {}
+        brg_copy: dict[tuple[str, int], int] = {}  # (shaft, side) -> the bearing piece on that journal
         for sh in line_sh:
             ks = spec[sh]
             pos = at[sh][0]
@@ -1596,6 +1622,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             for side, b0, b1, (bitem, des) in line_info["brg"].get(sh, []):
                 n = piece.get(bitem, 0)
                 piece[bitem] = n + 1
+                brg_copy[(sh, side)] = n
                 bd, bDD, bB = BEARINGS[des]
                 plain = ks["d"] <= bd + 1e-9  # the shaft is the bearing bore: a plain journal, else a shoulder
                 jz = (b0, b1) if plain else ((y_lo, b1) if side < 0 else (b0, y_hi))
@@ -1629,7 +1656,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     add("key", (k, c), (sh, 0), {
                         "d": ks["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl, "ax": "y",
                         "axis": ak, "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
-                        "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
+                        "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": take_key(p["sub"], (float(ks["d"]), kl)),
                         "standard": "DIN 6885-1 A", "position_tol": POS_TOL}, ["A", "B", "C"],
                         f"parallel key {kb:g} x {kh:g} x {kl:g}")
         for m in line_info["mesh"]:
@@ -1646,6 +1673,67 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 "ratio": round(sb["teeth"] / sa["teeth"], 4),
                 "axis_a": [_r2(pa[0]), _r2(pa[2])], "axis_b": [_r2(pb[0]), _r2(pb[2])],
                 "ax": "y", "plane_a": _r2(pa[1]), "plane_b": _r2(pb[1])}, ["A", "B"])
+        # DIN 471 retaining rings last (earlier ids stay stable): on each shaft, both faces of every gear / hub first
+        # (a plain shaft has no shoulder to locate them), then the outboard face of each bearing
+        spots: list[tuple[int, int, dict[str, Any]]] = []  # (shaft order, spot order, place)
+        for j, sh in enumerate(line_sh):
+            ks = spec[sh]
+            pos = at[sh][0]
+            assert pos is not None
+            y_lo, y_hi = pos[1] - ks["length"] / 2, pos[1] + ks["length"] / 2
+            mine: list[tuple[float, float, int, str, tuple[str, int]]] = []  # (shaft Ø, face, side, against, part)
+            for k, c in stk.get((sh, 0), []):
+                pos_k = at[k][c]
+                assert pos_k is not None
+                mine += [(float(ks["d"]), pos_k[1] - height(k) / 2, -1, "hub", (k, c)),
+                         (float(ks["d"]), pos_k[1] + height(k) / 2, 1, "hub", (k, c))]
+            for side, b0, b1, (bitem, des) in line_info["brg"].get(sh, []):
+                mine.append((min(float(ks["d"]), BEARINGS[des][0]), b0 if side < 0 else b1, side, "bearing",
+                             (bitem, brg_copy[(sh, side)])))
+            for n_s, (d1, face, side, against, who) in enumerate(mine):
+                row = RINGS.get(round(d1)) if abs(d1 - round(d1)) < 1e-9 else None
+                if row is None:
+                    continue  # not a DIN 471 shaft size
+                m_, n_ = row[3], row[4]
+                g0, g1 = (face, face + m_) if side > 0 else (face - m_, face)
+                if g0 < y_lo + n_ - 1e-9 or g1 > y_hi - n_ + 1e-9:
+                    continue  # no room for the groove before the shaft end
+                spots.append((j, n_s, {"sh": sh, "d": d1, "face": face, "side": side, "against": against,
+                                       "who": who, "row": row, "g": (g0, g1)}))
+        # the rings of a shaft's own sub-assembly first (every shaft), then what is left, same-named first
+        took: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = []
+        for own in (True, False):
+            for j, n_s, sp in spots:
+                if any(x[0] == j and x[1] == n_s for x in took):
+                    continue
+                sub, cls = by_id[sp["sh"]]["sub"], _line_class(by_id[sp["sh"]]["name"])
+                cands = sorted((e for e in ring_pool if e["left"] > 0 and e["d"] in (None, sp["d"])
+                                and (e["sub"] == sub or not own)),
+                               key=lambda e: (_line_class(e["name"]) != cls, ring_pool.index(e)))
+                if cands:
+                    e = cands[0]
+                    e["left"] -= 1
+                    e["d"] = sp["d"]
+                    took.append((j, n_s, sp, e))
+        rpiece: dict[str, int] = {}
+        for _j, _n, sp, e in sorted(took, key=lambda x: (x[0], x[1])):
+            sh, d1, face, side = sp["sh"], sp["d"], sp["face"], sp["side"]
+            s_, b_, d2, m_, n_ = sp["row"]
+            pos = at[sh][0]
+            assert pos is not None
+            r0, r1 = (face, face + s_) if side > 0 else (face - s_, face)
+            n = rpiece.get(e["id"], 0)
+            rpiece[e["id"]] = n + 1
+            who, wc = sp["who"]
+            add("retaining_ring", (sh, 0), (e["id"], n), {
+                "d": d1, "s": s_, "b": b_, "d2": d2, "m": m_, "n": n_, "t": _r2((d1 - d2) / 2), "ax": "y",
+                "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(r0), _r2(r1)],
+                "groove_z": [_r2(sp["g"][0]), _r2(sp["g"][1])], "face_z": _r2(face), "side": side,
+                "against": sp["against"], "against_item": who, "against_copy": wc, "ring_item": e["id"],
+                "ring": f"Retaining ring DIN 471 {d1:g}×{s_:g}", "count": 1, "standard": "DIN 471",
+                "position_tol": POS_TOL}, ["A", "B"],
+                f"retaining ring DIN 471 {d1:g} at the {'+' if side > 0 else '-'}Y face of the "
+                f"{by_id[who]['name'] if sp['against'] == 'hub' else 'bearing'}")
         nb = sum(len(v) for v in line_info["brg"].values())
         notes.append("Shaft line: no housing or base plate in the plan, so the shafts run along +Y on their own "
                      f"bearings ({nb} on the shaft journals), parallel at the centre distances of their gears; the "
@@ -1950,6 +2038,14 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         out.append({"type": "keyway", "on": on, **g, "d": d["d"], "b": d["b"], "depth": depth,
                     "dir": _dir2(skel, side, d, d["dir"], g.get("ax") or "z"), "tol": tol,
                     "label": f"keyway {d['b']:g} × {depth:g} ({on}, {d['standard']})"})
+    elif f["kind"] == "retaining_ring":
+        if which == "a":  # the shaft: the DIN 471 groove (groove Ø d2, width m H13 over groove_z)
+            g = _axial(skel, side, d, d["axis"], d["groove_z"][0], d["groove_z"][1])
+            out.append({"type": "groove", **g, "d": d["d2"], "shaft_d": d["d"], "m": d["m"], "tol": tol,
+                        "label": f"retaining ring groove Ø{d['d2']:g} × {d['m']:g} H13 ({d['standard']} {d['d']:g})"})
+        else:  # the ring (a Toolbox part, not in the skeleton): its own frame, a face on Z 0, axis along +Z
+            out.append({"type": "seat", "c": [0.0, 0.0], "z0": 0.0, "z1": float(d["s"]), "d": d["d2"], "tol": tol,
+                        "label": f"ring bore Ø{d['d2']:g} as fitted ({d['ring']})"})
     elif f["kind"] == "dowel":
         for k, xy in enumerate(d["positions"]):
             out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"],
@@ -2022,8 +2118,11 @@ def body_spec(shape: str, size: list[float], features: list[dict[str, Any]], bor
     journals = [keep(f, ("c", "d", "z0", "z1")) for f in features
                 if f["type"] == "boss" and f.get("z0") is not None and shape == "cylinder" and f["d"] < size[0] - 1e-6]
     keyways = [keep(f, ("on", "c", "d", "b", "depth", "dir", "z0", "z1")) for f in features if f["type"] == "keyway"]
+    grooves = [keep(f, ("c", "d", "z0", "z1")) for f in features if f["type"] == "groove"]
     out = {"shape": shape, "size": size, "holes": holes, "seats": seats, "journals": journals, "keyways": keyways,
            "name": name}
+    if grooves:  # only when there are some: placeholders of programs without retaining rings keep their cache keys
+        out["grooves"] = grooves
     if cavity:
         out["pockets"] = [{"min": cavity["min"], "max": cavity["max"]}]
     return out
@@ -2039,9 +2138,59 @@ def placeholder_spec(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str)
     return body_spec(it["shape"], size, item_features(skel, ifs, item), it.get("bore"), it["name"], it.get("cavity"))
 
 
+def key_frame(d: dict[str, Any]) -> tuple[list[list[float]], list[float]]:
+    """Placement (R, base point; program frame) of the Toolbox parallel key of a ``key`` interface. The key's frame
+    (``toolbox._parallel_key``): length along X and width along Y, centred, underside on Z 0. In the program its X
+    runs along the shaft axis, its Z out along the keyway direction ``dir`` and its underside lies on the keyseat
+    floor, ``d / 2 - t1`` from the axis, centred on the key's span ``z``."""
+    ax = ax_of(d)
+    u = unit(ax)
+    w = point3(ax, d["dir"], 0.0)
+    w[AXIS_INDEX[ax]] = 0.0
+    nw = math.sqrt(sum(x * x for x in w)) or 1.0
+    w = [x / nw for x in w]
+    v = [w[1] * u[2] - w[2] * u[1], w[2] * u[0] - w[0] * u[2], w[0] * u[1] - w[1] * u[0]]  # Y = Z × X
+    R = [[float(u[i]), float(v[i]), float(w[i])] for i in range(3)]
+    mid = point3(ax, d["axis"], (float(d["z"][0]) + float(d["z"][1])) / 2)
+    r = float(d["d"]) / 2 - float(d["t1"])
+    return R, [_r2(mid[i] + w[i] * r) for i in range(3)]
+
+
 def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
-    """Where the ICD puts a standard part (a bearing in its seats, dowel pins in their holes): the Toolbox
-    component, its sizes and one placement per piece (the part's base point, program frame, +Z up)."""
+    """Where the ICD puts a standard part (a bearing in its seats, dowel pins in their holes, a parallel key in its
+    keyseat under the hub, a DIN 471 ring in its shaft groove): the Toolbox component, its sizes and one placement
+    per piece (the part's base point, program frame; ``R`` turns the part's own frame when it isn't the program's)."""
+    keys = [f for f in ifs if f["kind"] == "key" and f["data"].get("key_item") == item]
+    if keys:
+        d0 = keys[0]["data"]
+        R0, _p = key_frame(d0)
+        out_k: dict[str, Any] = {
+            "code": "parallel_key", "params": {"D": float(d0["d"]), "L": float(d0["length"])}, "at": [], "R": R0,
+            "interface": keys[0]["id"], "interfaces": [], "standard": "DIN 6885-1 A", "what": "shaft keyseats",
+            "title": f"Parallel key DIN 6885 A {d0['b']:g}×{d0['h']:g}×{d0['length']:g}"}
+        for f in keys:  # one Toolbox part per standard item: another size or direction is not this item's place
+            R, p = key_frame(f["data"])
+            if R != R0 or abs(float(f["data"]["d"]) - float(d0["d"])) > 1e-9 \
+                    or abs(float(f["data"]["length"]) - float(d0["length"])) > 1e-9:
+                continue
+            out_k["at"].append(p)
+            out_k["interfaces"].append(f["id"])
+        return out_k
+    rings = [f for f in ifs if f["kind"] == "retaining_ring" and f["data"].get("ring_item") == item]
+    if rings:
+        d0 = rings[0]["data"]
+        out_r: dict[str, Any] = {
+            "code": "retaining_ring", "params": {"D": float(d0["d"])}, "at": [], "interface": rings[0]["id"],
+            "interfaces": [], "standard": "DIN 471", "what": "shaft grooves", "title": d0["ring"]}
+        if ax_of(d0) != "z":
+            out_r["R"] = CANON[ax_of(d0)]
+        for f in rings:  # the ring's face on Z 0 of its frame: the lower end of its span along the axis
+            d = f["data"]
+            if abs(float(d["d"]) - float(d0["d"])) > 1e-9 or ax_of(d) != ax_of(d0):
+                continue
+            out_r["at"].append([_r2(x) for x in point3(ax_of(d), d["axis"], float(d["z"][0]))])
+            out_r["interfaces"].append(f["id"])
+        return out_r
     out: dict[str, Any] | None = None
     for f in ifs:  # bearings: every seat / journal of this item, in ICD order (copy n is the n-th place)
         d = f["data"]
@@ -2576,6 +2725,10 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                 bits.append(f"{x['label']}: {x['b']:g} wide, {x['depth']:g} deep from the "
                             f"{'bore' if x['on'] == 'hub' else 'shaft surface'}, on the ({u}, {v}) "
                             f"({_r2(dv[i]):g}, {_r2(dv[j]):g}) side of {_at(x)}, {_span(x)}")
+            elif x["type"] == "groove":
+                bits.append(f"{x['label']}: groove bottom Ø{x['d']:g} (depth {d['t']:g} on the Ø{d['d']:g} shaft), "
+                            f"{d['m']:g} wide, on {_at(x)}, {_span(x)}, at least {d['n']:g} from the shaft end; the "
+                            f"{d['ring']} bears on the {d['against']} face there")
             elif x["type"] == "gear":
                 bits.append(f"{x['label']}, pressure angle {d['pressure_angle']:g}°, face width {d['face_width']:g}, "
                             f"centre distance {d['centre_distance']:g} to its mate")

@@ -230,6 +230,36 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         r = out(style, vals, list(vals), "high" if L else "medium", "fastener",
                 fasten={"style": style, "washers": washers, "size": int(d), "length": L})
         return r
+    # keys and retaining rings before anything their host's noun would pick ("Pinion key", "Gear shaft circlip"),
+    # when the part named first is one: the last part noun of the leading phrase ("Pinion key, DIN 6885 6x6x18" is
+    # a key; "Bearing 6204, held by a circlip" is a bearing)
+    lead = re.split(r"[,.;:(]|\b(?:with|for|on|onto|to|in|of|from|that|which|held|holds?|located|against|by|and)\b",
+                    t)[0]
+    heads = re.findall(r"\b(keys?|circlips?|seeger|(?:retaining|snap) rings?|471|bearings?|gears?|pinions?|shafts?|"
+                       r"axles?|bolts?|screws?|nuts?|washers?|dowels?|pins?)\b", lead)
+    head = heads[-1] if heads else ""
+    if head in ("key", "keys") and not re.search(r"\b(?:allen|hex) keys?\b", t):
+        g = re.search(r"\b(\d{1,2})\s*x\s*(\d{1,2})\s*x\s*" + NUM, t)
+        row = next((hi for (_lo, hi), v in toolbox.KEY_ROWS
+                    if g and (v[0], v[1]) == (int(g.group(1)), int(g.group(2)))), None)
+        if g and row:
+            return out("parallel_key", {"D": float(row), "L": float(g.group(3))}, ["D", "L"], "high", "key")
+        dd, ll = _dia(t), _length(t)
+        if dd and 8 < dd <= 65:
+            vals = {"D": dd, **({"L": ll} if ll else {})}
+            return out("parallel_key", vals, list(vals), "high" if ll else "medium", "key")
+        return {"code": "parallel_key", "params": None, "title": "Parallel key DIN 6885 A (size from the shaft)",
+                "standard": "DIN 6885-1 A", "name": "Parallel key", "confidence": "medium", "read": [],
+                "kind": "key"}
+    if re.fullmatch(r"circlips?|seeger|(?:retaining|snap) rings?|471", head):
+        dd = _dia(t)
+        g = re.search(r"\bfor (?:a |an )?" + NUM + r"\s*(?:mm)?\s*shaft", t)
+        dd = dd or (float(g.group(1)) if g else None)
+        if dd and abs(dd - round(dd)) < 1e-9 and round(dd) in toolbox.DIN471:
+            return out("retaining_ring", {"D": dd}, ["D"], "high", "retaining_ring")
+        return {"code": "retaining_ring", "params": None, "title": "Retaining ring DIN 471 (size from the shaft)",
+                "standard": "DIN 471", "name": "Retaining ring for shafts", "confidence": "medium", "read": [],
+                "kind": "retaining_ring"}
     if words & {"nut", "nuts"} and d is not None:
         return out("hex_nut", {"D": d}, ["D"], "high")
     if words & {"washer", "washers"} and d is not None:

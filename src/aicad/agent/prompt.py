@@ -197,8 +197,10 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 ## Toolbox (standard components) and imported parts
 - `from aicad import toolbox` gives deterministic generators: `shape, expected = toolbox.build(code, **params)`.
   Codes: hex_bolt(D, L), shcs(D, L), hex_nut(D), washer(D), standoff(D, AF, L), dowel(D, L), bearing(SERIES),
-  spur_gear(M, Z, B, BORE), shaft(D, L, KEY_L, C), flange(OD, T, BORE, N, HOLE, PCD), l_bracket(A, B, W, T, HOLE).
-  D is the metric size (M3–M24). Use them for standard parts inside assemblies (position with Pos/Rot, set
+  spur_gear(M, Z, B, BORE, KEY_B=0, KEY_T2=0, KEY_ANG=0) (optional DIN 6885 hub keyway), shaft(D, L, KEY_L, C),
+  parallel_key(D, L) (DIN 6885 A for shaft Ø D), retaining_ring(D) (DIN 471 for shaft Ø D, as fitted),
+  flange(OD, T, BORE, N, HOLE, PCD), l_bracket(A, B, W, T, HOLE).
+  D is the metric size (M3–M24) for fasteners. Use them for standard parts inside assemblies (position with Pos/Rot, set
   .label) instead of re-modelling them, so they are always identical.
 - A design marked `IMPORTED = True` is a STEP the user imported. It is built as
   `part = fw.imported_blank(REFERENCE_STEP, RECOGNITION)`: the EXACT imported solid (the "Imported blank") plus

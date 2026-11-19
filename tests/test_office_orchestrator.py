@@ -139,8 +139,13 @@ def test_hex_does_not_read_a_key_or_circlip_as_its_host() -> None:
                      {"id": "c", "description": "External retaining ring DIN 471 for Ø22 shaft, holds the pinion "
                                                 "axially.", "toolbox": None},
                      {"id": "b", "description": "Deep groove ball bearing 6204 (20x47x14).", "toolbox": "bearing"}]}
-    for title, iid in (("Pinion key", "k"), ("Gear key", "k"), ("Pinion circlip", "c"), ("Gear shaft circlip", "c")):
-        assert platform_env.hex_lookup(doc, {"title": title, "kind": "standard", "item_id": iid}, []) is None
+    # since wip/toolbox-keys they are stocked: read as what they are, never as their host
+    for title, iid, code, name in (("Pinion key", "k", "parallel_key", "Parallel key DIN 6885 A 6×6×18"),
+                                   ("Gear key", "k", "parallel_key", "Parallel key DIN 6885 A 6×6×18"),
+                                   ("Pinion circlip", "c", "retaining_ring", "Retaining ring DIN 471 22×1.2"),
+                                   ("Gear shaft circlip", "c", "retaining_ring", "Retaining ring DIN 471 22×1.2")):
+        hit = platform_env.hex_lookup(doc, {"title": title, "kind": "standard", "item_id": iid}, [])
+        assert hit is not None and (hit["code"], hit["title"]) == (code, name), (title, hit)
     brg = platform_env.hex_lookup(doc, {"title": "Gear shaft bearing", "kind": "standard", "item_id": "b"}, [])
     assert brg is not None and brg["code"] == "bearing"
     keyed = {"items": [{"id": "s", "description": "Shaft Ø20 x 120 with a keyway."}]}

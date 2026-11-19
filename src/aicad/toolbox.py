@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-VERSION = 1
+VERSION = 2  # v2 (2026-11-19): bearing rings carry their ISO 582 mounting chamfers r_s min (was: sharp corners)
 SQ3 = math.sqrt(3.0)
 
 # ------------------------------------------------------------------------------------------------ tables
@@ -40,9 +40,40 @@ BEARING = {6000: (10, 26, 8), 6001: (12, 28, 8), 6002: (15, 32, 9), 6003: (17, 3
            6005: (25, 47, 12), 6006: (30, 55, 13), 6200: (10, 30, 9), 6201: (12, 32, 10), 6202: (15, 35, 11),
            6203: (17, 40, 12), 6204: (20, 47, 14), 6205: (25, 52, 15), 6206: (30, 62, 16), 6207: (35, 72, 17),
            6208: (40, 80, 18)}
+# ISO 15 boundary dimensions with the ISO 582 chamfer dimension r_s min (bore and outside corners of both rings), as
+# printed in rolling-bearing catalogues (e.g. SKF 60xx / 62xx tables): designation -> r_s min. Unverified (PD-13).
+BEARING_RS = {6000: 0.3, 6001: 0.3, 6002: 0.3, 6003: 0.3, 6004: 0.6, 6005: 0.6, 6006: 1.0, 6200: 0.6, 6201: 0.6,
+              6202: 0.6, 6203: 0.6, 6204: 1.0, 6205: 1.0, 6206: 1.0, 6207: 1.1, 6208: 1.1}
 # DIN 6885-1 parallel keys: shaft range (over, up to) -> (b width, t1 shaft groove depth)
 KEYS = [((8, 10), (3, 1.8)), ((10, 12), (4, 2.5)), ((12, 17), (5, 3.0)), ((17, 22), (6, 3.5)), ((22, 30), (8, 4.0)),
         ((30, 38), (10, 5.0)), ((38, 44), (12, 5.0)), ((44, 50), (14, 5.5)), ((50, 58), (16, 6.0)), ((58, 65), (18, 7.0))]
+# DIN 6885-1:1968 parallel keys, the full row: shaft Ø (over, up to) -> (b, h, t1 shaft depth, t2 hub depth). Same
+# values as ``office.icd.KEYS`` (one standard, two consumers; a test keeps them equal). d = 20 -> 6 x 6, t1 3.5, t2 2.8.
+KEY_ROWS = [((8, 10), (3, 3, 1.8, 1.4)), ((10, 12), (4, 4, 2.5, 1.8)), ((12, 17), (5, 5, 3.0, 2.3)),
+            ((17, 22), (6, 6, 3.5, 2.8)), ((22, 30), (8, 7, 4.0, 3.3)), ((30, 38), (10, 8, 5.0, 3.3)),
+            ((38, 44), (12, 8, 5.0, 3.3)), ((44, 50), (14, 9, 5.5, 3.8)), ((50, 58), (16, 10, 6.0, 4.3)),
+            ((58, 65), (18, 11, 7.0, 4.4))]
+# DIN 6885-1 preferred key lengths l (mm)
+KEY_LENGTHS = (6, 8, 10, 12, 14, 16, 18, 20, 22, 25, 28, 32, 36, 40, 45, 50, 56, 63, 70, 80, 90, 100, 110, 125, 140,
+               160, 180, 200)
+# DIN 471:2011-04 external retaining rings for shafts, normal type: shaft d1 -> (s ring thickness, b radial width
+# approx. (the narrow section opposite the lugs), d2 groove Ø, m groove width (H13), n min edge distance of the groove
+# from the shaft end). Typed from a distributor's reprint of the DIN 471 table (Aspen Fasteners, "Metric DIN 471
+# External Retaining Rings for Shafts"); unverified against the standard itself (PD-13). d1 = 20 -> s 1.2, d2 19.0,
+# m 1.3, n 1.5 (groove depth t = (d1 - d2) / 2 = 0.5).
+DIN471 = {8: (0.8, 1.5, 7.6, 0.9, 0.6), 9: (1.0, 1.7, 8.6, 1.1, 0.6), 10: (1.0, 1.8, 9.6, 1.1, 0.6),
+          11: (1.0, 1.8, 10.5, 1.1, 0.8), 12: (1.0, 1.8, 11.5, 1.1, 0.8), 13: (1.0, 2.0, 12.4, 1.1, 0.9),
+          14: (1.0, 2.1, 13.4, 1.1, 0.9), 15: (1.0, 2.2, 14.3, 1.1, 1.1), 16: (1.0, 2.2, 15.2, 1.1, 1.2),
+          17: (1.0, 2.3, 16.2, 1.1, 1.2), 18: (1.2, 2.4, 17.0, 1.3, 1.5), 19: (1.2, 2.5, 18.0, 1.3, 1.5),
+          20: (1.2, 2.6, 19.0, 1.3, 1.5), 21: (1.2, 2.7, 20.0, 1.3, 1.5), 22: (1.2, 2.8, 21.0, 1.3, 1.5),
+          24: (1.2, 3.0, 22.9, 1.3, 1.7), 25: (1.2, 3.0, 23.9, 1.3, 1.7), 26: (1.2, 3.1, 24.9, 1.3, 1.7),
+          28: (1.5, 3.2, 26.6, 1.6, 2.1), 30: (1.5, 3.5, 28.6, 1.6, 2.1), 32: (1.5, 3.6, 30.3, 1.6, 2.6),
+          34: (1.5, 3.8, 32.3, 1.6, 2.6), 35: (1.5, 3.9, 33.0, 1.6, 3.0), 36: (1.8, 4.0, 34.0, 1.85, 3.0),
+          38: (1.8, 4.2, 36.0, 1.85, 3.0), 40: (1.8, 4.4, 37.5, 1.85, 3.8), 42: (1.8, 4.5, 39.5, 1.85, 3.8),
+          45: (1.8, 4.7, 42.5, 1.85, 3.8), 48: (2.0, 5.0, 45.5, 1.85, 3.8), 50: (2.0, 5.1, 47.0, 2.15, 4.5),
+          52: (2.0, 5.2, 49.0, 2.15, 4.5), 55: (2.0, 5.4, 52.0, 2.15, 4.5), 56: (2.0, 5.5, 53.0, 2.15, 4.5),
+          58: (2.0, 5.6, 55.0, 2.15, 4.5), 60: (2.0, 5.8, 57.0, 2.15, 4.5), 62: (2.0, 6.0, 59.0, 2.15, 4.5),
+          63: (2.0, 6.2, 60.0, 2.15, 4.5), 65: (2.5, 6.3, 62.0, 2.65, 4.5)}
 METRIC = sorted(HEX_HEAD)
 
 
@@ -103,6 +134,21 @@ def _chamfer_ring(r: float, c: float) -> float:
     return 2 * math.pi * (c * c / 2) * (r - c / 3)
 
 
+def _chamfer_bore(r: float, c: float) -> float:
+    """Volume removed by a 45° chamfer c on the circular edge of a radius-r bore (material outside r; Pappus)."""
+    return 2 * math.pi * (c * c / 2) * (r + c / 3)
+
+
+def _chamfer_circles(part: Any, r: float, c: float) -> Any:
+    """45° chamfer c on every circular edge of radius r (a ring's bore or outside corners)."""
+    from build123d import chamfer
+
+    if c <= 0:
+        return part
+    edges = part.edges().filter_by(lambda e: e.geom_type.name == "CIRCLE" and abs(e.radius - r) < 1e-6)
+    return chamfer(edges, c)
+
+
 # ------------------------------------------------------------------------------------------------ generators
 def _hex_bolt(D: float, L: float) -> tuple[Any, dict[str, Any]]:
     from aicad import fw
@@ -156,6 +202,8 @@ def _bearing(SERIES: float) -> tuple[Any, dict[str, Any]]:
     if key not in BEARING:
         raise ToolboxError(f"Bearing {SERIES:g} not in table ({', '.join(str(k) for k in sorted(BEARING))})")
     d, Dd, B = BEARING[key]
+    c = BEARING_RS[key]  # ISO 582 r_s min, as a 45° chamfer: inside the r_s min arc, so a shaft or housing
+    #                      fillet r <= r_s min never touches the ring (live gear run 2026-11-19: 2.2 mm³ per shoulder)
     w = (Dd - d) / 2 * 0.3  # ring wall
     gap = (Dd - d) / 2 - 2 * w
     db = gap * 0.9
@@ -163,6 +211,8 @@ def _bearing(SERIES: float) -> tuple[Any, dict[str, Any]]:
     n = max(6, int(math.pi * dm / (1.6 * db)))
     inner = _cyl(d / 2 + w, B) - _cyl(d / 2, B + 0.02, -0.01)
     outer = _cyl(Dd / 2, B) - _cyl(Dd / 2 - w, B + 0.02, -0.01)
+    inner = _chamfer_circles(inner, d / 2, c)   # the bore corners (against the shaft shoulder)
+    outer = _chamfer_circles(outer, Dd / 2, c)  # the outside corners (against the housing shoulder)
     inner.label, outer.label = "Inner ring", "Outer ring"
     balls = []
     for i in range(n):
@@ -173,6 +223,7 @@ def _bearing(SERIES: float) -> tuple[Any, dict[str, Any]]:
     fw.feature("Rings", inner)
     part = Compound(children=[inner, outer, *balls])
     vol = math.pi / 4 * B * (((d + 2 * w) ** 2 - d * d) + (Dd * Dd - (Dd - 2 * w) ** 2)) + n * math.pi / 6 * db ** 3
+    vol -= 2 * _chamfer_bore(d / 2, c) + 2 * _chamfer_ring(Dd / 2, c)
     return part, {"bbox": [Dd, Dd, B], "volume": vol, "solids": 2 + n}
 
 
@@ -214,8 +265,25 @@ def _shoelace(pts: list[tuple[float, float]]) -> float:
     return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1], strict=True))) / 2
 
 
-def _spur_gear(M: float, Z: float, B: float, BORE: float) -> tuple[Any, dict[str, Any]]:
-    from build123d import Polygon, extrude
+def _segment_in_strip(R: float, b: float) -> float:
+    """Area of a radius-R disc inside the strip |y| <= b / 2 on the side x >= 0 (exact)."""
+    def F(v: float) -> float:
+        return v / 2 * math.sqrt(R * R - v * v) + R * R / 2 * math.asin(v / R)
+
+    return F(b / 2) - F(-b / 2)
+
+
+def key_row(D: float) -> tuple[float, float, float, float]:
+    """DIN 6885-1 (b, h, t1, t2) for a shaft Ø D (over lo, up to hi)."""
+    for (lo, hi), v in KEY_ROWS:
+        if lo < D <= hi:
+            return (float(v[0]), float(v[1]), float(v[2]), float(v[3]))
+    raise ToolboxError("shaft diameter outside the DIN 6885 key table (over 8 up to 65 mm)")
+
+
+def _spur_gear(M: float, Z: float, B: float, BORE: float, KEY_B: float = 0.0, KEY_T2: float = 0.0,
+               KEY_ANG: float = 0.0) -> tuple[Any, dict[str, Any]]:
+    from build123d import Align, Box, Polygon, Pos, Rot, extrude
 
     from aicad import fw
 
@@ -227,10 +295,19 @@ def _spur_gear(M: float, Z: float, B: float, BORE: float) -> tuple[Any, dict[str
     rf = M * z / 2 - 1.25 * M
     if BORE <= 0 or BORE / 2 >= rf - M:
         raise ToolboxError(f"bore must be positive and below Ø{2 * (rf - M):.1f} (root diameter minus a rim)")
+    R = BORE / 2
+    if KEY_B > 0 and not (KEY_B < BORE and KEY_T2 > 0 and R + KEY_T2 < rf - M / 2):
+        raise ToolboxError("hub keyway: width must be below the bore and the keyway top inside the rim "
+                           f"(bore radius + t2 below {rf - M / 2:.1f})")
     pts = _gear_profile(M, z)
     body = fw.feature("Involute teeth (α=20°)", extrude(Polygon(*pts, align=None), B))
-    part = fw.feature("Bore", body - _cyl(BORE / 2, B + 0.02, -0.01))
-    vol = (_shoelace(pts) - math.pi * BORE * BORE / 4) * B
+    part = fw.feature("Bore", body - _cyl(R, B + 0.02, -0.01))
+    vol = (_shoelace(pts) - math.pi * R * R) * B
+    if KEY_B > 0:  # DIN 6885 hub keyway: b wide, its top R + t2 from the axis, through, centred on KEY_ANG from +X
+        slot = Rot(0, 0, KEY_ANG) * Pos(0, 0, -0.01) * Box(R + KEY_T2, KEY_B, B + 0.02,
+                                                           align=(Align.MIN, Align.CENTER, Align.MIN))
+        part = fw.feature(f"Hub keyway {KEY_B:g}×{KEY_T2:g} (DIN 6885)", part - slot)
+        vol -= (KEY_B * (R + KEY_T2) - _segment_in_strip(R, KEY_B)) * B
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
     return part, {"bbox": [max(xs) - min(xs), max(ys) - min(ys), B], "volume": vol, "solids": 1}
@@ -265,6 +342,41 @@ def _shaft(D: float, L: float, KEY_L: float, C: float) -> tuple[Any, dict[str, A
     seg = F(y) - F(-y) - b * (R - t1)
     vol = math.pi * R * R * L - 2 * _chamfer_ring(R, C) - seg * KEY_L
     return part, {"bbox": [D, D, L], "volume": vol, "solids": 1}
+
+
+def _parallel_key(D: float, L: float) -> tuple[Any, dict[str, Any]]:
+    """DIN 6885-1 form A (round-ended) parallel key for a shaft Ø D: b × h from the table, length L. Frame: length
+    along X and width along Y, both centred; the underside (in the shaft keyseat) on Z 0, the top at Z h."""
+    from build123d import SlotOverall, extrude
+
+    from aicad import fw
+
+    b, h, _t1, _t2 = key_row(D)
+    if L <= b:
+        raise ToolboxError(f"key length must exceed the key width {b:g} mm")
+    part = fw.feature(f"Parallel key {b:g}×{h:g} form A", extrude(SlotOverall(L, b), h))
+    part.label = f"Parallel key DIN 6885 A {b:g}×{h:g}×{L:g}"
+    return part, {"bbox": [L, b, h], "volume": h * (b * (L - b) + math.pi * b * b / 4), "solids": 1}
+
+
+def ring_row(D: float) -> tuple[float, float, float, float, float]:
+    """DIN 471 (s, b, d2, m, n) for a shaft d1 = D."""
+    key = round(D)
+    if abs(D - key) > 1e-9 or key not in DIN471:
+        raise ToolboxError(f"Retaining ring: Ø{D:g} is not a DIN 471 size ({', '.join(str(k) for k in sorted(DIN471))})")
+    return DIN471[key]
+
+
+def _retaining_ring(D: float) -> tuple[Any, dict[str, Any]]:
+    """DIN 471 external retaining ring for a shaft d1 = D, as fitted in its groove: an annulus from the groove Ø d2
+    out by the ring's radial width b, thickness s. Frame: axis Z, one face on Z 0 (like a bearing)."""
+    from aicad import fw
+
+    s, b, d2, _m, _n = ring_row(D)
+    part = fw.feature("Retaining ring (as fitted)", _cyl(d2 / 2 + b, s) - _cyl(d2 / 2, s + 0.02, -0.01))
+    part.label = f"Retaining ring DIN 471 {D:g}×{s:g}"
+    return part, {"bbox": [d2 + 2 * b, d2 + 2 * b, s], "volume": math.pi / 4 * ((d2 + 2 * b) ** 2 - d2 * d2) * s,
+                  "solids": 1}
 
 
 def _dowel(D: float, L: float) -> tuple[Any, dict[str, Any]]:
@@ -351,11 +463,31 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
     Component("bearing", "Deep-groove ball bearing", "Bearings", "ISO 15 (envelope)", ["bearing", "ball bearing", "6204", "6205", "60", "62"],
               [P("SERIES", "Designation", 6204, unit="", options=[float(k) for k in sorted(BEARING)], help="60xx / 62xx series", integer=True)],
               "Bearing steel", _bearing, lambda p: f"Ball bearing {int(p['SERIES'])}",
-              "Simplified: plain rings + balls at catalogue d × D × B (no grooves, cage or seals).", "circle-dot"),
+              "Simplified: plain rings + balls at catalogue d × D × B (no grooves, cage or seals); bore and outside "
+              "corners chamfered 45° by r_s min (ISO 582).", "circle-dot"),
     Component("spur_gear", "Spur gear", "Power transmission", "ISO 53 profile, α = 20°", ["gear", "spur gear", "pinion", "teeth", "module"],
               [P("M", "Module", 2, min=0.3, max=20), P("Z", "Teeth", 24, unit="", min=12, max=200, integer=True),
-               P("B", "Face width", 15, min=1, max=300), P("BORE", "Bore", 10, min=1, max=500)], "Steel C45", _spur_gear,
-              lambda p: f"Spur gear m{p['M']:g} z{int(p['Z'])}", "True involute flanks (polyline-sampled), no profile shift.", "cog"),
+               P("B", "Face width", 15, min=1, max=300), P("BORE", "Bore", 10, min=1, max=500),
+               P("KEY_B", "Hub keyway width", 0, min=0, max=100, help="DIN 6885 b; 0 = no keyway"),
+               P("KEY_T2", "Hub keyway depth t2", 0, min=0, max=50, help="From the bore surface (DIN 6885 t2)"),
+               P("KEY_ANG", "Hub keyway angle", 0, unit="°", min=-360, max=360, help="Keyway centre line from +X")],
+              "Steel C45", _spur_gear,
+              lambda p: f"Spur gear m{p['M']:g} z{int(p['Z'])}" + (
+                  f", keyed {p['KEY_B']:g}×{p['KEY_T2']:g}" if p.get("KEY_B") else ""),
+              "True involute flanks (polyline-sampled), no profile shift. Optional DIN 6885 hub keyway.", "cog"),
+    Component("parallel_key", "Parallel key", "Pins & keys", "DIN 6885-1 form A",
+              ["parallel key", "feather key", "6885", "key", "keys"],
+              [P("D", "Shaft diameter", 20, min=8, max=65, help="b × h from DIN 6885-1 for the shaft Ø"),
+               P("L", "Key length", 18, min=4, max=400, help="DIN 6885 lengths: " + ", ".join(f"{x:g}" for x in KEY_LENGTHS[:16]) + " …")],
+              "Steel C45+C (bright key steel)", _parallel_key,
+              lambda p: "Parallel key DIN 6885 A {:g}×{:g}×{:g}".format(*key_row(p["D"])[:2], p["L"]),
+              "Round-ended (form A); edge chamfers not modelled. Table typed from public references (verify).", "minus"),
+    Component("retaining_ring", "Retaining ring for shafts", "Pins & keys", "DIN 471",
+              ["circlip", "circlips", "retaining ring", "retaining rings", "snap ring", "seeger", "471"],
+              [P("D", "Shaft diameter d1", 20, options=[float(k) for k in sorted(DIN471)], help="DIN 471 normal type")],
+              "Spring steel", _retaining_ring, lambda p: f"Retaining ring DIN 471 {p['D']:g}×{ring_row(p['D'])[0]:g}",
+              "Modelled as fitted: a plain annulus from the groove Ø d2 out by the radial width b (no lugs, holes "
+              "or gap). Table typed from a distributor's DIN 471 reprint (verify).", "circle"),
     Component("shaft", "Shaft with keyway", "Power transmission", "DIN 6885-1 keyway", ["shaft", "keyway", "key way", "axle"],
               [P("D", "Diameter", 25, min=9, max=65), P("L", "Length", 120, min=20, max=2000), P("KEY_L", "Keyway length", 40, min=5, max=1000),
                P("C", "End chamfer", 1, min=0, max=5)], "Steel C45", _shaft,
@@ -459,10 +591,17 @@ def match(prompt: str) -> list[dict[str, Any]]:
     Conservative: only fires on clear component nouns; custom features (pockets, special shapes) lower the score."""
     t = prompt.lower()
     out: list[dict[str, Any]] = []
-    custom = sum(w in t for w in ("pocket", "slot", "custom", "rib", "boss", "with a", "cutout", "enclosure", "housing",
+    # "with a keyway" / "with a bore" name features a standard gear or shaft carries (the hub keyway is a parameter):
+    # they are not custom work (live gear run 2026-11-19: "Gear with a keyway" was designed, the pinion swapped in)
+    tc = re.sub(r"\bwith an?\s+(?:(?:din\s*6885\s+|hub\s+|keyed\s+|plain\s+|ø?\d+(?:\.\d+)?\s*(?:mm\s+)?)*)"
+                r"(?:key\s?way|keyseat|key|bore)s?\b", " ", t)
+    custom = sum(w in tc for w in ("pocket", "slot", "custom", "rib", "boss", "with a", "cutout", "enclosure", "housing",
                                   "assembly", "mount for", "adapter", "modify", "change", "make it", "the part",
                                   # edits and plain prismatic parts are not standard components (STU-15)
                                   "chamfer", "fillet", "block", "plate", "through hole", "holes", "add a", "add an"))
+    # "Pinion key", "Gear circlip": the part is the key / ring, the gear or shaft word only says where it goes
+    small = re.search(r"\b(?:keys?|circlips?|retaining rings?|snap rings?)\b", t)
+    host = re.search(r"\b(?:pinion|gears?|shafts?|hub|wheel|pulley)\b", t)
     for c in COMPONENTS.values():
         score = 0
         for k in c.keywords:
@@ -470,6 +609,10 @@ def match(prompt: str) -> list[dict[str, Any]]:
                 score += 2 if " " in k or len(k) > 4 else 1
         if score == 0:
             continue
+        if small and c.code not in ("parallel_key", "retaining_ring"):
+            score -= 2
+        if c.code == "parallel_key" and host and re.search(r"\bkeys?\b", t):
+            score += 1
         vals: dict[str, float] = {}
         m = re.search(r"\bm\s?(\d{1,2})(?:\s*[x×]\s*" + _NUM + r")?", t)
         names = {p.name for p in c.params}
@@ -491,11 +634,16 @@ def match(prompt: str) -> list[dict[str, Any]]:
                 g = re.search(pat, t)
                 if g:
                     vals[key] = float(g.group(1))
-        if c.code in ("shaft", "dowel"):
+        if c.code in ("shaft", "dowel", "parallel_key", "retaining_ring"):
             g = re.search(r"(?:ø|dia(?:meter)?\s*)\s*" + _NUM, t)
             if g:
                 vals["D"] = float(g.group(1))
-        if c.code in ("hex_bolt", "shcs", "standoff", "dowel", "shaft"):
+        if c.code == "parallel_key":  # "6x6x18" (b × h × l): the table row of that b gives the shaft range
+            g = re.search(r"\b(\d{1,2})\s*[x×]\s*(\d{1,2})\s*[x×]\s*" + _NUM, t)
+            row = next(((lo, hi) for (lo, hi), v in KEY_ROWS if g and v[0] == int(g.group(1)) and v[1] == int(g.group(2))), None)
+            if g and row:
+                vals["D"], vals["L"] = float(row[1]), float(g.group(3))
+        if c.code in ("hex_bolt", "shcs", "standoff", "dowel", "shaft", "parallel_key"):
             g = re.search(r"(?:length|long)\s*(?:of\s*)?" + _NUM + r"|" + _NUM + r"\s*mm\s*long", t)
             if g:
                 vals["L"] = float(g.group(1) or g.group(2))

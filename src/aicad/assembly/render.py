@@ -113,17 +113,28 @@ def scene_from_skeleton(skel: dict[str, Any], title: str = "", ifaces: list[dict
         seat = icd.seated(ifaces or [], st["item"])
         if not seat:
             continue
+        prim = "cyl"
         if seat["code"] == "bearing":
             from aicad.toolbox import BEARING
 
             _d, D, B = BEARING[int(seat["params"]["SERIES"])]
             size = [float(D), float(D), float(B)]
+        elif seat["code"] == "parallel_key":  # a box: length along its X, width Y, height Z from its base
+            from aicad.toolbox import key_row
+
+            kb, kh, _t1, _t2 = key_row(float(seat["params"]["D"]))
+            size, prim = [float(seat["params"]["L"]), kb, kh], "box"
+        elif seat["code"] == "retaining_ring":
+            from aicad.toolbox import ring_row
+
+            s_, b_, d2, _m, _n = ring_row(float(seat["params"]["D"]))
+            size = [d2 + 2 * b_, d2 + 2 * b_, s_]
         else:
             size = [float(seat["params"]["D"])] * 2 + [float(seat["params"]["L"])]
         R = seat.get("R") or frames.IDENT
         for c, at in enumerate(seat["at"]):  # the part's base point; the body is centred: half its length along Z
             mid = [float(at[k]) + R[k][2] * size[2] / 2 for k in range(3)]
-            bodies.append({"id": f"{st['item']}#{c}", "group": f"item:{st['item']}", "prim": "cyl", "size": size,
+            bodies.append({"id": f"{st['item']}#{c}", "group": f"item:{st['item']}", "prim": prim, "size": size,
                            "label": _clean_label(st.get("name") or seat["title"]), "T": frames.to12(R, mid)})
     key = _key_items(bodies)
     return {"title": title or "Layout", "bodies": bodies, "key": key, "kind": "skeleton"}

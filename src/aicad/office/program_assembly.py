@@ -637,7 +637,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         inst = aservice.add_instance(aroot, adoc, key, T=T,
                                                      name=t["title"])
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
-                    what = "bearing" if seat["code"] == "bearing" else "dowel pin"
+                    what = {"bearing": "bearing", "dowel": "dowel pin", "parallel_key": "key",
+                            "retaining_ring": "retaining ring"}.get(seat["code"], "part")
                     seated[what] = seated.get(what, 0) + len(seat["at"])
                     if any(f["kind"] == "bearing_journal" and f["b"]["item"] == t["item_id"] for f in ifaces):
                         # bearings on shaft journals (no housing): mated to their shafts by interface name

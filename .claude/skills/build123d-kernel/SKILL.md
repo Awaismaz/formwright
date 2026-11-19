@@ -64,6 +64,9 @@ Acceptance is deterministic checks, never renders (`src/aicad/checks.py`, `src/a
 - `runner._exec` purges only modules imported during the run (resolving all ~2000 `sys.modules` paths cost 0.7 s).
 
 ## OCP 7.9 API pitfalls
+- Booleans on a multi-solid `Compound` (a Toolbox bearing: rings + balls) are not reliable: `(bearing & gear).volume`
+  gave 95.5 mm³ where every solid-by-solid intersection was empty. Measure overlaps solid by solid
+  (`for x in a.solids(): for y in b.solids(): x & y`, which returns None when empty).
 - Downcasts are `TopoDS.Edge(shape)` / `TopoDS.Face(...)`, not `TopoDS.Edge_s`. Static methods elsewhere keep the `_s`
   suffix, e.g. `BRep_Tool.Degenerated_s(e)`.
 - `TopTools_IndexedDataMapOfShapeListOfShape` is not exposed. Build edge→face maps yourself (see `free_edge_count`).
