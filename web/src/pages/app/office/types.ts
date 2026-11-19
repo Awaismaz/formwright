@@ -12,7 +12,17 @@ export interface PlanPart { id: string; name: string; family: Family; complexity
 export interface PlanSub { id: string; name: string; description: string; parts: PlanPart[] }
 export interface Plan {
   source: "archie" | "standard"; summary: string; assumptions: string[]; subassemblies: PlanSub[];
-  narrative?: string; note?: string | null; edited?: boolean;
+  narrative?: string; note?: string | null; edited?: boolean; graph?: PlanGraph;
+}
+
+/** The design graph behind a plan (architecture v2): a readable list of parts and connections, and open questions. */
+export interface GraphParam { text: string; source: string; note?: string }
+export interface GraphComponent { name: string; kind: string; qty: number; group: string; standard: string; params: GraphParam[]; added: boolean; material?: string }
+export interface GraphConnection { text: string; kind: string; detail: string; placement: string }
+export interface GraphQuestion { id: string; question: string; options: string[]; default?: string | null; why?: string }
+export interface PlanGraph {
+  view?: { components: GraphComponent[]; connections: GraphConnection[]; notes: string[]; constraints: { excluded: string[]; exclusive: boolean } };
+  questions?: GraphQuestion[]; check?: string[]; limits?: string[];
 }
 
 export interface Eta { remaining_min: number; critical_path_min: number; concurrency: number; low_min: number; high_min: number }

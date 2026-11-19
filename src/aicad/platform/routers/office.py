@@ -11,6 +11,7 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   PATCH  /api/office/programs/{pid}                         rename, concurrency, budget
   DELETE /api/office/programs/{pid}
   POST   /api/office/programs/{pid}/replan                  plan again (optionally with review notes)
+  POST   /api/office/programs/{pid}/plan/answers            answer Archie's questions on a design-graph plan
   POST   /api/office/programs/{pid}/gates/brief/approve     approve the (edited) plan: items and tickets open,
                                                             Archie drafts the skeleton and the ICD
   POST   /api/office/programs/{pid}/gates/express           small program: plan + interfaces in one step, then Run
@@ -262,13 +263,21 @@ async def _plan_task(root: Path, pid: str, org_id: str, user_id: str, god_tokens
         db.close()
     budget = None if god_tokens else max(0, min(balance, ARCHIE_MAX_TOKENS)) * metering.USD_PER_TOKEN
     text, usd, failed = "", None, False
+    from aicad.graph import office as design_graph
+
+    graphed = None  # FW_DESIGN_GRAPH=1: intent -> design graph -> plan (architecture v2, PD-110)
     try:
-        text, usd = await planner.run_agent(store.program_dir(root, pid) / "archie", doc["name"], doc["brief"],
-                                            notes, budget)
+        if design_graph.enabled():
+            graphed = await design_graph.plan(store.program_dir(root, pid) / "archie", doc["name"], doc["brief"],
+                                              notes, budget)
+            text, usd, failed = graphed.narrative, graphed.cost_usd, graphed.plan is None
+        else:
+            text, usd = await planner.run_agent(store.program_dir(root, pid) / "archie", doc["name"], doc["brief"],
+                                                notes, budget)
     except Exception:  # any agent failure falls back to the standard planner
         log.exception("Archie planning failed")
         failed = True
-    plan = planner.parse_plan(text)
+    plan = graphed.plan if graphed is not None else planner.parse_plan(text)
     tokens = metering.tokens_for_usd(usd) if usd else 0
     if usd:
         db = session_factory()()
@@ -288,6 +297,8 @@ async def _plan_task(root: Path, pid: str, org_id: str, user_id: str, god_tokens
         archie = service.agent_actor("archie")
         if plan is not None:
             plan, scope_note = planner.finish(plan, doc["name"], doc["brief"])
+            if graphed is not None:
+                design_graph.attach(plan, graphed)
             service.set_plan(root, doc, plan, archie, narrative=planner.narrative(text), note=scope_note)
         else:
             why = ("Archie stopped before finishing the plan" if failed else
@@ -457,6 +468,43 @@ async def replan(pid: str, body: ReplanIn, ctx: Ctx = Depends(verified_ctx)) -> 
     doc = _mutate(ctx, pid, fn)
     if kind == "archie":
         _spawn(ctx, _root(ctx), doc, body.notes)
+    return _view(doc)
+
+
+class PlanAnswersIn(BaseModel):
+    answers: dict[str, str] = Field(default_factory=dict)
+
+
+@router.post("/programs/{pid}/plan/answers")
+async def answer_plan_questions(pid: str, body: PlanAnswersIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Answers to Archie's clarifying questions on a design-graph plan (PD-110). Questions about the housing, the
+    bearings or the material are applied by code at once; any other answer goes back to Archie with the brief."""
+    from aicad.graph import office as design_graph
+
+    again: dict[str, str] = {}
+
+    def fn(root: Path, doc: dict[str, Any]) -> None:
+        if doc["status"] != "plan_review":
+            raise OfficeInputError("There is no plan waiting for answers.")
+        out, notes = design_graph.answer(doc, body.answers)
+        archie = service.agent_actor("archie")
+        if out is not None:
+            if out.plan is None:
+                raise OfficeInputError("That answer can't be built: " + (out.error or "the design is incomplete"))
+            p, note = planner.finish(out.plan, doc["name"], doc["brief"])
+            design_graph.attach(p, out)
+            service.set_plan(root, doc, p, archie, narrative=out.narrative, note=note)
+        elif notes:
+            _start_planning(ctx, root, doc, "archie", notes)
+            again["notes"] = notes
+        else:
+            raise OfficeInputError("Choose an answer for at least one question.")
+        service.emit(root, doc, "plan.answered", f"{ctx.user.name or 'Someone'} answered Archie's questions.",
+                     _actor(ctx), answers={k: str(v)[:120] for k, v in body.answers.items()})
+
+    doc = _mutate(ctx, pid, fn)
+    if again:
+        _spawn(ctx, _root(ctx), doc, again["notes"])
     return _view(doc)
 
 

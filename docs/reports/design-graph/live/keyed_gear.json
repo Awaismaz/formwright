@@ -1,0 +1,292 @@
+{
+  "case": "keyed_gear",
+  "brief": "Build a Spur Gear mounted on stepped Shaft and locked with a key",
+  "new": {
+    "wall_s": 8.05,
+    "error": null,
+    "cost_usd": 0.011931500000000001,
+    "meta": {
+      "job": "simple",
+      "seconds": 8.02,
+      "tokens": {
+        "input_tokens": 2,
+        "output_tokens": 401,
+        "cache_creation_input_tokens": 3114,
+        "cache_read_input_tokens": 0
+      },
+      "tier": "sonnet",
+      "check": []
+    },
+    "questions": [],
+    "notes": [],
+    "raw_reply": {
+      "summary": "A stepped shaft carrying a spur gear locked with a parallel key and seated against the shoulder.",
+      "components": [
+        {
+          "id": "shaft",
+          "kind": "shaft",
+          "name": "Stepped shaft",
+          "params": {
+            "stepped": true
+          }
+        },
+        {
+          "id": "gear",
+          "kind": "spur_gear",
+          "name": "Spur gear"
+        },
+        {
+          "id": "key",
+          "kind": "key",
+          "name": "Gear key"
+        }
+      ],
+      "connections": [
+        {
+          "kind": "keyed_hub",
+          "host": "shaft",
+          "guest": "gear",
+          "via": [
+            "key"
+          ]
+        },
+        {
+          "kind": "shoulder_stop",
+          "host": "shaft",
+          "guest": "gear"
+        }
+      ],
+      "assumptions": [
+        "No bearings, housing or retaining ring added, since the brief asks only for the gear, shaft and key.",
+        "The gear seats against the shaft shoulder because the shaft is stepped.",
+        "Sizes are left out; the key is sized from the shaft diameter by DIN 6885."
+      ]
+    },
+    "graph": {
+      "schema": "fw-design-graph",
+      "version": 1,
+      "name": "Keyed gear",
+      "brief": "Build a Spur Gear mounted on stepped Shaft and locked with a key",
+      "summary": "A stepped shaft carrying a spur gear locked with a parallel key and seated against the shoulder.",
+      "units": "mm",
+      "components": [
+        {
+          "id": "shaft",
+          "kind": "shaft",
+          "name": "Stepped shaft",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "stepped": {
+              "value": true,
+              "source": "rule",
+              "note": "a part locates against its shoulder"
+            },
+            "d": {
+              "value": 20.0,
+              "source": "assumed",
+              "note": "no size in the brief"
+            },
+            "shoulder_d": {
+              "value": 26.0,
+              "source": "rule",
+              "note": "shoulder step max(2.5, 0.1 d + 1) per side"
+            },
+            "length": {
+              "value": 80.0,
+              "source": "assumed",
+              "note": "no length in the brief"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "gear",
+          "kind": "spur_gear",
+          "name": "Spur gear",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "module": {
+              "value": 2.0,
+              "source": "assumed",
+              "note": "no module in the brief"
+            },
+            "teeth": {
+              "value": 30,
+              "source": "assumed",
+              "note": "no teeth count in the brief"
+            },
+            "face_width": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "face width 10 m"
+            },
+            "bore": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "bored to the Ø20 seat"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "key",
+          "kind": "key",
+          "name": "Gear key",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "shaft_d": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "the seat it sits in"
+            },
+            "b": {
+              "value": 6.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "h": {
+              "value": 6.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "t1": {
+              "value": 3.5,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "t2": {
+              "value": 2.8,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "length": {
+              "value": 18.0,
+              "source": "rule",
+              "note": "floor(max(b + 2, B - 2)) for the hub width"
+            }
+          },
+          "implied": false
+        }
+      ],
+      "connections": [
+        {
+          "id": "c1",
+          "kind": "keyed_hub",
+          "host": "shaft",
+          "guest": "gear",
+          "via": [
+            "key"
+          ],
+          "params": {
+            "fit": {
+              "value": "H7/k6",
+              "source": "standard",
+              "note": "ISO 286 transition fit"
+            }
+          }
+        },
+        {
+          "id": "c2",
+          "kind": "shoulder_stop",
+          "host": "shaft",
+          "guest": "gear",
+          "via": [],
+          "params": {}
+        }
+      ],
+      "constraints": {
+        "named": [
+          "gear",
+          "key",
+          "shaft"
+        ],
+        "excluded": [],
+        "exclusive": false
+      },
+      "assumptions": [
+        "No bearings, housing or retaining ring added, since the brief asks only for the gear, shaft and key.",
+        "The gear seats against the shaft shoulder because the shaft is stepped.",
+        "Sizes are left out; the key is sized from the shaft diameter by DIN 6885."
+      ],
+      "questions": [],
+      "answers": {},
+      "notes": [],
+      "source": "intent",
+      "layout": {}
+    },
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Stepped shaft",
+        "1 x Spur gear",
+        "1 x Gear key"
+      ],
+      "kinds": {
+        "shaft": 1,
+        "gear": 1,
+        "key": 1
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "shaft_line",
+      "problems": [],
+      "mesh": [],
+      "direct": {
+        "Stepped shaft": "direct",
+        "Spur gear": "direct"
+      },
+      "n_direct": 2,
+      "n_designed": 2,
+      "correct": true
+    },
+    "check": [],
+    "platform_tokens": 2,
+    "limits": [],
+    "rescored": true
+  },
+  "old": {
+    "wall_s": 15.79,
+    "cost_usd": 0.047022100000000004,
+    "tokens": {
+      "input_tokens": 2,
+      "output_tokens": 1159,
+      "cache_creation_input_tokens": 4714,
+      "cache_read_input_tokens": 658
+    },
+    "model": "claude-opus-5-5",
+    "note": null,
+    "text": "This is a small product: one spur gear keyed onto a stepped shaft. I planned it as one sub-assembly with exactly three parts: the shaft, the gear and the key. It has no bearings, housing or retaining hardware, because the brief did not ask for them. The gear seats against the shaft shoulder and is driven through a parallel key. The brief gave no sizes, so the sizes below are assumed and listed as such.\n\n```fw-plan\n{\"summary\": \"A spur gear located against the shoulder of a stepped steel shaft and locked in rotation by a parallel key, delivered as one sub-assembly.\",\n \"assumptions\": [\"No sizes were given; shaft seat 25 mm, shoulder step 30 mm, overall shaft length 150 mm are assumed\", \"Gear assumed module 2, 40 teeth, 20 degree pressure angle, 25 mm face width, giving 80 mm pitch diameter and 84 mm tip diameter\", \"Key assumed DIN 6885 A parallel key 8 x 7 x 22 mm to suit the 25 mm seat\", \"Shaft material assumed 42CrMo4, gear assumed C45 steel\", \"Axial retention of the gear beyond the shoulder is left to the customer's machine, as the brief asks for no extra items\"],\n \"subassemblies\": [{\"name\": \"Keyed gear shaft\", \"description\": \"Stepped shaft carrying a spur gear on its seat diameter, gear located by the shoulder and driven through a parallel key.\",\n   \"parts\": [\n     {\"name\": \"Stepped shaft\", \"family\": \"turned\", \"complexity\": 3, \"qty\": 1, \"description\": \"Stepped shaft in 42CrMo4 with a 25 mm h6 gear seat and a 30 mm shoulder step, 150 mm overall length (all sizes assumed), with an 8 mm wide keyseat in the gear seat and chamfered ends.\", \"envelope\": [30, 30, 150]},\n     {\"name\": \"Spur gear\", \"family\": \"gear\", \"complexity\": 3, \"qty\": 1, \"description\": \"Spur gear in C45 steel, module 2, 40 teeth, 20 degree pressure angle, 25 mm face width (assumed), with a 25 mm H7 bore and an 8 mm keyway that locates against the shaft shoulder.\", \"envelope\": [84, 84, 25], \"mounts_on\": \"Stepped shaft\", \"module\": 2, \"teeth\": 40},\n     {\"name\": \"Parallel key\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"DIN 6885 A parallel key, 8 x 7 x 22 mm, steel (size assumed to suit the 25 mm seat), sitting in the shaft keyseat and the gear keyway.\", \"envelope\": [22, 8, 7], \"mounts_on\": \"Stepped shaft\"}\n   ]}]}\n```",
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Stepped shaft",
+        "1 x Spur gear",
+        "1 x Parallel key"
+      ],
+      "kinds": {
+        "shaft": 1,
+        "gear": 1,
+        "key": 1
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "shaft_line",
+      "problems": [],
+      "mesh": [],
+      "direct": {
+        "Stepped shaft": "direct",
+        "Spur gear": "direct"
+      },
+      "n_direct": 2,
+      "n_designed": 2,
+      "correct": true
+    },
+    "platform_tokens": 5
+  }
+}

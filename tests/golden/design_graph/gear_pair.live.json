@@ -1,0 +1,99 @@
+{
+  "case": "gear_pair",
+  "name": "Gear pair 1:3",
+  "brief": "Simple spur gear pair 1:3, module 2, 20 and 60 teeth, on two Ø20 shafts with four 6204 bearings. No housing, nothing else.",
+  "recorded": "live intent reply, 2026-11-20, tier sonnet",
+  "reply": {
+    "summary": "Spur gear pair 1:3 (module 2, 20/60 teeth) on two Ø20 shafts with four 6204 bearings, no housing.",
+    "components": [
+      {
+        "id": "input_shaft",
+        "kind": "shaft",
+        "name": "Input shaft",
+        "params": {
+          "d": 20,
+          "role": "input"
+        }
+      },
+      {
+        "id": "output_shaft",
+        "kind": "shaft",
+        "name": "Output shaft",
+        "params": {
+          "d": 20,
+          "role": "output"
+        }
+      },
+      {
+        "id": "pinion",
+        "kind": "spur_gear",
+        "name": "Pinion",
+        "params": {
+          "module": 2,
+          "teeth": 20,
+          "role": "pinion"
+        }
+      },
+      {
+        "id": "output_gear",
+        "kind": "spur_gear",
+        "name": "Output gear",
+        "params": {
+          "module": 2,
+          "teeth": 60,
+          "role": "wheel"
+        }
+      },
+      {
+        "id": "bearing_6204",
+        "kind": "bearing",
+        "name": "Bearing 6204",
+        "qty": 4,
+        "params": {
+          "designation": "6204"
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "gear_mesh",
+        "host": "pinion",
+        "guest": "output_gear",
+        "params": {
+          "ratio": 3
+        }
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "input_shaft",
+        "guest": "bearing_6204",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "output_shaft",
+        "guest": "bearing_6204",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "hub_fit",
+        "host": "input_shaft",
+        "guest": "pinion"
+      },
+      {
+        "kind": "hub_fit",
+        "host": "output_shaft",
+        "guest": "output_gear"
+      }
+    ],
+    "assumptions": [
+      "No keys, rings, housing or other parts added, per 'nothing else'; gears are fitted directly on the shafts.",
+      "Two 6204 bearings per shaft.",
+      "Ratio 1:3 means the 60-tooth gear is on the output shaft (speed reduction)."
+    ]
+  }
+}

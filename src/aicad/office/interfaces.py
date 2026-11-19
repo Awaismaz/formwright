@@ -42,7 +42,9 @@ def gate_open(doc: dict[str, Any]) -> bool:
 def create(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
     """Archie's skeleton + draft ICD for the approved plan (called at brief approval)."""
     parts = icd.parts_from(doc)
-    skel, ic = icd.new_icd(parts, doc["brief"], "Archie")
+    from aicad.graph.compile import overrides_for
+
+    skel, ic = icd.new_icd(parts, doc["brief"], "Archie", overrides_for(doc.get("plan") or {}, parts))
     ic["history"][0]["at"] = store.now()
     doc.setdefault("change_requests", [])
     doc["icd"] = ic

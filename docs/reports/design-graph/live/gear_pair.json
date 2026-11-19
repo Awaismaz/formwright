@@ -1,0 +1,448 @@
+{
+  "case": "gear_pair",
+  "brief": "Simple spur gear pair 1:3, module 2, 20 and 60 teeth, on two Ø20 shafts with four 6204 bearings. No housing, nothing else.",
+  "new": {
+    "wall_s": 7.96,
+    "error": null,
+    "cost_usd": 0.0098451,
+    "meta": {
+      "job": "simple",
+      "seconds": 7.93,
+      "tokens": {
+        "input_tokens": 2,
+        "output_tokens": 783,
+        "cache_creation_input_tokens": 651,
+        "cache_read_input_tokens": 2496
+      },
+      "tier": "sonnet",
+      "check": []
+    },
+    "questions": [],
+    "notes": [],
+    "raw_reply": {
+      "summary": "Spur gear pair 1:3 (module 2, 20/60 teeth) on two Ø20 shafts with four 6204 bearings, no housing.",
+      "components": [
+        {
+          "id": "input_shaft",
+          "kind": "shaft",
+          "name": "Input shaft",
+          "params": {
+            "d": 20,
+            "role": "input"
+          }
+        },
+        {
+          "id": "output_shaft",
+          "kind": "shaft",
+          "name": "Output shaft",
+          "params": {
+            "d": 20,
+            "role": "output"
+          }
+        },
+        {
+          "id": "pinion",
+          "kind": "spur_gear",
+          "name": "Pinion",
+          "params": {
+            "module": 2,
+            "teeth": 20,
+            "role": "pinion"
+          }
+        },
+        {
+          "id": "output_gear",
+          "kind": "spur_gear",
+          "name": "Output gear",
+          "params": {
+            "module": 2,
+            "teeth": 60,
+            "role": "wheel"
+          }
+        },
+        {
+          "id": "bearing_6204",
+          "kind": "bearing",
+          "name": "Bearing 6204",
+          "qty": 4,
+          "params": {
+            "designation": "6204"
+          }
+        }
+      ],
+      "connections": [
+        {
+          "kind": "gear_mesh",
+          "host": "pinion",
+          "guest": "output_gear",
+          "params": {
+            "ratio": 3
+          }
+        },
+        {
+          "kind": "bearing_journal",
+          "host": "input_shaft",
+          "guest": "bearing_6204",
+          "params": {
+            "count": 2
+          }
+        },
+        {
+          "kind": "bearing_journal",
+          "host": "output_shaft",
+          "guest": "bearing_6204",
+          "params": {
+            "count": 2
+          }
+        },
+        {
+          "kind": "hub_fit",
+          "host": "input_shaft",
+          "guest": "pinion"
+        },
+        {
+          "kind": "hub_fit",
+          "host": "output_shaft",
+          "guest": "output_gear"
+        }
+      ],
+      "assumptions": [
+        "No keys, rings, housing or other parts added, per 'nothing else'; gears are fitted directly on the shafts.",
+        "Two 6204 bearings per shaft.",
+        "Ratio 1:3 means the 60-tooth gear is on the output shaft (speed reduction)."
+      ]
+    },
+    "graph": {
+      "schema": "fw-design-graph",
+      "version": 1,
+      "name": "Gear pair 1:3",
+      "brief": "Simple spur gear pair 1:3, module 2, 20 and 60 teeth, on two Ø20 shafts with four 6204 bearings. No housing, nothing else.",
+      "summary": "Spur gear pair 1:3 (module 2, 20/60 teeth) on two Ø20 shafts with four 6204 bearings, no housing.",
+      "units": "mm",
+      "components": [
+        {
+          "id": "input_shaft",
+          "kind": "shaft",
+          "name": "Input shaft",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "d": {
+              "value": 20,
+              "source": "brief",
+              "note": ""
+            },
+            "role": {
+              "value": "input",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "journal_d": {
+              "value": 20.0,
+              "source": "standard",
+              "note": "the bore of the 6204"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_shaft",
+          "kind": "shaft",
+          "name": "Output shaft",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "d": {
+              "value": 20,
+              "source": "brief",
+              "note": ""
+            },
+            "role": {
+              "value": "output",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "journal_d": {
+              "value": 20.0,
+              "source": "standard",
+              "note": "the bore of the 6204"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "pinion",
+          "kind": "spur_gear",
+          "name": "Pinion",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "module": {
+              "value": 2,
+              "source": "brief",
+              "note": ""
+            },
+            "teeth": {
+              "value": 20,
+              "source": "brief",
+              "note": ""
+            },
+            "role": {
+              "value": "pinion",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "face_width": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "face width 10 m"
+            },
+            "bore": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "bored to the Ø20 seat"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_gear",
+          "kind": "spur_gear",
+          "name": "Output gear",
+          "qty": 1,
+          "group": "",
+          "material": "",
+          "params": {
+            "module": {
+              "value": 2,
+              "source": "brief",
+              "note": ""
+            },
+            "teeth": {
+              "value": 60,
+              "source": "brief",
+              "note": ""
+            },
+            "role": {
+              "value": "wheel",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "face_width": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "face width 10 m"
+            },
+            "bore": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "bored to the Ø20 seat"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "bearing_6204",
+          "kind": "bearing",
+          "name": "Bearing 6204",
+          "qty": 4,
+          "group": "",
+          "material": "",
+          "params": {
+            "designation": {
+              "value": 6204,
+              "source": "brief",
+              "note": ""
+            },
+            "d": {
+              "value": 20.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            },
+            "D": {
+              "value": 47.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            },
+            "B": {
+              "value": 14.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            }
+          },
+          "implied": false
+        }
+      ],
+      "connections": [
+        {
+          "id": "c1",
+          "kind": "gear_mesh",
+          "host": "pinion",
+          "guest": "output_gear",
+          "via": [],
+          "params": {
+            "ratio": {
+              "value": 3.0,
+              "source": "rule",
+              "note": "z2 / z1"
+            },
+            "centre_distance": {
+              "value": 80.0,
+              "source": "rule",
+              "note": "a = m (z1 + z2) / 2"
+            }
+          }
+        },
+        {
+          "id": "c2",
+          "kind": "bearing_journal",
+          "host": "input_shaft",
+          "guest": "bearing_6204",
+          "via": [],
+          "params": {
+            "count": {
+              "value": 2,
+              "source": "brief",
+              "note": ""
+            }
+          }
+        },
+        {
+          "id": "c3",
+          "kind": "bearing_journal",
+          "host": "output_shaft",
+          "guest": "bearing_6204",
+          "via": [],
+          "params": {
+            "count": {
+              "value": 2,
+              "source": "brief",
+              "note": ""
+            }
+          }
+        },
+        {
+          "id": "c4",
+          "kind": "hub_fit",
+          "host": "input_shaft",
+          "guest": "pinion",
+          "via": [],
+          "params": {}
+        },
+        {
+          "id": "c5",
+          "kind": "hub_fit",
+          "host": "output_shaft",
+          "guest": "output_gear",
+          "via": [],
+          "params": {}
+        }
+      ],
+      "constraints": {
+        "named": [
+          "bearing",
+          "gear",
+          "shaft"
+        ],
+        "excluded": [
+          "housing"
+        ],
+        "exclusive": true
+      },
+      "assumptions": [
+        "No keys, rings, housing or other parts added, per 'nothing else'; gears are fitted directly on the shafts.",
+        "Two 6204 bearings per shaft.",
+        "Ratio 1:3 means the 60-tooth gear is on the output shaft (speed reduction)."
+      ],
+      "questions": [],
+      "answers": {},
+      "notes": [],
+      "source": "intent",
+      "layout": {}
+    },
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Input shaft",
+        "1 x Output shaft",
+        "1 x Pinion",
+        "1 x Output gear",
+        "4 x Bearing 6204"
+      ],
+      "kinds": {
+        "shaft": 2,
+        "gear": 2,
+        "bearing": 4
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "shaft_line",
+      "problems": [],
+      "mesh": [
+        80.0
+      ],
+      "direct": {
+        "Input shaft": "direct",
+        "Output shaft": "direct",
+        "Pinion": "direct",
+        "Output gear": "direct"
+      },
+      "n_direct": 4,
+      "n_designed": 4,
+      "correct": true
+    },
+    "check": [],
+    "platform_tokens": 1,
+    "limits": [],
+    "rescored": true
+  },
+  "old": {
+    "wall_s": 19.99,
+    "cost_usd": 0.050965,
+    "tokens": {
+      "input_tokens": 2,
+      "output_tokens": 1997,
+      "cache_creation_input_tokens": 2042,
+      "cache_read_input_tokens": 3365
+    },
+    "model": "claude-opus-5-5",
+    "note": null,
+    "text": "The pair is two independent shaft sub-assemblies that go into the customer's frame: a 20T pinion on one Ø20 shaft and a 60T wheel on the other, each shaft carrying two 6204 bearings (20 x 47 x 14). Module 2 gives pitch diameters of 40 and 120 mm and a centre distance of 80 mm. The brief says \"nothing else,\" so the plan has no housing, keys, spacers or retaining rings. The gears are assumed to be fixed by an interference fit on a shaft step.\n\n```fw-plan\n{\"summary\": \"Spur gear pair 1:3 (module 2, 20T/60T, 80 mm centre distance) as two shaft sub-assemblies, each with two 6204 bearings, no housing.\",\n \"assumptions\": [\"Face width 20 mm on both gears, with the pinion 2 mm wider (22 mm) to tolerate axial misalignment\", \"Gears are fixed by an interference fit on a Ø24 shaft step. No keys, because the brief allows nothing else\", \"Shafts are stepped: Ø20 bearing seats and a Ø24 gear seat/shoulder, overall length 120 mm assumed\", \"20 degree pressure angle, standard full-depth involute, no profile shift\", \"Material assumed: shafts and pinion 42CrMo4 hardened and tempered, wheel C45\", \"Centre distance 80 mm is set by the customer's frame\"],\n \"subassemblies\": [\n  {\"name\": \"Pinion shaft assembly\", \"description\": \"Input shaft carrying the 20T pinion between two 6204 bearings.\",\n   \"parts\": [\n    {\"name\": \"Pinion shaft\", \"family\": \"turned\", \"complexity\": 2, \"qty\": 1, \"description\": \"Stepped shaft in 42CrMo4 with Ø20 k5 bearing seats and a Ø24 gear seat with shoulder, overall length 120 mm (assumed).\", \"envelope\": [24, 24, 120]},\n    {\"name\": \"Pinion 20T\", \"family\": \"gear\", \"complexity\": 3, \"qty\": 1, \"description\": \"Spur pinion, module 2, 20 teeth, PCD 40 mm, tip Ø44, face width 22 mm, Ø24 bore for an interference fit. 42CrMo4.\", \"envelope\": [44, 44, 22], \"mounts_on\": \"Pinion shaft\", \"module\": 2, \"teeth\": 20},\n    {\"name\": \"Bearing 6204\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 2, \"description\": \"Deep groove ball bearing 6204, 20 x 47 x 14 mm, on the Ø20 seats.\", \"envelope\": [47, 47, 14], \"mounts_on\": \"Pinion shaft\"}\n   ]},\n  {\"name\": \"Wheel shaft assembly\", \"description\": \"Output shaft carrying the 60T wheel between two 6204 bearings.\",\n   \"parts\": [\n    {\"name\": \"Wheel shaft\", \"family\": \"turned\", \"complexity\": 2, \"qty\": 1, \"description\": \"Stepped shaft in 42CrMo4 with Ø20 k5 bearing seats and a Ø24 gear seat with shoulder, overall length 120 mm (assumed).\", \"envelope\": [24, 24, 120]},\n    {\"name\": \"Wheel 60T\", \"family\": \"gear\", \"complexity\": 3, \"qty\": 1, \"description\": \"Spur gear, module 2, 60 teeth, PCD 120 mm, tip Ø124, face width 20 mm, Ø24 bore for an interference fit. Web may be lightened. C45.\", \"envelope\": [124, 124, 20], \"mounts_on\": \"Wheel shaft\", \"module\": 2, \"teeth\": 60},\n    {\"name\": \"Bearing 6204\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 2, \"description\": \"Deep groove ball bearing 6204, 20 x 47 x 14 mm, on the Ø20 seats.\", \"envelope\": [47, 47, 14], \"mounts_on\": \"Wheel shaft\"}\n   ]}\n ]}\n```",
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Pinion shaft",
+        "1 x Pinion 20T",
+        "2 x Bearing 6204",
+        "1 x Wheel shaft",
+        "1 x Wheel 60T",
+        "2 x Bearing 6204"
+      ],
+      "kinds": {
+        "shaft": 2,
+        "gear": 2,
+        "bearing": 4
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "shaft_line",
+      "problems": [],
+      "mesh": [
+        80.0
+      ],
+      "direct": {
+        "Pinion shaft": "direct",
+        "Pinion 20T": "agent",
+        "Wheel shaft": "direct",
+        "Wheel 60T": "agent"
+      },
+      "n_direct": 2,
+      "n_designed": 4,
+      "correct": true
+    },
+    "platform_tokens": 6
+  }
+}
