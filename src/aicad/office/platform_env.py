@@ -340,6 +340,19 @@ class PlatformEnv(orchestrator.Env):
         if not t.get("project_id"):
             return {"skipped": "Nothing to swap in: the part has no Design Studio build."}
         key = (t.get("icd_check") or {}).get("part_key") or await self.real_part(t["project_id"])
+        if (doc.get("assembly") or {}).get("status") == "ready" and tid not in _FITTED.get(pid, {}):
+            # the exact checks run here, outside the program lock, into the pair cache (ASM-023): the swap under the
+            # lock finds them there, so swaps and integrations of other levels don't queue behind the geometry
+            pre = {x["item_id"]: ((x.get("icd_check") or {}).get("part_key"), (x.get("icd_check") or {}).get("frame"))
+                   for x in doc["tickets"] if x["item_id"] in doc["skeleton"]["items"] and (x["id"] == tid or (
+                       orchestrator.run_of(x).get("next") == "fit" and x.get("project_id")))}
+            pre[t["item_id"]] = (key, (t.get("icd_check") or {}).get("frame"))
+            try:
+                await program_assembly.prewarm_swap(
+                    _aroot(self.org_id), self.org_id, doc, {i: k for i, (k, _) in pre.items() if k},
+                    {i: fr for i, (_, fr) in pre.items() if fr and not fr.get("identity")})
+            except Exception:  # noqa: BLE001 - only a cache fill: the swap below does the real check
+                log.warning("swap prewarm failed", exc_info=True)
         async with program_assembly.lock(pid):
             ready = _FITTED.setdefault(pid, {}).pop(tid, None)
             if ready is not None:  # swapped in with an earlier batch while this ticket waited (CD-032)
@@ -598,6 +611,14 @@ class PlatformEnv(orchestrator.Env):
         from aicad.assembly import AssemblyInputError
         from aicad.assembly.service import WorkerError
 
+        pre = store.load(root, pid)
+        if pre is not None and service.ticket(pre, tid)["item_id"] == "root":
+            # the whole-program check fills the pair cache outside the program lock (ASM-023); under the lock only
+            # the joints fitted there are new
+            try:
+                await program_assembly.prewarm_final(_aroot(self.org_id), self.org_id, pre)
+            except Exception:  # noqa: BLE001 - only a cache fill: the integration below does the real check
+                log.warning("integration prewarm failed", exc_info=True)
         async with program_assembly.lock(pid):
             doc = store.load(root, pid)
             if doc is None:

@@ -111,6 +111,7 @@ class WorkerUnavailable(RuntimeError):
 
 class Worker:
     START_TIMEOUT_S = 180.0  # a cold start on a loaded machine can take minutes
+    max_jobs = MAX_JOBS
 
     def __init__(self, cmd: list[str] | None = None) -> None:
         self.proc: asyncio.subprocess.Process | None = None
@@ -164,7 +165,7 @@ class Worker:
     async def request(self, req: dict[str, Any], timeout: float) -> dict[str, Any]:
         async with self._guard():
             try:
-                if self.proc is None or self.proc.returncode is not None or self.jobs >= MAX_JOBS:
+                if self.proc is None or self.proc.returncode is not None or self.jobs >= self.max_jobs:
                     await self.stop()
                     await self._start()
             except (WorkerUnavailable, OSError, RuntimeError, TimeoutError):

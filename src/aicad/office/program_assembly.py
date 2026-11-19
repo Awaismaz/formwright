@@ -380,6 +380,50 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     return state
 
 
+async def prewarm_swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str, str],
+                       frames: dict[str, dict[str, Any]] | None = None) -> int:
+    """Fill the pair cache for a swap before the program lock is taken (ASM-023): the final assembly as saved, the
+    swapped parts at their skeleton placement, mates solved, the swapped parts' pairs checked. Writes no document;
+    the swap under the lock then finds its pairs in the cache (a part the solve puts elsewhere is simply a miss).
+    Returns the pairs computed."""
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+
+    state = prog.get("assembly") or {}
+    final = astore.load(aroot, state["final"]) if state.get("final") else None
+    if final is None:
+        return 0
+    sk, fr = prog["skeleton"], frames or {}
+    ids = []
+    for inst in final["instances"]:
+        o = inst.get("office") or {}
+        key = updates.get(o.get("item") or "")
+        if key is None or o.get("copy") is None or astore.part(aroot, key) is None:
+            continue
+        inst["part"] = key
+        inst["T"] = place(sk, o["item"], o["copy"], fr.get(o["item"]) if not key.startswith("h_") else None)
+        ids.append(inst["id"])
+    if not ids:
+        return 0
+    aservice.run_solve(aroot, final)
+    res = await aservice.check_pairs(aroot, org_id, final, only=ids)
+    return int(res["stats"]["computed"])
+
+
+async def prewarm_final(aroot: Path, org_id: str, prog: dict[str, Any]) -> int:
+    """Fill the pair cache with the whole final assembly as saved (interference + clearance, as ``analyse`` asks)
+    before the program lock is taken for the final integration; only the joints fitted under the lock are new."""
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+
+    fid = (prog.get("assembly") or {}).get("final")
+    final = astore.load(aroot, fid) if fid else None
+    if final is None or not final["instances"]:
+        return 0
+    res = await aservice.analyse(aroot, org_id, final, save=False)
+    return int(res["pairs"]["computed"])
+
+
 def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, clashes: list[dict[str, Any]]) -> str:
     """One line for the program page: real parts / placeholders, mates, fastener stacks, clashes."""
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")

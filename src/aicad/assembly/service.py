@@ -19,12 +19,13 @@ from typing import Any
 import numpy as np
 
 from aicad import materials, toolbox
-from aicad.assembly import AssemblyInputError, fasteners, solver, store, xform
+from aicad.assembly import AssemblyInputError, fasteners, pairs, solver, store, xform
 from aicad.assembly import worker as aworker
 
 THREADED = {"hex_bolt", "shcs", "hex_nut"}
 MAX_INSTANCES = 200
 MAX_MATES = 600
+NEAR_CAP_MM = 25.0  # clearance rows: neighbours within 5 % of the assembly size, capped (PD-70)
 
 
 class WorkerError(RuntimeError):
@@ -619,7 +620,8 @@ def worker_instances(root: Path, doc: dict[str, Any], skip_groups: bool = False)
         if skip_groups and i.get("group"):
             continue
         p = parts[i["part"]]
-        row = {"id": i["id"], "name": display_names(doc)[i["id"]], "step": str(store.part_dir(root, i["part"]) / "part.step"),
+        row = {"id": i["id"], "key": i["part"], "name": display_names(doc)[i["id"]],
+               "step": str(store.part_dir(root, i["part"]) / "part.step"),
                "T": i["T"], "bbox": p["info"]["bbox"], "material": p.get("material"), "holes": p["info"].get("holes", [])}
         if p["kind"] == "toolbox" and p["code"] in THREADED:
             row["thread"] = {"d_nom": p["params"]["D"], "p": [0, 0, 0], "d": [0, 0, 1]}
@@ -652,13 +654,71 @@ def display_names(doc: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-async def analyse(root: Path, org_id: str, doc: dict[str, Any]) -> dict[str, Any]:
+def _pair_caller(org_id: str) -> pairs.Call:
+    async def call(req: dict[str, Any], timeout: float) -> Any:
+        return await _call(org_id, req, timeout)
+    return call
+
+
+async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: list[str] | None = None,
+                      near_mm: float | None = None, vol_tol: float = 1e-6, use_cache: bool = True) -> dict[str, Any]:
+    """Exact interference (and, with ``near_mm``, clearance) through the pair cache (ASM-023). Same results as the
+    whole-assembly worker checks: interference for every pair whose boxes meet (``only``: pairs involving those
+    instances), clearance for mated pairs and pairs whose boxes come within ``near_mm`` (overlapping pairs: 0 at the
+    overlap). Only pairs not in the cache go to the worker."""
     insts = worker_instances(root, doc)
-    pairs = sorted({(m["a"]["inst"], m["b"]["inst"], "mate") for m in doc["mates"]})
+    n = len(insts)
+    ids = [i["id"] for i in insts]
+    focus = set(only) if only is not None else None
+    boxes = [pairs.world_box(i) for i in insts]
+    want_int, want_clr = [], []
+    why: dict[tuple[int, int], set[str]] = {}
+    if near_mm is not None:
+        at = {iid: k for k, iid in enumerate(ids)}
+        for m in doc["mates"]:
+            a, b = at.get(m["a"]["inst"]), at.get(m["b"]["inst"])
+            if a is not None and b is not None and a != b:
+                why.setdefault((min(a, b), max(a, b)), set()).add("mate")
+    for a in range(n):
+        for b in range(a + 1, n):
+            if focus is not None and ids[a] not in focus and ids[b] not in focus:
+                continue
+            gap = np.maximum(0, np.maximum(boxes[a][0] - boxes[b][1], boxes[b][0] - boxes[a][1]))
+            if not (np.any(boxes[a][0] > boxes[b][1] + 1e-6) or np.any(boxes[b][0] > boxes[a][1] + 1e-6)):
+                want_int.append((a, b))
+            if near_mm is not None and float(np.linalg.norm(gap)) <= near_mm:
+                why.setdefault((a, b), set()).add("near")
+    want_clr = sorted(why)
+    inter, clear, stats = await pairs.run(root, _pair_caller(org_id), insts, want_int, want_clr, vol_tol, use_cache)
+    rows = []
+    for (a, b), r in inter.items():
+        rows.append({"a": ids[a], "b": ids[b], **r})
+    rows.sort(key=lambda r: (-r["volume_mm3"], r["a"], r["b"]))
+    out: dict[str, Any] = {"interference": {"pairs": rows, "checked_pairs": len(want_int), "instances": n},
+                           "stats": stats}
+    if near_mm is not None:
+        crow = []
+        for (a, b) in want_clr:
+            c = clear[(a, b)]
+            if c is None:
+                d, p1, p2 = 0.0, inter[(a, b)]["center"], inter[(a, b)]["center"]
+            else:
+                d, p1, p2 = c
+            x, y = (a, b) if ids[a] < ids[b] else (b, a)
+            pa, pb = (p1, p2) if x == a else (p2, p1)
+            crow.append({"a": ids[x], "b": ids[y], "distance_mm": round(d, 10), "pa": [round(v, 4) for v in pa],
+                         "pb": [round(v, 4) for v in pb], "why": sorted(why[(a, b)])})
+        crow.sort(key=lambda r: (r["a"], r["b"]))
+        out["clearance"] = {"rows": crow}
+    return out
+
+
+async def analyse(root: Path, org_id: str, doc: dict[str, Any], save: bool = True) -> dict[str, Any]:
     parts = _parts(root, doc)
-    near = max(2.0, 0.05 * length_scale(doc, parts) * 2)
-    res = await _call(org_id, {"op": "analyse", "instances": insts, "pairs": [list(p) for p in pairs],
-                               "near_mm": near}, timeout=300)
+    # neighbours closer than 5 % of the assembly size, at most NEAR_CAP_MM: on a large assembly the uncapped band
+    # (260 mm on a 1:8 car) asked for the exact distance of nearly every pair, ~90 % of the check time (PD-70)
+    near = min(NEAR_CAP_MM, max(2.0, 0.05 * length_scale(doc, parts) * 2))
+    res = await check_pairs(root, org_id, doc, near_mm=near)
     names = display_names(doc)
     inter = res["interference"]
     by_pair = {tuple(sorted((p["a"], p["b"]))): p for p in inter["pairs"]}
@@ -684,8 +744,10 @@ async def analyse(root: Path, org_id: str, doc: dict[str, Any]) -> dict[str, Any
                          "min_clear_mm": min((r["distance_mm"] for r in rows if r["status"] == "clear"), default=None)},
            "note": "Exact B-rep booleans (interference volume) and exact minimum distances on the nominal geometry. "
                    "Threads are cosmetic: an overlap that stays inside a fastener's nominal thread diameter is "
-                   "reported as thread engagement, not a clash. Tolerances and deflection are not considered."}
-    store.write_json(store.doc_dir(root, doc["id"]) / "analysis.json", out)
+                   "reported as thread engagement, not a clash. Tolerances and deflection are not considered.",
+           "pairs": res["stats"]}
+    if save:
+        store.write_json(store.doc_dir(root, doc["id"]) / "analysis.json", out)
     return out
 
 
@@ -752,7 +814,8 @@ async def propose(root: Path, org_id: str, doc: dict[str, Any], targets: list[di
                   washers: str, flip: bool) -> dict[str, Any]:
     insts = worker_instances(root, doc, skip_groups=True)
     probes = await _call(org_id, {"op": "probe", "instances": insts,
-                                  "targets": [{**t, "flip": flip} for t in targets]}, timeout=240)
+                                  "targets": [{**t, "flip": flip} for t in targets]},
+                   timeout=max(240.0, 60.0 + 15.0 * len(targets)))  # scales with the holes probed (ASM-023)
     holes = []
     for t, pr in zip(targets, probes, strict=True):
         prop = fasteners.propose(pr, style=style, washers=washers)
@@ -855,7 +918,7 @@ async def stack_clashes(root: Path, org_id: str, doc: dict[str, Any], ids: list[
     a stack that lands inside a part is reported at once instead of looking verified (AMI-01)."""
     if not ids:
         return []
-    res = await _call(org_id, {"op": "interference", "instances": worker_instances(root, doc), "only": ids}, timeout=240)
+    res = (await check_pairs(root, org_id, doc, only=ids))["interference"]
     names = display_names(doc)
     return [{"a": p["a"], "b": p["b"], "a_name": names[p["a"]], "b_name": names[p["b"]],
              "volume_mm3": p["volume_mm3"]} for p in res["pairs"] if p["kind"] == "interference"]

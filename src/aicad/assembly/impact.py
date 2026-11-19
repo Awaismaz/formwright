@@ -59,8 +59,7 @@ def _moved(a: list[float], b: list[float]) -> tuple[float, float]:
 async def _overlaps(root: Path, org_id: str, doc: dict[str, Any], focus: list[str]) -> dict[tuple[str, str], float]:
     if not focus or len(doc["instances"]) < 2:
         return {}
-    res = await service._call(org_id, {"op": "interference", "instances": service.worker_instances(root, doc),
-                                       "only": focus}, timeout=300)
+    res = (await service.check_pairs(root, org_id, doc, only=focus))["interference"]
     return {tuple(sorted((p["a"], p["b"]))): float(p["volume_mm3"]) for p in res["pairs"]
             if p["kind"] == "interference"}
 

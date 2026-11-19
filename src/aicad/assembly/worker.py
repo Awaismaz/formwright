@@ -45,6 +45,8 @@ def _handle(req: dict[str, Any]) -> Any:
         clear = geometry.clearance(req["instances"], [tuple(p) for p in req.get("pairs", [])],
                                    float(req.get("near_mm", 10.0)), overlaps=hits)
         return {"interference": inter, "clearance": clear}
+    if op == "pairs":  # ASM-023: uncached pairs only, each in its own frame (the caller caches the results)
+        return geometry.pair_jobs(req["jobs"], float(req.get("vol_tol", 1e-6)))
     if op == "motion":  # ASM-011: collisions per step of a joint sweep
         from aicad.assembly import motion
 
@@ -77,6 +79,10 @@ def serve() -> None:
 
 
 class AssemblyWorker(Worker):
+    # the warm process keeps imported snapshots (bounded LRU); pair checks come in chunks, so don't recycle it as
+    # often as a build worker that runs user scripts
+    max_jobs = 400
+
     async def _start(self) -> None:
         self.proc = await asyncio.create_subprocess_exec(
             sys.executable, "-I", "-m", "aicad.assembly.worker", env=child_env(),

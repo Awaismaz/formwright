@@ -24,7 +24,7 @@ import numpy as np
 from aicad.assembly import xform
 
 _CACHE: OrderedDict[str, Any] = OrderedDict()
-_CACHE_MAX = 64
+_CACHE_MAX = 128  # imported snapshots kept warm (a 1:8 car program has ~60 distinct parts)
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -240,14 +240,14 @@ def _common(sa: Any, sb: Any) -> Any | None:
     return res if res.solids() else None
 
 
-def _mesh(shape: Any, tol: float) -> dict[str, list[float] | list[int]]:
+def _mesh(shape: Any, tol: float, digits: int = 4) -> dict[str, list[float] | list[int]]:
     pos: list[float] = []
     idx: list[int] = []
     for f in shape.faces():
         vs, tris = f.tessellate(tol, 0.3)
         b = len(pos) // 3
         for v in vs:
-            pos += [round(v.X, 4), round(v.Y, 4), round(v.Z, 4)]
+            pos += [round(v.X, digits), round(v.Y, digits), round(v.Z, digits)]
         for t in tris:
             idx += [b + t[0], b + t[1], b + t[2]]
     return {"pos": pos, "idx": idx}
@@ -387,7 +387,8 @@ def interference(instances: list[dict[str, Any]], vol_tol: float = 1e-6,
     return {"pairs": out, "checked_pairs": checked, "instances": n}
 
 
-def _pair_row(ia: dict[str, Any], ib: dict[str, Any], vol: float, commons: list[Any], mesh: bool = True) -> dict[str, Any]:
+def _pair_row(ia: dict[str, Any], ib: dict[str, Any], vol: float, commons: list[Any], mesh: bool = True,
+              digits: int = 4) -> dict[str, Any]:
     from build123d import Compound
 
     common = commons[0] if len(commons) == 1 else Compound(children=commons)
@@ -400,11 +401,12 @@ def _pair_row(ia: dict[str, Any], ib: dict[str, Any], vol: float, commons: list[
     bb = common.bounding_box()
     size = max(bb.size.X, bb.size.Y, bb.size.Z, 1e-3)
     c = common.center()
+    n = digits
     return {"a": ia["id"], "b": ib["id"], "volume_mm3": round(vol, 9), "kind": kind,
-            "center": [round(c.X, 4), round(c.Y, 4), round(c.Z, 4)],
-            "bbox": [round(bb.min.X, 4), round(bb.min.Y, 4), round(bb.min.Z, 4), round(bb.max.X, 4),
-                     round(bb.max.Y, 4), round(bb.max.Z, 4)],
-            "mesh": _mesh(common, max(size / 200, 0.005)) if kind == "interference" and mesh else None}
+            "center": [round(c.X, n), round(c.Y, n), round(c.Z, n)],
+            "bbox": [round(bb.min.X, n), round(bb.min.Y, n), round(bb.min.Z, n), round(bb.max.X, n),
+                     round(bb.max.Y, n), round(bb.max.Z, n)],
+            "mesh": _mesh(common, max(size / 200, 0.005), min(n, 6)) if kind == "interference" and mesh else None}
 
 
 # ----------------------------------------------------------------------------- clearance
@@ -453,6 +455,7 @@ def _box_gap(A: np.ndarray, B: np.ndarray) -> np.ndarray:
 
 
 MAX_FACE_PAIRS = 20000
+CONTACT_MM = 1e-7
 
 
 def min_distance_near(sa: Any, sb: Any) -> tuple[float, list[float], list[float]]:
@@ -474,7 +477,9 @@ def min_distance_near(sa: Any, sb: Any) -> tuple[float, list[float], list[float]
     best: tuple[float, list[float], list[float]] | None = None
     for k in order:
         g = float(gaps[ia[k], ib[k]])
-        if best is not None and g >= best[0]:
+        # stop when no remaining pair can be closer, or once the parts touch: a mated pair has many face pairs at box
+        # gap 0 and the first found within CONTACT_MM is as good as any (rows below 1e-6 mm read "contact")
+        if best is not None and (g >= best[0] or best[0] <= CONTACT_MM):
             break
         d = min_distance(fa[int(ia[k])], fb[int(ib[k])])
         if best is None or d[0] < best[0]:
@@ -519,6 +524,40 @@ def clearance(instances: list[dict[str, Any]], pairs: list[tuple[str, str, str]]
         rows.append({"a": a, "b": b, "distance_mm": round(d, 10), "pa": [round(x, 4) for x in p1],
                      "pb": [round(x, 4) for x in p2], "why": sorted(why)})
     return {"rows": rows}
+
+
+# ----------------------------------------------------------------------------- one pair in its own frame (ASM-023)
+_IDENT12 = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+
+
+def pair_jobs(jobs: list[dict[str, Any]], vol_tol: float = 1e-6) -> list[dict[str, Any]]:
+    """Exact interference and/or minimum distance of instance pairs, each computed in the frame of its first part
+    (part a at the identity, part b at ``rel`` = inv(T_a) T_b). The result depends only on the two snapshots and
+    their relative placement, so the caller can cache it (``assembly.pairs``) and map it to any world placement.
+
+    jobs: [{"a": {step, bbox, thread?, envelope?}, "b": {...}, "rel": 12 numbers, "ops": ["int"] | ["clr"] |
+    ["int", "clr"]}]. "clr" is skipped when "int" found an overlap (the distance is 0 there by definition).
+    Returns per job {"int": {vol, kind, center, bbox, mesh} | None, "clr": {d, p1, p2} | None}, frame of a."""
+    out = []
+    for j in jobs:
+        ia = {**j["a"], "id": "a", "T": _IDENT12}
+        ib = {**j["b"], "id": "b", "T": j["rel"]}
+        res: dict[str, Any] = {"int": None, "clr": None}
+        overlapped = False
+        if "int" in j["ops"]:
+            sh = _Shapes([ia, ib])
+            vol, commons = overlap(sh, 0, 1, vol_tol)
+            if vol > vol_tol:
+                overlapped = True
+                row = _pair_row(ia, ib, vol, commons, digits=9)
+                res["int"] = {k: row[k] for k in ("volume_mm3", "kind", "center", "bbox", "mesh")}
+            else:
+                res["int"] = {"volume_mm3": round(vol, 9), "kind": None}
+        if "clr" in j["ops"] and not overlapped:
+            d, p1, p2 = min_distance_near(_world(ia), _world(ib))
+            res["clr"] = {"d": d, "p1": p1, "p2": p2}
+        out.append(res)
+    return out
 
 
 # ----------------------------------------------------------------------------- probe (fastener auto-fit)
