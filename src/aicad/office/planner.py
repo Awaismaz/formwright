@@ -30,7 +30,13 @@ brief for a product or machine. You do not model CAD. You plan: break the produc
 specialists can design the parts in parallel.
 
 Rules:
-- 2 to 8 sub-assemblies, each a physical group that is assembled as a unit. Every part belongs to one.
+- Plan exactly what the brief asks for, no more. When the brief limits the parts ("just", "only", "no extra \
+items", "nothing else", "without a housing", "no bearings"), plan those parts and nothing else: no housing, base \
+plate, bearings, fasteners, retaining rings or spacers it did not ask for. A shaft with what it carries (a gear, a \
+pulley, a key) and no bearings or housing is a normal deliverable: a sub-assembly that goes into the customer's own \
+machine. Never add a part only to make the layout complete.
+- 1 to 8 sub-assemblies, each a physical group that is assembled as a unit. Every part belongs to one. A small \
+product (a few parts that assemble as one unit, such as a gear keyed on a shaft) is one sub-assembly.
 - Each part has a family: "machined" (prismatic, milled), "turned" (lathe, round), "gear" (gears, pulleys, \
 sprockets), "sheet" (sheet metal), "plastic" (moulded or printed), or "standard" (bought-out: bolts, nuts, \
 washers, bearings, dowels, standoffs, keys, motors). Standard parts are picked from the catalogue, not designed.
@@ -39,7 +45,8 @@ holes and fillets, 4 many features or tight tolerances, 5 a complex casting-like
 standard parts.
 - qty is how many identical parts the product needs.
 - description: one or two sentences with the key sizes, material and interfaces you can infer. Say when a size is \
-assumed.
+assumed. For a stepped shaft give its diameters (the seat and the larger step) and its overall length; the layout \
+places the steps, seats and keyseats from the interfaces, so don't give step lengths.
 - Keep names short and specific ("Output shaft", "Motor plate"). Plain engineering language.
 - Optional, for the layout and the interfaces (ICD) that follow approval: "envelope": [L, W, H] in mm (a turned \
 part or gear: [D, D, length]); "mounts_on": the name of the part it is fixed to; for gears "module" and "teeth". \
@@ -317,14 +324,45 @@ _GENERIC: list[tuple[str, str, list[P]]] = [
 ]
 
 
+def finish(plan: dict[str, Any], name: str, brief: str) -> tuple[dict[str, Any], str | None]:
+    """The post-check on every plan a planner makes (never on the engineer's own edits): parts the brief excludes,
+    or doesn't name when it limits the program ("just a gear, a shaft and a key"), are left out with a note in plain
+    words (``scope.respect``); a small program (PD-88) of shafts and what rides on them (gears, keys, hubs) becomes
+    one sub-assembly, one unit to assemble (a "keyed shaft" and a "gear" group are one physical unit)."""
+    from aicad.office import scope
+
+    out, _dropped, note = scope.respect(plan, brief)
+    if scope.small(out) and len(out.get("subassemblies") or []) > 1 and scope.rides_on_shafts(out):
+        out = scope.one_unit(out)
+        out["subassemblies"][0]["description"] = (out["subassemblies"][0].get("description") or
+                                                  "Every part, assembled as one unit.")
+    p2 = normalise_plan(out, plan.get("source") or "archie")
+    if p2 is None:
+        return plan, None
+    for k in ("scope",):
+        if out.get(k):
+            p2[k] = out[k]
+    return p2, note
+
+
 def standard_plan(name: str, brief: str) -> dict[str, Any]:
-    """Deterministic decomposition: the best-matching product template, adjusted by keywords in the brief."""
+    """Deterministic decomposition: the best-matching product template, adjusted by keywords in the brief; a brief
+    that names its parts and matches no template (or limits the program to what it names) gets exactly those parts
+    (``scope.named_plan``), not the generic frame-and-housing breakdown."""
+    from aicad.office import scope
+
     t = f"{name} {brief}".lower()
     best, kind, subs = 0, "", _GENERIC
     for keys, label, tpl in _TEMPLATES:
         score = sum(len(k) for k in keys if re.search(rf"(?<![a-z]){re.escape(k)}(?![a-z])", t))
         if score > best:
             best, kind, subs = score, label, tpl
+    if best == 0 or (scope.exclusive(brief) and scope.mentions(brief)[0] <= scope.NAMED_KINDS):
+        named = scope.named_plan(name, brief)
+        if named is not None:
+            plan = normalise_plan(named, "standard")
+            assert plan is not None
+            return plan
     bump = 1 if re.search(r"precision|tight toleranc|\bh7\b|\bh6\b|ground|lapped", t) else 0
     plastic = bool(re.search(r"\bplastic|moulded|molded|\babs\b|nylon|3d[- ]?print", t))
     sheet = bool(re.search(r"sheet metal|sheet-metal|\bbent\b|folded", t))

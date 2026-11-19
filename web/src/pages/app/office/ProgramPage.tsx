@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Gauge, Lock, MoreHorizontal, PartyPopper, Pause, Play, ShieldCheck, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Coins, FileDown, FlaskConical, Gauge, Lock, MoreHorizontal, PartyPopper, Pause, Play, ShieldCheck, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx, num, PAGE } from "@/lib/format";
@@ -114,6 +114,46 @@ function RunBar({ p, onSpeed }: { p: Program; onSpeed: () => void }) {
               : <><b>Next: approve the interfaces (ICD)</b> on the Interfaces tab. Part work starts at that gate, against the numbers you approved; then press Run.</>)
               : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. Each part is built to its interfaces and swapped into the program assembly when Gage approves it. You can still move tickets and open parts by hand.</>}
       </p>
+    </Card>
+  );
+}
+
+/** The light path (PD-88): what one click approved, and the drawings / manufacturing review switch, in plain view. */
+function LightCard({ p }: { p: Program }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const ex = p.express;
+  if (!p.light && !ex) return null;
+  const canEdit = p.can_edit !== false;
+  const deliv = p.deliverables_auto !== false;
+  const delivDone = p.tickets.some(t => t.kind === "deliverable");
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      const core = p.tickets.filter(t => t.kind !== "deliverable");
+      const done = core.length > 0 && core.every(t => t.column === "integrated");
+      const v = done && !deliv
+        ? await api.post<Program>(`${BASE}/programs/${p.id}/deliverables`)
+        : await api.patch<Program>(`${BASE}/programs/${p.id}`, { deliverables: !deliv });
+      qc.setQueryData(["office-program", p.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      toast.success(!deliv ? (done ? "Ortho and Smithy are making the drawings and the manufacturing review" : "Drawings and the manufacturing review follow the final assembly") : "No drawings or manufacturing review after the assembly");
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
+  };
+  return (
+    <Card className="mb-4 flex flex-wrap items-start gap-3 border-primary/30 p-3" data-light-card>
+      <Zap className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+      <div className="min-w-[260px] flex-1 space-y-1 text-[12.5px]">
+        {ex?.approved
+          ? <div><b>Approved in one step</b> by {ex.by} {ago(ex.at)}: the plan ({ex.parts.join(", ")}) and the interfaces (ICD v{ex.icd_version}, {ex.interfaces} interface{ex.interfaces === 1 ? "" : "s"}{ex.kinds?.length ? `: ${ex.kinds.join(", ")}` : ""}; 0 problems). {ex.run ? "The office started building it straight away." : ex.run_blocked ?? "Press Run to build it."}</div>
+          : ex ? <div><b>The plan is approved</b>; the interfaces have {ex.problems ?? 0} problem{ex.problems === 1 ? "" : "s"}, so they wait for you on the Interfaces tab.</div>
+            : <div><b>Small program.</b> {p.light?.text}</div>}
+        {ex?.warnings?.map((w, i) => <div key={i} className="text-muted">Note: {w}</div>)}
+        <div className="text-muted">{delivDone ? "Drawings and the manufacturing review: on the Deliverables tab." : deliv
+          ? "Drawings and the manufacturing review follow the final assembly."
+          : (p.deliverables_why ?? "Drawings and the manufacturing review run only when you ask.")}</div>
+      </div>
+      {canEdit && !delivDone && <Button size="sm" variant="secondary" loading={busy} onClick={toggle} data-deliverables-toggle>
+        {deliv ? "Skip drawings and review" : "Add drawings and manufacturing review"}</Button>}
     </Card>
   );
 }
@@ -233,6 +273,7 @@ export default function ProgramPage() {
           <div className="min-w-[240px] flex-1 text-[13px]"><b>Review the interfaces before part work starts.</b> Archie named {p.icd!.interfaces.length} interfaces between the parts. Approve them on the Interfaces tab: the office can't run until then.</div>
           <Button variant="secondary" onClick={() => { params.set("tab", "interfaces"); setParams(params, { replace: true }); }}>Review interfaces</Button>
         </Card>}
+        <LightCard p={p} />
         <RunBar p={p} onSpeed={() => setSpeedOpen(true)} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
           <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="deliverables">Deliverables{p.gates.some(g => g.code === "release" && g.status === "pending") ? " ·" : ""}</Tab><Tab value="timeline">Timeline</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>

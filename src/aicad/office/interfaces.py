@@ -377,7 +377,9 @@ def fix(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any
     return {"steps": steps, "problems": probs}
 
 
-def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
+def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any], *, with_plan: bool = False) -> None:
+    """The ICD gate. ``with_plan``: approved in the same click as the plan (the light path, PD-88), which is only
+    allowed when the interfaces have no problem; the history and the activity say so."""
     if not has_icd(doc):
         raise OfficeInputError("This program has no interfaces document.")
     g = service.gate(doc, "icd")
@@ -391,14 +393,16 @@ def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
     ic["overrides"] = icd.freeze(doc["skeleton"], ic["interfaces"], ic["overrides"])
     ic["status"] = "approved"
     ic["approved_at"] = store.now()
+    how = " together with the plan (one step: no interface problems)" if with_plan else ""
     ic["history"].append({"version": ic["version"], "at": store.now(), "by": actor.get("name"), "kind": "approved",
-                          "text": f"{actor.get('name', 'Someone')} approved ICD v{ic['version']}: envelopes frozen, "
-                                  "part tickets released.", "changes": []})
-    g.update(status="approved", by=actor.get("name"), at=store.now())
+                          "text": f"{actor.get('name', 'Someone')} approved ICD v{ic['version']}{how}: envelopes "
+                                  "frozen, part tickets released.", "changes": [],
+                          **({"with_plan": True} if with_plan else {})})
+    g.update(status="approved", by=actor.get("name"), at=store.now(), **({"with_plan": True} if with_plan else {}))
     doc["assembly"] = {**(doc.get("assembly") or {}), "status": "building"}
     service.emit(root, doc, "gate.approved", f"{actor.get('name', 'Someone')} approved the architecture and "
-                 f"interfaces (ICD v{ic['version']}, {len(ic['interfaces'])} interfaces). Part tickets are released; "
-                 "Fitz is assembling the placeholders.", actor, gate="icd")
+                 f"interfaces{how} (ICD v{ic['version']}, {len(ic['interfaces'])} interfaces). Part tickets are "
+                 "released; Fitz is assembling the placeholders.", actor, gate="icd")
 
 
 # ----------------------------------------------------------------------------- change requests

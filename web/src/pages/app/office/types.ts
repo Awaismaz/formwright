@@ -186,6 +186,18 @@ export interface Program {
   review_gate?: boolean; ecns?: Ecn[];
   /** Per-agent threads (CD-027): parallel sub-agents of one designer; null on programs from before (shared pool). */
   threads?: Record<string, number> | null;
+  /** The light path for a small program (PD-88): null when the program is not small. */
+  light?: LightInfo | null;
+  /** What one-step approval approved (plan + interfaces), and whether the office started. */
+  express?: Express | null;
+  /** "auto": drawings and the manufacturing review follow, except for a small program whose brief doesn't ask. */
+  deliverables_mode?: "auto" | "on" | "off"; deliverables_why?: string | null;
+}
+
+export interface LightInfo { rule: string; parts: number; pieces: number; deliverables_asked: boolean; text: string }
+export interface Express {
+  at: string; by: string; parts: string[]; tickets: number; approved: boolean; run: boolean; run_blocked?: string;
+  icd_version?: number; interfaces?: number; kinds?: string[]; warnings?: string[]; problems?: number;
 }
 
 // ------------------------------------------------------------------ talking to Archie (CD-026)

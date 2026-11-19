@@ -64,7 +64,8 @@ _EXTRAS.insert(0, (re.compile(r"(?<![\w.])M\d{1,2}(?:\s*[x×]\s*\d+(?:\.\d+)?)?\
                    "a thread", True))
 # the part's own size statement: "Ø20 x 100", "60 x 40 x 10 mm"
 _ENVELOPE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:mm\s*)?[x×]\s*(\d+(?:\.\d+)?)(?:\s*(?:mm\s*)?[x×]\s*(\d+(?:\.\d+)?))?")
-_HUB = re.compile(r"\bhub\b|\bboss\b", re.IGNORECASE)
+# a hub or boss on a gear (a size the interfaces don't give); the "hub keyway" or "hub bore" is the gear's own bore
+_HUB = re.compile(r"\b(?:hub|boss)\b(?!\s*(?:keyways?|key ?seats?|key|bores?|bored))", re.IGNORECASE)
 _STEPPY = re.compile(r"\bshoulders?\b|\bsteps?\b|\bstepped\b|\bcollar\b", re.IGNORECASE)
 _CHAMFER = re.compile(r"chamfer(?:ed|s)?\s*(?:of\s*)?(\d+(?:\.\d+)?)\s*(?:mm)?", re.IGNORECASE)
 
@@ -339,7 +340,11 @@ def _shaft_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: di
         g["d_shaft"] = seg["d"]
     diam = sorted({s["d"] for s in segs})
     known = {L, D, *diam, *(z["d"] for z in zones), *(k["b"] for k in keyways), *(k["z1"] - k["z0"] for k in keyways),
+             *(k["t1"] for k in keyways), *(_r(s["z1"] - s["z0"]) for s in segs),
              *(g["d"] for g in grooves), *(g["z1"] - g["z0"] for g in grooves)}
+    for k in keyways:  # the key the keyseat takes (b × h × length, and the hub's t2) is sized by the same interface
+        kd = byid[k["if"]]["data"]
+        known |= {float(kd[x]) for x in ("h", "t2", "length") if kd.get(x) is not None}
     r_s = None  # the bearings' corner chamfer (ISO 582 r_s min) when the interface gives it: shoulder fillets stay under
     for f in ifs:
         if item in (f["a"]["item"], f["b"]["item"]) and f["kind"] in ("bearing_journal", "bearing_seat"):
@@ -349,14 +354,16 @@ def _shaft_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: di
             if rs:
                 r_s = min(float(rs), r_s if r_s is not None else float(rs))
     steps = "Ø" + " / Ø".join(f"{s['d']:g}" for s in segs) if len(segs) > 1 else f"Ø{D:g}"
-    summary = (f"shaft {steps} × {L:g}, {_n(sum(1 for z in zones if z['role'] == 'journal'), 'bearing journal')}, "
-               f"{_n(sum(1 for z in zones if z['role'] == 'seat'), 'seat')}" + (f", {len(keyways)} keyseat"
-                                                                        f"{'s' if len(keyways) != 1 else ''}"
-                                                                        if keyways else ""))
+    n_j = sum(1 for z in zones if z["role"] == "journal")
+    summary = (f"shaft {steps} × {L:g}, " + (f"{_n(n_j, 'bearing journal')}, " if n_j else "")
+               + f"{_n(sum(1 for z in zones if z['role'] == 'seat'), 'seat')}"
+               + (f", {len(keyways)} keyseat{'s' if len(keyways) != 1 else ''}" if keyways else ""))
     if grooves:
         summary += f", {_n(len(grooves), 'circlip groove')}"
+    hub_shoulder = any(f["kind"] == "shaft_bore" and f["b"]["item"] == item and f["data"].get("shoulder_z") is not None
+                       for f in ifs)
     return {"L": L, "D": D, "segments": segs, "zones": zones, "faces": faces, "keyways": keyways, "grooves": grooves,
-            "r_s": r_s, "known": known, "summary": summary,
+            "r_s": r_s, "known": known, "summary": summary, "hub_shoulder": hub_shoulder,
             "n_features": len(zones) + len(faces) + len(keyways) + len(grooves)}
 
 
@@ -437,8 +444,10 @@ def _gear_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: dic
             raise Undetermined(str(e)) from None
         keyway["din"] = abs(din["b"] - keyway["b"]) < TOL and abs(din["t2"] - keyway["t2"]) < TOL
     known = {m, float(z), B, bore, m * z, m * (z + 2), m * z - 2.5 * m, *(x["a"] for x in mesh), float(it["size"][0])}
-    if keyway:
-        known.add(keyway["b"])
+    if keyway:  # the keyway and the key it takes (b × h × length, the shaft's t1): sized by the key interface
+        known |= {keyway["b"], keyway["t2"]}
+        kd = byid[keyway["if"]]["data"]
+        known |= {float(kd[x]) for x in ("h", "t1", "length") if kd.get(x) is not None}
     summary = f"spur gear m{m:g} × {z} teeth, face {B:g}, bore Ø{bore:g}" + (" with a keyway" if keyway else "")
     return {"m": m, "z": z, "B": B, "bore": bore, "bore_if": bore_if, "alpha": alpha, "keyway": keyway,
             "keyways": [keyway] if keyway else [], "mesh": mesh, "faces": faces, "known": known, "summary": summary,
@@ -560,6 +569,8 @@ def shaft_script(spec: dict[str, Any]) -> str:
     fillet = 0.5 if steps and min(steps) > 0.75 else 0.0
     if fillet and spec.get("r_s"):  # never more than the bearing's corner chamfer, or the ring can't seat
         fillet = min(fillet, round(0.8 * float(spec["r_s"]), 2))
+    if spec.get("hub_shoulder"):  # a gear / hub face bears on a shoulder: its bore edge is sharp (no chamfer in the
+        fillet = 0.0              # ICD), so a fillet in the corner would hold the hub off its seat (3 mm³ of overlap)
     grooves = spec.get("grooves") or []
     lines = []
     for z in sorted(spec["zones"], key=lambda z: z["z0"]):
