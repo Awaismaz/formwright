@@ -1,0 +1,105 @@
+{
+  "case": "r_table",
+  "name": "TEST Project",
+  "brief": "Design a foldable Table",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20) for the founder's brief",
+  "reply": {
+    "summary": "A folding table: a top with a hinge bracket under each corner, a leg pivoting on each bracket.",
+    "components": [
+      {
+        "id": "top",
+        "kind": "plate",
+        "name": "Table top",
+        "params": {
+          "L": 1200,
+          "W": 700,
+          "T": 18
+        }
+      },
+      {
+        "id": "leg",
+        "kind": "other",
+        "name": "Folding leg",
+        "qty": 4,
+        "params": {
+          "L": 40,
+          "W": 20,
+          "H": 700
+        }
+      },
+      {
+        "id": "bracket",
+        "kind": "bracket",
+        "name": "Leg hinge bracket",
+        "qty": 4,
+        "params": {
+          "L": 60,
+          "W": 30,
+          "H": 60
+        }
+      },
+      {
+        "id": "screw",
+        "kind": "fastener",
+        "name": "Bracket wood screw",
+        "qty": 16,
+        "params": {
+          "style": "shcs",
+          "size": 5
+        }
+      },
+      {
+        "id": "bolt",
+        "kind": "fastener",
+        "name": "Leg pivot bolt",
+        "qty": 4,
+        "params": {
+          "style": "hex_bolt",
+          "size": 8
+        }
+      },
+      {
+        "id": "washer",
+        "kind": "washer",
+        "name": "Pivot washer",
+        "qty": 8,
+        "params": {
+          "size": 8
+        }
+      },
+      {
+        "id": "nut",
+        "kind": "nut",
+        "name": "Pivot lock nut",
+        "qty": 4,
+        "params": {
+          "size": 8
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "top",
+        "guest": "bracket",
+        "via": [
+          "screw"
+        ]
+      },
+      {
+        "kind": "pin_joint",
+        "host": "bracket",
+        "guest": "leg",
+        "via": [
+          "bolt",
+          "washer",
+          "nut"
+        ]
+      }
+    ],
+    "assumptions": [
+      "A four-seat folding table: top 1200 x 700 x 18, legs 700 long (table height about 730)."
+    ],
+    "questions": []
+  }
+}

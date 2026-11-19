@@ -4,6 +4,36 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-20: Architecture v2 begins; Archie supervises; agents cheaper and faster; site revamp
+
+Founder (night of 11-19 to 11-20): fix the Design Office on his real programs, make it as reliable as the Studio,
+faster and cheaper, give Archie real powers, revamp the website, and plan architecture v2 ("start and complete
+everything"), with model routing by job size.
+
+**Merged and pushed** (each with targeted tests, 1-2 files per run):
+- Recognition fix (holes mirrored on negative axes; founder's Housing base unstuck) + Gage no-progress guard (CD-045).
+- Toolbox DIN 6885 keys, DIN 471 rings, bearing chamfers (CD-043); gearbox caps on every seat, Hex head noun,
+  fasteners fitted or reported (CD-043).
+- Agent cost: claude.ai connectors no longer loaded into the in-app agent ($2.96 -> $0.21 a turn) (DS-041).
+- Model routing + latency (Sonnet simple, Opus complex/Archie, Haiku vision): 204 s / $0.87 -> 95 s / $0.35 (DS-041).
+- Small programs, brief scope, shaft sub-assemblies, one-click light path (CD-041).
+- Archie supervisor + Fix with Archie for structural problems (CD-042).
+- Design graph, behind FW_DESIGN_GRAPH (on for the founder's local app) (CD-044).
+- Golden suite + dashboard (EVAL-009): 5/9 simulated pass; findings F1-F6.
+- Website revamp, real CAD logos (founder-supplied, docs/brand/), headline 'One brief. A complete machine.' (WEB-010).
+- Worker housekeeping: CAD workers reaped after test modules, killed at exit, capped (founder's PC hung).
+- Smooth involute Toolbox gears with backlash; sidebar never auto-folds (DS-042).
+
+**In progress (local agents on this PC):** WORKLIST 44 connection layout (wip/connection-layout), 54 program revision
+(wip/program-revision). Paused: 45/48 generators (wip/generators 3886b47). Next: 51 Assembly Studio chat, 50 hybrid
+master model, then 52 Motion Studio and 53 Simulation (later, after the core). 55 catalogues/standards: backlog.
+
+**Founder decisions this session:** model routing (PD-82); headline; bypass permissions on this project
+(.claude/settings.local.json, local only); no long dashes anywhere; name search (Formwright domain unavailable; shortlist
+MechBrains / KineCAD / Machinica, undecided).
+
+---
+
 ## 2026-11-19 (i) — Assembly that assembles, a faster agent, dimensions on the model, projects and memory
 
 Founder (evening): AI assembly "lays all parts on floor"; test case: a 1:3 spur gear pair with only shafts and

@@ -620,6 +620,11 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
 
     out["supervisor"] = supervisor.view(doc)  # Archie's log, rule overrides and what is relaxed (WORKLIST 49)
     out["change_requests"] = doc.get("change_requests") or []
+    from aicad.office import revision
+
+    out["revisions"] = revision.public(doc)  # program revisions (ICD v+1 at any stage), newest first, undo state
+    out["retired_tickets"] = [{k: t.get(k) for k in ("id", "key", "title", "kind", "column", "retired")}
+                              for t in doc.get("retired_tickets") or []]
     out["assembly"] = doc.get("assembly")
     b = orchestrator.budget_state(doc)
     out["budget"] = {**doc["budget"], "spent": b["spent"], "pct": b["pct"], "level": b["level"]}

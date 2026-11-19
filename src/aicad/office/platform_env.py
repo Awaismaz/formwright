@@ -691,6 +691,16 @@ class PlatformEnv(orchestrator.Env):
                                    "the add-on, then retry."}
         finally:
             db.close()
+        if (doc.get("assembly") or {}).get("status") != "ready" and doc.get("icd") and doc.get("skeleton"):
+            # a program with an ICD: its assembly is being built (at ICD approval); a level integrated before it is
+            # ready would be laid out on the bench instead (a fastener kit's parts in a row: golden R3)
+            import asyncio
+
+            for _ in range(240):
+                await asyncio.sleep(0.5)
+                doc = store.load(root, pid) or doc
+                if (doc.get("assembly") or {}).get("status") in ("ready", "failed"):
+                    break
         if (doc.get("assembly") or {}).get("status") == "ready":
             return await self._integrate_program(root, pid, tid)
         kids = children(doc, t)
@@ -1081,8 +1091,10 @@ def assembly_allowed(org_id: str, god_paywall: bool) -> bool:
         db.close()
 
 
-async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False) -> None:
-    """At ICD approval: Fitz assembles the program from placeholders (mates by interface name)."""
+async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False,
+                                 keep_subs: set[str] | None = None) -> None:
+    """At ICD approval: Fitz assembles the program from placeholders (mates by interface name). Also after a program
+    revision (``office/revision.py``): kept parts go in as built at their new places, ``keep_subs`` stay as they are."""
     from aicad.agent import worker
 
     # parts built from the interfaces (office.direct) start as soon as Run is pressed: have the engine warm by then
@@ -1099,12 +1111,17 @@ async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str
         if doc is None or not interfaces.has_icd(doc):
             return
         keys = {}
+        frames: dict[str, dict[str, Any]] = {}
         for t in doc["tickets"]:  # a rebuild keeps real parts already swapped in
             p = ((doc.get("assembly") or {}).get("parts") or {}).get(t["item_id"]) or {}
-            if p.get("kind") == "real" and t["column"] in service.DONE_COLUMNS:
+            if p.get("kind") == "real" and t["column"] in service.DONE_COLUMNS and t["item_id"] in doc["skeleton"]["items"]:
                 keys[t["item_id"]] = p["key"]
+                fr = (t.get("icd_check") or {}).get("frame")
+                if fr and not fr.get("identity"):
+                    frames[t["item_id"]] = fr
         try:
-            state = await program_assembly.build(_aroot(org_id), org_id, user_id, doc, keys)
+            state = await program_assembly.build(_aroot(org_id), org_id, user_id, doc, keys, frames or None,
+                                                 keep_subs)
         except Exception as e:
             log.exception("program assembly build failed")
             save_assembly(root, pid, {**(doc.get("assembly") or {}), "status": "failed",

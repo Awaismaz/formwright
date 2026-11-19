@@ -9,6 +9,7 @@ brief = "A manual linear stage: an 80 x 100 x 25 mm carriage that slides on two 
 
 [sim]
 plan = "f_linear_stage.plan.json"
+intent = "f_linear_stage.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
 
 [limits]
 tokens = 120

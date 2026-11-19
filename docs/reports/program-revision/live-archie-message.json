@@ -1,0 +1,240 @@
+{
+ "id": "e4b1356a6629",
+ "role": "archie",
+ "text": "The ICD v1 layout makes Folding leg the base and ties every interface (table top and all four brackets) to Folding leg #1, so legs #2, #3 and #4 have no interface placing them and float. The approved part models are not at fault, and no single interface number can fix this. The table top envelope (100 × 70 × 16 mm, the same as a hinge bracket) is also implausibly small for a table with 568 mm legs, so it should be re-sized in the same revision.\n\nThe legs float because the layout hangs everything off one leg. I propose revising to ICD v2: Table top as the base, one hinge bracket per corner mounted on the top, and each folding leg mounted on its own bracket, standing upright at 90 × 20 × 568 mm. I also suggest re-sizing the table top to 800 × 600 × 20 mm, since 100 × 70 mm is a bracket-sized top. Please adjust that size if the brief has a different one. The fasteners and the kept parts carry over.\n\nThis needs your decision first: Revise the program to ICD v2 (Table top is the base; Leg hinge bracket mounts on Table top; Folding leg mounts on Leg hinge bracket; 3 more changes): 4 kept, 0 re-placed, 3 redesigned; 3 assemblies run again; about 78 tokens and 7.6 min (it reopens parts already worked on).",
+ "t": "2026-11-19T22:57:22Z",
+ "kind": "supervisor",
+ "tokens": 0,
+ "actions": [],
+ "questions": [
+  {
+   "action": "SA-1",
+   "question": "Revise the program to ICD v2 (Table top is the base; Leg hinge bracket mounts on Table top; Folding leg mounts on Leg hinge bracket; 3 more changes): 4 kept, 0 re-placed, 3 redesigned; 3 assemblies run again; about 78 tokens and 7.6 min?",
+   "why": "The floating legs come from the layout, not the parts: re-basing on the table top and giving each leg its own bracket puts an interface on every copy",
+   "impact": {
+    "ok": true,
+    "why": "",
+    "changes": [
+     "Table top is the base",
+     "Leg hinge bracket mounts on Table top",
+     "Folding leg mounts on Leg hinge bracket",
+     "Folding leg envelope 90 × 20 × 568 mm",
+     "Table top envelope 800 × 600 × 20 mm",
+     "Leg hinge bracket envelope 100 × 70 × 16 mm"
+    ],
+    "dropped": [],
+    "summary": "4 kept, 0 re-placed, 3 redesigned; 3 assemblies run again; about 78 tokens and 7.6 min",
+    "lines": [
+     "Redesigned: Table top (envelope 100 × 70 × 16 → 800 × 600 × 20 mm; interface features: 5 removed, 17 added); Folding leg (envelope 568 × 90 × 20 → 90 × 20 × 568 mm; interface features: 21 removed, 3 added); Leg hinge bracket (interface features: 0 removed, 3 added)",
+     "Kept as built: Bracket wood screw; Leg pivot bolt; Pivot washer; Pivot lock nut",
+     "Assemblies run again: Top, Legs, Final assembly",
+     "Assemblies kept: Fasteners",
+     "Estimate: about 78 tokens and 7.6 min of office time"
+    ],
+    "counts": {
+     "unchanged": 4,
+     "moved": 0,
+     "redesign": 3,
+     "added": 0,
+     "removed": 0
+    },
+    "estimate": {
+     "tokens": 78,
+     "minutes": 7.6
+    },
+    "replace_only": false,
+    "major_why": [
+     "it reopens parts already worked on"
+    ],
+    "parts": [
+     {
+      "name": "Table top",
+      "class": "redesign",
+      "why": "envelope 100 × 70 × 16 → 800 × 600 × 20 mm; interface features: 5 removed, 17 added",
+      "ticket": "TP-1",
+      "column": "integrated",
+      "qty_before": 1,
+      "qty_after": 1,
+      "remove": [
+       "hole Ø5.5 at (-39, -24)",
+       "hole Ø5.5 at (-39, 24)",
+       "hole Ø5.5 at (39, -24)",
+       "hole Ø5.5 at (39, 24)",
+       "mounting face (bottom) at Z -8"
+      ],
+      "add": [
+       "hole Ø5.5 at (-129, -24)",
+       "hole Ø5.5 at (-129, 24)",
+       "hole Ø5.5 at (-17, -24)",
+       "hole Ø5.5 at (-17, 24)",
+       "hole Ø5.5 at (-207, -24)",
+       "hole Ø5.5 at (-207, 24)",
+       "hole Ø5.5 at (-95, -24)",
+       "hole Ø5.5 at (-95, 24)",
+       "hole Ø5.5 at (129, -24)",
+       "hole Ø5.5 at (129, 24)",
+       "hole Ø5.5 at (17, -24)",
+       "hole Ø5.5 at (17, 24)",
+       "hole Ø5.5 at (207, -24)",
+       "hole Ø5.5 at (207, 24)",
+       "hole Ø5.5 at (95, -24)",
+       "hole Ø5.5 at (95, 24)",
+       "mounting face (top) at Z 10"
+      ]
+     },
+     {
+      "name": "Folding leg",
+      "class": "redesign",
+      "why": "envelope 568 × 90 × 20 → 90 × 20 × 568 mm; interface features: 21 removed, 3 added",
+      "ticket": "TP-3",
+      "column": "approved",
+      "qty_before": 4,
+      "qty_after": 4,
+      "remove": [
+       "hole Ø5.5 at (-151, -24)",
+       "hole Ø5.5 at (-151, 24)",
+       "hole Ø5.5 at (-185, -24)",
+       "hole Ø5.5 at (-185, 24)",
+       "hole Ø5.5 at (-263, -24)",
+       "hole Ø5.5 at (-263, 24)",
+       "hole Ø5.5 at (-39, -24)",
+       "hole Ø5.5 at (-39, 24)",
+       "hole Ø5.5 at (-73, -24)",
+       "hole Ø5.5 at (-73, 24)",
+       "hole Ø5.5 at (151, -24)",
+       "hole Ø5.5 at (151, 24)",
+       "hole Ø5.5 at (185, -24)",
+       "hole Ø5.5 at (185, 24)",
+       "hole Ø5.5 at (263, -24)",
+       "hole Ø5.5 at (263, 24)",
+       "hole Ø5.5 at (39, -24)",
+       "hole Ø5.5 at (39, 24)",
+       "hole Ø5.5 at (73, -24)",
+       "hole Ø5.5 at (73, 24)",
+       "mounting face (top) at Z 10"
+      ],
+      "add": [
+       "hole Ø3.4 at (-3.5, 0)",
+       "hole Ø3.4 at (3.5, 0)",
+       "mounting face (bottom) at Z -284"
+      ]
+     },
+     {
+      "name": "Leg hinge bracket",
+      "class": "redesign",
+      "why": "interface features: 0 removed, 3 added",
+      "ticket": "TP-4",
+      "column": "approved",
+      "qty_before": 4,
+      "qty_after": 4,
+      "remove": [],
+      "add": [
+       "hole Ø3.4 at (-3.5, 0)",
+       "hole Ø3.4 at (3.5, 0)",
+       "mounting face (top) at Z 8"
+      ]
+     },
+     {
+      "name": "Bracket wood screw",
+      "class": "unchanged",
+      "why": "same geometry, features and place",
+      "ticket": "TP-6",
+      "column": "integrated",
+      "qty_before": 16,
+      "qty_after": 16,
+      "remove": null,
+      "add": null
+     },
+     {
+      "name": "Leg pivot bolt",
+      "class": "unchanged",
+      "why": "same geometry, features and place",
+      "ticket": "TP-7",
+      "column": "integrated",
+      "qty_before": 4,
+      "qty_after": 4,
+      "remove": null,
+      "add": null
+     },
+     {
+      "name": "Pivot washer",
+      "class": "unchanged",
+      "why": "same geometry, features and place",
+      "ticket": "TP-8",
+      "column": "integrated",
+      "qty_before": 8,
+      "qty_after": 8,
+      "remove": null,
+      "add": null
+     },
+     {
+      "name": "Pivot lock nut",
+      "class": "unchanged",
+      "why": "same geometry, features and place",
+      "ticket": "TP-9",
+      "column": "integrated",
+      "qty_before": 4,
+      "qty_after": 4,
+      "remove": null,
+      "add": null
+     }
+    ],
+    "levels": [
+     {
+      "item": "i_s1",
+      "name": "Top",
+      "status": "rerun",
+      "ticket": "TP-2",
+      "column": "integrated"
+     },
+     {
+      "item": "i_s2",
+      "name": "Legs",
+      "status": "rerun",
+      "ticket": "TP-5",
+      "column": "changes_requested"
+     },
+     {
+      "item": "i_s3",
+      "name": "Fasteners",
+      "status": "kept",
+      "ticket": "TP-10",
+      "column": "integrated"
+     },
+     {
+      "item": "root",
+      "name": "Final assembly",
+      "status": "rerun",
+      "ticket": "TP-11",
+      "column": "backlog"
+     }
+    ],
+    "placement": {
+     "before": [
+      "Folding leg #2, #3, #4: no interface places them",
+      "Folding leg touches nothing in the rest of the assembly (apart, or floating)."
+     ],
+     "after": []
+    },
+    "problems": []
+   },
+   "options": [
+    {
+     "id": "approve",
+     "label": "Yes, revise the program"
+    },
+    {
+     "id": "decline",
+     "label": "No, leave it"
+    }
+   ]
+  }
+ ],
+ "supervisor": {
+  "mode": "ai",
+  "entries": [
+   "SA-1"
+  ]
+ },
+ "unprompted": true
+}

@@ -1,0 +1,76 @@
+{
+  "case": "d_bracket",
+  "name": "Bracket on a base plate",
+  "brief": "An aluminium angle bracket (foot 60 x 40 x 8 mm, upright 50 mm high and 8 mm thick) bolted to a 120 x 80 x 10 mm aluminium base plate with two M6 x 30 hex bolts, washers and nuts.",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "An angle bracket bolted to a base plate with two M6 hex bolts, washers and nuts.",
+    "components": [
+      {
+        "id": "plate",
+        "kind": "plate",
+        "name": "Base plate",
+        "qty": 1,
+        "params": {
+          "L": 120,
+          "W": 80,
+          "T": 10
+        }
+      },
+      {
+        "id": "bracket",
+        "kind": "bracket",
+        "name": "Angle bracket",
+        "qty": 1,
+        "params": {
+          "L": 60,
+          "W": 40,
+          "H": 58
+        }
+      },
+      {
+        "id": "bolt",
+        "kind": "fastener",
+        "name": "Hex bolt M6x30",
+        "qty": 2,
+        "params": {
+          "style": "hex_bolt",
+          "size": 6,
+          "length": 30
+        }
+      },
+      {
+        "id": "washer",
+        "kind": "washer",
+        "name": "Washer M6",
+        "qty": 4,
+        "params": {
+          "size": 6
+        }
+      },
+      {
+        "id": "nut",
+        "kind": "nut",
+        "name": "Hex nut M6",
+        "qty": 2,
+        "params": {
+          "size": 6
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "plate",
+        "guest": "bracket",
+        "via": [
+          "bolt",
+          "washer",
+          "nut"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

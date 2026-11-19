@@ -1,0 +1,498 @@
+"""Layout solved from the design graph's connections (architecture v2, step 2; ``graph/layout.py``).
+
+Five golden mechanisms, every expected number a hand calculation from the placement rules (never a measurement):
+
+1. Keyed gear on a stepped shaft (no bearings): the shoulder face is datum B (Y = 0); gear m2 x 30, face 20: Y -20 .. 0
+   (centre -10); the seat runs SEAT_END 2 past the free face (Y -22); shaft 80 long (assumed): Y -22 .. 58, centre 18;
+   key 6 x 6 x 18 (DIN 6885-1, Ø20), Y -19 .. -1, underside 10 - 3.5 = 6.5 off the axis.
+2. 1:3 pair m2 20 / 60, Ø20 shafts, four 6204 (20 x 47 x 14), no housing: a = 2 (20 + 60) / 2 = 80; gears Y -10 .. 10;
+   bearings BEARING_CLEAR 5 from the gear faces: Y 15 .. 29 and -29 .. -15; shafts SHAFT_END 10 beyond: length 78.
+3. 3:1 reducer, split housing, four caps, shoulders inside (the live reply): cap screws M6 x 16 and cover bolts M8 x 30
+   (PD-114, the rule code completes housings with; golden suite F6); walls max(16 + 4, tap depth 2.5 x 6 + 3 + 3 = 21,
+   the M8 lid screws 2.5 x 9 + 1.5 = 24) = 24, so 224 x 92 x 146 (half inside 10 + 12 = 22; seats at Y -46 / +46); input Ø20 seat, step 20 + 2 max(2.5, 0.1 x 20 + 1)
+   = Ø26; output Ø30 (6206, 30 x 62 x 16), step 30 + 2 max(2.5, 4) = Ø38; each gear's +Y face (Y 10) on its shoulder,
+   a 5 mm collar (Y 10 .. 15) in the cavity, the seat from the -Y bearing's inner face (-42 + 14 = -28, -42 + 16 = -26)
+   to the shoulder, the +Y journal from the collar's end to the shaft end (input 92 + 16 + 20 = 128 long: Y -46 .. 82).
+4. Belt drive (new): pulleys Ø60 / Ø120 x 20 on Ø20 shafts, two pillow blocks per shaft, 6204, on a base plate.
+   C = D1 + D2 = 180 (stated rule); belt pitch length 2 C + pi (D1 + D2) / 2 + (D2 - D1)^2 / 4C = 360 + 282.74 + 5 =
+   647.74. Bearings BEARING_CLEAR + SHOULDER = 9 from the pulley faces: Y 19 .. 33 and -33 .. -19; blocks 14 + 4 = 18
+   wide, the seat open toward -Y on both (one design for both copies): Y -33 .. -15, 19 .. 37; shafts Y -43 .. 43 (86). Axis height = max(120 / 2 + CAV 6, 47 / 2 + 11.75) = 66 (the big
+   pulley clears the plate). Pillow block: wall max(8, 0.25 x 47) = 11.75, bolts M6 (fastener_for(2 x 47 = 94)),
+   inset 2 x 6.6 = 13.2; L = 47 + 23.5 + 4 x 13.2 = 123.3 -> 123.5, H = 66 + 23.5 + 11.75 = 101.25 -> 101.5 (0.5 mm up),
+   centre Z 50.75; its two M6 holes 61.75 - 13.2 = 48.55 either side. Axes at X 0 and 180, centred on the plate:
+   X -90 / +90. Plate: (180 + 123.5) + 2 x 10 = 323.5 -> 324 long, 86 + 20 = 106 wide.
+5. Motor drive (new): a motor (assumed envelope 120 x 180 x 120, shaft Ø14 x 30) on a bracket on a base plate,
+   coupled to a Ø20 shaft in two pillow blocks (6204). The shaft carries nothing: its bearings are max(4 x 20,
+   2 x 47) = 94 apart (Y -61 .. -47 and 47 .. 61). Coupling: engagement min(1.5 x 20, 30) = 30 a side, gap 2: 62 long,
+   Ø50 (2.5 x 20); the coupled end 5 + 30 beyond the -Y block face: Y -96, the other end 61 + 10 = 71 (167 long). Height:
+   the motor needs 120 / 2 + 10 (the least bracket) = 70 > 35.25 (pillow block) > 25 + 6 (coupling): the shaft axis is
+   70 above the plate, the bracket 70 - 60 = 10 tall and 120 + 2 x 2 x 13.2 = 172.8 -> 173 wide (its own M6 bolts
+   outside the motor's), the pillow blocks 70 + 23.5 + 11.75 = 105.25 -> 105.5 tall. The motor face 2 + 30 behind the
+   shaft end. Everything centred on the plate (shift Y + 118.5): shaft centre Y 106, motor -99.5, coupling 21.5;
+   plate: the bracket is the widest part, 173 + 2 x 10 = 193 long; Y -308 .. 71 is 379, + 20 = 399 wide.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from aicad.graph import compile as gc
+from aicad.graph import intent, layout
+from aicad.graph.model import DesignGraph
+from aicad.office import icd
+
+G1 = Path(__file__).parent / "golden" / "design_graph"
+G2 = Path(__file__).parent / "golden" / "connection_layout"
+
+
+def _reply(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _graph(path: Path, mutate: Any = None) -> DesignGraph:
+    d = _reply(path)
+    if mutate:
+        mutate(d["reply"])
+    g, iss, qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    assert [i for i in iss if i["severity"] == "error"] == [] and qs == [], ([i["text"] for i in iss], qs)
+    return g
+
+
+def _solve(g: DesignGraph) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    plan = gc.to_plan(g, resolved=True)
+    sk, ifs = gc.to_icd(g, plan)
+    assert sk.get("solver") == "graph", sk["notes"]
+    return plan, sk, ifs
+
+
+def _it(sk: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {it["name"]: it for it in sk["items"].values()}
+
+
+def _ifs(ifs: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    return [f for f in ifs if f["kind"] == kind]
+
+
+# ----------------------------------------------------------------------------- 1. the keyed gear on a stepped shaft
+def test_keyed_gear_on_a_stepped_shaft() -> None:
+    g = _graph(G1 / "keyed_gear.json")
+    plan, sk, ifs = _solve(g)
+    it = _it(sk)
+    assert sk["layout"] == "shaft_line" and sk["shaft_subassembly"] and icd.problems(sk, ifs) == []
+    assert it["Stepped shaft"]["size"] == [26, 26, 80] and it["Stepped shaft"]["copies"] == [[0, 18, 0]]
+    assert it["Spur gear"]["copies"] == [[0, -10, 0]]
+    b, k = ifs[0]["data"], ifs[1]["data"]
+    assert (b["d"], b["seat_z"], b["shoulder_z"], b["shoulder_d"], b["side"]) == (20, [-22, 0], 0, 26, 1)
+    assert (k["b"], k["h"], k["length"], k["z"]) == (6, 6, 18, [-19, -1])
+    key_item = next(s["item"] for s in sk["standard"] if s["name"] == "Parallel key")
+    assert icd.seated(ifs, key_item)["at"] == [[6.5, -10, 0]]
+    assert gc.check(g, sk, ifs) == [] and gc.limits(g, sk, ifs) == []
+    assert gc.to_direct(g, plan)["shaft"]["summary"] == "shaft Ø20 / Ø26 × 80, 1 seat, 1 keyseat"
+
+
+# ----------------------------------------------------------------------------- 2. the 1:3 pair, four 6204, no housing
+def test_gear_pair_on_four_bearings() -> None:
+    g = _graph(G1 / "gear_pair.json")
+    plan, sk, ifs = _solve(g)
+    it = _it(sk)
+    assert sk["layout"] == "shaft_line" and icd.problems(sk, ifs) == [] and icd.warnings(sk, ifs) == []
+    assert it["Pinion"]["copies"] == [[0, 0, 0]] and it["Gear"]["copies"] == [[80, 0, 0]]
+    assert it["Input shaft"]["size"] == [20, 20, 78] and it["Output shaft"]["copies"] == [[80, 0, 0]]
+    js = sorted(tuple(f["data"]["z"]) for f in _ifs(ifs, "bearing_journal"))
+    assert js == [(-29, -15), (-29, -15), (15, 29), (15, 29)]
+    m = _ifs(ifs, "gear_mesh")[0]["data"]
+    assert (m["centre_distance"], m["axis_a"], m["axis_b"], m["plane_a"], m["plane_b"]) == (80, [0, 0], [80, 0], 0, 0)
+    assert gc.check(g, sk, ifs) == []
+    assert {k: v["path"] for k, v in gc.to_direct(g, plan).items()} == {
+        "input_shaft": "direct", "output_shaft": "direct", "pinion": "direct", "gear": "direct"}
+
+
+# ----------------------------------------------------------------------------- 3. the reducer: shoulders in a housing
+def test_reducer_shoulders_inside_the_housing() -> None:
+    d = _reply(G1 / "reducer.live.json")  # (the live reply asks a material question: compiled as it is)
+    g, iss, _qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    assert [i for i in iss if i["severity"] == "error"] == []
+    plan, sk, ifs = _solve(g)
+    it = _it(sk)
+    assert sk["layout"] == "gearbox" and icd.problems(sk, ifs) == []
+    assert it["Housing base"]["size"] == [224, 92, 146] and it["Housing base"]["cavity"]["wall"] == 24
+    xi, xo = it["Input shaft"]["copies"][0][0], it["Output shaft"]["copies"][0][0]
+    assert (xi, xo) == (-60, 20) and it["Input shaft"]["copies"][0][2] == it["Output shaft"]["copies"][0][2] == -68
+    assert it["Input shaft"]["size"] == [26, 26, 128] and it["Output shaft"]["size"] == [38, 38, 138]
+    bores = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "shaft_bore")}
+    pin, out = bores["Input shaft"], bores["Output shaft"]
+    assert (pin["d"], pin["shoulder_d"], pin["shoulder_z"], pin["seat_z"], pin["z"]) == (20, 26, 10, [-32, 10], [-10, 10])
+    assert (out["d"], out["shoulder_d"], out["shoulder_z"], out["seat_z"]) == (30, 38, 10, [-30, 10])
+    seats = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "bearing_seat")}
+    assert seats["Input shaft"]["journals"] == [[-46, -32], [15, 82]]
+    assert seats["Output shaft"]["journals"] == [[-46, -30], [15, 92]]
+    joints = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "hole_pattern")}
+    assert joints["Housing cover"]["fastener"] == "M8" and joints["Input open cap"]["fastener"] == "M6"
+    assert {n: s["designation"] for n, s in seats.items()} == {"Input shaft": "6204", "Output shaft": "6206"}
+    caps = sorted((f["b"]["name"], f["data"]["cap"], f["data"]["normal"][1]) for f in _ifs(ifs, "hole_pattern")
+                  if f["data"].get("cap"))
+    assert caps == [("Input blind cap", "blind", -1), ("Input open cap", "open", 1), ("Output blind cap", "blind", -1),
+                    ("Output open cap", "open", 1)]
+    assert it["Input open cap"]["bore"] == 22  # the shaft leaves on its Ø20 journal, not the Ø26 step
+    mesh = _ifs(ifs, "gear_mesh")[0]["data"]
+    assert mesh["centre_distance"] == 80 and mesh["axis_b"][0] - mesh["axis_a"][0] == 80
+    assert gc.check(g, sk, ifs) == [] and gc.limits(g, sk, ifs) == []  # "not laid out yet" is gone
+    assert "Shoulders inside the housing" in sk["notes"][0] and "consistent by construction" in sk["notes"][0]
+    d_ = gc.to_direct(g, plan)
+    assert d_["input_shaft"]["summary"] == "shaft Ø20 / Ø26 / Ø20 × 128, 2 bearing journals, 1 seat, 1 keyseat"
+    assert d_["output_shaft"]["summary"] == "shaft Ø30 / Ø38 / Ø30 × 138, 2 bearing journals, 1 seat, 1 keyseat"
+
+
+@pytest.mark.parametrize("case", ["keyed_gear", "gear_pair"])
+def test_parity_with_the_template_on_the_golden_cases(case: str) -> None:
+    """The recorded golden graphs: the solver gives exactly the template's layout, item by item and number by number.
+    (The reducer's graph now states M8 cover bolts, PD-114, which the template reads as M6: its parity is measured
+    on the reverse-adapted layouts instead, docs/reports/connection-layout.md.)"""
+    g = _graph(G1 / f"{case}.json")
+    plan = gc.to_plan(g, resolved=True)
+    t_sk, t_if = gc.to_icd(g, plan, template=True)
+    s_sk, s_if = gc.to_icd(g, plan)
+    for i, a in t_sk["items"].items():
+        b = s_sk["items"][i]
+        assert {k: a.get(k) for k in ("size", "copies", "ax", "d", "bore", "phase", "bearing", "cavity")} == \
+            {k: b.get(k) for k in ("size", "copies", "ax", "d", "bore", "phase", "bearing", "cavity")}, a["name"]
+    assert [(f["id"], f["kind"], f["a"], f["b"]) for f in t_if] == [(f["id"], f["kind"], f["a"], f["b"]) for f in s_if]
+    for a, b in zip(t_if, s_if, strict=True):
+        assert a["data"] == b["data"], a["id"]
+
+
+# ----------------------------------------------------------------------------- 4. the belt drive on pillow blocks
+def test_belt_drive_on_pillow_blocks() -> None:
+    g = _graph(G2 / "pulley_pair.json")
+    plan, sk, ifs = _solve(g)
+    it = _it(sk)
+    assert sk["layout"] == "block" and icd.problems(sk, ifs) == [] and icd.warnings(sk, ifs) == []
+    assert it["Drive shaft"]["copies"] == [[-90, 0, 66]] and it["Driven shaft"]["copies"] == [[90, 0, 66]]
+    assert it["Drive shaft"]["size"] == [20, 20, 86] and it["Driven pulley"]["copies"] == [[90, 0, 66]]
+    belt = _ifs(ifs, "belt_drive")[0]["data"]
+    assert (belt["centre_distance"], belt["belt_length"], belt["plane_a"], belt["plane_b"]) == (180, 647.74, 0, 0)
+    pb = it["Drive pillow block"]
+    assert pb["size"] == [123.5, 18, 101.5] and pb["copies"] == [[-90, -24, 50.75], [-90, 28, 50.75]]
+    assert it["Base plate"]["size"] == [324, 106, 16] and it["Base plate"]["copies"] == [[0, 0, -8]]
+    seats = sorted((f["a"]["name"], tuple(f["data"]["seats"][0]["z"])) for f in _ifs(ifs, "bearing_seat"))
+    assert seats == [("Drive pillow block #1", (-33, -19)), ("Drive pillow block #2", (19, 33)),
+                     ("Driven pillow block #1", (-33, -19)), ("Driven pillow block #2", (19, 33))]
+    assert all(f["data"]["seats"][0]["open"] == -1 for f in _ifs(ifs, "bearing_seat"))
+    holes = next(f for f in _ifs(ifs, "hole_pattern") if f["b"]["name"] == "Drive pillow block #1")["data"]
+    assert (holes["fastener"], holes["positions"], holes["plane_z"]) == ("M6", [[-138.55, -24], [-41.45, -24]], 0)
+    keys = _ifs(ifs, "key")
+    assert len(keys) == 2 and all(k["data"]["key_item"] for k in keys)  # the implied keys sit in their keyseats
+    brg = next(s["item"] for s in sk["standard"] if s["name"] == "Drive shaft bearing")
+    assert icd.seated(ifs, brg)["at"] == [[-90, -33, 66], [-90, 19, 66]]
+    assert gc.check(g, sk, ifs) == []
+    assert {k for k, v in gc.to_direct(g, plan).items() if v["path"] == "direct"} == {"drive_shaft", "driven_shaft"}
+
+
+# ----------------------------------------------------------------------------- 5. a motor coupled to a shaft unit
+def test_motor_on_a_bracket_coupled_to_a_shaft_in_pillow_blocks() -> None:
+    g = _graph(G2 / "motor_drive.json")
+    _plan, sk, ifs = _solve(g)
+    it = _it(sk)
+    assert sk["layout"] == "block" and icd.problems(sk, ifs) == []
+    assert it["Drive shaft"]["copies"] == [[0, 106, 70]] and it["Drive shaft"]["size"] == [20, 20, 167]
+    assert it["Motor"]["copies"] == [[0, -99.5, 70]] and it["Motor"]["size"] == [120, 180, 120]
+    assert it["Motor bracket"]["size"] == [173, 180, 10] and it["Motor bracket"]["copies"] == [[0, -99.5, 5]]
+    assert it["Coupling"]["size"] == [50, 50, 62] and it["Coupling"]["copies"] == [[0, 21.5, 70]]
+    assert it["Pillow block"]["size"] == [123.5, 18, 105.5]
+    assert it["Base plate"]["size"] == [193, 399, 16]
+    bores = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "shaft_bore") if f["a"]["name"] == "Coupling"}
+    assert (bores["Drive shaft"]["d"], bores["Drive shaft"]["z"]) == (20, [22.5, 52.5])
+    assert (bores["Motor"]["d"], bores["Motor"]["z"]) == (14, [-9.5, 20.5])  # the motor shaft, 2 mm gap to the shaft
+    seats = sorted(tuple(f["data"]["seats"][0]["z"]) for f in _ifs(ifs, "bearing_seat"))
+    assert seats == [(57.5, 71.5), (165.5, 179.5)]
+    plate_bracket = next(f for f in _ifs(ifs, "hole_pattern") if f["b"]["name"] == "Motor bracket")["data"]
+    motor_bolts = next(f for f in _ifs(ifs, "hole_pattern") if f["b"]["name"] == "Motor")["data"]
+    assert max(abs(p[0]) for p in plate_bracket["positions"]) == 73.3  # the bracket's bolts outside the motor's 60
+    assert max(abs(p[0]) for p in motor_bolts["positions"]) == 46.8 and motor_bolts["plane_z"] == 10
+    assert any("assumed" in n for n in sk["notes"]) and "70 mm above" in sk["notes"][0]
+
+
+# ----------------------------------------------------------------------------- conflicts: precise, never silent
+def _pair(extra_c: list[dict[str, Any]], extra_x: list[dict[str, Any]]) -> DesignGraph:
+    reply = {"components": [
+        {"id": "s1", "kind": "shaft", "name": "Input shaft", "params": {"d": 20, "role": "input"}},
+        {"id": "s2", "kind": "shaft", "name": "Output shaft", "params": {"d": 20, "role": "output"}},
+        {"id": "g1", "kind": "spur_gear", "name": "Pinion", "params": {"module": 2, "teeth": 20}},
+        {"id": "g2", "kind": "spur_gear", "name": "Gear", "params": {"module": 2, "teeth": 60}},
+        {"id": "b", "kind": "bearing", "name": "Bearing 6204", "qty": 4, "params": {"designation": 6204}}] + extra_c,
+        "connections": [{"kind": "hub_fit", "host": "s1", "guest": "g1"}, {"kind": "hub_fit", "host": "s2", "guest": "g2"},
+                        {"kind": "gear_mesh", "host": "g1", "guest": "g2"},
+                        {"kind": "bearing_journal", "host": "s1", "guest": "b", "params": {"count": 2}},
+                        {"kind": "bearing_journal", "host": "s2", "guest": "b", "params": {"count": 2}}] + extra_x}
+    g, _iss, _qs = intent.compile_reply(reply, "Pair", "A spur pair, no housing.")
+    return g
+
+
+PULLEYS = [{"id": "p1", "kind": "pulley", "name": "Small pulley", "params": {"od": 40, "width": 15}},
+           {"id": "p2", "kind": "pulley", "name": "Large pulley", "params": {"od": 60, "width": 15}}]
+BELTED = [{"kind": "hub_fit", "host": "s1", "guest": "p1"}, {"kind": "hub_fit", "host": "s2", "guest": "p2"}]
+
+
+def _conflicts(g: DesignGraph) -> list[dict[str, Any]]:
+    _plan, sk, ifs = _solve(g)
+    return [i for i in icd.issues(sk, ifs) if i["code"] == "layout_conflict"]
+
+
+def test_a_closed_loop_that_disagrees_is_a_conflict_naming_the_parts() -> None:
+    """Two shafts that mesh (a = 80) and are belted at a stated C = 200: over-constrained."""
+    g = _pair(PULLEYS, BELTED + [{"kind": "belt_drive", "host": "p1", "guest": "p2", "params": {"centre_distance": 200}}])
+    cs = _conflicts(g)
+    assert len(cs) == 1 and cs[0]["severity"] == "error"
+    c = cs[0]
+    assert "C = 200" in c["text"] and "a = 80" in c["text"] and "over-constrained" in c["text"]
+    assert {"Small pulley", "Large pulley", "Pinion", "Gear", "Input shaft", "Output shaft"} <= set(c["parts"])
+    belt = next(x.id for x in g.connections if x.kind == "belt_drive")
+    mesh = next(x.id for x in g.connections if x.kind == "gear_mesh")
+    assert c["connections"] == [belt, mesh] and c["items"]
+
+
+def test_a_closed_loop_that_agrees_is_solved_and_said() -> None:
+    g = _pair(PULLEYS, BELTED + [{"kind": "belt_drive", "host": "p1", "guest": "p2", "params": {"centre_distance": 80}}])
+    _plan, sk, ifs = _solve(g)
+    assert icd.problems(sk, ifs) == [] and "Closed loops checked" in sk["notes"][0]
+    belt = _ifs(ifs, "belt_drive")[0]["data"]
+    assert belt["axis_b"][0] - belt["axis_a"][0] == 80 and belt["plane_a"] == belt["plane_b"] == 17.5  # 10 + 15 / 2
+
+
+def test_a_hub_on_two_shafts_and_an_unconnected_part_are_conflicts() -> None:
+    g = _pair([], [{"kind": "hub_fit", "host": "s1", "guest": "g2"}])
+    (c,) = _conflicts(g)
+    assert c["text"].startswith("Layout conflict: Gear is fitted on two shafts") and set(c["parts"]) == {
+        "Gear", "Output shaft", "Input shaft"}
+    g = _pair([{"id": "sp", "kind": "spacer", "name": "Spacer", "params": {"od": 30, "length": 5}}], [])
+    _plan, sk, ifs = _solve(g)
+    codes = {i["code"] for i in icd.issues(sk, ifs) if i["severity"] == "error"}
+    assert codes == {"layout_conflict", "no_interface"}  # drawn beside the program and said, never silently
+
+
+def test_two_stated_heights_that_disagree_are_a_conflict() -> None:
+    def mutate(r: dict[str, Any]) -> None:
+        for c in r["components"]:
+            if c["id"] == "bracket":
+                c["params"] = {"H": 20}      # motor axis at 20 + 120 / 2 = 80
+            if c["id"] == "pb":
+                c["params"] = {"centre_height": 70}
+
+    (c,) = _conflicts(_graph(G2 / "motor_drive.json", mutate))
+    assert "70 mm" in c["text"] and "80 mm" in c["text"] and {"Pillow block", "Motor bracket", "Motor"} <= set(c["parts"])
+
+    def one(r: dict[str, Any]) -> None:  # one stated height: the other path adapts to it
+        for c in r["components"]:
+            if c["id"] == "bracket":
+                c["params"] = {"H": 30}
+
+    _plan, sk, ifs = _solve(_graph(G2 / "motor_drive.json", one))
+    assert icd.problems(sk, ifs) == [] and _it(sk)["Drive shaft"]["copies"][0][2] == 90  # 30 + 60
+    assert _it(sk)["Pillow block"]["size"][2] == 125.5  # 90 + 23.5 + 11.75 = 125.25 -> 125.5
+
+
+# ----------------------------------------------------------------------------- fallback, stability, the office hook
+def test_graphs_the_solver_does_not_lay_out_yet_use_the_template_and_say_so() -> None:
+    """Two blocks that nothing connects: no base to walk from, so the template lays them out (and says so)."""
+    reply = {"components": [{"id": "p", "kind": "plate", "name": "Base plate", "params": {"L": 200, "W": 100, "T": 10}},
+                            {"id": "b", "kind": "bracket", "name": "Bracket", "params": {"L": 60, "W": 40, "H": 30}}],
+             "connections": []}
+    g, _iss, _qs = intent.compile_reply(reply, "Bracket", "A bracket and a plate")
+    sk, _ifs = gc.to_icd(g)
+    assert "solver" not in sk
+    assert any(n.startswith("Laid out with the standard layout") for n in sk["notes"])
+    with pytest.raises(layout.Unsupported):
+        layout.build(g, gc.plan_parts(gc.to_plan(g, resolved=True)), g.brief)
+
+
+@pytest.mark.parametrize("path", [G1 / "keyed_gear.json", G1 / "gear_pair.json", G1 / "reducer.live.json",
+                                  G2 / "pulley_pair.json", G2 / "motor_drive.json"])
+def test_freeze_and_rebuild_gives_the_same_layout(path: Path) -> None:
+    """At ICD approval the envelopes are frozen (``icd.freeze``); every rebuild (an edit, a change request) must
+    then lay the program out exactly as before."""
+    d = _reply(path)
+    g, _iss, _qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    plan = gc.to_plan(g, resolved=True)
+    parts = gc.plan_parts(plan)
+    sk, ifs = gc.to_icd(g, plan)
+    ov = icd.freeze(sk, ifs, gc.overrides_for(plan, parts) or {})
+    sk2, ifs2 = layout.build(g, parts, g.brief, ov, resolved=True)
+    for i, it in sk["items"].items():
+        assert (it["size"], it["copies"]) == (sk2["items"][i]["size"], sk2["items"][i]["copies"]), it["name"]
+    assert [f["data"] for f in ifs] == [f["data"] for f in ifs2]
+
+
+def test_the_office_lays_graph_programs_out_from_their_connections(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad.graph import office as goffice
+    from aicad.office import interfaces
+
+    d = _reply(G2 / "pulley_pair.json")
+    out = goffice.finish(goffice.OfficePlan(None), *intent.compile_reply(d["reply"], d["name"], d["brief"])[:2])
+    assert out.plan is not None and out.plan["graph"]["check"] == [] and out.plan["graph"]["limits"] == []
+    items = [{"id": p["id"], "kind": "part", "name": p["name"], "family": p["family"], "qty": p["qty"],
+              "description": p["description"], "parent_id": p["sub"]} for p in gc.plan_parts(out.plan)]
+    doc = {"plan": out.plan, "brief": d["brief"], "items": items, "tickets": []}
+    sk, _ifs2 = interfaces._rebuild(doc, {"items": {}, "interfaces": {}})
+    assert sk.get("solver") == "graph" and _it(sk)["Driven shaft"]["copies"] == [[90, 0, 66]]
+    assert "_layout_fallback" not in doc
+    monkeypatch.setenv(layout.ENV, "0")  # the switch: graph plans back on the template
+    sk, _ifs = interfaces._rebuild(doc, {"items": {}, "interfaces": {}})
+    assert "solver" not in sk
+    monkeypatch.delenv(layout.ENV)
+    doc2 = {**doc, "plan": {k: v for k, v in out.plan.items() if k != "graph"}}  # a plan without a graph: template
+    assert interfaces._graph_layout(doc2, None) is None
+
+
+def test_pillow_blocks_carry_the_bearings_so_no_housing_question() -> None:
+    d = _reply(G2 / "pulley_pair.json")
+    _g, _iss, qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    assert [q.id for q in qs] == []
+
+
+def test_spacer_between_two_faces_and_circlips_in_their_grooves() -> None:
+    """A spacer 8 long after the pinion (Y 10 .. 18): the +Y bearing bears on it (Y 18 .. 32, no BEARING_CLEAR) and the
+    spacer seats on the pinion's face; two DIN 471 rings for Ø20 (s 1.2, m 1.3) hold the gear at both faces: rings
+    Y -11.2 .. -10 and 10 .. 11.2, grooves -11.3 .. -10 and 10 .. 11.3."""
+    g = _pair([{"id": "sp", "kind": "spacer", "name": "Spacer", "params": {"od": 28, "length": 8}},
+               {"id": "rr", "kind": "retaining_ring", "name": "Circlip", "qty": 2}],
+              [{"kind": "hub_fit", "host": "s1", "guest": "sp"},
+               {"kind": "ring_retained", "host": "s2", "guest": "g2", "via": ["rr"]}])
+    _plan, sk, ifs = _solve(g)
+    assert icd.problems(sk, ifs) == []
+    assert _it(sk)["Spacer"]["copies"] == [[0, 14, 0]]
+    js = {(f["a"]["name"], f["data"]["side"]): f["data"]["z"] for f in _ifs(ifs, "bearing_journal")}
+    assert js[("Input shaft", 1)] == [18, 32] and js[("Output shaft", 1)] == [15, 29]
+    face = _ifs(ifs, "face")[0]
+    assert (face["a"]["name"], face["b"]["name"], face["data"]["plane_z"]) == ("Pinion", "Spacer", 10)
+    rings = sorted((f["data"]["z"], f["data"]["groove_z"]) for f in _ifs(ifs, "retaining_ring"))
+    assert rings == [([-11.2, -10], [-11.3, -10]), ([10, 11.2], [10, 11.3])]
+    ring = next(s["item"] for s in sk["standard"] if s["name"] == "Circlip")
+    assert len(icd.seated(ifs, ring)["at"]) == 2
+
+
+# ----------------------------------------------------------------------------- the golden suite's mechanisms (WORKLIST 46)
+GC = Path(__file__).resolve().parents[1] / "src" / "aicad" / "eval" / "golden_cases"
+
+
+def _golden(case: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    d = _reply(GC / f"{case}.intent.json")
+    g, iss, _qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    assert [i for i in iss if i["severity"] == "error"] == []
+    _plan, sk, ifs = _solve(g)
+    assert icd.problems(sk, ifs) == [], icd.problems(sk, ifs)
+    return sk, ifs
+
+
+def test_roller_bearings_in_side_plates() -> None:
+    """(e) Tube Ø50 x 200 on a Ø20 shaft, 6204 (B 14) in 15 mm side plates, no frame: the shaft is the base; bearings
+    9 from the tube's ends (Y 109 .. 123), each plate 15 thick from its bearing's -Y face (Y 109 .. 124 and
+    -123 .. -108: both seats open toward -Y, one design for both copies), shaft ends 10 beyond: 266 long."""
+    sk, ifs = _golden("e_roller")
+    it = _it(sk)
+    assert it["Roller shaft"]["size"] == [20, 20, 266] and it["Roller tube"]["copies"] == [[0, 0, 0]]
+    assert it["Side plate"]["size"] == [100, 15, 120] and it["Side plate"]["copies"] == [[0, -115.5, 0], [0, 116.5, 0]]
+    brg = next(s["item"] for s in sk["standard"] if s["name"] == "Bearing 6204")
+    assert icd.seated(ifs, brg)["at"] == [[0, -123, 0], [0, 109, 0]]
+
+
+def test_linear_stage_rods_in_end_blocks() -> None:
+    """(f) Two Ø12 x 240 rods 60 apart along +Y, 25 above the base plate (turned so its 300 runs along the rods), their
+    ends flush in the end blocks (30 thick along the rods: Y -120 .. -90 and 90 .. 120), the carriage centred."""
+    sk, ifs = _golden("f_linear_stage")
+    it = _it(sk)
+    assert it["Guide rod"]["copies"] == [[-30, 0, 25], [30, 0, 25]] and it["Base plate"]["rot"] == 90
+    assert it["End block"]["copies"] == [[0, -105, 20], [0, 105, 20]] and it["Carriage"]["copies"] == [[0, 0, 25]]
+    rods = [f for f in _ifs(ifs, "shaft_bore")]
+    assert len(rods) == 6 and {f["data"]["fit"] for f in rods} == {"H7/h6", "H7/g6"}
+
+
+def test_hinge_pin_through_lugs_and_arm() -> None:
+    """(g) The arm (100 x 22 x 12) pivots on the Ø8 x 40 pin 24 above the clevis' underside (Z -30 + 24 = -6), the pin
+    bore 11 from its end: arm centre X 50 - 11 = 39; the pin is placed (no vanishing part), along Y."""
+    sk, ifs = _golden("g_hinge_arm")
+    it = _it(sk)
+    assert it["Hinge arm"]["copies"] == [[39, 0, -6]] and it["Clevis base"]["cavity"]["open_through"]
+    pin = next(s["item"] for s in sk["standard"] if s["name"] == "Hinge pin")
+    st = icd.seated(ifs, pin)
+    assert st["at"] == [[0, -20, -6]] and st["R"] == icd.CANON["y"]
+
+
+def test_foldable_table_top_as_base_legs_pivot_copy_by_copy() -> None:
+    """(R3) Top 1200 x 700 x 18 is the base; brackets 60 x 30 x 60 under its corners (X +-540, Y +-305, Z -48), 4 M5
+    wood screws each; leg i on bracket i (inboard: Y +-280), the M8 pivot bolt 2 + 20 under the top (Z -40: the leg's
+    upper end 2 mm clear of the top), legs Z -720 .. -20."""
+    sk, ifs = _golden("r_table")
+    it = _it(sk)
+    assert sk["base"] == next(i for i, x in sk["items"].items() if x["name"] == "Table top")
+    assert sorted(it["Leg hinge bracket"]["copies"]) == [[-540, -305, -48], [-540, 305, -48], [540, -305, -48],
+                                                          [540, 305, -48]]
+    assert sorted(it["Folding leg"]["copies"]) == [[-540, -280, -370], [-540, 280, -370], [540, -280, -370],
+                                                    [540, 280, -370]]
+    pivots = [f for f in _ifs(ifs, "hole_pattern") if f["data"].get("pivot")]
+    assert len(pivots) == 4 and {(f["a"]["copy"], f["b"]["copy"]) for f in pivots} == {(0, 0), (1, 1), (2, 2), (3, 3)}
+    screws = [f for f in _ifs(ifs, "hole_pattern") if not f["data"].get("pivot")]
+    assert len(screws) == 4 and all(f["data"]["count"] == 4 and f["data"]["fastener"] == "M5" for f in screws)
+
+
+def test_the_founders_table_plan_is_laid_out_by_role_on_the_old_path() -> None:
+    """The founder's plan (no graph, no sizes): the template took a leg as the base and hung every bracket on leg #1;
+    the parts' roles give the top as the base and each leg on its own bracket, sizes assumed and said."""
+    from aicad.office import interfaces, planner
+
+    plan = json.loads((GC / "r_table.plan.json").read_text(encoding="utf-8"))
+    if "id" not in plan["subassemblies"][0]:
+        plan = planner.normalise_plan(plan, "archie")
+    parts = gc.plan_parts(plan)
+    items = [{"id": p["id"], "kind": "part", "name": p["name"], "family": p["family"], "qty": p["qty"],
+              "description": p["description"], "parent_id": p["sub"]} for p in parts]
+    doc = {"plan": plan, "brief": "Design a foldable Table", "items": items, "tickets": []}
+    sk, ifs = interfaces._graph_layout(doc, None)  # type: ignore[misc]
+    assert sk["solver"] == "roles" and icd.problems(sk, ifs) == []
+    assert _it(sk)["Table top"]["size"] == [1200, 700, 18] and "assumed" in sk["notes"][0]
+    assert len([f for f in ifs if f["data"].get("pivot")]) == 4
+
+
+def test_an_unconnected_copy_blocks_the_gate() -> None:
+    """Per copy, not per item: legs #2 .. #4 with no interface are no_interface errors (the founder's gate passed)."""
+    sk = {"layout": "block", "items": {"leg": {"name": "Leg", "copies": [[0, 0, 0], [1, 0, 0]], "role": "block"},
+                                       "top": {"name": "Top", "copies": [[0, 0, 0]], "role": "block"}}}
+    ifs = [{"kind": "hole_pattern", "a": {"item": "top", "copy": 0}, "b": {"item": "leg", "copy": 0}}]
+    codes = [(x["code"], x.get("copy")) for x in icd._layout_issues(sk, ifs)]
+    assert codes == [("no_interface", 1)]
+
+
+def test_the_founders_own_table_graph_revised_with_old_frozen_sizes() -> None:
+    """The graph the live intent step wrote for "Design a foldable Table" (before pin joints existed): legs bolted to
+    the brackets, no sizes. A revision re-lays it out carrying the old ICD's frozen sizes (top 100 x 70 x 16, the
+    template's assumption) and hole patterns: role sizes win over assumed ones, each leg pivots on its own bracket
+    under a corner, and a frozen pattern that no longer fits its joint yields to the rule (no washer overlap)."""
+    reply = {"components": [
+        {"id": "table_top", "kind": "plate", "name": "Table top"},
+        {"id": "leg", "kind": "other", "name": "Folding leg", "qty": 4},
+        {"id": "hinge_bracket", "kind": "bracket", "name": "Leg hinge bracket", "qty": 4},
+        {"id": "bracket_screw", "kind": "fastener", "name": "Bracket wood screw", "qty": 16, "params": {"style": "shcs"}},
+        {"id": "pivot_bolt", "kind": "fastener", "name": "Leg pivot bolt", "qty": 4, "params": {"style": "hex_bolt"}},
+        {"id": "pivot_washer", "kind": "washer", "name": "Pivot washer", "qty": 8},
+        {"id": "pivot_nut", "kind": "nut", "name": "Pivot lock nut", "qty": 4}],
+        "connections": [{"kind": "bolted_joint", "host": "table_top", "guest": "hinge_bracket", "via": ["bracket_screw"]},
+                        {"kind": "bolted_joint", "host": "hinge_bracket", "guest": "leg",
+                         "via": ["pivot_bolt", "pivot_washer", "pivot_nut"]}]}
+    g, _iss, _qs = intent.compile_reply(reply, "TEST Project", "Design a foldable Table")
+    plan = gc.to_plan(g, resolved=True)
+    parts = gc.plan_parts(plan)
+    ids = {p["name"]: p["id"] for p in parts}
+    frozen = {"items": {ids["Table top"]: {"L": 100, "W": 70, "H": 16, "rot": 0},
+                        ids["Leg hinge bracket"]: {"L": 100, "W": 70, "H": 16, "rot": 0},
+                        ids["Folding leg"]: {"L": 568, "W": 90, "H": 20, "rot": 0}},
+              "interfaces": {f"IF-0{k}": {"count": 4, "fastener": 5, "inset": 11.0} for k in range(1, 5)}}
+    sk, ifs = layout.build(g, parts, g.brief, frozen, resolved=True)
+    it = _it(sk)
+    assert icd.problems(sk, ifs) == [] and it["Table top"]["size"] == [1200, 700, 18]
+    assert min(it["Leg hinge bracket"]["copies"]) == [-540, -305, -48]
+    assert min(it["Folding leg"]["copies"]) == [-540, -305 + 25, -370]
+    assert len([f for f in ifs if f["data"].get("pivot")]) == 4
+    assert any("assumed by role" in n for n in sk["notes"])

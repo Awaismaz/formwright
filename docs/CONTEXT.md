@@ -145,9 +145,46 @@ size; AI image generation is NOT used in planning (a dimensioned preview from th
 size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/checks (PD-82). Ordered work: WORKLIST
 41 to 48. Machine limit: at most two module agents at once.
 
-## Where things stand (handoff, updated 2026-11-18 evening)
+## Founder rules added 2026-11-20
 
-**Latest (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
+- **Push on every build:** every merged and verified change goes to `origin main` straight away (already the push
+  rule; the founder repeated it: "keep pushing updates on every build").
+- **No long dashes anywhere** (em dash, en dash as punctuation): UI copy, agent messages, docs, commits, replies.
+  `web/src/noLongDashes.test.ts` guards the public site; extend it to the whole app when touching copy.
+- **Machine limit:** at most two module agents at once on the founder's PC; reap worker processes after test runs
+  (CAD workers are now reaped per test module and killed at exit). Port 8765 is the founder's app; never test on it.
+- **Permissions:** this project runs Claude Code in bypass-permissions mode (`.claude/settings.local.json`, local
+  only, not in git). Subagents may still hit the auto-mode classifier.
+- **Catalogues and standards:** the founder will decide later; the full tiered list is WORKLIST 55 (backlog).
+- **New modules later:** Motion Studio (WORKLIST 52) and Simulation / basic static FEA (53), only after the core
+  (Design, Office, Assembly) is refined.
+- **Naming:** formwright domain unavailable. Candidates the founder liked: MechBrains (fits his "-brains" family:
+  meetbrains.com, healthbrains.com; parent company Coding the Brains), KineCAD (all TLDs looked free), Machinica,
+  Mechanicum, Kinematica. Undecided; rename everything in one pass once he picks.
+
+## Continue on another PC (handoff 2026-11-20)
+
+1. `git pull` on main, then follow `.claude/skills/dev-setup` (uv venv from uv.lock, `cd web && npm ci`).
+2. `data/` is NOT in git: the founder's projects, Design Office programs (Gear Reducer, Test 5, Shaft Gear, TEST
+   Project, ...) and `data/ADMIN_CREDENTIALS.txt` exist only on the original workstation. Copy the folder privately
+   if needed (it holds credentials), or start fresh (God mode, seed demo).
+3. Start the app with the design graph on, as the founder runs it: `FW_DESIGN_GRAPH=1 uv run aicad app --no-browser
+   --port 8765` (after `unset VIRTUAL_ENV`).
+4. Work in flight on the original PC (local worktrees under `D:/AI CAD/fw-worktrees/`): `wip/connection-layout`
+   (WORKLIST 44, also golden findings F1-F6 and the TEST Project table layout), `wip/program-revision` (54, will repair
+   the founder's TEST Project), `wip/generators` (45/48, paused at 3886b47). Their committed heads are pushed to
+   origin as `wip/*` branches for safety; the agents' reports land in `docs/reports/` when they finish.
+5. Next in order: 44 and 54 merge, then 51 (Assembly Studio chat), 45/48 resume, 50 (hybrid master model), golden
+   suite to 9/9, then 52 and 53. Each merge: targeted tests (1-2 files per run), ruff, tsc, vite build, push.
+6. Measure with `uv run aicad golden --simulated` (and `--env FW_DESIGN_GRAPH=1`); dashboard under Admin > Golden suite.
+
+## Where things stand (handoff, updated 2026-11-20)
+
+**Latest (2026-11-20):** WORKLIST 41, 42, 43 (flag), 46, 49 merged and pushed, plus the recognition fix, gearbox caps,
+Toolbox keys/rings, agent cost, the site revamp, smooth involute gears and the sidebar fix (SESSION_LOG 2026-11-20;
+PUNCH_LIST CD-041..045, DS-041/042, EVAL-009, WEB-010; DECISIONS PD-88..166 index). In flight: 44, 54; paused: 45/48.
+
+**Earlier (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
 PD-73..87; SESSION_LOG 2026-11-19 (i)). In flight: live Design Office run of the test case (`wip/live-gear`) and
 ICD-defined parts without the LLM (`wip/office-direct`). Open follow-ups: WORKLIST 35 and 40.
 

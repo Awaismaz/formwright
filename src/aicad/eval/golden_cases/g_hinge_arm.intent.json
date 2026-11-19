@@ -1,0 +1,59 @@
+{
+  "case": "g_hinge_arm",
+  "name": "Hinged arm",
+  "brief": "A hinged arm: a 100 x 22 x 12 mm arm pivots on a Ø8 x 40 pin between the two lugs of a clevis base (base plate 80 x 40 x 8 mm, lugs 8 mm thick and 24 mm apart, pivot 24 mm above the underside).",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "An arm pivoting on a pin between the two lugs of a clevis base.",
+    "components": [
+      {
+        "id": "clevis",
+        "kind": "bracket",
+        "name": "Clevis base",
+        "qty": 1,
+        "params": {
+          "L": 80,
+          "W": 40,
+          "H": 30
+        }
+      },
+      {
+        "id": "arm",
+        "kind": "other",
+        "name": "Hinge arm",
+        "qty": 1,
+        "params": {
+          "L": 100,
+          "W": 22,
+          "H": 12
+        }
+      },
+      {
+        "id": "pin",
+        "kind": "dowel",
+        "name": "Hinge pin",
+        "qty": 1,
+        "params": {
+          "d": 8,
+          "length": 40
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "pin_joint",
+        "host": "clevis",
+        "guest": "arm",
+        "via": [
+          "pin"
+        ],
+        "params": {
+          "pivot_height": 24,
+          "gap": 24
+        }
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

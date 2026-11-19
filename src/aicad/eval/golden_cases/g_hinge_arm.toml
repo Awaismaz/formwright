@@ -10,6 +10,7 @@ brief = "A hinged arm: a 100 x 22 x 12 mm arm pivots on a Ø8 x 40 pin between t
 
 [sim]
 plan = "g_hinge_arm.plan.json"
+intent = "g_hinge_arm.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
 
 [limits]
 tokens = 120

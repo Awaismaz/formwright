@@ -55,8 +55,11 @@ def _inv(x: float) -> float:
 class _Involute:
     """Standard (x = 0) spur gear tooth geometry, ISO 53 basic rack: addendum m, dedendum 1.25 m."""
 
-    def __init__(self, m: float, z: int, alpha_deg: float) -> None:
+    def __init__(self, m: float, z: int, alpha_deg: float, backlash: float = 0.0) -> None:
         self.m, self.z, self.a = m, z, math.radians(alpha_deg)
+        # backlash: circumferential tooth thinning at the pitch circle (mm), half taken off each flank, so two
+        # meshing gears at the standard centre distance m(z1+z2)/2 clear instead of touching flank to flank
+        self.thin = backlash / 2 / (m * z / 2)
         self.rp = m * z / 2
         self.rb = self.rp * math.cos(self.a)
         self.ra = self.rp + m
@@ -66,7 +69,7 @@ class _Involute:
     def psi(self, r: float) -> float:
         """Half the tooth's angular thickness at radius r (involute part)."""
         r = max(r, self.rb)
-        return math.pi / (2 * self.z) + _inv(self.a) - _inv(math.acos(min(1.0, self.rb / r)))
+        return math.pi / (2 * self.z) + _inv(self.a) - _inv(math.acos(min(1.0, self.rb / r))) - self.thin
 
     def area(self) -> float:
         """Profile area: root disc + z teeth, a tooth being 2 psi(r) r dr above r0 and radial flanks below."""
@@ -115,7 +118,7 @@ def _keyway_segment(radius: float, b: float) -> float:
 def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle: float = 20.0, bore: float = 0.0,
               hub_d: float = 0.0, hub_l: float = 0.0, keyway: bool | tuple[float, float] = False,
               helix_angle: float = 0.0, name: str = "Gear teeth", z0: float = 0.0,
-              keyway_angle: float = 90.0) -> tuple[Any, dict[str, Any]]:
+              keyway_angle: float = 90.0, backlash: float = 0.0) -> tuple[Any, dict[str, Any]]:
     """Spur (or helical) gear from Z = z0 up, axis Z, true involute flanks (no root fillet), standard addendum m and
     dedendum 1.25 m, profile shift 0, a tooth centred on +X. Optional hub (Ø hub_d, length hub_l on the +Z face),
     through bore, and a hub keyway (keyway=True: DIN 6885-1 for the bore; or (b, t2)) on the side keyway_angle
@@ -130,7 +133,7 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
         raise ValueError("teeth must be a whole number from 8 to 400")
     if module <= 0 or face_width <= 0:
         raise ValueError("module and face width must be positive")
-    g = _Involute(float(module), z, float(pressure_angle))
+    g = _Involute(float(module), z, float(pressure_angle), float(backlash))
     if bore and bore / 2 >= g.rf - 0.5 * module:
         raise ValueError(f"bore Ø{bore:g} leaves no rim: keep it below Ø{2 * (g.rf - 0.5 * module):.1f}")
     if hub_d and (hub_l <= 0 or hub_d <= bore):

@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-VERSION = 2  # v2 (2026-11-19): bearing rings carry their ISO 582 mounting chamfers r_s min (was: sharp corners)
+VERSION = 3  # v3 (2026-11-20): spur gear flanks are true involute splines (were polylines: faceted teeth). v2: bearing ISO 582 chamfers
 SQ3 = math.sqrt(3.0)
 
 # ------------------------------------------------------------------------------------------------ tables
@@ -227,52 +227,6 @@ def _bearing(SERIES: float) -> tuple[Any, dict[str, Any]]:
     return part, {"bbox": [Dd, Dd, B], "volume": vol, "solids": 2 + n}
 
 
-def _gear_profile(M: float, Z: int, alpha_deg: float = 20.0, flank: int = 10) -> list[tuple[float, float]]:
-    a = math.radians(alpha_deg)
-    rp, ra, rf = M * Z / 2, M * Z / 2 + M, M * Z / 2 - 1.25 * M
-    rb = rp * math.cos(a)
-
-    def inv(x: float) -> float:
-        return math.tan(x) - x
-
-    def psi(r: float) -> float:  # half tooth angle at radius r
-        r = max(r, rb)
-        return math.pi / (2 * Z) + inv(a) - inv(math.acos(rb / r))
-
-    r0 = max(rb, rf)
-    radii = [r0 + (ra - r0) * (i / flank) ** 1.3 for i in range(flank + 1)]
-    pts: list[tuple[float, float]] = []
-    for i in range(Z):
-        phi = 2 * math.pi * i / Z
-        if rf < rb:
-            pts.append((rf * math.cos(phi - psi(rb)), rf * math.sin(phi - psi(rb))))
-        for r in radii:  # right flank, root -> tip
-            pts.append((r * math.cos(phi - psi(r)), r * math.sin(phi - psi(r))))
-        pts.append((ra * math.cos(phi), ra * math.sin(phi)))
-        for r in reversed(radii):  # left flank, tip -> root
-            pts.append((r * math.cos(phi + psi(r)), r * math.sin(phi + psi(r))))
-        if rf < rb:
-            pts.append((rf * math.cos(phi + psi(rb)), rf * math.sin(phi + psi(rb))))
-        nxt = 2 * math.pi * (i + 1) / Z
-        a0, a1 = phi + psi(rb), nxt - psi(rb)
-        for j in range(1, 3):
-            t = a0 + (a1 - a0) * j / 3
-            pts.append((rf * math.cos(t), rf * math.sin(t)))
-    return [(round(x, 6), round(y, 6)) for x, y in pts]
-
-
-def _shoelace(pts: list[tuple[float, float]]) -> float:
-    return abs(sum(x0 * y1 - x1 * y0 for (x0, y0), (x1, y1) in zip(pts, pts[1:] + pts[:1], strict=True))) / 2
-
-
-def _segment_in_strip(R: float, b: float) -> float:
-    """Area of a radius-R disc inside the strip |y| <= b / 2 on the side x >= 0 (exact)."""
-    def F(v: float) -> float:
-        return v / 2 * math.sqrt(R * R - v * v) + R * R / 2 * math.asin(v / R)
-
-    return F(b / 2) - F(-b / 2)
-
-
 def key_row(D: float) -> tuple[float, float, float, float]:
     """DIN 6885-1 (b, h, t1, t2) for a shaft Ø D (over lo, up to hi)."""
     for (lo, hi), v in KEY_ROWS:
@@ -283,8 +237,6 @@ def key_row(D: float) -> tuple[float, float, float, float]:
 
 def _spur_gear(M: float, Z: float, B: float, BORE: float, KEY_B: float = 0.0, KEY_T2: float = 0.0,
                KEY_ANG: float = 0.0) -> tuple[Any, dict[str, Any]]:
-    from build123d import Align, Box, Polygon, Pos, Rot, extrude
-
     from aicad import fw
 
     z = round(Z)
@@ -299,18 +251,18 @@ def _spur_gear(M: float, Z: float, B: float, BORE: float, KEY_B: float = 0.0, KE
     if KEY_B > 0 and not (KEY_B < BORE and KEY_T2 > 0 and R + KEY_T2 < rf - M / 2):
         raise ToolboxError("hub keyway: width must be below the bore and the keyway top inside the rim "
                            f"(bore radius + t2 below {rf - M / 2:.1f})")
-    pts = _gear_profile(M, z)
-    body = fw.feature("Involute teeth (α=20°)", extrude(Polygon(*pts, align=None), B))
-    part = fw.feature("Bore", body - _cyl(R, B + 0.02, -0.01))
-    vol = (_shoelace(pts) - math.pi * R * R) * B
-    if KEY_B > 0:  # DIN 6885 hub keyway: b wide, its top R + t2 from the axis, through, centred on KEY_ANG from +X
-        slot = Rot(0, 0, KEY_ANG) * Pos(0, 0, -0.01) * Box(R + KEY_T2, KEY_B, B + 0.02,
-                                                           align=(Align.MIN, Align.CENTER, Align.MIN))
-        part = fw.feature(f"Hub keyway {KEY_B:g}×{KEY_T2:g} (DIN 6885)", part - slot)
-        vol -= (KEY_B * (R + KEY_T2) - _segment_in_strip(R, KEY_B)) * B
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-    return part, {"bbox": [max(xs) - min(xs), max(ys) - min(ys), B], "volume": vol, "solids": 1}
+    # v3: true involute flanks as smooth splines (fw_std.spur_gear, the generator the direct path uses). v2 sampled
+    # each flank as a polyline, so every flank was several flat faces (founder: "split into multiple planes").
+    # Same conventions: a tooth centred on +X, axis Z, faces Z = 0..B, keyway centred KEY_ANG degrees from +X.
+    from aicad import fw_std
+
+    # a small working backlash (0.04 m of tooth thinning at the pitch circle): exact involutes at m(z1+z2)/2 would
+    # touch flank to flank and read as a clash; the old polyline flanks only cleared because their chords cut inside
+    part, exp = fw_std.spur_gear(M, z, B, bore=BORE, name="Involute teeth", backlash=0.04 * M,
+                                 keyway=(KEY_B, KEY_T2) if KEY_B > 0 else False, keyway_angle=KEY_ANG)
+    if KEY_B > 0:
+        fw.feature(f"Hub keyway {KEY_B:g}×{KEY_T2:g} (DIN 6885)", part)
+    return part, {"bbox": exp["bbox"], "volume": exp["volume"], "solids": 1}
 
 
 def _key_for(D: float) -> tuple[float, float]:
@@ -474,7 +426,7 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
               "Steel C45", _spur_gear,
               lambda p: f"Spur gear m{p['M']:g} z{int(p['Z'])}" + (
                   f", keyed {p['KEY_B']:g}×{p['KEY_T2']:g}" if p.get("KEY_B") else ""),
-              "True involute flanks (polyline-sampled), no profile shift. Optional DIN 6885 hub keyway.", "cog"),
+              "True involute flanks (smooth splines), no profile shift. Optional DIN 6885 hub keyway.", "cog"),
     Component("parallel_key", "Parallel key", "Pins & keys", "DIN 6885-1 form A",
               ["parallel key", "feather key", "6885", "key", "keys"],
               [P("D", "Shaft diameter", 20, min=8, max=65, help="b × h from DIN 6885-1 for the shaft Ø"),
