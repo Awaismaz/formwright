@@ -110,6 +110,10 @@ planning 43 s. The gear rework (2.6 min) and the false stop were the two big avo
   `test_failure_and_level_messages`).
 - Verified live: with the visual fixes the blocked Gear-shaft sub integrated on retry and the program completed.
 
+Tests: `test_assembly_visual.py`, `test_office_orchestrator.py`, `test_office_shaft_line.py`: 49 passed, 1 failed;
+the failure (`test_gage_sends_back_then_approves_and_caps_retries`, ICD `no_interface` 409 for "Good shaft") fails
+the same way on unmodified main 1995236. `ruff check src tests` clean.
+
 ## Parked
 - PD (proposed): a design turn's cost must be capped well below a trial wallet; default program budget ≤ wallet.
   Default used: none changed.
