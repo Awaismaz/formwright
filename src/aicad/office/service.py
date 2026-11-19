@@ -313,13 +313,20 @@ def revise_plan(root: Path, doc: dict[str, Any], a: dict[str, Any], actor: dict[
         raise OfficeInputError("The plan can go back only while the interfaces wait for approval and no part work "
                                "has started.")
     plan = doc["plan"]
-    subs = [{**sub, "parts": [dict(x) for x in sub["parts"]]} for sub in plan["subassemblies"]]
+    if a.get("plan"):  # a whole earlier plan back (Archie's plan change undone, office/supervisor)
+        subs = [{**sub, "parts": [dict(x) for x in sub["parts"]]} for sub in a["plan"]["subassemblies"]]
+    else:
+        subs = [{**sub, "parts": [dict(x) for x in sub["parts"]]} for sub in plan["subassemblies"]]
     add = a.get("add") or {}
     if add:
         sub = next((x for x in subs if x["name"] == add["sub"]), None)
         if sub is None:
             raise OfficeInputError("That sub-assembly is no longer in the plan.")
         sub["parts"].insert(0, dict(add["part"]))
+    if a.get("remove"):  # one part out (a part the brief excludes, approved by the engineer)
+        for sub in subs:
+            sub["parts"] = [x for x in sub["parts"] if x["name"] != a["remove"]]
+        subs = [sub for sub in subs if sub["parts"]]
     p2 = planner.normalise_plan({**plan, "subassemblies": subs}, plan["source"])
     if p2 is None:
         raise OfficeInputError("The revised plan is empty.")
@@ -336,7 +343,7 @@ def revise_plan(root: Path, doc: dict[str, Any], a: dict[str, Any], actor: dict[
     note = f"Archie sent the plan back at the interfaces gate: {a['notes']}"
     set_plan(root, doc, p2, actor, narrative=plan.get("narrative") or "", note=note)
     emit(root, doc, "plan.revised", f"{actor.get('name', 'Someone')} sent the plan back for review: {a['notes']}",
-         actor, added=(add.get("part") or {}).get("name"))
+         actor, added=(add.get("part") or {}).get("name"), removed=a.get("remove"))
 
 
 DELIVERABLE_TICKETS = (
@@ -607,6 +614,9 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
 
     out.pop("skeleton", None)
     out["icd"] = interfaces.view(doc)
+    from aicad.office import supervisor
+
+    out["supervisor"] = supervisor.view(doc)  # Archie's log, rule overrides and what is relaxed (WORKLIST 49)
     out["change_requests"] = doc.get("change_requests") or []
     out["assembly"] = doc.get("assembly")
     b = orchestrator.budget_state(doc)

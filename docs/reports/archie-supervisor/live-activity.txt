@@ -1,0 +1,153 @@
+2026-11-19T20:12:40Z Founder: Founder opened the program Plate and cover live.
+2026-11-19T20:12:40Z Archie: The standard planner split Plate and cover live into 2 sub-assemblies and 3 parts. Review the plan before tickets are created.
+2026-11-19T20:12:40Z Founder: Founder approved the brief and plan. 6 tickets opened.
+2026-11-19T20:12:40Z Archie: Archie laid out Plate and cover live: 2 designed parts in the skeleton and 1 named interfaces. Review the interfaces (ICD) before part work starts.
+2026-11-19T20:12:40Z Founder: Founder approved the architecture and interfaces (ICD v1, 1 interfaces). Part tickets are released; Fitz is assembling the placeholders.
+2026-11-19T20:12:40Z Founder: Founder pressed Run: the office works the tickets, 2 at a time.
+2026-11-19T20:12:40Z Hex: Hex picked up PACL-1 Base plate.
+2026-11-19T20:12:40Z Hex: Hex #2 picked up PACL-4 Cover.
+2026-11-19T20:12:40Z Hex: Hex #3 picked up PACL-2 Frame bolt.
+2026-11-19T20:12:40Z Hex: Hex is searching the Toolbox and your parts for Base plate
+2026-11-19T20:12:40Z Hex: Hex → Mill: no stock part for Base plate, design it.
+2026-11-19T20:12:40Z Hex: Hex is searching the Toolbox and your parts for Cover
+2026-11-19T20:12:40Z Hex: Hex → Benny: no stock part for Cover, design it.
+2026-11-19T20:12:40Z Hex: Hex is searching the Toolbox and your parts for Frame bolt
+2026-11-19T20:12:40Z Hex: Hex moved PACL-2 Frame bolt: Ready → Approved.
+2026-11-19T20:12:40Z Hex: Hex found Hex bolt ISO 4017 M8×30 in the Toolbox (size to suit the holes at assembly) for PACL-2 Frame bolt (0 tokens).
+2026-11-19T20:12:40Z Hex: Hex → Fitz: Frame bolt is in stock, ready for assembly.
+2026-11-19T20:12:40Z Archie: PACL-2 Frame bolt took 0 s against 25 s estimated: Hex's rate for standard part (toolbox) moves 0.425 → 0.3612 min per complexity unit.
+2026-11-19T20:12:40Z Mill: Mill picked up PACL-1 Base plate.
+2026-11-19T20:12:40Z Benny: Benny picked up PACL-4 Cover.
+2026-11-19T20:12:40Z Mill: Mill opened PACL-1 Base plate as a Design Studio part.
+2026-11-19T20:12:40Z Mill: Mill moved PACL-1 Base plate: Ready → In design.
+2026-11-19T20:12:40Z Mill: Mill is reading the brief for Base plate
+2026-11-19T20:12:40Z Benny: Benny opened PACL-4 Cover as a Design Studio part.
+2026-11-19T20:12:40Z Benny: Benny moved PACL-4 Cover: Ready → In design.
+2026-11-19T20:12:40Z Benny: Benny is reading the brief for Cover
+2026-11-19T20:12:40Z Mill: PACL-1 Base plate: Brief read reached (5 %).
+2026-11-19T20:12:40Z Benny: PACL-4 Cover: Brief read reached (5 %).
+2026-11-19T20:12:40Z Mill: Mill is roughing out Base plate
+2026-11-19T20:12:40Z Benny: Benny is cutting the blank for Cover
+2026-11-19T20:12:41Z Benny: PACL-4 Cover: First build reached (35 %).
+2026-11-19T20:12:41Z Benny: Cover passes the gating checks: Benny is flattening burrs
+2026-11-19T20:12:41Z Mill: PACL-1 Base plate: First build reached (35 %).
+2026-11-19T20:12:41Z Mill: Base plate passes the gating checks: Mill is deburring
+2026-11-19T20:12:41Z Design Studio: PACL-1 Base plate: the latest build passes the gating checks (70 %).
+2026-11-19T20:12:41Z Design Studio: PACL-4 Cover: the latest build passes the gating checks (70 %).
+2026-11-19T20:12:41Z Benny: Benny is checking Cover against the brief
+2026-11-19T20:12:41Z Benny: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:12:41Z Benny: Benny moved PACL-4 Cover: In design → In review.
+2026-11-19T20:12:41Z Benny: Benny → Gage: Cover for inspection.
+2026-11-19T20:12:41Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:12:41Z Mill: Mill is measuring Base plate against the brief
+2026-11-19T20:12:41Z Mill: PACL-1 Base plate: Self-review reached (85 %).
+2026-11-19T20:12:41Z Mill: Mill moved PACL-1 Base plate: In design → In review.
+2026-11-19T20:12:41Z Mill: Mill → Gage: Base plate for inspection.
+2026-11-19T20:12:41Z Gage: Gage is inspecting Base plate against the brief
+2026-11-19T20:12:47Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:12:47Z Gage: Gage moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:12:47Z Gage: Gage → Benny: Cover sent back. IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1).
+2026-11-19T20:12:47Z Benny: Benny moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:12:47Z Benny: Benny is reading the brief for Cover
+2026-11-19T20:12:47Z Gage: Gage commented on PACL-1 Base plate.
+2026-11-19T20:12:47Z Gage: Gage moved PACL-1 Base plate: In review → Approved.
+2026-11-19T20:12:47Z Gage: Gage → Fitz: Base plate approved for assembly.
+2026-11-19T20:12:47Z Fitz: Fitz picked up PACL-1 Base plate.
+2026-11-19T20:12:47Z Fitz: Fitz is swapping Base plate in for its placeholder
+2026-11-19T20:12:47Z Benny: Benny is bending Cover
+2026-11-19T20:12:47Z Fitz: Fitz assembled Plate and cover live from 2 placeholders: 3 mates by interface name; 0 clashes at the last check (placeholders).
+2026-11-19T20:12:47Z Fitz: Fitz swapped the real Base plate in for its placeholder: every interface mate re-attached by name, 0 clashes (3 mates in the program assembly).
+2026-11-19T20:12:47Z Archie: PACL-1 Base plate took 7 s against 10.2 min estimated: Mill's rate for machined (prismatic) moves 3.4 → 2.89 min per complexity unit.
+2026-11-19T20:12:47Z Fitz: Fitz picked up PACL-3 Assemble Frame.
+2026-11-19T20:12:47Z Fitz: Fitz moved PACL-3 Assemble Frame: Backlog → In design.
+2026-11-19T20:12:47Z Fitz: Fitz is laying out Frame on the bench
+2026-11-19T20:12:47Z Fitz: Fitz is looking at Frame before it is signed off
+2026-11-19T20:12:47Z Benny: Cover passes the gating checks: Benny is flattening burrs
+2026-11-19T20:12:48Z Benny: Benny is checking Cover against the brief
+2026-11-19T20:12:48Z Benny: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:12:48Z Benny: Benny moved PACL-4 Cover: In design → In review.
+2026-11-19T20:12:48Z Benny: Benny → Gage: Cover for inspection.
+2026-11-19T20:12:48Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:12:48Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:12:48Z Archie: Archie moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:12:48Z Benny: PACL-4 Cover needs you: Benny rebuilt Cover, but my measurement came back exactly the same: IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1). When a redesign doesn't move the measurement, the measurement or the interface spec is usually what's wrong, not the part. Look at the part: if the feature is as specified, approve it yourself; if the spec asks for something the part can't have, change the interface.
+2026-11-19T20:12:49Z Archie: Archie commented on PACL-3 Assemble Frame.
+2026-11-19T20:12:49Z Fitz: Fitz commented on PACL-3 Assemble Frame.
+2026-11-19T20:12:49Z Fitz: Fitz moved PACL-1 Base plate: Approved → Integrated.
+2026-11-19T20:12:49Z Fitz: Fitz moved PACL-2 Frame bolt: Approved → Integrated.
+2026-11-19T20:12:49Z Fitz: Fitz moved PACL-3 Assemble Frame: In design → Integrated.
+2026-11-19T20:12:49Z Fitz: PACL-3 Assemble Frame: Fitz integrated Frame: fitted 0 fastener stacks, 8 planned parts not placed (more than the ICD uses, or no interface: see the notes).
+2026-11-19T20:12:49Z Archie: PACL-3 Assemble Frame took 1 s against 1.8 min estimated: Fitz's rate for assembly integration moves 1.8424 → 1.566 min per complexity unit.
+2026-11-19T20:13:19Z Archie: Archie relaxed the review-round cap on PACL-4 Cover, for 1 more round: The round cap is procedural; one more round with a precise instruction is honest work on a fixable part
+2026-11-19T20:13:19Z Archie: Archie retried PACL-4 Cover.
+2026-11-19T20:13:19Z Archie: Archie relaxed the no-progress guard on PACL-4 Cover, for 1 more round: The rebuild didn't move the hole because the instruction wasn't specific enough, not because the measurement is wrong
+2026-11-19T20:13:19Z Archie: Archie commented on PACL-4 Cover.
+2026-11-19T20:13:19Z Archie: Archie: Only hole 1 on the Cover is flagged: Ø5.500 is in tolerance but it sits at x -36.00 instead of -39.00, while y matches. A single hole off by a clean 3 mm, with the other holes passing, points to a misplaced feature that the rebuild did not move, not a misread datum. The Base plate already passed aga
+2026-11-19T20:13:19Z Benny: Benny picked up PACL-4 Cover.
+2026-11-19T20:13:19Z Benny: Benny moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:13:19Z Benny: Benny is reading the brief for Cover
+2026-11-19T20:13:19Z Benny: Benny is bending Cover
+2026-11-19T20:13:20Z Benny: Cover passes the gating checks: Benny is flattening burrs
+2026-11-19T20:13:20Z Benny: Benny is checking Cover against the brief
+2026-11-19T20:13:20Z Benny: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:13:20Z Benny: Benny moved PACL-4 Cover: In design → In review.
+2026-11-19T20:13:20Z Benny: Benny → Gage: Cover for inspection.
+2026-11-19T20:13:20Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:13:20Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:13:20Z Gage: Gage moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:13:20Z Gage: Gage → Benny: Cover sent back. IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1).
+2026-11-19T20:13:20Z Benny: Benny moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:13:20Z Benny: Benny is reading the brief for Cover
+2026-11-19T20:13:21Z Benny: Benny is bending Cover
+2026-11-19T20:13:21Z Benny: Cover passes the gating checks: Benny is flattening burrs
+2026-11-19T20:13:22Z Benny: Benny is checking Cover against the brief
+2026-11-19T20:13:22Z Benny: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:13:22Z Benny: Benny moved PACL-4 Cover: In design → In review.
+2026-11-19T20:13:22Z Benny: Benny → Gage: Cover for inspection.
+2026-11-19T20:13:22Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:13:22Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:13:22Z Gage: Gage moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:13:22Z Gage: Gage → Benny: Cover sent back. IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1).
+2026-11-19T20:13:22Z Benny: Benny moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:13:22Z Benny: Benny is reading the brief for Cover
+2026-11-19T20:13:22Z Benny: Benny is bending Cover
+2026-11-19T20:13:23Z Benny: Cover passes the gating checks: Benny is flattening burrs
+2026-11-19T20:13:23Z Benny: Benny is checking Cover against the brief
+2026-11-19T20:13:23Z Benny: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:13:23Z Benny: Benny moved PACL-4 Cover: In design → In review.
+2026-11-19T20:13:23Z Benny: Benny → Gage: Cover for inspection.
+2026-11-19T20:13:23Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:13:24Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:13:24Z Archie: Archie moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:13:24Z Benny: PACL-4 Cover needs you: Benny rebuilt Cover, but my measurement came back exactly the same: IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1). When a redesign doesn't move the measurement, the measurement or the interface spec is usually what's wrong, not the part. Look at the part: if the feature is as specified, approve it yourself; if the spec asks for something the part can't have, change the interface.
+2026-11-19T20:13:50Z Archie: Archie updated PACL-4 Cover: reassigned to Molly.
+2026-11-19T20:13:50Z Archie: Archie retried PACL-4 Cover.
+2026-11-19T20:13:50Z Archie: Archie commented on PACL-4 Cover.
+2026-11-19T20:13:50Z Archie: Archie: Hole 1 on the Cover measures Ø5.500 at (-36.00, -24.00) against a specified (-39.00, -24.00), and only that hole is off. Diameter, y-position and the other three holes conform, so the check is reading the part correctly: a single asymmetric hole looks like a model error, not a measurement fault. Ben
+2026-11-19T20:13:50Z Molly: Molly picked up PACL-4 Cover.
+2026-11-19T20:13:50Z Molly: Molly moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:13:50Z Molly: Molly is reading the brief for Cover
+2026-11-19T20:13:50Z Molly: Molly is adding draft and ribs to Cover
+2026-11-19T20:13:51Z Molly: Cover passes the gating checks: Molly is trimming the gates
+2026-11-19T20:13:51Z Molly: Molly is checking Cover against the brief
+2026-11-19T20:13:51Z Molly: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:13:51Z Molly: Molly moved PACL-4 Cover: In design → In review.
+2026-11-19T20:13:51Z Molly: Molly → Gage: Cover for inspection.
+2026-11-19T20:13:51Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:13:51Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:13:51Z Gage: Gage moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:13:51Z Gage: Gage → Molly: Cover sent back. IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1).
+2026-11-19T20:13:51Z Molly: Molly moved PACL-4 Cover: Changes requested → In design.
+2026-11-19T20:13:51Z Molly: Molly is reading the brief for Cover
+2026-11-19T20:13:52Z Molly: Molly is adding draft and ribs to Cover
+2026-11-19T20:13:52Z Molly: Cover passes the gating checks: Molly is trimming the gates
+2026-11-19T20:13:52Z Molly: Molly is checking Cover against the brief
+2026-11-19T20:13:52Z Molly: PACL-4 Cover: Self-review reached (85 %).
+2026-11-19T20:13:52Z Molly: Molly moved PACL-4 Cover: In design → In review.
+2026-11-19T20:13:52Z Molly: Molly → Gage: Cover for inspection.
+2026-11-19T20:13:52Z Gage: Gage is inspecting Cover against the brief
+2026-11-19T20:13:53Z Gage: Gage commented on PACL-4 Cover.
+2026-11-19T20:13:53Z Archie: Archie moved PACL-4 Cover: In review → Changes requested.
+2026-11-19T20:13:53Z Molly: PACL-4 Cover needs you: Molly rebuilt Cover, but my measurement came back exactly the same: IF-01 Cover ↔ Base plate: bolted joint: hole 1 specified Ø5.5 ±0.05 at (-39.00, -24.00), measured Ø5.500 at (-36.00, -24.00), 3.00 mm off position (±0.1). When a redesign doesn't move the measurement, the measurement or the interface spec is usually what's wrong, not the part. Look at the part: if the feature is as specified, approve it yourself; if the spec asks for something the part can't have, change the interface.
+2026-11-19T20:14:14Z Archie: Archie paused PACL-4 Cover.
+2026-11-19T20:14:14Z Archie: Archie: IF-01 does not match the brief: the brief calls for M6 bolts, but IF-01 specifies M5 with Ø5.5 holes. Its inset of 11.0 on a 120 x 80 plate would put the holes at (±49, ±29), not the (±39, ±24) Gage measures against. The reading is not clearly a gauge error, because only hole 1 is off and it has rea

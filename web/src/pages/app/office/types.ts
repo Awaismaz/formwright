@@ -58,6 +58,8 @@ export interface Ticket {
     observed?: number; why?: string; profile?: string } | null;
   /** Phase 6: the engineer's decision at the per-part review gate; the change notice that reopened it. */
   reviewed?: { by: string; at: string; decision: "approved" | "changes"; note: string | null } | null; ecn?: string;
+  /** WORKLIST 49: checks Archie relaxed on this part (relaxed, never passed) and the advisory notes he recorded. */
+  relaxed?: RelaxedCheck[]; review_notes?: string[];
 }
 
 // ------------------------------------------------------------------ Phase 4: skeleton, ICD, change requests
@@ -192,6 +194,27 @@ export interface Program {
   express?: Express | null;
   /** "auto": drawings and the manufacturing review follow, except for a small program whose brief doesn't ask. */
   deliverables_mode?: "auto" | "on" | "off"; deliverables_why?: string | null;
+  /** WORKLIST 49: Archie supervising the program (his log, rule overrides, relaxed checks). */
+  supervisor?: SupervisorView;
+}
+
+export interface RelaxedCheck { rule: string; label: string; feature?: string | null; feature_text?: string | null; text: string; reason: string; override: string; at: string; undone?: boolean }
+export interface SupervisorEntry {
+  id: string; at: string; tool: string; title: string; why: string; class: "minor" | "major"; class_why: string;
+  cause?: string | null; diagnosis?: string | null; evidence: string[]; mode: "ai" | "rules" | "simulated"; tokens?: number;
+  trigger: string[]; ticket?: string | null;
+  status: "applied" | "asking" | "declined" | "failed" | "lapsed" | "undone"; outcome?: string;
+  decided?: { by: string; at: string; choice: string } | null; undone?: { by: string; at: string; outcome: string } | null;
+  undoable: boolean; undo_why?: string | null; message?: string;
+}
+export interface RuleOverride {
+  id: string; rule: string; label: string; scope_text: string; feature?: string | null; feature_text?: string | null; reason: string; expiry_text: string;
+  status: "active" | "expired" | "undone"; at: string; approved_by?: string | null; measures: boolean; action?: string | null;
+  ended?: { at: string; why: string } | null; uses?: { ticket: string; at: string }[];
+}
+export interface SupervisorView {
+  enabled: boolean; log: SupervisorEntry[]; overrides: RuleOverride[]; calls_hour: number; max_calls_hour: number;
+  asking: number; relaxed: string[];
 }
 
 export interface LightInfo { rule: string; parts: number; pieces: number; deliverables_asked: boolean; text: string }
@@ -209,10 +232,16 @@ export interface ArchieAction {
 }
 export interface ArchieMessage {
   id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;
-  kind?: "status" | "ai" | "office" | "look"; tokens?: number; actions?: ArchieAction[];
+  kind?: "status" | "ai" | "office" | "look" | "supervisor"; tokens?: number; actions?: ArchieAction[];
+  /** Archie supervising: a major change waits for a yes or no (clickable choices). */
+  questions?: ArchieQuestion[]; supervisor?: { mode: "ai" | "rules" | "simulated"; entries: string[] };
   /** Archie spoke first (a look, a failure): founder 2026-11-19. */
   unprompted?: boolean;
   visual?: { level: string; image: string | null; verdict: VisualVerdict | null; quick: QuickFinding[] | null; tokens?: number };
+}
+export interface ArchieQuestion {
+  action: string; question: string; why?: string; options: { id: "approve" | "decline"; label: string }[];
+  answered?: "approve" | "decline"; by?: Actor; at?: string;
 }
 export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 

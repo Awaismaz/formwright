@@ -14,6 +14,13 @@ def _no_live_visual_check(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FW_ASSEMBLY_VISUAL_CHECK", "0")
 
 
+@pytest.fixture(autouse=True)
+def _no_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WORKLIST 49: Archie supervises running programs and acts on blocked tickets. Existing tests assert the office's
+    own behaviour, so he is off unless a test turns him on (``tests/test_office_supervisor.py``)."""
+    monkeypatch.setenv("FW_OFFICE_SUPERVISOR", "0")
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _reap_cad_workers() -> Iterator[None]:
     """Each test app keeps warm CAD workers (~300-500 MB each) keyed by project or org; across a session they piled up

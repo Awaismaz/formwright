@@ -17,6 +17,7 @@ import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import TimelineView from "./TimelineView";
 import ArchieChat, { TalkToArchieButton } from "./ArchieChat";
+import ArchieLog from "./ArchieLog";
 import SpeedPanel from "./SpeedPanel";
 import Tree from "./Tree";
 import { saveNative } from "@/components/NativeExport";
@@ -276,13 +277,14 @@ export default function ProgramPage() {
         <LightCard p={p} />
         <RunBar p={p} onSpeed={() => setSpeedOpen(true)} />
         <Tabs value={tab} onValueChange={v => { params.set("tab", v); setParams(params, { replace: true }); }}>
-          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="deliverables">Deliverables{p.gates.some(g => g.code === "release" && g.status === "pending") ? " ·" : ""}</Tab><Tab value="timeline">Timeline</Tab><Tab value="tree">Tree</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
+          <TabList className="mb-3"><Tab value="board">Board</Tab><Tab value="interfaces">Interfaces{icdPending ? " ·" : ""}</Tab><Tab value="assembly">Assembly</Tab><Tab value="deliverables">Deliverables{p.gates.some(g => g.code === "release" && g.status === "pending") ? " ·" : ""}</Tab><Tab value="timeline">Timeline</Tab><Tab value="tree">Tree</Tab><Tab value="archie">Archie{p.supervisor?.asking ? ` · ${p.supervisor.asking}` : ""}</Tab><Tab value="activity">Activity</Tab><Tab value="brief">Brief</Tab></TabList>
           <TabPanel value="board"><Board program={p} onOpen={setOpen} handoffs={handoffs} /></TabPanel>
           <TabPanel value="interfaces"><Interfaces program={p} /></TabPanel>
           <TabPanel value="assembly"><AssemblyView program={p} recent={recent} /></TabPanel>
           <TabPanel value="deliverables"><Deliverables program={p} /></TabPanel>
           <TabPanel value="timeline"><TimelineView program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="tree"><Tree program={p} onOpen={setOpen} /></TabPanel>
+          <TabPanel value="archie"><ArchieLog program={p} onTalk={() => setChatOpen(true)} /></TabPanel>
           <TabPanel value="activity"><Activity program={p} /></TabPanel>
           <TabPanel value="brief">
             <Card className="space-y-3 p-5 text-[13px]">

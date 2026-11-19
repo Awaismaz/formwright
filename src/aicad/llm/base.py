@@ -37,6 +37,7 @@ ROLES: tuple[str, ...] = (
     "reconcile",      # Branch merge: conflict reconciliation (platform/collab/reconcile.propose)
     "office_chat",    # Design Office: talking to Archie during a program (office/archie_chat, CD-026)
     "assembly_check", # visual assembly check: one look at the 4-view picture (assembly/visual.ask, PD-73)
+    "supervisor",     # Design Office: Archie supervising a running program (office/supervisor.run_supervisor), Opus
 )
 
 # Capability names a provider declares (contract tests are gated on them).

@@ -171,6 +171,10 @@ def needs_you(doc: dict[str, Any]) -> list[str]:
         out.append("the release pack waits for your sign-off on the Deliverables tab")
     if (doc.get("orchestrator") or {}).get("state") == "stopped":
         out.append("the office stopped at the token budget: raise it and press Resume")
+    asking = [e for e in (doc.get("supervisor") or {}).get("log") or [] if e.get("status") == "asking"]
+    if asking:  # Archie's major proposals wait for a yes or no (office/supervisor)
+        out.append(f"{len(asking)} proposal{'s' if len(asking) != 1 else ''} of mine wait{'' if len(asking) != 1 else 's'} "
+                   f"for your decision: {asking[0]['title']}")
     return out
 
 
@@ -213,6 +217,12 @@ def status_report(root: Path, doc: dict[str, Any]) -> str:
                                                                            "screening")]
     if working:
         parts.append("On the bench now: " + "; ".join(working[:5]) + ("…" if len(working) > 5 else "") + ".")
+    from aicad.office import supervisor
+
+    relaxed = supervisor.relaxed_summary(doc)
+    if relaxed:
+        parts.append(f"Relaxed by me, not passed ({len(relaxed)}): " + "; ".join(relaxed[:3])
+                     + ("…" if len(relaxed) > 3 else "") + ".")
     need = needs_you(doc)
     if need:
         parts.append("Needs you: " + "; ".join(need[:5]) + ("…" if len(need) > 5 else "") + ".")

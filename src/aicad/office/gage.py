@@ -25,6 +25,8 @@ from typing import Any
 MAX_SENDBACKS = 2      # rounds Gage may send a part back before it waits for the engineer
 REVIEW_MAX_TOKENS = 60  # hard cap for one AI review note
 DIM_TOL = 0.05         # mm
+# findings from the gating build checks (CHK-02..09): never relaxed by Archie (office/supervisor)
+GATING_PREFIXES = ("Gating check", "The latest build does not pass", "There is no build")
 
 REVIEW_INSTRUCTIONS = """You are Gage, the independent checker in a mechanical design office. You did not design \
 this part. You receive the ticket brief, the approved interfaces (ICD) for this part when there are any, the part's \
