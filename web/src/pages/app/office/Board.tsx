@@ -83,7 +83,7 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
               <span className="rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success">deliverable</span></Tip>}
             {t.qty > 1 && <span>×{t.qty}</span>}
             {t.direct?.path === "direct" && !t.direct.superseded && <Tip content={`Built from the interface spec in ${t.direct.seconds ?? "?"} s, without AI (0 tokens)`}>
-              <span className="inline-flex items-center gap-0.5 rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success" data-direct><Ruler className="h-2.5 w-2.5" />no AI</span></Tip>}
+              <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success" data-direct><Ruler className="h-2.5 w-2.5" />no AI</span></Tip>}
             {t.priority === "high" && <Tip content="High priority"><ArrowUp className="h-3 w-3 text-danger" /></Tip>}
             {t.fitted ? <Tip content={`Interfaces conform to ICD v${t.icd_check?.version ?? ""}; swapped into the program assembly in place of its placeholder`}>
               <span className="rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success">fitted</span></Tip>

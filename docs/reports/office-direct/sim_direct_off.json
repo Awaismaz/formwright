@@ -1,0 +1,116 @@
+{
+ "mode": "agent",
+ "status": "complete",
+ "wall_s": 27.4,
+ "agent_turns": 3,
+ "tickets": [
+  {
+   "title": "Pinion",
+   "kind": "part",
+   "path": null,
+   "reuse": "toolbox",
+   "tokens": 30,
+   "review_tokens": 5,
+   "stages_s": {
+    "hex": 0.02,
+    "fit": 4.5,
+    "design": 0.88,
+    "review": 13.43
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Gear",
+   "kind": "part",
+   "path": null,
+   "reuse": "toolbox",
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.01,
+    "fit": 21.66
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Input shaft",
+   "kind": "part",
+   "path": null,
+   "reuse": null,
+   "tokens": 30,
+   "review_tokens": 5,
+   "stages_s": {
+    "hex": 0.01,
+    "design": 0.28,
+    "review": 0.12,
+    "fit": 0.11
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Output shaft",
+   "kind": "part",
+   "path": null,
+   "reuse": null,
+   "tokens": 30,
+   "review_tokens": 5,
+   "stages_s": {
+    "hex": 0.01,
+    "design": 0.29,
+    "review": 0.07,
+    "fit": 0.01
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Deep groove ball bearing 6204",
+   "kind": "standard",
+   "path": null,
+   "reuse": "toolbox",
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.01
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Assemble Gear pair",
+   "kind": "integration",
+   "path": null,
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "integrate": 0.38
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Final assembly of Test rig",
+   "kind": "integration",
+   "path": null,
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "integrate": 0.06
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  }
+ ]
+}

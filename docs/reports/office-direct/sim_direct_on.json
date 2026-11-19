@@ -1,0 +1,118 @@
+{
+ "mode": "direct",
+ "status": "complete",
+ "wall_s": 16.0,
+ "agent_turns": 0,
+ "tickets": [
+  {
+   "title": "Pinion",
+   "kind": "part",
+   "path": "direct",
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.02,
+    "design": 8.92,
+    "review": 0.88,
+    "fit": 5.28
+   },
+   "direct_s": 8.9,
+   "build_s": 5.71,
+   "checks_s": 3.17
+  },
+  {
+   "title": "Gear",
+   "kind": "part",
+   "path": "direct",
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.01,
+    "design": 9.61,
+    "review": 2.27,
+    "fit": 0.01
+   },
+   "direct_s": 9.6,
+   "build_s": 6.04,
+   "checks_s": 3.53
+  },
+  {
+   "title": "Input shaft",
+   "kind": "part",
+   "path": "direct",
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.02,
+    "design": 9.6,
+    "review": 2.29,
+    "fit": 0.01
+   },
+   "direct_s": 9.6,
+   "build_s": 6.46,
+   "checks_s": 3.1
+  },
+  {
+   "title": "Output shaft",
+   "kind": "part",
+   "path": "direct",
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.02,
+    "design": 3.25,
+    "review": 2.12,
+    "fit": 0.23
+   },
+   "direct_s": 3.2,
+   "build_s": 1.75,
+   "checks_s": 1.46
+  },
+  {
+   "title": "Deep groove ball bearing 6204",
+   "kind": "standard",
+   "path": null,
+   "reuse": "toolbox",
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "hex": 0.02
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Assemble Gear pair",
+   "kind": "integration",
+   "path": null,
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "integrate": 0.37
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  },
+  {
+   "title": "Final assembly of Test rig",
+   "kind": "integration",
+   "path": null,
+   "reuse": null,
+   "tokens": 0,
+   "review_tokens": 0,
+   "stages_s": {
+    "integrate": 0.06
+   },
+   "direct_s": null,
+   "build_s": null,
+   "checks_s": null
+  }
+ ]
+}

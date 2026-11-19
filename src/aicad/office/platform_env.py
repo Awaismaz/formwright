@@ -201,6 +201,11 @@ class PlatformEnv(orchestrator.Env):
         out["interrupted"] = out["interrupted"] or out["subtype"] == "stopped"
         return out
 
+    async def warm(self) -> None:
+        from aicad.agent import worker
+
+        await worker.warm(self.org_id)  # the warm worker the Studio builds of this organisation run on
+
     async def design_direct(self, project_id: str, script: str, note: str) -> dict[str, Any]:
         """A model script written without AI (``office.direct``), built exactly as the design agent's build tool
         builds one (``tools.build_handler``: CHK-02..05, topology and the render now; exports, CHK-07 and CHK-08 on the
@@ -974,6 +979,12 @@ def assembly_allowed(org_id: str, god_paywall: bool) -> bool:
 
 async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False) -> None:
     """At ICD approval: Fitz assembles the program from placeholders (mates by interface name)."""
+    from aicad.agent import worker
+
+    # parts built from the interfaces (office.direct) start as soon as Run is pressed: have the engine warm by then
+    warm = asyncio.get_running_loop().create_task(worker.warm(org_id))
+    _ADVISORY.add(warm)
+    warm.add_done_callback(_ADVISORY.discard)
     if not assembly_allowed(org_id, god_paywall):
         save_assembly(root, pid, {"status": "unavailable", "summary": "Assembly Studio isn't included in your plan, "
                                   "so the live program assembly can't be built. Unlock the add-on, then rebuild it."},

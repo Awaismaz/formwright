@@ -505,6 +505,10 @@ class Env:
     async def interrupt(self, project_id: str) -> None:
         return None
 
+    async def warm(self) -> None:
+        """Start the program's geometry engine ahead of its first build."""
+        return
+
     async def design_direct(self, project_id: str, script: str, note: str) -> dict[str, Any]:
         """Build a model script written without AI (``direct``) through the Studio's build and check gate, as the
         project's new revision. {ok (verified: CHK-02..08), build_s, checks_s, error}."""
@@ -584,6 +588,7 @@ class Runner:
         self.loop = asyncio.get_running_loop()
         self.max_seen = 0  # the most stages that ever ran at once (tests assert the cap)
         self.main: asyncio.Task[None] | None = None
+        self.warming: asyncio.Task[None] | None = None  # the geometry engine starting for direct builds
 
     # ------------------------------------------------------------------ helpers
     def edit(self, fn: Callable[[dict[str, Any]], Any]) -> Any:
@@ -627,6 +632,9 @@ class Runner:
     async def run(self) -> None:
         try:
             self.edit(lambda d: recover(self.root, d, set(self.tasks)))
+            # parts built from the interfaces need the geometry engine at once: start it now, not on the first build
+            self.warming = asyncio.get_running_loop().create_task(self.env.warm())
+            self.warming.add_done_callback(lambda t: t.cancelled() or t.exception())
             while True:
                 info = await self.env.studio_info(self.load())
                 if self.tick(info):
