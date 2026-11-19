@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
+import { VisualCheck } from "@/components/VisualCheck";
 import { BASE } from "./api";
 import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, axisChip, axisLabel, ifaceAxis, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
 import type { ChangeRequest, CheckRow, Icd, IcdSide, Interface, Program } from "./types";
@@ -266,6 +267,7 @@ export default function Interfaces({ program }: { program: Program }) {
         </div>
         <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>
       </Card>}
+      {(icd.look || icd.status === "draft") && <LayoutLook program={program} icd={icd} canEdit={!!canEdit} />}
       <SkeletonCard icd={icd} />
       <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)]">
         <Card className="overflow-x-auto">
@@ -304,4 +306,26 @@ export default function Interfaces({ program }: { program: Program }) {
         footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>Cancel</Button><Button loading={approving} onClick={approve} data-testid="confirm-approve-icd">Approve</Button></>} />
     </div>
   );
+}
+
+/** PD-73: Archie's look at the drafted layout (the envelopes from four sides, measured placement checks and the
+ * visual check, advisory). He also says it in the chat, with the fix he proposes. */
+function LayoutLook({ program, icd, canEdit }: { program: Program; icd: Icd; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [looking, setLooking] = useState(false);
+  const lk = icd.look;
+  const look = async () => {
+    setLooking(true);
+    try {
+      const v = await api.post<Program>(`${BASE}/programs/${program.id}/visual/layout`);
+      qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
+      void qc.invalidateQueries({ queryKey: ["office-archie", program.id] });
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setLooking(false); }
+  };
+  const bad = !!lk && ((lk.quick ?? []).some(f => f.severity === "block") || (lk.verdict && lk.verdict.overall !== "looks_assembled"));
+  return <Card className={cx("p-3", bad && "border-danger/40")} data-layout-look={lk ? (bad ? "wrong" : "ok") : "none"}>
+    <VisualCheck rec={lk ? { status: "done", verdict: lk.verdict, quick: lk.quick, line: lk.line } : null}
+      image={lk?.image ? `${BASE}/programs/${program.id}/visual/layout.png?t=${encodeURIComponent(lk.at)}` : null}
+      onLook={icd.status === "draft" && canEdit ? look : undefined} looking={looking} />
+  </Card>;
 }

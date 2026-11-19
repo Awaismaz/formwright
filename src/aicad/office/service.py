@@ -254,6 +254,42 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
     interfaces.create(root, doc, actor)
 
 
+def revise_plan(root: Path, doc: dict[str, Any], a: dict[str, Any], actor: dict[str, Any]) -> None:
+    """Archie's "send the plan back" (applied by the engineer): while the interfaces wait for approval and nothing
+    has started, the program returns to plan review with the note and (optionally) one part added. The tickets,
+    skeleton and draft ICD go; approving the plan again lays the program out again (and Archie looks again)."""
+    from aicad.office import archie_chat
+
+    if not archie_chat.can_revise(doc):
+        raise OfficeInputError("The plan can go back only while the interfaces wait for approval and no part work "
+                               "has started.")
+    plan = doc["plan"]
+    subs = [{**sub, "parts": [dict(x) for x in sub["parts"]]} for sub in plan["subassemblies"]]
+    add = a.get("add") or {}
+    if add:
+        sub = next((x for x in subs if x["name"] == add["sub"]), None)
+        if sub is None:
+            raise OfficeInputError("That sub-assembly is no longer in the plan.")
+        sub["parts"].insert(0, dict(add["part"]))
+    p2 = planner.normalise_plan({**plan, "subassemblies": subs}, plan["source"])
+    if p2 is None:
+        raise OfficeInputError("The revised plan is empty.")
+    p2["edited"] = True
+    doc["items"], doc["tickets"], doc["ticket_seq"] = [], [], 0
+    for k in ("icd", "skeleton", "assembly"):
+        doc.pop(k, None)
+    g = gate(doc, "brief")
+    for k in ("by", "at"):
+        g.pop(k, None)
+    g["status"] = "pending"
+    gate(doc, "icd").update(status="locked", note="Opens when the brief is approved: Archie lays out the skeleton and "
+                                                  "names the interfaces.")
+    note = f"Archie sent the plan back at the interfaces gate: {a['notes']}"
+    set_plan(root, doc, p2, actor, narrative=plan.get("narrative") or "", note=note)
+    emit(root, doc, "plan.revised", f"{actor.get('name', 'Someone')} sent the plan back for review: {a['notes']}",
+         actor, added=(add.get("part") or {}).get("name"))
+
+
 DELIVERABLE_TICKETS = (
     ("drawings", "Drawings: part sheets and the assembly drawing",
      ("Draw every part the program makes (Drawing Studio sheets, ICD interface numbers tagged as spec dimensions where "

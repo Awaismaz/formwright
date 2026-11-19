@@ -179,4 +179,8 @@ export interface SmartLog { agent: "Hex" | "Fitz"; text: string; tone: "ok" | "w
 export interface SmartResult {
   log: SmartLog[]; summary: string; clashes: Clash[]; inserted: number; mated: number; placed_loose: number;
   fastener_stacks: number; fastener_asked: number;
+  /** PD-73: quick placement checks and where the exact clash check ran (inline / targeted / background). */
+  checks?: { quick: { code: string; severity: "block" | "note"; text: string }[]; reason: string; quick_s: number; seconds: number;
+    policy: { exact: "inline" | "targeted" | "background"; stop: boolean; why: string }; visual: "done" | "running" | "off";
+    estimate: { pairs: number; near: number; uncached: number; seconds: number } };
 }

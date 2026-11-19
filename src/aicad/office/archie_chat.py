@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,8 @@ CHAT_MAX_TOKENS = 150  # hard cap (platform tokens) for one AI chat turn; the "S
 HISTORY_TURNS = 8
 
 ACTION_TYPES = ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority", "pause_program",
-                "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked")
+                "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked",
+                "revise_plan")
 
 CHAT_INSTRUCTIONS = """You are Archie, the Chief Designer of a mechanical design office. The engineering manager \
 talks to you while a program is planned or in work. You see the program state below. Answer in plain engineering \
@@ -64,6 +66,10 @@ out. "concurrency" is how many agents work at once in total; "threads" is parall
 - {"type": "retry_blocked"}: put every blocked part back to work under the current review rules (a part that \
 passes every measurable check is approved with Gage's open points recorded) and run the office.
 - {"type": "fix_icd"}: while the interfaces wait for approval and have problems: adjust them so every part can be made (smallest safe changes, listed for review).
+- {"type": "revise_plan", "notes": "what to change", "add": {"sub": "sub-assembly name", "part": {"name": "...", \
+"family": "machined", "qty": 1, "description": "..."}}}: only while the interfaces wait for approval and no part \
+work has started: send the plan back to the manager for review with this change ("add" is optional: one part to add, \
+e.g. a housing or base plate the other parts mount on).
 - {"type": "ecn", "reason": "why", "tickets": ["KEY", ...]}: only after the program is released.
 Parts can't be added to or removed from an approved plan: say so and suggest a new program or an ECN instead."""
 
@@ -77,6 +83,16 @@ _RESUME = re.compile(r"^\s*(?:please\s+)?(?:resume|continue|carry on|go on|run|s
 
 
 # --------------------------------------------------------------------------- the conversation file
+_chat_locks: dict[str, threading.Lock] = {}
+_glock = threading.Lock()
+
+
+def chat_lock(pid: str) -> threading.Lock:
+    """The conversation's own lock (never the program's: the orchestrator posts while it holds that one)."""
+    with _glock:
+        return _chat_locks.setdefault(pid, threading.Lock())
+
+
 def _file(root: Path, pid: str) -> Path:
     return store.program_dir(root, pid) / "archie" / "chat.json"
 
@@ -90,6 +106,18 @@ def save_history(root: Path, pid: str, msgs: list[dict[str, Any]]) -> None:
     f = _file(root, pid)
     f.parent.mkdir(parents=True, exist_ok=True)
     store.write_json(f, msgs[-MAX_MESSAGES:])
+
+
+def post(root: Path, pid: str, text: str, actions: list[dict[str, Any]], *, kind: str = "office",
+         **extra: Any) -> dict[str, Any]:
+    """Archie speaks first (founder, 2026-11-19: the office tells the engineer on the go): a message in the program
+    chat with proposed actions, as if he had answered. ``extra``: e.g. ``visual`` (picture link + verdict)."""
+    msg = {**archie_message(text, actions, kind=kind), **extra, "unprompted": True}
+    with chat_lock(pid):
+        hist = history(root, pid)
+        hist.append(msg)
+        save_history(root, pid, hist)
+    return msg
 
 
 def user_message(text: str, actor: dict[str, Any]) -> dict[str, Any]:
@@ -385,6 +413,8 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
     if typ == "fix_icd":
         icd = doc.get("icd") or {}
         return {"type": typ} if icd.get("status") == "draft" and icd.get("problems") else None
+    if typ == "revise_plan":
+        return revise_ok(doc, a, txt)
     if typ == "resize_part":
         from aicad.office import interfaces
 
@@ -481,6 +511,12 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         return f"Resize {a['part']}: " + ", ".join(f"{k} {v:g} mm" for k, v in a["size"].items())
     if typ == "fix_icd":
         return "Fix the interface problems (smallest safe changes, listed in the ICD history for your review)"
+    if typ == "revise_plan":
+        add = a.get("add") or {}
+        if add:
+            return (f"Send the plan back to you with a {add['part']['name'].lower()} added to {add['sub']} "
+                    f"({a['notes']})")
+        return f"Send the plan back to you for review: {a['notes']}"
     if typ == "ecn":
         return f"Raise an engineering change on {', '.join(a['tickets'])}: {a['reason']}"
     return typ
@@ -501,3 +537,36 @@ async def run_chat(folder: Path, prompt: str, budget_usd: float | None = None) -
     res = await llm.complete(llm.CallRequest(role="office_chat", system=CHAT_INSTRUCTIONS, prompt=prompt,
                                              budget_usd=budget_usd, cwd=folder))
     return res.text, res.metering.cost_usd
+
+
+# --------------------------------------------------------------------------- revising the plan at the interfaces gate
+def can_revise(doc: dict[str, Any]) -> bool:
+    """The plan may go back for review while the interfaces wait for approval and no ticket has started."""
+    from aicad.office import service as _svc
+
+    return (doc["status"] == "active" and (doc.get("icd") or {}).get("status") == "draft"
+            and _svc.gate(doc, "icd")["status"] == "pending"
+            and not any((t.get("run") or {}).get("status") or t["column"] not in ("backlog", "ready")
+                        for t in doc["tickets"]))
+
+
+def revise_ok(doc: dict[str, Any], a: dict[str, Any], txt: str) -> dict[str, Any] | None:
+    from aicad.office import roster as _roster
+
+    if not can_revise(doc) or not txt:
+        return None
+    out: dict[str, Any] = {"type": "revise_plan", "notes": txt}
+    add = a.get("add")
+    if isinstance(add, dict) and isinstance(add.get("part"), dict):
+        subs = [s["name"] for s in (doc.get("plan") or {}).get("subassemblies") or []]
+        sub = str(add.get("sub") or "")
+        part = add["part"]
+        nm = " ".join(str(part.get("name") or "").split())[:80]
+        if sub not in subs or not nm:
+            return None
+        out["add"] = {"sub": sub, "part": {"name": nm, "family": _roster.normalise_family(part.get("family")),
+                                           "complexity": 2 if part.get("complexity") is None else
+                                           max(1, min(5, int(part.get("complexity") or 2))),
+                                           "qty": max(1, min(8, int(part.get("qty") or 1))),
+                                           "description": " ".join(str(part.get("description") or "").split())[:400]}}
+    return out

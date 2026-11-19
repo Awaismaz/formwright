@@ -660,8 +660,9 @@ def fasten_targets(root: Path, doc: dict[str, Any], size: int | None, only: str 
 
 
 async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict[str, Any]],
-                  project_part: ProjectPart) -> dict[str, Any]:
-    """Insert, place and mate the approved items in order, then run the exact interference check."""
+                  project_part: ProjectPart, check: bool = True) -> dict[str, Any]:
+    """Insert, place and mate the approved items in order, then run the exact interference check (``check=False``:
+    the caller schedules it, e.g. the visual-check policy in ``aicad.assembly.visual``)."""
     log: list[dict[str, str]] = []
     made: dict[str, list[str]] = {}
     used_ends: set[tuple[str, str]] = set()
@@ -813,7 +814,7 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
     service.run_solve(root, doc)
     clashes: list[dict[str, Any]] = []
     checked = False
-    if doc["instances"]:
+    if doc["instances"] and check:
         an = await service.analyse(root, org_id, doc)
         checked = True
         clashes = [p for p in an["interference"]["pairs"] if p["kind"] == "interference"]

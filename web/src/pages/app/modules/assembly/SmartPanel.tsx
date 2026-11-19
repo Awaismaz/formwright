@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, CheckCircle2, PenTool, Sparkles, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Badge, Button, Input } from "@/components/ui";
 import { AgentBadge } from "@/components/AgentBadge";
+import { VisualCheck, type VisualRecord } from "@/components/VisualCheck";
 import type { AsmView, SmartItem, SmartPlan, SmartResult, Sources, ToolboxParam } from "./types";
 import { Section } from "./bits";
 import { SOURCE_LABEL, ACTION_LABEL, confidenceTone, paramLine, tokenLine } from "./smart";
@@ -171,8 +172,10 @@ export function SmartPanel({ view, aid, onRun, busy }: {
           {result.clashes.length > 0 && <ul className="mt-2 space-y-0.5 text-[11.5px] text-danger">
             {result.clashes.map((c, k) => <li key={k}>{c.a_name} ↔ {c.b_name}: {c.volume_mm3.toFixed(3)} mm³</li>)}</ul>}
           <p className="mt-2 text-[11px] text-muted">Placements follow the mates Fitz made; check fits and tolerances before release. Edit or delete any mate in the tree.</p>
+          {result.checks?.policy && <p className="mt-1 text-[11px] text-muted" data-check-policy={result.checks.policy.exact}>{result.checks.policy.why}</p>}
         </div>
       )}
+      {(result || view.instances.length > 0) && <SmartVisual aid={aid} after={result} />}
     </div>
   );
 }
@@ -189,4 +192,25 @@ function ParamField({ p, value, onChange }: { p: ToolboxParam; value: number | u
         onChange={e => onChange(Number(e.target.value))} className="h-7 w-20 px-1.5 text-[12px]" />{p.unit && <span className="text-muted">{p.unit}</span>}</div>
     )}
   </>;
+}
+
+/** PD-73: the visual check of this assembly (after a smart assembly it runs by itself; "Look again" on demand). */
+function SmartVisual({ aid, after }: { aid: string; after: SmartResult | null }) {
+  const qc = useQueryClient();
+  const key = ["asm-visual", aid];
+  const q = useQuery({
+    queryKey: key, queryFn: () => api.get<{ visual: VisualRecord | null; image: string | null; stale: boolean; available: boolean }>(`/api/m/assembly/assemblies/${aid}/visual`),
+    refetchInterval: d => (d.state.data?.visual?.status === "running" ? 2000 : false),
+  });
+  const [looking, setLooking] = useState(false);
+  useEffect(() => { if (after) void q.refetch(); }, [after]);  // eslint-disable-line react-hooks/exhaustive-deps
+  const look = async () => {
+    setLooking(true);
+    try { qc.setQueryData(key, await api.post(`/api/m/assembly/assemblies/${aid}/visual`)); }
+    catch (e) { toast.error((e as Error).message); } finally { setLooking(false); }
+  };
+  if (!q.data || (!q.data.visual && !q.data.available)) return null;
+  return <div className="border-b border-border px-4 py-3.5" data-smart-visual>
+    <VisualCheck rec={q.data.visual} image={q.data.image} stale={q.data.stale} onLook={look} looking={looking} canLook={q.data.available} />
+  </div>;
 }

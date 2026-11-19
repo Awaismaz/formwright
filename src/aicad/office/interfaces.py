@@ -555,4 +555,5 @@ def view(doc: dict[str, Any]) -> dict[str, Any] | None:
     return {"version": ic["version"], "status": ic["status"], "interfaces": out, "history": ic["history"][-60:],
             "problems": ic.get("problems") or [], "skeleton": {k: v for k, v in sk.items()},
             "fits": list(icd.FITS), "fasteners": [f"M{m}" for m in icd.CLEARANCE],
-            "bearings": [str(k) for k in sorted(icd.BEARINGS)], "housing_fits": list(icd.HOUSING_FITS)}
+            "bearings": [str(k) for k in sorted(icd.BEARINGS)], "housing_fits": list(icd.HOUSING_FITS),
+            "look": ic.get("look")}  # PD-73: Archie's look at the layout (quick checks + visual check, advisory)
