@@ -277,12 +277,23 @@ def _diameters(text: str) -> list[float]:
     out = [float(m.group(1)) for m in re.finditer(r"[ØⲐ⌀]\s*" + _NUM, t)]
     out += [float(m.group(1)) for m in re.finditer(_WORDED_D, t)]
     out += [float(m.group(1)) for m in re.finditer(r"\b(?:diameter|dia\.?)\s*(?:of\s*)?" + _NUM, t, re.IGNORECASE)]
+    out += [float(m.group(1)) for m in re.finditer(_STEP_D, t)]
     return [d for d in out if d > 0]
+
+
+def _bore_hint(text: str) -> float | None:
+    """The bore a hub or gear description states ("20 mm H7 bore", "bore Ø20", "a 20 H7 bore")."""
+    m = _BORE_D.search(text or "") or re.search(r"\bbore\s*(?:of\s*)?[ØⲐ⌀]?\s*" + _NUM, text or "", re.IGNORECASE)
+    return float(m.group(1)) if m else None
 
 
 # "20 mm diameter", "20 mm h6 diameter", "20h6 dia": the number is not part of a word ("h6" is a tolerance class)
 _WORDED_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s*)?(?:diameter|dia\b)",
                        re.IGNORECASE)
+# a shaft's steps in words: "20 mm k6 gear seat", "25 mm larger step", "Ø26 body" (not "6 mm keyseat")
+_STEP_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s+)?(?:[a-z]+\s+){0,2}"
+                     r"(?:seat|journal|step|body|shoulder|collar)\b", re.IGNORECASE)
+_BORE_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s*)?bore\b", re.IGNORECASE)
 
 
 def shoulder_for(d: float) -> float:
@@ -691,8 +702,13 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             if not (_STEPPED.search(text) or _STEPPED.search(shaft_talk)):
                 continue
             ds = sorted(set(_diameters(p["description"])))
+            riders = [q for q in designed if spec[q["id"]]["role"] in ("gear", "hub") and (
+                len(line_sh) == 1 or str(q.get("mounts_on") or "").lower() == p["name"].lower())]
+            bores = sorted({b for b in (_bore_hint(q["description"]) for q in riders) if b})
             if len(ds) >= 2 and ds[-1] > ds[0]:
                 seat, body, src = ds[0], ds[-1], "plan"
+            elif bores and bores[0] < float(s["d"]) - 1e-9:  # the hub's bore is the seat, the planned Ø the step
+                seat, body, src = bores[0], float(s["d"]), "plan"
             else:
                 seat = float(s["d"])
                 body, src = shoulder_for(seat), "assumed"
@@ -700,6 +716,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             if isinstance(ob, int | float) and not isinstance(ob, bool) and ob > seat:
                 body, src = float(ob), "edited"
             s["d"] = seat
+            if not float(s.get("length") or 0.0) and _worded(p["description"])[1]:  # "overall length 120 mm"
+                s["length"] = float(_worded(p["description"])[1] or 0.0)
             stepped[sh] = {"seat": seat, "body": body, "source": src}
     # shafts in a sub-assembly with bearings run in bearing seats (62xx / 60xx from the Toolbox table)
     for p in designed:

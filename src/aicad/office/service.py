@@ -161,8 +161,10 @@ def set_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any], actor: dict[
     doc["light"] = scope.light_info(plan, doc.get("brief") or "")
     n_parts = sum(len(s["parts"]) for s in plan["subassemblies"])
     who = "Archie" if plan["source"] == "archie" else "The standard planner"
-    emit(root, doc, "plan.ready", f"{who} split {doc['name']} into {len(plan['subassemblies'])} sub-assemblies and "
-         f"{n_parts} parts. Review the plan before tickets are created.", actor, source=plan["source"])
+    n_subs = len(plan["subassemblies"])
+    emit(root, doc, "plan.ready", f"{who} split {doc['name']} into {n_subs} sub-assembl{'y' if n_subs == 1 else 'ies'} "
+         f"and {n_parts} part{'' if n_parts == 1 else 's'}. Review the plan before tickets are created.", actor,
+         source=plan["source"])
 
 
 def gate(doc: dict[str, Any], code: str) -> dict[str, Any]:

@@ -199,6 +199,51 @@ def test_parts_are_built_without_ai(tmp_path: Path) -> None:
     assert p_g["path"] == "direct" and p_g["summary"] == "spur gear m2 × 30 teeth, face 20, bore Ø20 with a keyway"
 
 
+# Archie's plan in the live run of 2026-11-20 (the founder's exact sentence): the steps are written in words
+LIVE_PLAN = {"source": "archie", "summary": "", "assumptions": [], "subassemblies": [
+    {"name": "Keyed gear shaft", "description": "", "parts": [
+        {"name": "Spur gear", "family": "gear", "complexity": 2, "qty": 1, "description":
+         "Steel (C45) spur gear, module 2, 20 deg pressure angle, 40 teeth, 20 mm face width (assumed), 20 mm H7 bore "
+         "with 6 mm keyway per DIN 6885."},
+        {"name": "Stepped shaft", "family": "turned", "complexity": 2, "qty": 1, "envelope": [25, 25, 120],
+         "description": "Steel (C45) stepped shaft with 20 mm k6 gear seat and 25 mm larger step forming the gear "
+                        "shoulder, overall length 120 mm (assumed); 6 mm keyseat in the gear seat, chamfered ends."},
+        {"name": "Gear key", "family": "standard", "complexity": 1, "qty": 1, "description":
+         "Parallel key, form A, 6 x 6 x 18 mm, DIN 6885 / ISO 773, key steel; locks the spur gear to the shaft "
+         "seat."}]}]}
+
+
+def test_archies_live_plan_reads_its_steps_and_builds_without_ai() -> None:
+    """The live run read the shaft's envelope Ø25 as the gear seat (8 x 7 key, Ø25 bore), so Chuck designed the shaft
+    with AI (23 tokens, 90 s) and Hex took a Toolbox gear. Hand: seat Ø20 ("20 mm k6 gear seat"), step Ø25 ("25 mm
+    larger step"), 120 long; gear m2 x 40, tip Ø84, Y -20 .. 0; shaft Y -22 .. 98, centre Y 38; key 6 x 6 x 18 at
+    (6.5, -10, 0). Both parts are built from the interfaces."""
+    plan = planner.normalise_plan(LIVE_PLAN, "archie")
+    assert plan is not None
+    out, note = planner.finish(plan, "Keyed gear", FOUNDER)
+    assert note is None and len(out["subassemblies"]) == 1
+    parts = _parts(out)
+    for p in parts:  # the layout hints Archie gave (the test helper keeps only the plan fields)
+        p.update({k: v for s in out["subassemblies"] for q in s["parts"] if q["name"] == p["name"]
+                  for k, v in q.items() if k in ("envelope", "module", "teeth", "mounts_on")})
+    sk, ifs = icd.build(parts, FOUNDER)
+    by = _ids(sk)
+    it = sk["items"]
+    assert it[by["Stepped shaft"]]["size"] == [25, 25, 120] and it[by["Stepped shaft"]]["copies"] == [[0, 38, 0]]
+    assert it[by["Spur gear"]]["size"] == [84, 84, 20] and it[by["Spur gear"]]["copies"] == [[0, -10, 0]]
+    b, k = ifs[0]["data"], ifs[1]["data"]
+    assert (b["d"], b["seat_z"], b["shoulder_z"], b["shoulder_d"], b["shoulder_source"]) == (20, [-22, 0], 0, 25, "plan")
+    assert (k["b"], k["h"], k["length"], k["z"]) == (6, 6, 18, [-19, -1])
+    key = next(p["id"] for p in parts if p["name"] == "Gear key")
+    assert icd.seated(ifs, key)["at"] == [[6.5, -10, 0]] and icd.problems(sk, ifs) == []
+    doc = {"skeleton": sk, "icd": {"version": 1, "status": "approved", "interfaces": ifs}, "brief": FOUNDER,
+           "items": [{"id": p["id"], "name": p["name"], "description": p["description"]} for p in parts]}
+    for name, want in (("Stepped shaft", "shaft Ø20 / Ø25 × 120, 1 seat, 1 keyseat"),
+                       ("Spur gear", "spur gear m2 × 40 teeth, face 20, bore Ø20 with a keyway")):
+        d = direct.plan(doc, {"kind": "part", "item_id": by[name], "title": name})
+        assert d["path"] == "direct" and d["summary"] == want, d
+
+
 def _build(tmp: Path, script: str, name: str) -> tuple[Any, dict[str, Any]]:
     from build123d import import_step
 
