@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,18 @@ def lock(pid: str) -> asyncio.Lock:
 def placeholder_key(pid: str, item: str, spec: dict[str, Any]) -> str:
     h = hashlib.sha1(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:10]
     return f"h_{pid}_{item}_{h}"[:120]
+
+
+# CD-038: every instance in a program assembly is placed from the approved layout (``place``); its mates record how
+# the parts connect. Solving them numerically took 387 s per call on a 311-instance, 600-mate program (F1) and ran
+# after every swap and integration, so the office records the layout placement instead of solving.
+
+
+async def _placed(aroot: Path, doc: dict[str, Any]) -> None:
+    """Record the layout placement and check every mate against it (one pass, no solve)."""
+    from aicad.assembly import service as aservice
+
+    await asyncio.to_thread(aservice.check_placement, aroot, doc)
 
 
 def subs_of(prog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -259,7 +272,7 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
                 adoc["instances"][0]["fixed"] = True
             _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, None))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
         sub_docs[sub["id"]] = adoc
     fid = state.get("final")
@@ -276,7 +289,7 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
             i["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
         _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, None, top_only=True))
         problems += p
-        await asyncio.to_thread(aservice.run_solve, aroot, final)
+        await _placed(aroot, final)
         an = await aservice.analyse(aroot, org_id, final)
         astore.save(aroot, final)
     clashes = _clashes(an)
@@ -337,7 +350,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                         aservice.remove_group(adoc, g["id"])
             _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, items))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
     async with locks.hold(state["final"], locks.OFFICE):
@@ -352,7 +365,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                 inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
             _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, items, top_only=True))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, final)
+            await _placed(aroot, final)
             if analyse:
                 # only the swapped parts against everything else (CD-035): the whole-program check grows with every
                 # real part and runs at the final assembly; here it timed out once ten parts went in together
@@ -405,7 +418,7 @@ async def prewarm_swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: 
         ids.append(inst["id"])
     if not ids:
         return 0
-    await asyncio.to_thread(aservice.run_solve, aroot, final)
+    await _placed(aroot, final)
     res = await aservice.check_pairs(aroot, org_id, final, only=ids)
     return int(res["stats"]["computed"])
 
@@ -671,7 +684,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     stats["binned"] += 1
                 say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
                     "by hand", "muted")
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
             # PD-71: no interference work in a sub-assembly step: every part was checked by Gage and when Fitz swapped
             # it in, and the stacks come from the ICD; the whole-program check runs after the final assembly (advisory)
@@ -711,7 +724,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         say("Fitz couldn't fit the joints between sub-assemblies: " + next(
                             (h["proposal"]["error"] for h in res["plan"]["holes"] if h["proposal"].get("error")),
                             "no standard stack fits"), "warn")
-            await asyncio.to_thread(aservice.run_solve, aroot, final)
+            await _placed(aroot, final)
             # PD-71: the whole-program clash check is advisory and runs after this, outside the program lock
             # (``advisory_check``): it never holds up or fails the integration
             astore.save(aroot, final)
@@ -725,12 +738,16 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)
-    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + \
-        f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}"
-    say(summary, "warn" if clashes else "ok")
+    # PD-71: no clash check inside a step; the whole-program check runs after the final assembly (advisory), so the
+    # summary never claims "0 clashes" for a check that hasn't run
+    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + (
+        "; the whole-program clash check runs next (advisory)" if level == "root" else "")
+    say(summary, "ok")
+    psum = summarize(state.get("parts") or {}, final, state.get("clashes") or [])
+    if level == "root":
+        psum = re.sub(r", \d+ clash(es)?\.$", ", clash check running.", psum)
     return {"summary": summary, "clashes": clashes, "log": log, "assembly_id": aid_out, "inserted": stats["stacks"],
-            "program_summary": summarize(state.get("parts") or {}, final, clashes if level == "root" else
-                                         state.get("clashes") or [])}
+            "program_summary": psum}
 
 
 # ----------------------------------------------------------------------------- advisory whole-program check (PD-71)

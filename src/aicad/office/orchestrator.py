@@ -436,8 +436,7 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
             out.append(t)
             continue
         if r.get("status") == "blocked" and t["kind"] == "integration" and (
-                why.startswith(("Fitz is still waiting for the real", "Fitz couldn't swap"))
-                or (why.startswith("Fitz couldn't integrate this") and "timed out" in why)):
+                why.startswith(("Fitz is still waiting for the real", "Fitz couldn't swap", "Fitz found")) or why.startswith("Fitz couldn't integrate this") and "timed out" in why):
             close_wait(t)
             _set_run(t, status="queued", next="integrate", attempt=0, blocked=None, line="Back to Fitz")
             out.append(t)
@@ -1226,11 +1225,14 @@ class Runner:
             tt["comments"][-1]["delivery"] = "stored"
             clashes = res.get("clashes") or []
             if clashes:
+                # advisory (PD-71): every part passed Gage and was placed by its approved interfaces, so a clash is
+                # reported on the ticket and the assembly view for the engineer, never a stop
                 desc = "; ".join(f"{c.get('a_name') or c['a']} ↔ {c.get('b_name') or c['b']} "
                                  f"{float(c.get('volume_mm3') or 0):.1f} mm³" for c in clashes[:5])
-                self._fail(d, tid, f"Fitz found {len(clashes)} clash{'es' if len(clashes) != 1 else ''}: {desc}. "
-                                   "Fix the parts (reopen them) or adjust the assembly by hand.")
-                return
+                service.comment(self.root, d, tid, f"Advisory: Fitz found {len(clashes)} clash"
+                                f"{'es' if len(clashes) != 1 else ''} to look at in the assembly view: {desc}.", f)
+                tt["comments"][-1]["delivery"] = "stored"
+                tt["clash_notes"] = [desc]
             changed = [service.ticket(d, k)["title"] for k in res.get("children") or []
                        if service.ticket(d, k)["column"] not in service.DONE_COLUMNS]
             if changed:  # a change request reopened a part while Fitz was integrating: integrate again later
