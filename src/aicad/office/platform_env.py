@@ -632,7 +632,9 @@ class PlatformEnv(orchestrator.Env):
             std = std + kit
             try:
                 res = await program_assembly.integrate(_aroot(self.org_id), self.org_id, doc, t["item_id"], std)
-            except (AssemblyInputError, WorkerError) as e:
+            except WorkerError as e:  # a timeout or a worker crash: try again (CD-036)
+                return {"error": f"Fitz couldn't integrate this: {e}"}
+            except AssemblyInputError as e:
                 return {"blocked": f"Fitz couldn't integrate this: {e}"}
             if res.get("blocked"):
                 return res

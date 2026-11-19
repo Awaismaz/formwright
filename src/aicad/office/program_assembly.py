@@ -433,6 +433,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     state = prog["assembly"]
     log: list[dict[str, str]] = []
     stats = {"stacks": 0, "asked": 0, "binned": 0}
+    stack_clashes: list[dict[str, Any]] = []
     seated: dict[str, int] = {}
 
     def say(text: str, tone: str = "ok") -> None:
@@ -512,6 +513,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                             res = await aservice.accept(aroot, org_id, adoc, targets, "shcs" if code == "shcs" else "hex_bolt",
                                                         "both", False)
                             stats["stacks"] += res["inserted"]
+                            stack_clashes += res.get("clashes") or []
                             summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
                             say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()}: " + "; ".join(summ)
                                 + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else ""),
@@ -536,9 +538,11 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
                     "by hand", "muted")
             aservice.run_solve(aroot, adoc)
-            an = await aservice.analyse(aroot, org_id, adoc)
             astore.save(aroot, adoc)
-            clashes = _clashes(an)
+            # every part was clash-checked when Fitz swapped it in; here only the fastener stacks just fitted are new
+            # (CD-036: the whole sub-assembly used to be re-checked, minutes on detailed parts)
+            clashes = [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
+                        "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in stack_clashes]
             aid_out = adoc["id"]
     else:
         clashes = []
@@ -580,10 +584,10 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     except AssemblyInputError as e:
                         say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
             aservice.run_solve(aroot, final)
-            an = await aservice.analyse(aroot, org_id, final)
-            astore.save(aroot, final)
-            if level == "root":
+            if level == "root":  # the whole-program check, once, at the final assembly
+                an = await aservice.analyse(aroot, org_id, final)
                 clashes = _clashes(an)
+            astore.save(aroot, final)
     bits = []
     if stats["asked"]:
         bits.append(f"fitted {stats['stacks']} fastener stack{'s' if stats['stacks'] != 1 else ''}")
