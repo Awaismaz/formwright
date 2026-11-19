@@ -178,8 +178,8 @@ CONNECTIONS: dict[str, ConnectionType] = {c.kind: c for c in [
         placement="coaxial on the rod, between the rod's supports (centred on them unless placed)",
         standards=("ISO 286 H7/g6",), icd=("shaft_bore",)),
     ConnectionType(
-        "pin_joint", "pivots on a pin", ("bracket", "other", "plate", "housing"), ("other", "bracket", "plate"),
-        via=("dowel",), host_features=("pin bore through both lugs",), guest_features=("pivot bore",),
+        "pin_joint", "pivots on a pin or a pivot bolt", ("bracket", "other", "plate", "housing"),
+        ("other", "bracket", "plate"), via=("dowel", "fastener", "washer", "nut"), host_features=("pin bore through both lugs",), guest_features=("pivot bore",),
         placement="the pin axis across the host's lugs (along Y) at the pivot height; the guest centred between the "
                   "lugs, its pivot bore on the pin, lying along +X",
         icd=("dowel",), params={"pivot_height": ParamSpec(lo=1, hi=5000, label="pivot above the host's underside"),

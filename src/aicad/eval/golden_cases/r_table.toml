@@ -1,0 +1,72 @@
+# Regression: the founder's program "TEST Project" (2026-11-20), brief "Design a foldable Table". Archie's plan,
+# replayed (r_table.plan.json, copied read only): a table top, 4 folding legs, 4 leg hinge brackets, 16 bracket wood
+# screws, 4 leg pivot bolts, 8 pivot washers, 4 pivot lock nuts. What went wrong then: the block layout took the biggest
+# box (a leg) as the base and hung the top and all four brackets on leg #1; legs #2 to #4 lay in a row with no
+# interface; the top was assumed 100 x 70 x 16; the gate passed (no_interface was checked per item, not per copy);
+# Assemble Legs found leg #2 floating and blocked.
+# Hand values (the graph reply, and the role layout the office derives from the plan's part names):
+#   top 1200 x 700 x 18 (assumed for a four-seat folding table), its top face datum A (Z = 0)
+#   brackets 60 x 30 x 60 under the corners, 30 mm in from the edges: X +-(600 - 30 - 30) = +-540,
+#   Y +-(350 - 30 - 15) = +-305, Z -18 - 30 = -48; 4 wood screws each (16 in all)
+#   legs 40 x 20 x 700, each on its own bracket's inboard face (Y +-(305 - 15 - 10) = +-280), the pivot at the
+#   bracket's centre (Z -48), the pivot bore 20 below the leg's upper end: leg Z -48 + 20 - 700 = -728 .. -28
+#   pivot: an M8 hex bolt through bracket (30) and leg (20) with two washers and the lock nut (4 stacks)
+id = "r-table"
+title = "Regression: foldable table (legs pivoting on brackets under the top)"
+letter = "R3"
+source = "Founder's program TEST Project, 2026-11-20"
+brief = "Design a foldable Table"
+
+[sim]
+plan = "r_table.plan.json"
+intent = "r_table.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
+
+[limits]
+tokens = 300
+wall_simulated_s = 600
+wall_live_s = 1800
+
+[expect]
+complete = true
+clashes = 0
+binned = 0
+loose = 0                # nothing floating (leg #2 floated)
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.count]]
+name = "(?i)folding leg"
+n = 4
+
+[[expect.count]]
+name = "(?i)hinge bracket"
+n = 4
+
+[[expect.touch]]
+a = { name = "(?i)hinge bracket" }   # every bracket is under the top
+b = { name = "(?i)table top" }
+tol = 0.01
+
+[[expect.touch]]
+a = { name = "(?i)folding leg" }     # every leg on its own bracket
+b = { name = "(?i)hinge bracket" }
+tol = 0.01
+
+[[expect.span]]
+name = "(?i)table top"   # the top is the base: its top face is datum A
+axis = "z"
+max = 0.0
+tol = 0.01
+
+[[expect.span]]
+name = "(?i)folding leg" # the legs hang below the top
+axis = "z"
+max = -18.0
+tol = 30.0
+
+[[expect.stacks]]
+style = "hex_bolt"
+size = 8
+n = 4                    # the four pivot bolts, with their washers and lock nuts

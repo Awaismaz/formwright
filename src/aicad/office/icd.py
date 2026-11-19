@@ -628,7 +628,12 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         keyy = not ringy and (_KEYY.search(p["name"]) or (_KEYY.search(text) and not _BEARINGY.search(text)
                                                           and not _DOWELY.search(text)))
         if ringy:
-            ring_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "name": p["name"], "d": None})
+            # its role, as the plan states it: what it locates ("locating each bearing inner race" / "holding the gear
+            # against the shoulder"): rings go to spots of that role, never just by order and Ø (golden suite F4)
+            role = "bearing" if _BEARINGY.search(text) and not re.search(r"gear|hub|pulley|wheel|sprocket|spacer",
+                                                                          p["name"], re.IGNORECASE) else                 "hub" if re.search(r"gear|hub|pulley|wheel|sprocket|spacer", text, re.IGNORECASE) else None
+            ring_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "name": p["name"], "d": None,
+                              "role": role})
         elif keyy:
             key_item.setdefault(p["sub"], p["id"])
             key_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "size": None})
@@ -1926,7 +1931,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     continue
                 sub, cls = by_id[sp["sh"]]["sub"], _line_class(by_id[sp["sh"]]["name"])
                 cands = sorted((e for e in ring_pool if e["left"] > 0 and e["d"] in (None, sp["d"])
-                                and (e["sub"] == sub or not own)),
+                                and (e["sub"] == sub or not own) and e.get("role") in (None, sp["against"])),
                                key=lambda e: (_line_class(e["name"]) != cls, ring_pool.index(e)))
                 if cands:
                     e = cands[0]
@@ -2699,6 +2704,18 @@ def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict
                         "text": f"{it['name']}: no interface connects it to the rest of the program, so it would "
                                 "be placed beside the assembly, unconnected. Say what it mounts on (or resize the "
                                 "part it should fit), remove it from the plan, or keep it as a separate part."})
+        # every copy, not just the item: leg #2 of four with no interface floats beside the program (founder's
+        # "TEST Project", 2026-11-20: the gate passed per item, Assemble Legs then found leg #2 floating)
+        linked_c = {(f[w]["item"], int(f[w].get("copy") or 0)) for f in ifs for w in ("a", "b")}
+        for i, it in items.items():
+            if i not in linked or i in separate or len(it.get("copies") or []) < 2:
+                continue
+            for c in range(len(it["copies"])):
+                if (i, c) not in linked_c:
+                    out.append({"code": "no_interface", "items": [i], "interfaces": [], "copy": c,
+                                "text": f"{it['name']} #{c + 1}: no interface connects this copy (the others are "
+                                        "connected), so it would be placed beside the assembly, unconnected. Each "
+                                        "copy needs its own joint: say what each one mounts on, or plan fewer."})
     if skel.get("layout") != "shaft_line":
         return out
     # a shaft line: two bearings per shaft, and nothing on one shaft overlapping another shaft's parts

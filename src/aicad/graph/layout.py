@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from collections import deque
 from typing import Any
 
@@ -93,6 +94,8 @@ PB_WALL_MIN = 8.0
 BRACKET_MIN = 10.0        # mm: the least bracket under a motor
 BEARING_SPAN = 4.0        # x the shaft Ø (at least 2 x the bearing OD): bearings of a shaft that carries nothing
 MOTOR = {"shaft_d": 14.0, "shaft_length": 30.0, "L": 180.0, "W": 120.0, "H": 120.0}  # assumed envelope (IEC 71-ish)
+CORNER = 30.0             # mm from a base's edges to a connector at its corner (a table's leg brackets)
+_TOPPY = re.compile(r"\btop\b|table|desk|deck|shelf|seat|worktop|\blid\b", re.IGNORECASE)
 ROLE = {"shaft": "shaft", "spur_gear": "gear", "pulley": "hub", "hub": "hub", "spacer": "hub", "bearing_cap": "hub",
         "coupling": "hub"}
 HUBS = ("keyed_hub", "hub_fit")
@@ -227,6 +230,8 @@ class _Layout:
             self._pin()
         elif self.kind == "blocks":
             self._blocks()
+        elif self.kind == "mount":
+            self._mount()
         else:
             self._line()
         self._loose()
@@ -449,7 +454,10 @@ class _Layout:
             self.kind, self.sub_line, self.ctx = "guide", False, {s: "guide" for s in self.shafts}
             return
         if not self.shafts and self.pin_x:
-            self.kind, self.sub_line, self.ctx = "pin", False, {}
+            guests = {x.guest for x in self.joints} | {x.guest for x in self.pin_x}
+            roots = [b for b in self.designed if b not in guests]
+            mounted = all(x.host in roots for x in self.pin_x) and len(self.pin_x) == 1
+            self.kind, self.sub_line, self.ctx = ("pin" if mounted else "mount"), False, {}
             return
         if not self.shafts and self.designed and all(self.role(c) == "block" for c in self.designed) and self.joints:
             self.kind, self.sub_line, self.ctx = "blocks", False, {}
@@ -1433,6 +1441,88 @@ class _Layout:
 
         place(self.base)
 
+    # ------------------------------------------------------------------ 5g. parts mounted on a base, members pivoting
+    def _mount(self) -> None:
+        """A base (a table top, a frame, a plate: by its role, never just the largest box) with connectors bolted to
+        it (under it when it is a top) and members pivoting on the connectors. Connector copies sit at the base's
+        corners (4), its ends (2) or its centre (1), CORNER mm in from its edges; member copy i pivots on connector
+        copy i (a pivot bolt along Y through both: the member flush against the connector's inboard face, its pivot
+        bore half its width from its upper end, hanging straight down). Every copy gets its own interfaces."""
+        pins = self.pin_x
+        guests = {x.guest for x in self.joints} | {x.guest for x in pins}
+        roots = [b for b in self.designed if b not in guests]
+        if len(roots) != 1:
+            raise Unsupported("parts mounted on more than one base")
+        self.base = roots[0]
+        self.under = bool(_TOPPY.search(self.name(self.base)))
+        parent: dict[str, tuple[str, Connection]] = {}
+        for x in self.joints:
+            if x.host == self.base and self.role(x.guest) == "block":
+                parent.setdefault(x.guest, (x.host, x))
+        self.parent = parent
+        self.connectors = [k for k in self.designed if k in parent]
+        bs = self.spec[self.base]
+        T = float(bs["H"])
+        self.at[self.base] = [[0.0, 0.0, _r2(-T / 2)]]
+        bx, by = self.foot(self.base)
+        self.block_order: list[tuple[str, int]] = []
+        for k in self.connectors:
+            ks = self.spec[k]
+            kx, ky = self.foot(k)
+            n = self.ncopies(k)
+            ex, ey = bx / 2 - CORNER - kx / 2, by / 2 - CORNER - ky / 2
+            spots = {4: [(-ex, -ey), (ex, -ey), (-ex, ey), (ex, ey)], 2: [(-ex, 0.0), (ex, 0.0)], 1: [(0.0, 0.0)]}.get(
+                n, [(-ex + 2 * ex * j / max(1, n - 1), 0.0) for j in range(n)])
+            z = -T - float(ks["H"]) / 2 if self.under else float(ks["H"]) / 2
+            self.at[k] = [[_r2(px), _r2(py), _r2(z)] for px, py in spots]
+            self.block_order += [(k, c) for c in range(n)]
+            if ex < 0 or ey < 0:
+                self.conflict(f"{n} x {self.name(k)} don't fit on the {self.name(self.base)} ({bx:g} x {by:g}).",
+                              [k, self.base], [parent[k][1].id])
+        self.pivots: list[dict[str, Any]] = []
+        for x in pins:
+            h, m = x.host, x.guest
+            if h not in self.at:
+                raise Unsupported(f"{self.name(m)} pivots on {self.name(h)}, which isn't mounted on the base")
+            if self.ncopies(m) != self.ncopies(h):
+                self.conflict(f"{self.comp[m].qty} x {self.name(m)} pivot on {self.comp[h].qty} x {self.name(h)}: "
+                              "each copy needs its own host copy.", [m, h], [x.id])
+            hs, ms = self.spec[h], self.spec[m]
+            _hx, hy = self.foot(h)
+            mx_, my = self.foot(m)
+            e = mx_ / 2  # the pivot bore half the member's width from its upper end
+            self.at[m] = [None] * self.ncopies(m)
+            for c in range(min(self.ncopies(m), self.ncopies(h))):
+                hp = self.at[h][c]
+                assert hp is not None
+                side = -1.0 if hp[1] > 0 else 1.0  # the host's inboard face
+                zp = hp[2]
+                ym = hp[1] + side * (hy / 2 + my / 2)
+                self.at[m][c] = [_r2(hp[0]), _r2(ym), _r2(zp + e - float(ms["H"]) / 2)]
+                self.pivots.append({"x": x, "host": h, "member": m, "c": c, "axis": [_r2(hp[0]), _r2(zp)],
+                                    "plane": _r2(hp[1] + side * hy / 2), "normal": [0, int(side), 0]})
+            if self.under and float(hs["H"]) / 2 < e + 2.0:
+                self.conflict(f"{self.name(m)}'s upper end ({e:g} above its pivot) would hit the "
+                              f"{self.name(self.base)}: {self.name(h)} is {float(hs['H']):g} tall.", [m, h, self.base],
+                              [x.id])
+
+    def _pivot_joint(self, pv: dict[str, Any]) -> None:
+        """A pivot bolt through the host and the member along Y: a one-hole bolted joint (head on the member, washers
+        and the lock nut on the host side), so Fitz stacks the planned bolt, washers and nut there."""
+        x, h, m, c = pv["x"], pv["host"], pv["member"], pv["c"]
+        o = self.nxt()
+        bolt = next((self.comp[v] for v in x.via if self.comp.get(v) is not None and self.comp[v].kind == "fastener"),
+                    None)
+        mm = int(o.get("fastener") or (bolt.v("size") if bolt is not None and bolt.v("size") else 8))
+        mm = mm if mm in CLEARANCE else 8
+        d = float(o.get("d") or CLEARANCE[mm])
+        self.add("hole_pattern", (self.item[h], c), (self.item[m], c), {
+            "fastener": f"M{mm}", "fastener_size": mm, "fastener_item": self.item[bolt.id] if bolt is not None else None,
+            "count": 1, "d": d, "pattern": "linear", "inset": None, "ax": "y", "plane_z": pv["plane"],
+            "normal": pv["normal"], "positions": [pv["axis"]], "through": True, "pivot": True,
+            "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
+            ["A", "B", "C"], f"pivot bolt M{mm} (the {self.name(m).lower()} folds about it)")
+
     # ------------------------------------------------------------------ 5e. a pin joint (a hinge)
     def _pin(self) -> None:
         """An arm pivoting on a pin between the lugs of its host: the host is the base (its top face datum A); the
@@ -1561,6 +1651,12 @@ class _Layout:
                         self._rod_bore(x.guest, 0, r, k, "slide")
         elif self.kind == "pin":
             self._pin_joint()
+        elif self.kind == "mount":
+            for k, c in self.block_order:
+                x = self.parent[k][1]
+                self._grid_joint(self.parent[k][0], 0, k, c, x, tapped=self.under, under=self.under)
+            for pv in self.pivots:
+                self._pivot_joint(pv)
         elif self.kind == "blocks":
             for k, c in self.block_order:
                 x = self.parent[k][1]
@@ -1817,7 +1913,8 @@ class _Layout:
             "plane_a": _r2(pa[1]), "plane_b": _r2(pb[1]), "position_tol": POS_TOL}, ["A", "B"],
             f"belt drive C {C:g}, pitch length {L:.0f}")
 
-    def _grid_joint(self, host: str, hc: int, child: str, cc: int, x: Connection | None, *, tapped: bool) -> None:
+    def _grid_joint(self, host: str, hc: int, child: str, cc: int, x: Connection | None, *, tapped: bool,
+                    under: bool = False) -> None:
         """A block bolted on its host's top face (the template's rule for a bolted block: a grid of 4, or 2 along
         the longer side when the washers of two rows don't fit side by side)."""
         ks = self.spec[child]
@@ -1825,7 +1922,7 @@ class _Layout:
         assert pos is not None
         o = self.nxt()
         Lp, Wp = self.foot(child)
-        bottom = pos[2] - float(ks["H"]) / 2
+        bottom = pos[2] + (1 if under else -1) * float(ks["H"]) / 2  # the joint face (the child's top when under)
         if self.comp[child].kind == "pillow_block":
             span = 2 * max(BEARINGS[self._des(b)][1] for b in self._pb_bearings(child))
         else:
@@ -1841,6 +1938,11 @@ class _Layout:
                       and self.comp[v].kind == "fastener"), None)
         if not o.get("count") and bolts is not None and int(bolts.qty) in (2, 3):  # no more holes than planned bolts
             count = 2
+        per = int(bolts.qty) // max(1, self.ncopies(child)) if bolts is not None else 0
+        if not o.get("count") and not o.get("inset") and count == 2 and per >= 4:
+            in4 = _r2(min(inset_pref, (min(Lp, Wp) - wod) / 2))  # four planned per joint: the holes move in
+            if in4 >= d / 2 + 1.0:
+                count, inset = 4, in4
         pts = _grid(pos, Lp, Wp, count, inset)
         if count == 2 and not o.get("inset"):
             inset = _r2(max(min(inset_pref, (max(Lp, Wp) - wod) / 2), d / 2 + 1.0))
@@ -1849,7 +1951,7 @@ class _Layout:
         self.add("hole_pattern", (self.item[host], hc), (self.item[child], cc), {
             "fastener": f"M{m}", "fastener_size": m, "fastener_item": self._fastener_item(x),
             "count": len(pts), "d": d, "pattern": "grid" if len(pts) > 2 else "linear", "inset": inset,
-            "plane_z": _r2(bottom), "normal": [0, 0, 1], "positions": pts, "through": tap is None,
+            "plane_z": _r2(bottom), "normal": [0, 0, -1 if under else 1], "positions": pts, "through": tap is None,
             **({"tapped": tap} if tap else {}),
             "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
             ["A", "B", "C"])
@@ -2009,7 +2111,7 @@ class _Layout:
                      for p in self.parts if p["family"] == "standard"]
         skel = {"units": "mm", "base": self.item[self.base],
                 "layout": {"gearbox": "gearbox", "plate": "block", "line": "shaft_line", "guide": "block",
-                           "pin": "block", "blocks": "block"}[self.kind],
+                           "pin": "block", "blocks": "block", "mount": "block"}[self.kind],
                 "csys": csys, "datums": datums, "axes": axes,
                 "envelope": {"min": [_r2(x) for x in lo], "max": [_r2(x) for x in hi],
                              "size": [_r2(hi[k] - lo[k]) for k in range(3)]},
@@ -2028,7 +2130,7 @@ class _Layout:
             return self.item[self.rider_of[cid]]
         if self.kind == "gearbox":
             return None if cid == self.housing else self.item[self.housing]
-        if self.kind in ("plate", "guide", "pin", "blocks"):
+        if self.kind in ("plate", "guide", "pin", "blocks", "mount"):
             if cid == self.base:
                 return None
             if cid in getattr(self, "parent", {}):
@@ -2110,6 +2212,13 @@ class _Layout:
             head += (f"Pin joint: {self.name(p['x'].guest)} pivots on a Ø{p['d']:g} x {p['length']:g} pin along +Y "
                      f"between the lugs of the {self.name(self.base)}, {self.spec[self.base]['H'] + p['axis'][1]:g} mm "
                      "above its underside; the arm lies along +X in the slot.")
+        elif self.kind == "mount":
+            head += (f"The {self.name(self.base)} is the base (its top face datum A); "
+                     + "; ".join(f"{self.ncopies(k)} x {self.name(k)} bolted {'under' if self.under else 'on'} it"
+                                 + (" at its corners" if self.ncopies(k) == 4 else "") for k in self.connectors)
+                     + "".join(f"; each {self.name(pv['member'])} pivots on its own {self.name(pv['host'])} (copy by "
+                               "copy) on a pivot bolt along Y" for pv in self.pivots[:1])
+                     + ". Copies pair with their host's copies: every copy has its own interfaces.")
         elif self.kind == "blocks":
             head += (f"Blocks bolted on their host's top face: the {self.name(self.base)} is the base (its top face "
                      "datum A), each part centred on it (side by side along +X when several), its bolts no more than "

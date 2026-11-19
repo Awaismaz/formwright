@@ -264,9 +264,23 @@ def known_loose(doc: dict[str, Any], adoc: dict[str, Any], findings: list[dict[s
     loose_items |= separate
     loose = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in loose_items}
     kept = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in separate}
+    # parts joined to the rest only at the next level up (four leg-and-bracket pairs in a "Legs" sub-assembly, each
+    # bolted to the top in another one: the founder's "TEST Project"): apart here by design, attached there
+    here = {(i.get("office") or {}).get("item") for i in adoc["instances"]}
+    partners: dict[str, set[str]] = {}
+    for f in ifs:
+        partners.setdefault(f["a"]["item"], set()).add(f["b"]["item"])
+        partners.setdefault(f["b"]["item"], set()).add(f["a"]["item"])
+    above = {i for i in items if partners.get(i) and partners[i] - here}
+    inst_item = {i["id"]: (i.get("office") or {}).get("item") for i in adoc["instances"]}
     out = []
     for f in findings:
         its = set(f.get("items") or [])
+        designed = {inst_item.get(x) for x in its} & set(items)
+        if f["code"] == "floating" and designed & above:  # the cluster hangs together and joins upward
+            out.append({**f, "severity": "note", "text": f["text"] + " They are joined to the rest at the next level "
+                        "up (their interfaces connect them to parts of another sub-assembly)."})
+            continue
         if f["code"] in ("floating", "row") and its and len(its - kept) <= 1 and kept & its:
             continue  # only parts the engineer kept separate (and at most one other) touch nothing: as decided
         if f["code"] == "floating" and its and its <= loose:

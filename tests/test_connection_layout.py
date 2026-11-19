@@ -16,7 +16,7 @@ Five golden mechanisms, every expected number a hand calculation from the placem
 4. Belt drive (new): pulleys Ø60 / Ø120 x 20 on Ø20 shafts, two pillow blocks per shaft, 6204, on a base plate.
    C = D1 + D2 = 180 (stated rule); belt pitch length 2 C + pi (D1 + D2) / 2 + (D2 - D1)^2 / 4C = 360 + 282.74 + 5 =
    647.74. Bearings BEARING_CLEAR + SHOULDER = 9 from the pulley faces: Y 19 .. 33 and -33 .. -19; blocks 14 + 4 = 18
-   wide, centred Y +-24; shafts Y -43 .. 43 (86). Axis height = max(120 / 2 + CAV 6, 47 / 2 + 11.75) = 66 (the big
+   wide, the seat open toward -Y on both (one design for both copies): Y -33 .. -15, 19 .. 37; shafts Y -43 .. 43 (86). Axis height = max(120 / 2 + CAV 6, 47 / 2 + 11.75) = 66 (the big
    pulley clears the plate). Pillow block: wall max(8, 0.25 x 47) = 11.75, bolts M6 (fastener_for(2 x 47 = 94)),
    inset 2 x 6.6 = 13.2; L = 47 + 23.5 + 4 x 13.2 = 123.3 -> 123.5, H = 66 + 23.5 + 11.75 = 101.25 -> 101.5 (0.5 mm up),
    centre Z 50.75; its two M6 holes 61.75 - 13.2 = 48.55 either side. Axes at X 0 and 180, centred on the plate:
@@ -176,11 +176,12 @@ def test_belt_drive_on_pillow_blocks() -> None:
     belt = _ifs(ifs, "belt_drive")[0]["data"]
     assert (belt["centre_distance"], belt["belt_length"], belt["plane_a"], belt["plane_b"]) == (180, 647.74, 0, 0)
     pb = it["Drive pillow block"]
-    assert pb["size"] == [123.5, 18, 101.5] and pb["copies"] == [[-90, -24, 50.75], [-90, 24, 50.75]]
+    assert pb["size"] == [123.5, 18, 101.5] and pb["copies"] == [[-90, -24, 50.75], [-90, 28, 50.75]]
     assert it["Base plate"]["size"] == [324, 106, 16] and it["Base plate"]["copies"] == [[0, 0, -8]]
     seats = sorted((f["a"]["name"], tuple(f["data"]["seats"][0]["z"])) for f in _ifs(ifs, "bearing_seat"))
     assert seats == [("Drive pillow block #1", (-33, -19)), ("Drive pillow block #2", (19, 33)),
                      ("Driven pillow block #1", (-33, -19)), ("Driven pillow block #2", (19, 33))]
+    assert all(f["data"]["seats"][0]["open"] == -1 for f in _ifs(ifs, "bearing_seat"))
     holes = next(f for f in _ifs(ifs, "hole_pattern") if f["b"]["name"] == "Drive pillow block #1")["data"]
     assert (holes["fastener"], holes["positions"], holes["plane_z"]) == ("M6", [[-138.55, -24], [-41.45, -24]], 0)
     keys = _ifs(ifs, "key")
@@ -371,3 +372,93 @@ def test_spacer_between_two_faces_and_circlips_in_their_grooves() -> None:
     assert rings == [([-11.2, -10], [-11.3, -10]), ([10, 11.2], [10, 11.3])]
     ring = next(s["item"] for s in sk["standard"] if s["name"] == "Circlip")
     assert len(icd.seated(ifs, ring)["at"]) == 2
+
+
+# ----------------------------------------------------------------------------- the golden suite's mechanisms (WORKLIST 46)
+GC = Path(__file__).resolve().parents[1] / "src" / "aicad" / "eval" / "golden_cases"
+
+
+def _golden(case: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    d = _reply(GC / f"{case}.intent.json")
+    g, iss, _qs = intent.compile_reply(d["reply"], d["name"], d["brief"])
+    assert [i for i in iss if i["severity"] == "error"] == []
+    _plan, sk, ifs = _solve(g)
+    assert icd.problems(sk, ifs) == [], icd.problems(sk, ifs)
+    return sk, ifs
+
+
+def test_roller_bearings_in_side_plates() -> None:
+    """(e) Tube Ø50 x 200 on a Ø20 shaft, 6204 (B 14) in 15 mm side plates, no frame: the shaft is the base; bearings
+    9 from the tube's ends (Y 109 .. 123), each plate 15 thick from its bearing's -Y face (Y 109 .. 124 and
+    -123 .. -108: both seats open toward -Y, one design for both copies), shaft ends 10 beyond: 266 long."""
+    sk, ifs = _golden("e_roller")
+    it = _it(sk)
+    assert it["Roller shaft"]["size"] == [20, 20, 266] and it["Roller tube"]["copies"] == [[0, 0, 0]]
+    assert it["Side plate"]["size"] == [100, 15, 120] and it["Side plate"]["copies"] == [[0, -115.5, 0], [0, 116.5, 0]]
+    brg = next(s["item"] for s in sk["standard"] if s["name"] == "Bearing 6204")
+    assert icd.seated(ifs, brg)["at"] == [[0, -123, 0], [0, 109, 0]]
+
+
+def test_linear_stage_rods_in_end_blocks() -> None:
+    """(f) Two Ø12 x 240 rods 60 apart along +Y, 25 above the base plate (turned so its 300 runs along the rods), their
+    ends flush in the end blocks (30 thick along the rods: Y -120 .. -90 and 90 .. 120), the carriage centred."""
+    sk, ifs = _golden("f_linear_stage")
+    it = _it(sk)
+    assert it["Guide rod"]["copies"] == [[-30, 0, 25], [30, 0, 25]] and it["Base plate"]["rot"] == 90
+    assert it["End block"]["copies"] == [[0, -105, 20], [0, 105, 20]] and it["Carriage"]["copies"] == [[0, 0, 25]]
+    rods = [f for f in _ifs(ifs, "shaft_bore")]
+    assert len(rods) == 6 and {f["data"]["fit"] for f in rods} == {"H7/h6", "H7/g6"}
+
+
+def test_hinge_pin_through_lugs_and_arm() -> None:
+    """(g) The arm (100 x 22 x 12) pivots on the Ø8 x 40 pin 24 above the clevis' underside (Z -30 + 24 = -6), the pin
+    bore 11 from its end: arm centre X 50 - 11 = 39; the pin is placed (no vanishing part), along Y."""
+    sk, ifs = _golden("g_hinge_arm")
+    it = _it(sk)
+    assert it["Hinge arm"]["copies"] == [[39, 0, -6]] and it["Clevis base"]["cavity"]["open_through"]
+    pin = next(s["item"] for s in sk["standard"] if s["name"] == "Hinge pin")
+    st = icd.seated(ifs, pin)
+    assert st["at"] == [[0, -20, -6]] and st["R"] == icd.CANON["y"]
+
+
+def test_foldable_table_top_as_base_legs_pivot_copy_by_copy() -> None:
+    """(R3) Top 1200 x 700 x 18 is the base; brackets 60 x 30 x 60 under its corners (X +-540, Y +-305, Z -48), 4 M5
+    wood screws each; leg i on bracket i (inboard: Y +-280), pivot bolt M8 at the bracket centre, legs Z -728 .. -28."""
+    sk, ifs = _golden("r_table")
+    it = _it(sk)
+    assert sk["base"] == next(i for i, x in sk["items"].items() if x["name"] == "Table top")
+    assert sorted(it["Leg hinge bracket"]["copies"]) == [[-540, -305, -48], [-540, 305, -48], [540, -305, -48],
+                                                          [540, 305, -48]]
+    assert sorted(it["Folding leg"]["copies"]) == [[-540, -280, -378], [-540, 280, -378], [540, -280, -378],
+                                                    [540, 280, -378]]
+    pivots = [f for f in _ifs(ifs, "hole_pattern") if f["data"].get("pivot")]
+    assert len(pivots) == 4 and {(f["a"]["copy"], f["b"]["copy"]) for f in pivots} == {(0, 0), (1, 1), (2, 2), (3, 3)}
+    screws = [f for f in _ifs(ifs, "hole_pattern") if not f["data"].get("pivot")]
+    assert len(screws) == 4 and all(f["data"]["count"] == 4 and f["data"]["fastener"] == "M5" for f in screws)
+
+
+def test_the_founders_table_plan_is_laid_out_by_role_on_the_old_path() -> None:
+    """The founder's plan (no graph, no sizes): the template took a leg as the base and hung every bracket on leg #1;
+    the parts' roles give the top as the base and each leg on its own bracket, sizes assumed and said."""
+    from aicad.office import interfaces, planner
+
+    plan = json.loads((GC / "r_table.plan.json").read_text(encoding="utf-8"))
+    if "id" not in plan["subassemblies"][0]:
+        plan = planner.normalise_plan(plan, "archie")
+    parts = gc.plan_parts(plan)
+    items = [{"id": p["id"], "kind": "part", "name": p["name"], "family": p["family"], "qty": p["qty"],
+              "description": p["description"], "parent_id": p["sub"]} for p in parts]
+    doc = {"plan": plan, "brief": "Design a foldable Table", "items": items, "tickets": []}
+    sk, ifs = interfaces._graph_layout(doc, None)  # type: ignore[misc]
+    assert sk["solver"] == "roles" and icd.problems(sk, ifs) == []
+    assert _it(sk)["Table top"]["size"] == [1200, 700, 18] and "assumed" in sk["notes"][0]
+    assert len([f for f in ifs if f["data"].get("pivot")]) == 4
+
+
+def test_an_unconnected_copy_blocks_the_gate() -> None:
+    """Per copy, not per item: legs #2 .. #4 with no interface are no_interface errors (the founder's gate passed)."""
+    sk = {"layout": "block", "items": {"leg": {"name": "Leg", "copies": [[0, 0, 0], [1, 0, 0]], "role": "block"},
+                                       "top": {"name": "Top", "copies": [[0, 0, 0]], "role": "block"}}}
+    ifs = [{"kind": "hole_pattern", "a": {"item": "top", "copy": 0}, "b": {"item": "leg", "copy": 0}}]
+    codes = [(x["code"], x.get("copy")) for x in icd._layout_issues(sk, ifs)]
+    assert codes == [("no_interface", 1)]
