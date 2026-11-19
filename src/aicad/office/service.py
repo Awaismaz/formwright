@@ -278,7 +278,7 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
 
 
 def _light_deliverables(root: Path, doc: dict[str, Any]) -> None:
-    """The light path (PD-88) at plan approval: a small program makes its drawings and manufacturing review only when
+    """The light path (PD-93) at plan approval: a small program makes its drawings and manufacturing review only when
     the brief asks for them or the engineer adds them later (Deliverables tab), unless the engineer chose "always"
     or "never" when creating it. Said in the activity, never a silent removal."""
     from aicad.office import scope
@@ -299,7 +299,7 @@ def _light_deliverables(root: Path, doc: dict[str, Any]) -> None:
 
 
 def express_ok(doc: dict[str, Any]) -> bool:
-    """The plan and the interfaces may be approved in one step (light path, PD-88)."""
+    """The plan and the interfaces may be approved in one step (light path, PD-93)."""
     return doc.get("status") == "plan_review" and bool(doc.get("light"))
 
 

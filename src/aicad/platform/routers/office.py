@@ -94,7 +94,7 @@ class ProgramIn(BaseModel):
     # None: the default, at most the workspace's remaining wallet (a trial wallet is smaller than 3,000)
     budget_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     # Ortho and Smithy make the drawings, BOM and DFM summary after integration: True always, False only when asked,
-    # None (default) automatic: on, except for a small program whose brief doesn't ask for them (PD-88)
+    # None (default) automatic: on, except for a small program whose brief doesn't ask for them (PD-93)
     deliverables: bool | None = None
     review_gate: bool = False  # every part waits for the engineer's approval after Gage passes it (CD-023)
     threads: dict[str, int] | None = None  # per-agent threads (CD-027); default one per designer (PD-66)
@@ -472,7 +472,7 @@ async def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_c
 
 @router.post("/programs/{pid}/gates/express")
 async def approve_express(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """The light path for a small program (PD-88): one click approves the plan and, when Archie's interfaces have no
+    """The light path for a small program (PD-93): one click approves the plan and, when Archie's interfaces have no
     problem, the interfaces too, and the office starts building. With a problem it stops at the interfaces gate as
     usual (nothing is skipped). What was approved is recorded on the program (``express``) and in the activity."""
     from aicad.office import icd as icd_mod

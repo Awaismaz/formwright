@@ -118,7 +118,7 @@ function RunBar({ p, onSpeed }: { p: Program; onSpeed: () => void }) {
   );
 }
 
-/** The light path (PD-88): what one click approved, and the drawings / manufacturing review switch, in plain view. */
+/** The light path (PD-93): what one click approved, and the drawings / manufacturing review switch, in plain view. */
 function LightCard({ p }: { p: Program }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);

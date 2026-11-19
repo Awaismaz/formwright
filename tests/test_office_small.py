@@ -102,7 +102,7 @@ def test_the_standard_planner_plans_the_founders_sentence() -> None:
     lt = scope.light_info(plan, FOUNDER)
     assert lt is not None and (lt["parts"], lt["pieces"], lt["deliverables_asked"]) == (3, 3, False)
     assert scope.light_info(plan, FOUNDER + ", with drawings")["deliverables_asked"] is True
-    # the rule (PD-88): at most 6 part lines and 8 pieces
+    # the rule (PD-93): at most 6 part lines and 8 pieces
     big = {"subassemblies": [{"parts": [{"qty": 1}] * 7}]}
     assert not scope.small(big) and not scope.small({"subassemblies": [{"parts": [{"qty": 9}]}]})
 

@@ -327,7 +327,7 @@ _GENERIC: list[tuple[str, str, list[P]]] = [
 def finish(plan: dict[str, Any], name: str, brief: str) -> tuple[dict[str, Any], str | None]:
     """The post-check on every plan a planner makes (never on the engineer's own edits): parts the brief excludes,
     or doesn't name when it limits the program ("just a gear, a shaft and a key"), are left out with a note in plain
-    words (``scope.respect``); a small program (PD-88) of shafts and what rides on them (gears, keys, hubs) becomes
+    words (``scope.respect``); a small program (PD-93) of shafts and what rides on them (gears, keys, hubs) becomes
     one sub-assembly, one unit to assemble (a "keyed shaft" and a "gear" group are one physical unit)."""
     from aicad.office import scope
 

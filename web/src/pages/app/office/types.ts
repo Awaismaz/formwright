@@ -186,7 +186,7 @@ export interface Program {
   review_gate?: boolean; ecns?: Ecn[];
   /** Per-agent threads (CD-027): parallel sub-agents of one designer; null on programs from before (shared pool). */
   threads?: Record<string, number> | null;
-  /** The light path for a small program (PD-88): null when the program is not small. */
+  /** The light path for a small program (PD-93): null when the program is not small. */
   light?: LightInfo | null;
   /** What one-step approval approved (plan + interfaces), and whether the office started. */
   express?: Express | null;

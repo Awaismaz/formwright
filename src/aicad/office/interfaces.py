@@ -378,7 +378,7 @@ def fix(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any
 
 
 def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any], *, with_plan: bool = False) -> None:
-    """The ICD gate. ``with_plan``: approved in the same click as the plan (the light path, PD-88), which is only
+    """The ICD gate. ``with_plan``: approved in the same click as the plan (the light path, PD-93), which is only
     allowed when the interfaces have no problem; the history and the activity say so."""
     if not has_icd(doc):
         raise OfficeInputError("This program has no interfaces document.")

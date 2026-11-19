@@ -49,7 +49,7 @@ _NOEXTRA = re.compile(r"\bno (?:extra|other|additional|more|further) (?:items?|p
 # words that start a positive clause again after a negation ("no housing, just a gear and a shaft")
 _POSITIVE = re.compile(r"\b(?:just|only|with|build|make|design|add|plus|include|including|use)\b", re.IGNORECASE)
 
-# the light path (PD-88): a program this small is planned, laid out and assembled in one step
+# the light path (PD-93): a program this small is planned, laid out and assembled in one step
 SMALL_MAX_LINES = 6     # part lines in the plan
 SMALL_MAX_PIECES = 8    # pieces in total (quantities summed)
 DELIVERABLES_ASKED = re.compile(r"\bdrawings?\b|\bdrawn\b|\bdfm\b|manufactur|\bbom\b|bill of materials|"
@@ -172,7 +172,7 @@ def pieces(plan: dict[str, Any]) -> tuple[int, int]:
 
 
 def small(plan: dict[str, Any] | None) -> bool:
-    """PD-88: at most SMALL_MAX_LINES part lines and SMALL_MAX_PIECES pieces (keys and rings count)."""
+    """PD-93: at most SMALL_MAX_LINES part lines and SMALL_MAX_PIECES pieces (keys and rings count)."""
     if not plan:
         return False
     lines, n = pieces(plan)
