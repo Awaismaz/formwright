@@ -423,14 +423,15 @@ def test_hinge_pin_through_lugs_and_arm() -> None:
 
 def test_foldable_table_top_as_base_legs_pivot_copy_by_copy() -> None:
     """(R3) Top 1200 x 700 x 18 is the base; brackets 60 x 30 x 60 under its corners (X +-540, Y +-305, Z -48), 4 M5
-    wood screws each; leg i on bracket i (inboard: Y +-280), pivot bolt M8 at the bracket centre, legs Z -728 .. -28."""
+    wood screws each; leg i on bracket i (inboard: Y +-280), the M8 pivot bolt 2 + 20 under the top (Z -40: the leg's
+    upper end 2 mm clear of the top), legs Z -720 .. -20."""
     sk, ifs = _golden("r_table")
     it = _it(sk)
     assert sk["base"] == next(i for i, x in sk["items"].items() if x["name"] == "Table top")
     assert sorted(it["Leg hinge bracket"]["copies"]) == [[-540, -305, -48], [-540, 305, -48], [540, -305, -48],
                                                           [540, 305, -48]]
-    assert sorted(it["Folding leg"]["copies"]) == [[-540, -280, -378], [-540, 280, -378], [540, -280, -378],
-                                                    [540, 280, -378]]
+    assert sorted(it["Folding leg"]["copies"]) == [[-540, -280, -370], [-540, 280, -370], [540, -280, -370],
+                                                    [540, 280, -370]]
     pivots = [f for f in _ifs(ifs, "hole_pattern") if f["data"].get("pivot")]
     assert len(pivots) == 4 and {(f["a"]["copy"], f["b"]["copy"]) for f in pivots} == {(0, 0), (1, 1), (2, 2), (3, 3)}
     screws = [f for f in _ifs(ifs, "hole_pattern") if not f["data"].get("pivot")]
@@ -492,6 +493,6 @@ def test_the_founders_own_table_graph_revised_with_old_frozen_sizes() -> None:
     it = _it(sk)
     assert icd.problems(sk, ifs) == [] and it["Table top"]["size"] == [1200, 700, 18]
     assert min(it["Leg hinge bracket"]["copies"]) == [-540, -305, -48]
-    assert min(it["Folding leg"]["copies"]) == [-540, -305 + 25, -378]
+    assert min(it["Folding leg"]["copies"]) == [-540, -305 + 25, -370]
     assert len([f for f in ifs if f["data"].get("pivot")]) == 4
     assert any("assumed by role" in n for n in sk["notes"])

@@ -8,8 +8,8 @@
 #   top 1200 x 700 x 18 (assumed for a four-seat folding table), its top face datum A (Z = 0)
 #   brackets 60 x 30 x 60 under the corners, 30 mm in from the edges: X +-(600 - 30 - 30) = +-540,
 #   Y +-(350 - 30 - 15) = +-305, Z -18 - 30 = -48; 4 wood screws each (16 in all)
-#   legs 40 x 20 x 700, each on its own bracket's inboard face (Y +-(305 - 15 - 10) = +-280), the pivot at the
-#   bracket's centre (Z -48), the pivot bore 20 below the leg's upper end: leg Z -48 + 20 - 700 = -728 .. -28
+#   legs 40 x 20 x 700, each on its own bracket's inboard face (Y +-(305 - 15 - 10) = +-280), the leg's upper end
+#   2 mm under the top, its pivot bore 20 below that (Z -18 - 2 - 20 = -40): leg Z -720 .. -20
 #   pivot: an M8 hex bolt through bracket (30) and leg (20) with two washers and the lock nut (4 stacks)
 id = "r-table"
 title = "Regression: foldable table (legs pivoting on brackets under the top)"
