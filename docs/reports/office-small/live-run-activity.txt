@@ -1,0 +1,82 @@
+19:22:49 program.created Founder: Founder opened the program Keyed gear live.
+19:22:49 plan.started Archie: Archie is reading the brief for Keyed gear live.
+19:23:12 plan.ready Archie: Archie split Keyed gear live into 1 sub-assemblies and 3 parts. Review the plan before tickets are created.
+19:23:19 gate.approved Founder: Founder approved the brief and plan. 5 tickets opened.
+19:23:19 program.light Archie: Keyed gear live is a small program (3 parts, 3 pieces): the office assembles it first; drawings and the manufacturing review wait until you ask for them in the Deliverables tab.
+19:23:19 icd.drafted Archie: Archie laid out Keyed gear live: 2 designed parts in the skeleton and 2 named interfaces. Review the interfaces (ICD) before part work starts.
+19:23:19 gate.approved Founder: Founder approved the architecture and interfaces together with the plan (one step: no interface problems) (ICD v1, 2 interfaces). Part tickets are released; Fitz is assembling the placeholders.
+19:23:19 gate.express Founder: Founder approved the plan (3 parts: Spur gear, Stepped shaft, Gear key) and the interfaces (ICD v1, 2 interfaces, 0 problems; note: Stepped shaft: no bearings or housing in the plan, so it is delivered as a sub-assembly (the shaft
+19:23:19 program.run Founder: Founder pressed Run: the office works the tickets, 3 at a time.
+19:23:19 ticket.claimed Hex: Hex picked up KGL-1 Spur gear.
+19:23:19 ticket.claimed Hex: Hex #2 picked up KGL-2 Stepped shaft.
+19:23:19 ticket.claimed Hex: Hex #3 picked up KGL-3 Gear key.
+19:23:19 agent.status Hex: Hex is searching the Toolbox and your parts for Spur gear
+19:23:19 ticket.moved Hex: Hex moved KGL-1 Spur gear: Ready → Approved.
+19:23:19 ticket.reused Hex: Hex found Spur gear m2 z40, keyed 8×3.3 in the Toolbox for KGL-1 Spur gear (0 tokens).
+19:23:19 ticket.handoff Hex: Hex → Fitz: Spur gear is in stock, ready for assembly.
+19:23:19 estimate.calibrated Archie: KGL-1 Spur gear took 0 s against 12.0 min estimated: Axel's rate for gear, pulley or drive moves 4 → 3.4 min per complexity unit.
+19:23:19 agent.status Hex: Hex is searching the Toolbox and your parts for Stepped shaft
+19:23:19 ticket.handoff Hex: Hex → Chuck: no stock part for Stepped shaft, design it.
+19:23:19 agent.status Hex: Hex is searching the Toolbox and your parts for Gear key
+19:23:19 ticket.moved Hex: Hex moved KGL-3 Gear key: Ready → Approved.
+19:23:19 ticket.reused Hex: Hex found Parallel key DIN 6885 A 8×7×18 in the Toolbox, sized by the ICD (IF-02) for KGL-3 Gear key (0 tokens).
+19:23:19 ticket.handoff Hex: Hex → Fitz: Gear key is in stock, ready for assembly.
+19:23:19 estimate.calibrated Archie: KGL-3 Gear key took 0 s against 30 s estimated: Hex's rate for standard part (toolbox) moves 0.5 → 0.425 min per complexity unit.
+19:23:19 ticket.claimed Chuck: Chuck picked up KGL-2 Stepped shaft.
+19:23:19 ticket.started Chuck: Chuck opened KGL-2 Stepped shaft as a Design Studio part.
+19:23:26 assembly.updated Fitz: Fitz assembled Keyed gear live from 2 placeholders: 2 mates by interface name; 0 clashes at the last check (placeholders).
+19:23:30 ticket.moved Chuck: Chuck moved KGL-2 Stepped shaft: Ready → In design.
+19:23:30 agent.status Chuck: Chuck is reading the brief for Stepped shaft
+19:23:30 ticket.milestone Design Studio: KGL-2 Stepped shaft: first build in the Design Studio (70 %).
+19:23:30 ticket.milestone Design Studio: KGL-2 Stepped shaft: the latest build passes the gating checks (70 %).
+19:23:37 ticket.milestone Chuck: KGL-2 Stepped shaft: Brief read reached (70 %).
+19:24:14 agent.status Chuck: Chuck is facing and grooving Stepped shaft
+19:24:15 agent.status Chuck: Stepped shaft passes the gating checks: Chuck is chamfering
+19:24:29 agent.status Chuck: Chuck is miking Stepped shaft against the brief
+19:24:29 ticket.milestone Chuck: KGL-2 Stepped shaft: Self-review reached (85 %).
+19:24:29 ticket.moved Chuck: Chuck moved KGL-2 Stepped shaft: In design → In review.
+19:24:29 ticket.handoff Chuck: Chuck → Gage: Stepped shaft for inspection.
+19:24:29 agent.status Gage: Gage is inspecting Stepped shaft against the brief
+19:24:44 ticket.comment Gage: Gage commented on KGL-2 Stepped shaft.
+19:24:44 ticket.moved Gage: Gage moved KGL-2 Stepped shaft: In review → Approved.
+19:24:44 ticket.handoff Gage: Gage → Fitz: Stepped shaft approved for assembly.
+19:24:44 ticket.claimed Fitz: Fitz picked up KGL-2 Stepped shaft.
+19:24:44 agent.status Fitz: Fitz is swapping Stepped shaft in for its placeholder
+19:24:44 ticket.fitted Fitz: Fitz swapped the real Stepped shaft in for its placeholder: every interface mate re-attached by name, 0 clashes (2 mates in the program assembly).
+19:24:44 estimate.calibrated Archie: KGL-2 Stepped shaft took 1.4 min against 10.5 min estimated: Chuck's rate for turned moves 3.5 → 2.975 min per complexity unit.
+19:24:44 ticket.claimed Fitz: Fitz picked up KGL-4 Assemble Keyed gear shaft.
+19:24:44 ticket.moved Fitz: Fitz moved KGL-4 Assemble Keyed gear shaft: Backlog → In design.
+19:24:44 agent.status Fitz: Fitz is laying out Keyed gear shaft on the bench
+19:24:44 ticket.claimed Fitz: Fitz picked up KGL-1 Spur gear.
+19:24:44 agent.status Fitz: Fitz is swapping Spur gear in for its placeholder
+19:24:57 ticket.fitted Fitz: Fitz swapped the real Spur gear in for its placeholder: every interface mate re-attached by name, 0 clashes (2 mates in the program assembly).
+19:24:57 ticket.claimed Fitz: Fitz picked up KGL-4 Assemble Keyed gear shaft.
+19:24:57 agent.status Fitz: Fitz is laying out Keyed gear shaft on the bench
+19:24:57 agent.status Fitz: Fitz is looking at Keyed gear shaft before it is signed off
+19:25:08 ticket.comment Archie: Archie commented on KGL-4 Assemble Keyed gear shaft.
+19:25:08 ticket.comment Fitz: Fitz commented on KGL-4 Assemble Keyed gear shaft.
+19:25:08 ticket.moved Fitz: Fitz moved KGL-1 Spur gear: Approved → Integrated.
+19:25:08 ticket.moved Fitz: Fitz moved KGL-2 Stepped shaft: Approved → Integrated.
+19:25:08 ticket.moved Fitz: Fitz moved KGL-3 Gear key: Approved → Integrated.
+19:25:08 ticket.moved Fitz: Fitz moved KGL-4 Assemble Keyed gear shaft: In design → Integrated.
+19:25:08 ticket.integrated Fitz: KGL-4 Assemble Keyed gear shaft: Fitz integrated Keyed gear shaft: seated 1 key per the ICD.
+19:25:08 estimate.calibrated Archie: KGL-4 Assemble Keyed gear shaft took 11 s against 3.0 min estimated: Fitz's rate for assembly integration moves 3 → 2.55 min per complexity unit.
+19:25:08 ticket.claimed Fitz: Fitz picked up KGL-5 Final assembly of Keyed gear live.
+19:25:08 ticket.moved Fitz: Fitz moved KGL-5 Final assembly of Keyed gear live: Backlog → In design.
+19:25:08 agent.status Fitz: Fitz is laying out Final assembly of Keyed gear live on the bench
+19:25:08 agent.status Fitz: Fitz is looking at Final assembly of Keyed gear live before it is signed off
+19:25:09 ticket.comment Fitz: Fitz commented on KGL-5 Final assembly of Keyed gear live.
+19:25:21 ticket.comment Archie: Archie commented on KGL-5 Final assembly of Keyed gear live.
+19:25:21 ticket.comment Fitz: Fitz commented on KGL-5 Final assembly of Keyed gear live.
+19:25:21 ticket.moved Fitz: Fitz moved KGL-5 Final assembly of Keyed gear live: In design → Integrated.
+19:25:21 program.milestone Fitz: Every ticket of Keyed gear live is integrated. First article assembled.
+19:25:21 ticket.integrated Fitz: KGL-5 Final assembly of Keyed gear live: Fitz integrated the program. Fitz's whole-program clash check runs now (advisory).
+19:25:21 estimate.calibrated Archie: KGL-5 Final assembly of Keyed gear live took 13 s against 3.0 min estimated: Fitz's rate for assembly integration moves 2.55 → 2.1675 min per complexity unit.
+19:25:21 program.done Archie: Keyed gear live: every ticket is integrated. The office has stopped.
+KGL-1 Spur gear 0 {}
+KGL-2 Stepped shaft 23 {"path":"agent","reasons":["the brief gives a size the interfaces don't explain (20 mm)","the brief gives a size the interfaces don't explain (6 mm)"],"seeded":true,"at":"2026-11-19T19:23:30Z"}
+KGL-3 Gear key 0 {}
+KGL-4 Assemble Keyed gear shaft 0 {}
+KGL-5 Final assembly of Keyed gear live 0 {}
+ARCHIE look 0 Final assembly of Keyed gear live is integrated. Visual check (advisory): it looks assembled. The gear appears seated on the larger step of the stepped shaft against its shoulder with the key at the hub, though the key seating is hidden and can't be fully confirmed from these views.
+0 errors

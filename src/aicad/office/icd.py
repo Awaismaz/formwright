@@ -75,6 +75,7 @@ EXIT_SIDE = 1        # gearbox shafts leave the housing through the +Y wall (ope
 BEARING_CLEAR = 5.0  # mm between a gear / hub face and the face of a bearing on its shaft (room for a spacer)
 GEAR_SPACE = 5.0     # mm between two gears on one shaft (a compound train)
 SHAFT_END = 10.0     # mm of shaft beyond each outer bearing face (at least half the shaft Ø)
+SEAT_END = 2.0       # mm of seat beyond the free face of the hub on a stepped shaft with no bearings (a sub-assembly)
 KIND_LABEL = {"hole_pattern": "bolted joint", "shaft_bore": "shaft / bore fit", "face": "seating face",
               "gear_mesh": "gear mesh", "bearing_seat": "bearing seat", "key": "keyed joint", "dowel": "dowel pins",
               "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring"}
@@ -267,11 +268,44 @@ def _sizes(text: str) -> tuple[float | None, list[float]]:
     return (float(dia.group(1)) if dia else None), [n for n in nums if n > 0]
 
 
+_STEPPED = re.compile(r"\bstepped\b|\bshoulders?\b|\bsteps?\b", re.IGNORECASE)
+
+
+def _diameters(text: str) -> list[float]:
+    """Every diameter written in a description (Ø20, "20 mm diameter", "diameter 26"), in order."""
+    t = text or ""
+    out = [float(m.group(1)) for m in re.finditer(r"[ØⲐ⌀]\s*" + _NUM, t)]
+    out += [float(m.group(1)) for m in re.finditer(_WORDED_D, t)]
+    out += [float(m.group(1)) for m in re.finditer(r"\b(?:diameter|dia\.?)\s*(?:of\s*)?" + _NUM, t, re.IGNORECASE)]
+    out += [float(m.group(1)) for m in re.finditer(_STEP_D, t)]
+    return [d for d in out if d > 0]
+
+
+def _bore_hint(text: str) -> float | None:
+    """The bore a hub or gear description states ("20 mm H7 bore", "bore Ø20", "a 20 H7 bore")."""
+    m = _BORE_D.search(text or "") or re.search(r"\bbore\s*(?:of\s*)?[ØⲐ⌀]?\s*" + _NUM, text or "", re.IGNORECASE)
+    return float(m.group(1)) if m else None
+
+
+# "20 mm diameter", "20 mm h6 diameter", "20h6 dia": the number is not part of a word ("h6" is a tolerance class)
+_WORDED_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s*)?(?:diameter|dia\b)",
+                       re.IGNORECASE)
+# a shaft's steps in words: "20 mm k6 gear seat", "25 mm larger step", "Ø26 body" (not "6 mm keyseat")
+_STEP_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s+)?(?:[a-z]+\s+){0,2}"
+                     r"(?:seat|journal|step|body|shoulder|collar)\b", re.IGNORECASE)
+_BORE_D = re.compile(r"(?<![\w.])" + _NUM + r"\s*(?:mm\s*)?(?:[a-zA-Z]{1,2}\d{1,2}\s*)?bore\b", re.IGNORECASE)
+
+
+def shoulder_for(d: float) -> float:
+    """The larger step of a stepped shaft behind a hub seat of Ø d when the plan gives none (assumed, said so):
+    a shoulder of max(2.5, 0.1 d + 1) mm per side, rounded to a whole mm (Ø20 -> Ø26, Ø25 -> Ø32, Ø40 -> Ø50)."""
+    return float(round(d + 2 * max(2.5, 0.1 * d + 1.0)))
+
+
 def _worded(text: str) -> tuple[float | None, float | None]:
     """(Ø, length) written in words: "20 mm diameter" / "diameter 20", "120 long" / "length 120"."""
     t = text or ""
-    dm = re.search(_NUM + r"\s*(?:mm\s*)?(?:diameter|dia\b)", t, re.IGNORECASE) or \
-        re.search(r"\b(?:diameter|dia\.?)\s*(?:of\s*)?" + _NUM, t, re.IGNORECASE)
+    dm = _WORDED_D.search(t) or re.search(r"\b(?:diameter|dia\.?)\s*(?:of\s*)?" + _NUM, t, re.IGNORECASE)
     lm = re.search(_NUM + r"\s*(?:mm\s*)?long\b", t, re.IGNORECASE) or \
         re.search(r"\blength\s*(?:of\s*)?" + _NUM, t, re.IGNORECASE)
     return (float(dm.group(1)) if dm else None), (float(lm.group(1)) if lm else None)
@@ -612,12 +646,15 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
 
     def take_key(sub: str, size: tuple[float, float]) -> str | None:
         """The key item of ``sub`` one more keyed joint gets (one Toolbox size per item, at most its quantity), else
-        None: the keyway is still cut, there is just no planned key piece for it."""
-        for e in key_pool:
-            if e["sub"] == sub and e["left"] > 0 and e["size"] in (None, size):
-                e["left"] -= 1
-                e["size"] = size
-                return str(e["id"])
+        None: the keyway is still cut, there is just no planned key piece for it. A key planned in another
+        sub-assembly (Archie's "keyed shaft" group, the gear in its own) is taken when its own has none: the key goes
+        where the keyway is, not into the parts bin (founder's run 2026-11-19)."""
+        for own in (True, False):
+            for e in key_pool:
+                if (e["sub"] == sub or not own) and e["left"] > 0 and e["size"] in (None, size):
+                    e["left"] -= 1
+                    e["size"] = size
+                    return str(e["id"])
         return None
     # quarter turns of part frames about +Z (Archie's ``rotate`` hint, or an edit at the ICD gate)
     for p in designed:
@@ -652,6 +689,36 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     s["d"] = bd  # an assumed shaft takes the bearing bore: one plain journal
                 s["bearing"] = {"designation": got[0][1], "item": got[0][0], "journal": bd, "seats": len(got)}
                 line_brg[sh] = got
+    # a shaft sub-assembly (founder, 2026-11-19: "a spur gear mounted on a stepped shaft, locked with a key"): a shaft
+    # line with no bearing anywhere in the plan is the shaft with what it carries, a normal deliverable. A stepped one
+    # has a seat for its hubs and a larger step behind them: the shoulder the hub locates against.
+    sub_line = line and not bearing_all
+    stepped: dict[str, dict[str, float]] = {}  # shaft -> {"seat": Ø, "body": Ø, "source": ...}
+    if sub_line:
+        shaft_talk = " ".join(x for x in re.split(r"(?<=[.;!?])\s+|\n+", brief or "") if _SHAFTY.search(x))
+        for sh in line_sh:
+            p, s = by_id[sh], spec[sh]
+            text = f"{p['name']} {p['description']}"
+            if not (_STEPPED.search(text) or _STEPPED.search(shaft_talk)):
+                continue
+            ds = sorted(set(_diameters(p["description"])))
+            riders = [q for q in designed if spec[q["id"]]["role"] in ("gear", "hub") and (
+                len(line_sh) == 1 or str(q.get("mounts_on") or "").lower() == p["name"].lower())]
+            bores = sorted({b for b in (_bore_hint(q["description"]) for q in riders) if b})
+            if len(ds) >= 2 and ds[-1] > ds[0]:
+                seat, body, src = ds[0], ds[-1], "plan"
+            elif bores and bores[0] < float(s["d"]) - 1e-9:  # the hub's bore is the seat, the planned Ø the step
+                seat, body, src = bores[0], float(s["d"]), "plan"
+            else:
+                seat = float(s["d"])
+                body, src = shoulder_for(seat), "assumed"
+            ob = (iov.get(sh) or {}).get("shoulder_d")
+            if isinstance(ob, int | float) and not isinstance(ob, bool) and ob > seat:
+                body, src = float(ob), "edited"
+            s["d"] = seat
+            if not float(s.get("length") or 0.0) and _worded(p["description"])[1]:  # "overall length 120 mm"
+                s["length"] = float(_worded(p["description"])[1] or 0.0)
+            stepped[sh] = {"seat": seat, "body": body, "source": src}
     # shafts in a sub-assembly with bearings run in bearing seats (62xx / 60xx from the Toolbox table)
     for p in designed:
         s = spec[p["id"]]
@@ -1267,7 +1334,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             below = (k, kc)
             z += height(k)
 
-    line_info: dict[str, Any] = {"xs": [], "brg": {}, "mesh": []}
+    line_info: dict[str, Any] = {"xs": [], "brg": {}, "mesh": [], "seat": {}}
 
     def layout_line() -> float:
         """A shaft line: shafts along +Y at Z = 0 (datum A is the plane of the shaft axes), the input shaft on X = 0
@@ -1330,12 +1397,30 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             end = max(SHAFT_END, 0.5 * s["d"])
             y0 = min([b0 for _s, b0, _b1, _p in brg] + [a for a, _b in own] + [0.0]) - end
             y1 = max([b1 for _s, _b0, b1, _p in brg] + [b for _a, b in own] + [0.0]) + end
-            if "length" not in (iov.get(sh) or {}):
+            dy = 0.0
+            if sh in stepped and own and not brg:
+                # a stepped shaft in a sub-assembly: the hubs sit on the seat (Ø seat) from SEAT_END beyond the
+                # free hub face to the shoulder; the larger step (the body) runs on from the shoulder. One shaft on
+                # its own: the shoulder face is datum B (Y = 0), the hubs on its -Y side.
+                olo, ohi = min(a for a, _b in own), max(b for _a, b in own)
+                y0 = olo - SEAT_END
+                need = ohi - y0 + 1.0
+                body_l = max(ohi - olo + SHAFT_END, 2.0 * stepped[sh]["seat"])
+                L = max(float(s.get("length") or 0.0), need) if float(s.get("length") or 0.0) > 0 \
+                    else (ohi - y0) + body_l
+                y1 = y0 + L
+                if len(S) == 1:
+                    dy = -ohi
+                s["length"] = _r2(L)
+                line_info["seat"][sh] = {"z": [_r2(y0 + dy), _r2(ohi + dy)], "shoulder_z": _r2(ohi + dy),
+                                         "seat": stepped[sh]["seat"], "body": stepped[sh]["body"], "side": 1,
+                                         "source": stepped[sh]["source"]}
+            elif "length" not in (iov.get(sh) or {}):
                 s["length"] = _r2(max(y1 - y0, float(s.get("length") or 0.0)))
-            at[sh][0] = [_r2(xs[j]), _r2((y0 + y1) / 2), 0.0]
+            at[sh][0] = [_r2(xs[j]), _r2((y0 + y1) / 2 + dy), 0.0]
             s["ax"] = "y"
             for st in on[sh]:
-                at[st[0]][st[1]] = [_r2(xs[j]), _r2(y[st]), 0.0]
+                at[st[0]][st[1]] = [_r2(xs[j]), _r2(y[st] + dy), 0.0]
                 spec[st[0]]["ax"] = "y"
             line_info["brg"][sh] = [(sd, _r2(b0), _r2(b1), p) for sd, b0, b1, p in brg]
         line_info.update(xs=xs, mesh=mesh)
@@ -1761,13 +1846,21 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 o = fov.get(f"IF-{len(ifs) + 1:02d}") or {}
                 fit = str(o.get("fit") or "H7/k6")
                 ak = [_r2(pos_k[0]), _r2(pos_k[2])]
+                seat = line_info["seat"].get(sh)
+                step: dict[str, Any] = {}
+                if seat:  # a stepped shaft: the seat Ø runs from near the free end to the shoulder
+                    step = {"seat_z": seat["z"], "shoulder_d": seat["body"], "shoulder_source": seat["source"]}
+                    if abs(bottom + height(k) - seat["shoulder_z"]) < 1e-6:  # this hub bears on the shoulder
+                        step.update(shoulder_z=seat["shoulder_z"], side=seat["side"])
                 add("shaft_bore", (k, c), (sh, 0), {
                     "d": ks["d"], "fit": fit if fit in FITS else "H7/k6", "length": _r2(height(k)), "ax": "y",
-                    "axis": ak, "z": [_r2(bottom), _r2(bottom + height(k))], "flush_z": None,
-                    "position_tol": POS_TOL}, ["A", "B", "C"], "bore on shaft")
+                    "axis": ak, "z": [_r2(bottom), _r2(bottom + height(k))], "flush_z": None, **step,
+                    "position_tol": POS_TOL}, ["A", "B", "C"],
+                    "bore on its seat, against the shoulder" if step.get("shoulder_z") is not None else "bore on shaft")
                 key = key_for(ks["d"])
                 p = by_id[k]
-                keyed = _KEYY.search(f"{p['name']} {p['description']}") or key_item.get(p["sub"])
+                keyed = _KEYY.search(f"{p['name']} {p['description']}") or key_item.get(p["sub"]) or \
+                    (sub_line and any(e["left"] > 0 for e in key_pool))
                 if key and keyed and height(k) >= key[0] + 3:
                     o2 = fov.get(f"IF-{len(ifs) + 1:02d}") or {}
                     kb, kh, t1, t2 = key
@@ -1811,7 +1904,10 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             for side, b0, b1, (bitem, des) in line_info["brg"].get(sh, []):
                 mine.append((min(float(ks["d"]), BEARINGS[des][0]), b0 if side < 0 else b1, side, "bearing",
                              (bitem, brg_copy[(sh, side)])))
+            seat = line_info["seat"].get(sh)
             for n_s, (d1, face, side, against, who) in enumerate(mine):
+                if seat and against == "hub" and side > 0 and abs(face - seat["shoulder_z"]) < 1e-6:
+                    continue  # the shoulder locates this face: no ring there
                 row = RINGS.get(round(d1)) if abs(d1 - round(d1)) < 1e-9 else None
                 if row is None:
                     continue  # not a DIN 471 shaft size
@@ -1856,10 +1952,24 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 f"retaining ring DIN 471 {d1:g} at the {'+' if side > 0 else '-'}Y face of the "
                 f"{by_id[who]['name'] if sp['against'] == 'hub' else 'bearing'}")
         nb = sum(len(v) for v in line_info["brg"].values())
-        notes.append("Shaft line: no housing or base plate in the plan, so the shafts run along +Y on their own "
-                     f"bearings ({nb} on the shaft journals), parallel at the centre distances of their gears; the "
-                     "first gear pair meshes on the plane Y = 0. The bearings still need something to stand on (pedestals or a "
-                     "frame): not in this plan.")
+        for sh, seat in line_info["seat"].items():
+            spec[sh]["d"] = seat["body"]  # the shaft's envelope is its larger step; its riders keep the seat Ø
+        if sub_line:
+            riders = [by_id[k]["name"] for sh in line_sh for k, _c in stk.get((sh, 0), [])]
+            what = ", ".join(dict.fromkeys(riders)) or "nothing yet"
+            stepped_txt = "".join(
+                f" {by_id[sh]['name']} is stepped: a Ø{seat['seat']:g} seat and a Ø{seat['body']:g} step"
+                f"{' (assumed)' if seat['source'] == 'assumed' else ''}; the hub bears on the shoulder"
+                + (" (datum B, Y = 0)." if len(line_sh) == 1 else ".") for sh, seat in line_info["seat"].items())
+            notes.append(f"Shaft sub-assembly: no housing or bearings in the plan, so "
+                         f"{'the shafts are' if len(line_sh) > 1 else by_id[line_sh[0]]['name'] + ' is'} the base, "
+                         f"along +Y, carrying {what}.{stepped_txt} What carries the shaft (bearings, a housing) is "
+                         "outside this program: it is delivered as a sub-assembly.")
+        else:
+            notes.append("Shaft line: no housing or base plate in the plan, so the shafts run along +Y on their own "
+                         f"bearings ({nb} on the shaft journals), parallel at the centre distances of their gears; "
+                         "the first gear pair meshes on the plane Y = 0. The bearings still need something to stand "
+                         "on (pedestals or a frame): not in this plan.")
 
     # tooth phasing: the second gear of a mesh turns about its axis so a tooth space faces the first gear's tooth
     # (Toolbox gears have a tooth centred on +X); without it two real gears at the exact centre distance collide
@@ -1935,12 +2045,29 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     base = items_out[prog_base]
     if line:  # datums of a shaft line: the plane of the shaft axes, the (first) mesh plane, the input shaft's axis
         meshy = any(line_info["mesh"])
-        csys = (f"Origin on the {base['name']} axis" + (" in the mesh plane of the first gear pair" if meshy else "")
+        shoulder = len(line_sh) == 1 and line_sh[0] in line_info["seat"]
+        first = next((by_id[k]["name"] for k, _c in stk.get((line_sh[0], 0), [])), None) if line_sh else None
+        if shoulder:
+            bname = f"Shoulder face of the {base['name']} (the {first or 'hub'} locates on it)"
+        elif meshy:
+            bname = "Mesh plane (first gear pair)"
+        elif sub_line and first:
+            bname = f"Mid-plane of the {first}"
+        else:
+            bname = "Mid-plane XZ"
+        csys = (f"Origin on the {base['name']} axis" + (" in the mesh plane of the first gear pair" if meshy else
+                                                         " at its shoulder face" if shoulder else "")
                 + " (datums A, B, C); the shafts run along +Y, parallel, in the plane Z = 0 (datum A, the plane of "
                 "the shaft axes); +X from the input shaft towards the next one; +Z up.")
-        datums = [{"id": "A", "kind": "plane", "name": "Plane of the shaft axes", "origin": [0, 0, 0], "normal": [0, 0, 1]},
-                  {"id": "B", "kind": "plane", "name": "Mesh plane (first gear pair)" if meshy else "Mid-plane XZ",
-                   "origin": [0, 0, 0], "normal": [0, 1, 0]},
+        if sub_line and len(line_sh) == 1:
+            csys = (f"Origin on the {base['name']} axis" + (" at its shoulder face" if shoulder else
+                                                             f" in the mid-plane of the {first}" if first else "")
+                    + f" (datums A, B, C); the {base['name']} is the base (fixed), its axis along +Y in the plane "
+                    "Z = 0 (datum A); +Z up.")
+        datums = [{"id": "A", "kind": "plane", "name": "Horizontal plane through the shaft axis"
+                   if sub_line and len(line_sh) == 1 else "Plane of the shaft axes", "origin": [0, 0, 0],
+                   "normal": [0, 0, 1]},
+                  {"id": "B", "kind": "plane", "name": bname, "origin": [0, 0, 0], "normal": [0, 1, 0]},
                   {"id": "C", "kind": "plane", "name": f"{base['name']} axis plane (YZ)", "origin": [0, 0, 0],
                    "normal": [1, 0, 0]}]
     else:
@@ -1963,6 +2090,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     sep = sorted(i for i in (ov.get("separate") or {}) if i in items_out)
     if sep:
         skel["separate"] = sep
+    if sub_line:  # a shaft with what it carries, no bearings or housing in the plan: delivered as a sub-assembly
+        skel["shaft_subassembly"] = True
     return skel, ifs
 
 
@@ -2115,12 +2244,21 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         if which == "a":
             out.append({"type": "hole", **g, "d": d["d"], "fit": d["fit"].split("/")[0],
                         "tol": tol, "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]}"})
+        elif d.get("seat_z"):  # a stepped shaft: the seat Ø over its span, up to the shoulder
+            out.append({"type": "boss", **_axial(skel, side, d, d["axis"], d["seat_z"][0], d["seat_z"][1]),
+                        "d": d["d"], "fit": d["fit"].split("/")[1], "tol": tol,
+                        "label": f"seat Ø{d['d']:g} {d['fit'].split('/')[1]} (stepped shaft)"})
         else:
             out.append({"type": "boss", **g, "d": d["d"], "fit": d["fit"].split("/")[1],
                         "tol": tol, "label": f"shaft Ø{d['d']:g} {d['fit'].split('/')[1]}"})
         if d.get("flush_z") is not None:
             out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
                         "label": "end face flush with the bottom"})
+        if d.get("shoulder_z") is not None:  # the hub face bears on the shaft's shoulder (faces opposed)
+            sd = int(d.get("side") or 1)
+            out.append({"type": "face", **_plane(skel, side, d, d["shoulder_z"], sd if which == "a" else -sd),
+                        "tol": tol, "label": ("hub face against the shoulder" if which == "a" else
+                                              f"shoulder Ø{float(d.get('shoulder_d') or 0):g} (the hub locates on it)")})
     elif f["kind"] == "bearing_seat":
         if which == "a":  # the housing: a seat per bearing (Ø D, housing fit, depth B) and the shaft clearance
             for st in d["seats"]:
@@ -2385,7 +2523,8 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
         ``row_layout``       nothing to mount the parts on, no shafts either: they are laid out in a row, unconnected
         ``no_interface``     a designed part with no interface (it would lie beside the program)
         ``bearing_unplaced`` (warning) bearings in the plan that no seat or journal takes: they go to the parts bin
-        ``shaft_support``    a shaft of a shaft line that runs in fewer than two bearings
+        ``shaft_support``    a shaft of a shaft line that runs in fewer than two bearings (a warning when the plan
+                             has no bearings at all: the shaft is delivered as a sub-assembly)
         ``line_clash``       two things on different shafts of a shaft line overlap (gears are taken at the pitch circle)
         ``journal_off_shaft`` a bearing beyond the end of its shaft
       geometry (a part can't be made):
@@ -2553,8 +2692,18 @@ def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict
     for f in ifs:
         if f["kind"] == "bearing_journal" and f["a"]["item"] in nb:
             nb[f["a"]["item"]] += 1
+    # no bearing anywhere in the plan (and, in a shaft line, no housing): the shaft with what it carries is the
+    # deliverable, a sub-assembly. Said at the gate, never blocking (founder 2026-11-19). Bearings that are planned
+    # but don't carry a shaft still block.
+    no_bearings = not any(_BEARINGY.search(str(st.get("name") or "")) for st in skel.get("standard") or [])
     for i in shafts:
         if nb[i] < 2 and i not in separate:
+            if nb[i] == 0 and no_bearings:
+                out.append({"code": "shaft_support", "severity": "warning", "items": [i], "interfaces": [],
+                            "text": f"{items[i]['name']}: no bearings or housing in the plan, so it is delivered as a "
+                                    "sub-assembly (the shaft with what it carries); what carries it is outside this "
+                                    "program."})
+                continue
             out.append({"code": "shaft_support", "items": [i], "interfaces": [],
                         "text": f"{items[i]['name']}: runs in {nb[i]} bearing{'s' if nb[i] != 1 else ''}; a shaft "
                                 "with no housing needs two (one either side of what it carries). Plan two more "

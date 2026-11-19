@@ -294,7 +294,8 @@ export default function Deliverables({ program }: { program: Program }) {
       const v = await api.post<Program>(`${BASE}/programs/${program.id}/deliverables`);
       qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
       qc.invalidateQueries({ queryKey: ["office-deliverables", program.id] });
-      toast.success("Ortho and Smithy have their tickets: press Run to make the deliverables");
+      toast.success(v.orchestrator?.state === "running" ? "Ortho and Smithy are making the deliverables"
+        : "Ortho and Smithy have their tickets: press Run to make the deliverables");
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
   };
   return (
@@ -305,7 +306,7 @@ export default function Deliverables({ program }: { program: Program }) {
           body={d.tickets.length ? <>{working.map(t => <div key={t.id} className="flex items-center justify-center gap-2 text-[12.5px]">
             <AgentAvatar code={t.agent ?? t.specialist} state={t.agent_state} size={22} />{t.line ?? `${t.title}: ${t.column.replace("_", " ")}`}</div>)}</>
             : d.auto ? "When the final assembly is integrated, Ortho draws every part (with the ICD's interface numbers as spec dimensions) and the assembly with its BOM, and Smithy runs the Manufacturing Advisor on every part."
-              : "This program makes its deliverables on request."}
+              : (program.deliverables_why ?? "This program makes its deliverables on request.")}
           action={d.can_edit && !d.tickets.length && integrated ? <Button loading={busy} onClick={make}>Make the deliverables now</Button> : undefined} />
       </Card>}
       <Drawings program={program} d={d} />

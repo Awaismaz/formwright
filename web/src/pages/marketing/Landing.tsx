@@ -14,7 +14,7 @@ import AppDevices from "@/components/landing/AppDevices";
 import Showcase from "@/components/landing/Showcase";
 import ExplodeOnScroll from "@/components/landing/ExplodeOnScroll";
 import { Reveal } from "@/components/landing/motion";
-import { Badge3D, Button3D, Card3D, Crosshair, Dim, Fcf, SectionHead, Zones } from "@/components/landing/site";
+import { Badge3D, Button3D, Card3D, Dim, Fcf, SectionHead, Zones } from "@/components/landing/site";
 
 export const SALES = "mailto:sales@formwright.dev?subject=Formwright%20Enterprise";
 
@@ -102,7 +102,6 @@ export default function Landing() {
     <main>
       {/* ------------------------------------------------ hero */}
       <section className="s-grid relative overflow-hidden border-b border-ink/80">
-        <Crosshair />
         <div className="relative mx-auto max-w-[1240px] px-4 pb-14 pt-10 sm:px-6 lg:pt-14">
           <div className="flex flex-wrap items-center gap-3">
             <Fcf cells={["Ø 0.00", "Brief"]} />
@@ -110,18 +109,18 @@ export default function Landing() {
           </div>
 
           <h1 className="s-display mt-8 text-[40px] text-ink min-[420px]:text-[48px] sm:text-[72px] md:text-[84px] lg:text-[104px] xl:text-[118px]">
-            <span className="s-rise"><span style={{ ["--d" as string]: "0.05s" }}>Write the brief.</span></span>
+            <span className="s-rise"><span style={{ ["--d" as string]: "0.05s" }}>One brief.</span></span>
             <span className="s-rise pb-[.2em]"><span style={{ ["--d" as string]: "0.16s" }}>
-              Get the <span className="underline decoration-hi decoration-[0.12em] underline-offset-[0.1em]">solid.</span>
+              A complete <span className="underline decoration-hi decoration-[0.12em] underline-offset-[0.1em]">machine.</span>
             </span></span>
           </h1>
-          <Dim label="Brief to checked STEP" load delay={0.55} className="max-w-[760px]" />
+          <Dim label="Brief to manufacturing review" load delay={0.55} className="max-w-[760px]" />
 
           <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,.8fr)] lg:items-start">
             <div className="min-w-0">
               <p className="max-w-[620px] text-[17px] leading-relaxed text-ink2 sm:text-[19px]">
-                Describe a part or a whole machine. Formwright models it as parametric CAD and measures every build against your numbers
-                before you see it. Dimensions stay editable on the model, with no AI in the loop.
+                Archie and a team of specialist agents plan the machine, model every part, assemble it, draw it and review it for
+                manufacture. You make every decision, and every number is measured against your spec before you see it.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-4">
                 {signedIn ? <Button3D to="/app" size="lg" icon={<ArrowRight className="h-4 w-4" />}>Open the app</Button3D>

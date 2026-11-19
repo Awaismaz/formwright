@@ -241,15 +241,6 @@ a.s-plate:focus-visible { outline: 2px solid rgb(var(--s-bp)); outline-offset: 4
 /* ---- zone ruler along the sheet border ---- */
 .s-zones { background-image: repeating-linear-gradient(90deg, rgb(var(--s-rule-2) / .7) 0 1px, transparent 1px 16px); background-size: 100% 4px; background-repeat: no-repeat; }
 
-/* ---- the drafting cursor (hero): pointer devices only, off under reduced motion ---- */
-.s-xhair { position: absolute; inset: 0; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .25s ease; }
-.s-xhair.is-on { opacity: 1; }
-.s-xhair > i { position: absolute; left: 0; top: 0; background: rgb(var(--s-bp) / .28); will-change: transform; }
-.s-xhair > .x { width: 100%; height: 1px; }
-.s-xhair > .y { height: 100%; width: 1px; }
-.s-xhair > b { position: absolute; left: 0; top: 0; font: 500 10.5px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .06em;
-  color: rgb(var(--s-bp)); background: rgb(var(--s-sheet) / .9); padding: 3px 5px; border: 1px solid rgb(var(--s-bp) / .4); white-space: nowrap; will-change: transform; }
-
 /* ---- motion: lines draw, words rise; all settle to the final state under reduced motion ---- */
 .s-rise { display: block; overflow: hidden; padding-bottom: .04em; }
 .s-rise > span { display: block; transform: translateY(105%); animation: s-rise .8s cubic-bezier(.2, .7, .1, 1) forwards; animation-delay: var(--d, 0s); }
