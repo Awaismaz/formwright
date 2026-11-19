@@ -112,3 +112,13 @@ plus `Edge.position_at` double-reverses edges on revolved faces. Make 2D faces c
 - With hundreds of instances the solver's DOF analysis was the cost (a dense SVD over every instance): leaf blocks
   (fastener stacks) are analysed on their own (`solver._null_blocks`, exact). Keep solves, relinks and syncs off the
   event loop (`asyncio.to_thread`, CD-037), one solve per document per step.
+
+## Parameter sensitivity / viewport dimensions (DS-038)
+- `aicad.dims` maps each editable parameter to the faces it measures by rebuilding with the value nudged (+1 %, or
+  ±1 for whole numbers) through `runner._exec(script, source=..., store=False)` (never pollute `_BASE_CACHE`).
+- **OCCT renumbers faces after a small value change** (pipe flange: a bolt hole and the raised face swapped ids).
+  Never pair faces by index across two builds: use `dims.match` (least movement within surface type + direction).
+- Plane rows use the adaptor's plane axis flipped for `TopAbs_REVERSED` faces (= topo.json's outward normal) and
+  offset `n·p`: exact and free of mass-property calls. Face ids follow `topo.body_list` order (same as topo.json).
+- A build used to spend ~0.9 s on Windows resolving every loaded module's path in `_exec`'s helper purge; only modules
+  the run itself imported are checked now. Profile `_exec` before blaming the kernel.

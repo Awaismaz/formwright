@@ -88,14 +88,16 @@ def suppressed_features(source: str) -> list[str]:
     return managed_list(source, "SUPPRESSED_FEATURES")
 
 
-def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
+def _exec(script: Path, use_cache: bool = False, source: str | None = None, store: bool = True) -> dict[str, Any]:
     """Run a model script. Its folder is importable (helper modules), and anything imported from that
     folder is purged afterwards so a warm worker never serves stale helpers to the next build.
-    With use_cache, the agent-authored base geometry is reused when only manual features changed."""
+    With use_cache, the agent-authored base geometry is reused when only manual features changed.
+    ``source`` runs that text in place of the file (same folder, helpers and project files): the dimension
+    mapping's perturbed builds (aicad.dims). ``store=False`` keeps such one-off builds out of the base cache."""
     import hashlib
 
     folder = str(script.parent.resolve())
-    source = script.read_text(encoding="utf-8")
+    source = script.read_text(encoding="utf-8") if source is None else source
     base_src, manual = _manual_block(source)
     helpers = sorted(f for f in script.parent.glob("*.py") if f.resolve() != script.resolve())
     for f in helpers:
@@ -116,22 +118,26 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
         fw._STATE["sheet"] = cached.get("sheet")  # immutable model: safe to share with the cache
     else:
         sys.path.insert(0, folder)
+        before = set(sys.modules)
         try:
             ns = {"__name__": "__aicad_model__", "__file__": str(script), "__builtins__": __builtins__}
             exec(compile(base_src, str(script), "exec"), ns)  # noqa: S102 - model scripts are tripwired above
         finally:
             if sys.path and sys.path[0] == folder:
                 sys.path.pop(0)
-            for name, mod in list(sys.modules.items()):
-                f = getattr(mod, "__file__", None)
+            # only modules this run imported can come from the folder (earlier runs purged theirs); resolving
+            # every loaded module's path cost ~0.9 s per build on Windows
+            for name in [n for n in sys.modules if n not in before]:
+                f = getattr(sys.modules[name], "__file__", None)
                 if f and str(Path(f).resolve()).startswith(folder):
                     del sys.modules[name]
         if "result" not in ns:
             raise ScriptRejected("script must assign the final build123d shape to a variable named `result`")
-        _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last"), "threads": fw.threads(),
-                             "sheet": fw.sheet()}
-        while len(_BASE_CACHE) > _CACHE_MAX:
-            _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
+        if store:
+            _BASE_CACHE[key] = {"ns": dict(ns), "log": fw.log(), "last": fw._STATE.get("last"),
+                                 "threads": fw.threads(), "sheet": fw.sheet()}
+            while len(_BASE_CACHE) > _CACHE_MAX:
+                _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
     ns["__fw_base__"] = ns["result"]
     if manual:
         ns["result"] = fw.apply_manual(ns["result"], manual)

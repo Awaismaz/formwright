@@ -15,6 +15,7 @@ import { ProjectStatus } from "@/components/ProjectCard";
 import { useDeliverables } from "@/components/Release";
 import { runTour, seenTour, STUDIO_TOUR } from "@/lib/tour";
 import type { Pick, SketchPreview, Topo, V3, ViewName } from "@/viewer/types";
+import { dimFaces, onModel, resolveDims, type DimsDoc } from "@/viewer/dims";
 import Chat from "./studio/Chat";
 import FeatureManager, { planePreview, selectKindsFor, xDirFor, type FeatureOp } from "./studio/FeatureManager";
 import CommandManager, { type Command, type MakeModule } from "./studio/CommandManager";
@@ -114,6 +115,10 @@ export default function ProjectStudio() {
   const [palette, setPalette] = useState(false);
   const [keys, setKeys] = useState(false);
   const undoBusy = useRef(false);
+  // design parameters as dimensions on the model (D): hover links the dimension, its faces and its Params row
+  const [dimsOn, setDimsOnS] = useState(() => { try { return localStorage.getItem("fw_view_dims") === "1"; } catch { return false; } });
+  const setDimsOn = (v: boolean) => { setDimsOnS(v); try { localStorage.setItem("fw_view_dims", v ? "1" : "0"); } catch { /* */ } };
+  const [paramHover, setParamHover] = useState<string | null>(null);
 
   const catalog = useQuery({ queryKey: ["catalog"], queryFn: () => api.get<Catalog>("/api/billing/catalog"), staleTime: 300_000 });
   const owned = useMemo(() => new Set(me?.org?.god_unlock ? Object.keys(MAKE) : me?.org?.modules ?? []), [me?.org]);
@@ -136,6 +141,15 @@ export default function ProjectStudio() {
     queryFn: () => api.get<{ recognition: Recognition | null }>(`/api/projects/${id}/recognition`) });
   const p = project.data;
   const st = status.data ?? undefined;
+  const dimsQ = useQuery({ queryKey: ["dims", id, st?.build_id], enabled: !!st?.fingerprint && (dimsOn || tab === "params"),
+    queryFn: () => api.get<DimsDoc>(`/api/projects/${id}/dims`),
+    refetchInterval: q => (q.state.data?.state === "pending" || q.state.data?.state === "paused" ? 1500 : false) });
+  const dimSpecs = dimsQ.data?.dims ?? [];
+  const dimValues = st?.editable_params ?? {};
+  const dimShown = useMemo(() => (topo && dimSpecs.length ? resolveDims(dimSpecs, topo, dimValues).length : 0), [topo, dimSpecs, dimValues]);
+  const dimMapped = useMemo(() => new Set(dimSpecs.filter(onModel).map(d => d.param)), [dimSpecs]);
+  const hoverFaces = useMemo(() => (paramHover ? dimFaces(dimSpecs.find(d => d.param === paramHover)) : null), [paramHover, dimSpecs]);
+  useEffect(() => { setParamHover(null); }, [st?.build_id]);
   const branch = p?.branch ?? "main";
   const readOnly = !!p && !can(p.access, "edit", branch);  // PLT-021: view-only people get the viewer, not the tools
   const usedIn = useWhereUsed(id, st?.build_id, owned.has("assembly")).length;  // ASM-018: edits preview their impact
@@ -154,7 +168,7 @@ export default function ProjectStudio() {
   useEffect(() => { if (compact && sk) setPane("model"); }, [sk, compact]); // face ids highlighted from a previous build are meaningless now
 
   const refresh = () => {
-    for (const k of ["status", "project", "manual", "revisions", "params", "recognition"]) qc.invalidateQueries({ queryKey: [k, id] });
+    for (const k of ["status", "project", "manual", "revisions", "params", "recognition", "dims"]) qc.invalidateQueries({ queryKey: [k, id] });
     qc.invalidateQueries({ queryKey: ["me"] }); qc.invalidateQueries({ queryKey: ["projects"] });
   };
   const selectKinds = useMemo<Pick["kind"][] | undefined>(() => (pm ? selectKindsFor(pm.op) : sk?.phase === "pick" ? ["face"] : undefined), [pm, sk]);
@@ -308,8 +322,8 @@ export default function ProjectStudio() {
   };
 
   // Keyboard (STU-11): Ctrl+Z/Y undo/redo, F fit, Ctrl+1–7 views, Esc, ? shortcuts, Ctrl+K typed commands (IDEA 5).
-  const keyState = useRef({ undo, redoNow, pm, sk, tool });
-  keyState.current = { undo, redoNow, pm, sk, tool };
+  const keyState = useRef({ undo, redoNow, pm, sk, tool, dimsOn, setDimsOn });
+  keyState.current = { undo, redoNow, pm, sk, tool, dimsOn, setDimsOn };
   useEffect(() => {
     const VIEWS: ViewName[] = ["Iso", "Front", "Top", "Right", "Back", "Left", "Bottom"];
     const h = (e: KeyboardEvent) => {
@@ -325,6 +339,7 @@ export default function ProjectStudio() {
       if (mod || e.altKey) return;
       if (e.key === "f" || e.key === "F") viewerApi.current?.zoomToFit();
       else if (e.key === "?") setKeys(true);
+      else if ((e.key === "d" || e.key === "D") && !k.pm && !k.sk) k.setDimsOn(!k.dimsOn);
       else if (e.key === "Escape" && !k.pm) { if (k.sk?.phase === "pick") { setSk(null); setTool("orbit"); } else if (k.tool !== "orbit") { setTool("orbit"); setSelection([]); } else setSelection([]); }
     };
     addEventListener("keydown", h, true);
@@ -355,6 +370,14 @@ export default function ProjectStudio() {
     // the model script is never shown to users (STU-06); superadmins keep it as a support view (PD parked)
     ...(me?.user?.is_superadmin ? [["src", <FileCode2 className="h-3.5 w-3.5" />, "Source"] as [string, React.ReactNode, string]] : [])];
   const repairs = st?.manual_errors ?? [];
+  /** A value edited on a dimension in the viewport: the same token-free parameter rebuild as the Params panel. */
+  const editOnScreen = (param: string, value: number) => {
+    const label = st?.param_meta?.[param]?.label ?? param.replace(/_/g, " ").toLowerCase().replace(/^\w/, c => c.toUpperCase()), from = st?.editable_params?.[param];
+    const values = { [param]: value };
+    void guarded({ kind: "params", values }, `Change ${label} to ${value}`,
+      () => void manualCall(() => api.post(`/api/projects/${id}/params`, { values }), `${label} ${from ?? ""} → ${value}`, undefined, true));
+  };
+  const dimsVisible = dimsOn && !pm && !sk && !flatOn && !compare && !paramPm;
   const repairOf = (f: ManualFeature | null) => (f ? repairs.find(m => m.id === f.id)?.error ?? null : null);
 
   const sidePanel = (<>
@@ -398,7 +421,8 @@ export default function ProjectStudio() {
                   onDelete={f => void guarded(treeChange({ kind: "delete", feature: f }), `Delete “${f.name}”`,
                     () => void manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true))} /></TabPanel>
                 <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
-                <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} usedIn={usedIn} /></fieldset></TabPanel>
+                <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} usedIn={usedIn}
+                  onModel={{ on: dimsOn, toggle: () => setDimsOn(!dimsOn), mapped: dimMapped, hover: paramHover, onHover: setParamHover }} /></fieldset></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>
                 <TabPanel value="revs"><RevisionsPanel project={p} onChanged={refresh} version={st?.build_id} onCompare={runCompare} comparing={compare?.base ?? null} /></TabPanel>
                 <TabPanel value="files"><FilesPanel project={p} status={st} /></TabPanel>
@@ -443,8 +467,11 @@ export default function ProjectStudio() {
         <div className="relative min-h-[320px] min-w-0 overflow-hidden" data-tour="viewer">
           <Viewer3D topoUrl={hasBuilds ? `/api/projects/${p.id}/files/${flatOn ? "flat.topo.json" : "topo.json"}` : null} version={fp ? (flatOn ? `${st?.build_id}-flat` : st?.build_id) : `keep`}
             tool={tool} onToolChange={setTool} selection={selection} onSelectionChange={setSelection} selectKinds={selectKinds}
-            highlightFaces={hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
+            highlightFaces={hoverFaces ?? hl} com={showCom ? (st?.mass?.com_mm as V3 | undefined) ?? null : null} sketch={sketch}
             compare={compare ? { added: compare.added, removed: compare.removed } : null} onTopo={setTopo} apiRef={viewerApi}
+            dims={fp && !flatOn ? { on: dimsVisible, onToggle: () => setDimsOn(!dimsOn), pending: dimsQ.data?.state === "pending" || dimsQ.isLoading, shown: dimShown,
+              specs: dimSpecs, values: dimValues, meta: st?.param_meta ?? {}, whole: dimsQ.data?.whole ?? [], hover: paramHover, onHover: setParamHover,
+              onEdit: readOnly || p.agent?.busy ? undefined : editOnScreen, busy: manualBusy } : undefined}
             empty={mf.length ? <div className="absolute bottom-10 rounded bg-panel/90 px-3 py-1.5 text-[12.5px] text-muted shadow-card">No solid yet: {mf.length} reference feature(s) in the tree. Add a boss, revolve, sweep or loft to create the body.</div>
               : p.agent?.busy && /^From .+ \(Image & Drawing to CAD\)/.test(p.description) /* AMI-26: first build from a drawing */
               ? <div className="text-center text-sm text-muted"><Loader2 className="mx-auto mb-2 h-8 w-8 animate-spin text-primary" />Building from {/^From (.+?) \(Image/.exec(p.description)?.[1]}…<div className="mt-1 text-[12.5px]">The design agent is modelling from your confirmed values.</div></div>

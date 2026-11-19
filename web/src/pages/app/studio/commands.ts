@@ -65,6 +65,7 @@ export const SHORTCUTS: [string, string][] = [
   ["Ctrl+Z / Ctrl+Y", "Undo / redo the last change (no AI)"],
   ["Enter / Esc", "OK / cancel in a feature panel"],
   ["F", "Zoom to fit"],
+  ["D", "Show or hide the design dimensions on the model (click a value to change it)"],
   ["Ctrl+1 … Ctrl+7", "Iso, Front, Top, Right, Back, Left, Bottom view"],
   ["Esc", "Clear the selection, leave a tool or the plane picker"],
   ["?", "This list"],

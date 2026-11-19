@@ -115,6 +115,14 @@ def mass_properties(shape: Shape) -> dict[str, Any]:
             "inertia_com_mm5": inertia, "principal_mm5": [_r(i1, 3), _r(i2, 3), _r(i3, 3)]}
 
 
+def body_list(shape: Shape) -> list[tuple[str, Any]]:
+    """The bodies of a shape in the order topo.json numbers them (labelled children of an assembly compound, else its
+    solids). Face ids in topo.json are positions in ``[f for _, b in body_list(s) for f in b.faces()]``."""
+    kids = [c for c in (getattr(shape, "children", None) or ()) if c.solids()]
+    return ([(getattr(c, "label", "") or f"Part {i + 1}", c) for i, c in enumerate(kids)]
+            if kids else [("", s) for s in (list(shape.solids()) or [shape])])
+
+
 def export_topology(shape: Shape, path: Path, feature_log: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     bb = shape.bounding_box()
     diag = math.sqrt(bb.size.X ** 2 + bb.size.Y ** 2 + bb.size.Z ** 2) or 1.0
@@ -127,9 +135,7 @@ def export_topology(shape: Shape, path: Path, feature_log: list[dict[str, Any]] 
             for k in entry["keys"]:
                 first_feature.setdefault(k, entry["name"])
 
-    kids = [c for c in (getattr(shape, "children", None) or ()) if c.solids()]
-    bodies: list[tuple[str, Any]] = ([(getattr(c, "label", "") or f"Part {i + 1}", c) for i, c in enumerate(kids)]
-                                     if kids else [("", s) for s in (list(shape.solids()) or [shape])])
+    bodies = body_list(shape)
     faces_out: list[dict[str, Any]] = []
     edges_out: list[dict[str, Any]] = []
     edge_ids: dict[Edge, int] = {}

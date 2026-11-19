@@ -9,6 +9,7 @@ import { Line2 } from "three/examples/jsm/lines/Line2.js";
 import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
 import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import type { Axis, DisplayMode, Pick, SketchPreview, Topo, TopoEdge, V3, ViewName } from "./types";
+import type { ViewCam } from "./dims";
 import { pickKey } from "./types";
 
 const Z_UP = new THREE.Vector3(0, 0, 1);
@@ -135,7 +136,40 @@ export class CadViewer {
     dom.addEventListener("pointerdown", this.onDown);
     dom.addEventListener("pointerup", this.onUp);
     dom.addEventListener("pointerleave", () => { this.clearHover(); this.events.onHover?.(null); });
-    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); this.renderTriad(); });
+    this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); this.renderTriad(); this.notifyView(); });
+  }
+
+  // ---------------------------------------------------------------- screen-space overlays (viewport dimensions)
+  private viewListeners = new Set<() => void>();
+  private viewSig = "";
+  /** Called after a frame whose camera, zoom or size changed (screen-space overlays follow the model). */
+  onView(cb: () => void): () => void { this.viewListeners.add(cb); cb(); return () => { this.viewListeners.delete(cb); }; }
+  private notifyView() {
+    if (!this.viewListeners.size) return;
+    const cam = this.camera as THREE.PerspectiveCamera | THREE.OrthographicCamera;
+    const r = this.el.getBoundingClientRect();
+    const sig = `${cam.matrixWorld.elements.map(x => x.toFixed(5)).join()}|${cam.projectionMatrix.elements.map(x => x.toFixed(6)).join()}|${r.width}x${r.height}|${this.topo?.bbox.join()}`;
+    if (sig === this.viewSig) return;
+    this.viewSig = sig;
+    this.viewListeners.forEach(f => f());
+  }
+  /** The current camera as the dimension layout sees it: CSS-pixel projection and screen axes in model millimetres. */
+  viewCam(): ViewCam {
+    const cam = this.camera as THREE.PerspectiveCamera | THREE.OrthographicCamera;
+    cam.updateMatrixWorld();
+    const r = this.el.getBoundingClientRect();
+    const w = Math.max(r.width, 1), h = Math.max(r.height, 1);
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 1).normalize();
+    const vd = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 2).normalize();
+    const visibleH = cam === this.ortho ? (this.ortho.top - this.ortho.bottom) / this.ortho.zoom
+      : 2 * this.persp.position.distanceTo(this.controls.target) * Math.tan(THREE.MathUtils.degToRad(this.persp.fov / 2));
+    const v = new THREE.Vector3();
+    return {
+      project: (p: V3) => { v.set(p[0], p[1], p[2]).project(cam); return [(v.x + 1) / 2 * w, (1 - v.y) / 2 * h]; },
+      vd: [vd.x, vd.y, vd.z], right: [right.x, right.y, right.z], up: [up.x, up.y, up.z],
+      pxPerMm: h / Math.max(visibleH, 1e-9), width: w, height: h,
+    };
   }
 
   dispose() {

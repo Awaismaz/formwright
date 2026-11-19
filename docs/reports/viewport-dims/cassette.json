@@ -1,0 +1,84 @@
+{
+ "version": 1,
+ "note": "Viewport dimensions walkthrough: one replayed design-agent build (no model call).",
+ "turns": [
+  {
+   "match": "(?i)motor mount",
+   "rebuild": true,
+   "files": {
+    "model.py": "import math\n\nfrom build123d import *\n\nfrom aicad import fw\n\nNAME = \"Motor mount bracket\"\nMATERIAL = \"Aluminium 6082-T6\"\nBASE_L = 140.0  # base length\nBASE_W = 70.0  # base depth\nBASE_T = 8.0  # base thickness\nWALL_H = 60.0  # wall height above the base\nWALL_T = 8.0  # wall thickness\nMOTOR_BORE = 22.0  # motor pilot bore\nBOLT_N = 4  # motor bolts\nBOLT_PCD = 44.0  # motor bolt circle\nBOLT_D = 3.4  # M3 clearance\nSLOT_L = 30.0  # mounting slot length\nSLOT_W = 6.6  # mounting slot width (M6)\nFILLET_R = 5.0  # inside fillet base/wall\nPARAMS = dict(BASE_L=BASE_L, BASE_W=BASE_W, BASE_T=BASE_T, WALL_H=WALL_H, WALL_T=WALL_T, MOTOR_BORE=MOTOR_BORE,\n              BOLT_N=BOLT_N, BOLT_PCD=BOLT_PCD, BOLT_D=BOLT_D, SLOT_L=SLOT_L, SLOT_W=SLOT_W, FILLET_R=FILLET_R)\nPARAM_META = {\n    \"BASE_L\": {\"min\": 90, \"max\": 300, \"unit\": \"mm\", \"group\": \"Base\", \"label\": \"Base length\"},\n    \"BASE_W\": {\"min\": 50, \"max\": 200, \"unit\": \"mm\", \"group\": \"Base\", \"label\": \"Base depth\"},\n    \"BASE_T\": {\"min\": 4, \"max\": 20, \"unit\": \"mm\", \"group\": \"Base\", \"label\": \"Base thickness\"},\n    \"WALL_H\": {\"min\": 40, \"max\": 150, \"unit\": \"mm\", \"group\": \"Wall\", \"label\": \"Wall height\"},\n    \"WALL_T\": {\"min\": 4, \"max\": 20, \"unit\": \"mm\", \"group\": \"Wall\", \"label\": \"Wall thickness\"},\n    \"MOTOR_BORE\": {\"min\": 10, \"max\": 40, \"unit\": \"mm\", \"group\": \"Motor\", \"label\": \"Pilot bore Ø\"},\n    \"BOLT_N\": {\"min\": 3, \"max\": 8, \"step\": 1, \"group\": \"Motor\", \"label\": \"Motor bolts\"},\n    \"BOLT_PCD\": {\"min\": 30, \"max\": 60, \"unit\": \"mm\", \"group\": \"Motor\", \"label\": \"Bolt circle Ø\"},\n    \"BOLT_D\": {\"min\": 2.4, \"max\": 6.6, \"unit\": \"mm\", \"group\": \"Motor\", \"label\": \"Bolt hole Ø\"},\n    \"SLOT_L\": {\"min\": 10, \"max\": 50, \"unit\": \"mm\", \"group\": \"Base\", \"label\": \"Slot length\"},\n    \"SLOT_W\": {\"min\": 4.5, \"max\": 11, \"unit\": \"mm\", \"group\": \"Base\", \"label\": \"Slot width\"},\n    \"FILLET_R\": {\"min\": 1, \"max\": 10, \"unit\": \"mm\", \"group\": \"Wall\", \"label\": \"Inside fillet\"},\n}\n\ny_wall = -BASE_W / 2 + WALL_T / 2\npart = Box(BASE_L, BASE_W, BASE_T, align=(Align.CENTER, Align.CENTER, Align.MIN))\npart += Pos(0, y_wall, BASE_T) * Box(BASE_L, WALL_T, WALL_H, align=(Align.CENTER, Align.CENTER, Align.MIN))\ninner = [e for e in part.edges().filter_by(Axis.X)\n         if abs(e.center().Z - BASE_T) < 1e-6 and abs(e.center().Y - (-BASE_W / 2 + WALL_T)) < 1e-6]\npart = fw.feature(\"Base and wall\", fillet(inner, FILLET_R))\n\ncz = BASE_T + WALL_H / 2\ncut = Pos(0, y_wall, cz) * Rot(90, 0, 0) * Cylinder(MOTOR_BORE / 2, WALL_T + 2)\nfor i in range(BOLT_N):\n    a = 2 * math.pi * i / BOLT_N + math.pi / 4\n    cut += Pos(BOLT_PCD / 2 * math.cos(a), y_wall, cz + BOLT_PCD / 2 * math.sin(a)) * Rot(90, 0, 0) * Cylinder(\n        BOLT_D / 2, WALL_T + 2)\npart = fw.feature(\"Motor bore and bolt circle\", part - cut)\n\nfor sx in (-1, 1):\n    slot = Pos(sx * (BASE_L / 2 - 25), 12, -1) * extrude(Rot(0, 0, 90) * SlotOverall(SLOT_L, SLOT_W), amount=BASE_T + 2)\n    part -= slot\npart = fw.feature(\"Mounting slots\", part)\nresult = part\n\nEXPECTED = {\"bbox\": [BASE_L, BASE_W, BASE_T + WALL_H], \"solids\": 1}\n"
+   },
+   "messages": [
+    {
+     "type": "system",
+     "subtype": "init",
+     "data": {}
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "w1",
+       "name": "Write",
+       "input": {
+        "file_path": "model.py"
+       }
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "w1",
+       "content": "ok"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "b1",
+       "name": "mcp__cad__build_model",
+       "input": {}
+      }
+     ]
+    },
+    {
+     "type": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "b1",
+       "content": "(replayed)"
+      }
+     ]
+    },
+    {
+     "type": "assistant",
+     "model": "replay",
+     "content": [
+      {
+       "type": "text",
+       "text": "Motor mount built: 140 × 70 mm base, 60 mm wall with a Ø22 pilot bore and 4 × Ø3.4 holes on a Ø44 bolt circle, two 30 × 6.6 mounting slots, R5 inside fillet."
+      }
+     ]
+    },
+    {
+     "type": "result",
+     "subtype": "success",
+     "num_turns": 3,
+     "duration_ms": 1500,
+     "session_id": "rp",
+     "total_cost_usd": 0.0
+    }
+   ]
+  }
+ ]
+}

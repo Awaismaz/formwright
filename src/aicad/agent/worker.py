@@ -80,6 +80,22 @@ def serve() -> None:
                 rec = recognize(ns["result"])
                 Path(req["out"]).write_text(json.dumps(rec), encoding="utf-8")
                 resp = {"ok": True, "rc": 0}
+            elif req["op"] == "dims_base":  # viewport dimensions (aicad.dims): face table + plan of nudges
+                from aicad import dims
+
+                prev = None
+                if req.get("prev") and Path(req["prev"]).is_file():
+                    try:
+                        prev = json.loads(Path(req["prev"]).read_text(encoding="utf-8"))
+                    except ValueError:
+                        prev = None
+                resp = {"ok": True, "rc": 0, **dims.base(Path(req["script"]), prev)}
+            elif req["op"] == "dims_step":  # one parameter's nudged rebuild, classified
+                from aicad import dims
+
+                resp = {"ok": True, "rc": 0, "dim": dims.step(Path(req["script"]), req["key"], req["param"],
+                                                               float(req["value"]), bool(req["is_int"]),
+                                                               [float(d) for d in req["deltas"]])}
             elif req["op"] == "finalize":
                 resp = {"ok": True, "rc": runner.finalize(Path(req["out"]))}
             elif req["op"] == "diff":
@@ -115,7 +131,7 @@ class Worker:
 
     def __init__(self, cmd: list[str] | None = None) -> None:
         self.proc: asyncio.subprocess.Process | None = None
-        self.jobs = 0
+        self.jobs: float = 0
         self.lock = asyncio.Lock()
         self.cmd = cmd or [sys.executable, "-I", "-m", "aicad.agent.worker"]
         self._seq = 0
@@ -162,7 +178,9 @@ class Worker:
             self.proc = None
         return self.lock
 
-    async def request(self, req: dict[str, Any], timeout: float) -> dict[str, Any]:
+    async def request(self, req: dict[str, Any], timeout: float, weight: float = 1.0) -> dict[str, Any]:
+        """weight: how much the request counts towards recycling the worker (a dimension-mapping nudge is a
+        fraction of a build: counting it fully would restart the warm worker every few edits)."""
         async with self._guard():
             try:
                 if self.proc is None or self.proc.returncode is not None or self.jobs >= self.max_jobs:
@@ -172,7 +190,7 @@ class Worker:
                 await self.stop()  # also for subclasses with their own _start: never keep a half-started worker
                 return {"ok": False, "rc": -1, "error": STARTING, "starting": True}
             assert self.proc and self.proc.stdin and self.proc.stdout
-            self.jobs += 1
+            self.jobs += weight
             self._seq += 1
             rid = self._seq
             deadline = time.monotonic() + timeout
@@ -230,6 +248,16 @@ async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float
 
 async def diff(key: str, a_step: Path, b_step: Path, out: Path, timeout: float = 180) -> dict[str, Any]:
     return await get_worker(key).request({"op": "diff", "a": str(a_step), "b": str(b_step), "out": str(out)}, timeout)
+
+
+async def dims_base(key: str, script: Path, prev: Path | None, timeout: float = 120) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "dims_base", "script": str(script),
+                                          "prev": str(prev) if prev else None}, timeout, weight=0.25)
+
+
+async def dims_step(key: str, script: Path, item: dict[str, Any], base_key: str, timeout: float = 60) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "dims_step", "script": str(script), "key": base_key, **item}, timeout,
+                                         weight=0.1)
 
 
 async def warm(key: str) -> None:
