@@ -228,7 +228,7 @@ def test_targeted_check_confirms_only_clashes_between_flagged_parts(monkeypatch:
         return {"interference": {"pairs": [p for p in pairs if p["a"] in only or p["b"] in only]}}
 
     monkeypatch.setattr(aservice, "check_pairs", fake_pairs)
-    monkeypatch.setattr(aservice, "display_names", lambda doc: {})
+    monkeypatch.setattr(aservice, "human_names", lambda doc: {})
     got = asyncio.run(visual.targeted(Path("."), "o", {}, ["shaft", "key"]))
     assert got == []  # shaft ↔ bearing: the bearing wasn't flagged
     got = asyncio.run(visual.targeted(Path("."), "o", {}, ["shaft", "gear", "key"]))
@@ -331,7 +331,7 @@ def test_archie_tells_the_row_layout_and_proposes_a_housing(tmp_path: Path) -> N
     assert "There's no housing or base in this plan, so the parts can't be mounted" in text
     assert "Pinion, Gear and Spacer: no interface connects them to the rest of the program" in text
     assert "Visual check (advisory): it looks wrong" in text and "which?" in text
-    assert [a["type"] for a in acts] == ["revise_plan", "revise_plan"]
+    assert [a["type"] for a in acts] == ["revise_plan", "revise_plan", "keep_separate"]  # or: meant to be apart
     assert acts[0]["add"]["part"]["name"] == "Housing" and acts[1]["add"]["part"]["name"] == "Base plate"
     # the proposal is checked against the program before it is offered (and again before it applies)
     clean = archie_chat.normalise(doc, acts[0])
@@ -460,9 +460,9 @@ def test_quick_checks_on_the_hand_built_gear_pair(gear_docs: Any, tmp_path: Path
     # 5 mm along the axes: 20 - 5 = 15 of 20 mm face width in mesh
     assert [f["code"] for f in off] == ["gear_plane"] and "only 15 of 20 mm face width" in off[0]["text"]
     fl = visual.quick_doc(root, docs["float"])["findings"]
-    assert [f["code"] for f in fl] == ["floating"] and "Ball bearing 6204<4>" in fl[0]["text"]
+    assert [f["code"] for f in fl] == ["floating"] and "Ball bearing 6204 #4" in fl[0]["text"]  # people's names
     rels = [r["text"] for r in visual.relations_from_doc(root, docs["ok"])]
-    assert rels == [("Pinion<1> meshes with Gear<1>: axes parallel, 80 mm apart (m (z1 + z2) / 2), the two gears in "
+    assert rels == [("Pinion meshes with Gear: axes parallel, 80 mm apart (m (z1 + z2) / 2), the two gears in "
                     "one plane")]
     out = render.render(render.scene_from_doc(root, docs["ok"], "Gear pair"), tmp_path / "ok.png")
     assert out["bodies"] == 8 and out["seconds"] < 60  # measured 1.3-2.6 s

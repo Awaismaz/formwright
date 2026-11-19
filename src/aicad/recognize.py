@@ -34,6 +34,11 @@ def _v(p: Any) -> list[float]:
     return [_r(p.X), _r(p.Y), _r(p.Z)]
 
 
+# Bump when recognised results change for the same geometry: cached part snapshots (assembly.store) are re-made.
+# 2: cylinder extents along the canonical axis (negative-axis holes were mirrored: wrong centre and through flag).
+VERSION = 2
+
+
 def _axis_key(d: tuple[float, float, float]) -> tuple[float, float, float]:
     """Direction with a canonical sign (so +Z and -Z holes group together)."""
     x, y, z = d
@@ -113,6 +118,12 @@ def _cyl_info(face: Any) -> dict[str, Any] | None:
     radial = _sub([c.X, c.Y, c.Z], foot)
     concave = _dot([n.X, n.Y, n.Z], radial) < 0  # normal points toward the axis -> material outside -> hole
     lo, hi = _extent_along(face, o, d)
+    # Report the extent along the canonical direction (the one holes are keyed and measured by): a cylinder built
+    # pointing -Y (e.g. Rot(90, 0, 0) * Cylinder) otherwise came back mirrored about its origin, so a blind tapped
+    # hole in a gearbox wall read as ending in the cavity and "through" (founder's Gear Reducer, 2026-11-19)
+    dk = _axis_key(d)
+    if _dot(dk, d) < 0:
+        d, lo, hi = (-d[0], -d[1], -d[2]), -hi, -lo
     return {"r": r, "axis": d, "origin": o, "span_deg": math.degrees(span), "concave": concave,
             "lo": lo, "hi": hi, "area": face.area}
 

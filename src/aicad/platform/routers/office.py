@@ -14,6 +14,7 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/gates/brief/approve     approve the (edited) plan: items and tickets open,
                                                             Archie drafts the skeleton and the ICD
   PATCH  /api/office/programs/{pid}/icd/interfaces/{iid}    edit an interface's numbers (ICD draft, at the gate)
+  POST   /api/office/programs/{pid}/icd/separate            keep unconnected parts separate (or connect them again)
   POST   /api/office/programs/{pid}/gates/icd/approve       approve the ICD: tickets released, placeholder assembly
   POST   /api/office/programs/{pid}/change-requests         raise an interface change request (Archie decides)
   GET    /api/office/programs/{pid}/assembly                the live program assembly (placeholders / real parts)
@@ -89,7 +90,8 @@ class ProgramIn(BaseModel):
     brief: str
     planner: str = "archie"  # "archie" (AI) | "standard" (deterministic, free)
     concurrency: int = Field(default=3, ge=1, le=12)
-    budget_tokens: int = Field(default=service.DEFAULT_BUDGET_TOKENS, ge=0, le=1_000_000)
+    # None: the default, at most the workspace's remaining wallet (a trial wallet is smaller than 3,000)
+    budget_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
     deliverables: bool = True  # Ortho and Smithy make the drawings, BOM and DFM summary after integration
     review_gate: bool = False  # every part waits for the engineer's approval after Gage passes it (CD-023)
     threads: dict[str, int] | None = None  # per-agent threads (CD-027); default one per designer (PD-66)
@@ -133,6 +135,11 @@ class ApproveIn(BaseModel):
 
 class IcdEditIn(BaseModel):
     values: dict[str, Any]
+
+
+class SeparateIn(BaseModel):
+    items: list[str] | None = None  # None: every part the layout flags as unconnected now
+    keep: bool = True               # False: undo (the part blocks again until an interface connects it)
 
 
 class CrIn(BaseModel):
@@ -338,7 +345,10 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     name = " ".join(body.name.split())[:120] or " ".join(brief.split()[:6])[:60]
     kind = "archie" if body.planner == "archie" else "standard"
     root = _root(ctx)
-    doc = service.new_program(name, brief, org.id, ctx.user.id, body.concurrency, body.budget_tokens, kind)
+    budget = body.budget_tokens
+    if budget is None:
+        budget = service.default_budget(org.token_balance - metering.reserved(org.id), ctx.god_on("bypass_tokens"))
+    doc = service.new_program(name, brief, org.id, ctx.user.id, body.concurrency, budget, kind)
     doc["deliverables_auto"] = body.deliverables
     doc["review_gate"] = body.review_gate
     service.set_threads(doc, body.threads if body.threads is not None else service.default_threads())
@@ -482,6 +492,21 @@ def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     return {**_view(doc), "fix": out[0]}
 
 
+@router.post("/programs/{pid}/icd/separate")
+async def keep_separate(pid: str, body: SeparateIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer's decision at the ICD gate: parts with no interface are meant to be separate (a kit, shafts made
+    on their own). Recorded in the ICD history; those parts become an acknowledged warning instead of blocking."""
+    out: list[list[str]] = []
+    doc = _mutate(ctx, pid, lambda root, d: out.append(interfaces.keep_separate(root, d, body.items, body.keep,
+                                                                                _actor(ctx))))
+    audit(ctx.db, "office.icd_separate" if body.keep else "office.icd_connect", ctx.user, doc["org_id"], target=pid,
+          items=out[0])
+    ctx.db.commit()
+    if body.keep and not doc["icd"].get("problems"):  # the gate can now be approved: Archie looks again, once
+        _look_at_layout(ctx, pid, doc)
+    return _view(doc)
+
+
 @router.post("/programs/{pid}/gates/icd/approve")
 async def approve_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     from aicad.office import platform_env
@@ -533,7 +558,11 @@ def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
                                "specialist": t["specialist"], "line": (t.get("run") or {}).get("line"),
                                "state": p.get("kind") or ("toolbox" if t["kind"] == "standard" else None),
                                "progress": t["progress"]}
-    return {"status": state.get("status"), "summary": state.get("summary"), "clashes": state.get("clashes") or [],
+    clash = program_assembly.clash_status(state)  # the one clash count every view shows
+    summary = state.get("summary")
+    if summary and state.get("status") == "ready":
+        summary = summary.rstrip(".") + "; " + clash["text"] + "."
+    return {"status": state.get("status"), "summary": summary, "clashes": state.get("clashes") or [], "clash": clash,
             "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer",
             "check": state.get("check"),  # PD-71: the advisory whole-program clash check
             "looks": _looks(ctx, pid, doc)}  # PD-73: the visual checks (layout, each level), advisory
@@ -1324,6 +1353,8 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
     elif typ == "fix_icd":
         fix_icd(pid, ctx)
+    elif typ == "keep_separate":
+        await keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
     elif typ == "revise_plan":
         _mutate(ctx, pid, lambda root, d: service.revise_plan(root, d, a, _actor(ctx)))
     elif typ == "retry_blocked":
@@ -1357,10 +1388,13 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
     if body.decision not in ("apply", "dismiss"):
         raise HTTPException(409, "Apply or dismiss.")
     status = "dismissed"
+    done: dict[str, Any] = {}
     if body.decision == "apply":
         cur = archie_chat.normalise(doc, {k: v for k, v in a.items() if k not in ("id", "status", "label")})
         if cur is None:
             raise HTTPException(409, "The program has moved on: this proposal no longer applies. Ask Archie again.")
+        if cur["type"] == "retry_blocked":  # the label says what was done, not what is blocked afterwards
+            done["count"] = len(archie_chat.blocked(doc))
         await _apply_action(ctx, pid, doc, cur)
         status = "applied"
     with archie_chat.chat_lock(pid):
@@ -1369,6 +1403,6 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
             if x["id"] == body.message:
                 for y in x.get("actions", []):
                     if y["id"] == body.action:
-                        y.update(status=status, by=_actor(ctx), at=store.now())
+                        y.update(status=status, by=_actor(ctx), at=store.now(), **done)
         archie_chat.save_history(root, pid, hist)
     return {**_chat_view(ctx, pid), "program": _view(_load(ctx, pid))}

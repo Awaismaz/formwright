@@ -67,6 +67,9 @@ STAGE_OF = {"searching": "hex", "designing": "design", "reviewing": "review", "i
 STATUS_OF = {"hex": "searching", "design": "designing", "review": "reviewing", "integrate": "integrating",
              "fit": "fitting", "drawings": "drafting", "dfm": "screening"}
 STAGE_AGENT = {"hex": "hex", "integrate": "fitz", "review": "gage", "fit": "fitz"}
+# stages that never take an LLM agent slot: Hex's Toolbox / parts lookup is deterministic (no model, no tokens; the
+# live run 2026-11-19 had bearings wait 87 s for a slot), Fitz's swap-in is one shared step (CD-032)
+FREE_STAGES = frozenset({"hex", "fit"})
 MAX_CLASH_ROUNDS = 2       # times Fitz sends a part back for clashes before it waits for the engineer
 PRIORITY = {"high": 1, "normal": 0, "low": -1}
 MAX_ATTEMPTS = 2           # failed design runs retried before the ticket waits for the engineer
@@ -246,6 +249,9 @@ def close_wait(t: dict[str, Any]) -> None:
 
 def _set_run(t: dict[str, Any], **kw: Any) -> dict[str, Any]:
     r = dict(run_of(t))
+    for k in ("line", "blocked"):  # the card's words: part names as people say them
+        if isinstance(kw.get(k), str):
+            kw[k] = service.plain_names(kw[k])
     r.update(kw)
     t["run"] = r
     t["updated_at"] = store.now()
@@ -586,7 +592,7 @@ class Runner:
         self.labels: dict[str, tuple[str, int]] = {}
         self.wake = asyncio.Event()
         self.loop = asyncio.get_running_loop()
-        self.max_seen = 0  # the most stages that ever ran at once (tests assert the cap)
+        self.max_seen = 0  # the most slot-taking stages that ever ran at once (tests assert the cap)
         self.main: asyncio.Task[None] | None = None
         self.warming: asyncio.Task[None] | None = None  # the geometry engine starting for direct builds
 
@@ -698,9 +704,9 @@ class Runner:
             if float(o.get("capacity_until") or 0) > now:
                 return False
             fitting = {t for t in self.tasks if self.stages.get(t) == "fit"}
-            # swapping a part into the program assembly is one shared step (it batches every part waiting): it
-            # never takes an agent slot from design, review or integration work (CD-032)
-            free = max(0, int(doc["concurrency"]) - (len(self.tasks) - len(fitting)))
+            # swapping a part into the program assembly is one shared step (it batches every part waiting) and Hex's
+            # lookups are deterministic: neither takes an agent slot from design, review or integration (CD-032)
+            free = max(0, int(doc["concurrency"]) - self.slots_used())
             threads = service.threads_of(doc) or {}
             busy: dict[str, int] = {}  # running work per agent: per-agent threads cap it (CD-027)
             for x in doc["tickets"]:
@@ -714,10 +720,10 @@ class Runner:
                     if fitting:
                         continue
                     fitting.add(t["id"])
-                elif free <= 0:
+                elif stage not in FREE_STAGES and free <= 0:
                     continue
                 code = STAGE_AGENT.get(stage, t["specialist"])
-                if stage != "fit" and threads.get(code) and busy.get(code, 0) >= threads[code]:
+                if stage not in FREE_STAGES and threads.get(code) and busy.get(code, 0) >= threads[code]:
                     continue
                 busy[code] = busy.get(code, 0) + 1
                 lbl = self.label(t["id"], code)
@@ -728,15 +734,19 @@ class Runner:
                              service.agent_actor(code), t["id"], stage=stage, agent=code)
                 claims.append((t["id"], stage))
                 self.stages[t["id"]] = stage
-                if stage != "fit":
+                if stage not in FREE_STAGES:
                     free -= 1
             return False
 
         stop = self.edit(fn)
         for tid, stage in claims:
             self.tasks[tid] = asyncio.create_task(self.work(tid, stage))
-        self.max_seen = max(self.max_seen, len(self.tasks))
+        self.max_seen = max(self.max_seen, self.slots_used())
         return bool(stop)
+
+    def slots_used(self) -> int:
+        """Running work that holds an agent slot (everything but Hex's lookups and Fitz's swap-in)."""
+        return sum(1 for t in self.tasks if self.stages.get(t) not in FREE_STAGES)
 
     async def work(self, tid: str, stage: str | None) -> None:
         try:
@@ -866,13 +876,14 @@ class Runner:
                 spec = to_designer(self.root, d, tt)
                 self.handoff(d, tt, "hex", spec, f"Hex → {roster.agent(spec)['name']}: {tt['title']} is not in the "
                              "Toolbox or your parts, model it as a bought-out part to its catalogue sizes.")
-                _set_run(tt, status="designing", next="design")
-                return "design"
-            spec = tt["specialist"]
-            self.handoff(d, tt, "hex", spec, f"Hex → {roster.agent(spec)['name']}: no stock part for "
-                         f"{tt['title']}, design it.")
-            _set_run(tt, status="designing", next="design")
-            return "design"
+            else:
+                spec = tt["specialist"]
+                self.handoff(d, tt, "hex", spec, f"Hex → {roster.agent(spec)['name']}: no stock part for "
+                             f"{tt['title']}, design it.")
+            # Hex ran outside the agent slots: the design turn queues for a slot (in critical-path order)
+            _set_run(tt, status="queued", next="design",
+                     line=f"Waiting for {roster.agent(spec)['name']}: Hex found no stock part")
+            return None
         return self.edit(fn)
 
     # ------------------------------------------------------------------ stage: the part agent
@@ -970,6 +981,18 @@ class Runner:
                 return "design"  # _halt records why
             if res.get("rate_limited"):
                 return self._capacity_doc(d, tt, "design", "rate")
+            if res.get("budget_stopped"):
+                # the turn was cut at its run budget: whatever it built last is not the designer's finished part, so
+                # it never goes to Gage or counts as approved (live run 2026-11-19: stopped at the budget, approved)
+                built = bool(state.get("builds") and state.get("ok") is True)
+                cap = res.get("budget")
+                _set_run(tt, next="design", resume=True)
+                self._fail(d, tid, f"{lbl} stopped at its run budget"
+                           + (f" ({cap} tokens)" if cap else "") + " before finishing "
+                           + (f"{tt['title']}: the last build passes its checks but the design isn't finished, so it "
+                              "is not sent for review. " if built else f"{tt['title']}, with no passing build. ")
+                           + "Retry to let it carry on (it uses more tokens), or take it over in the Studio.")
+                return None
             if state.get("builds") and state.get("ok") is True:
                 for m in ("brief_read", "first_build", "gates_pass", "self_review"):
                     if m not in tt["milestones"]:
@@ -1213,8 +1236,21 @@ class Runner:
                     return None
                 return None
             n = int(r.get("review_round") or 0) + 1
+            # No progress: the designer rebuilt the part and every measured finding came back word for word (same
+            # feature, same measured value). Another round cannot help: either the measurement is wrong or the ICD asks
+            # for something this part can't have. Say so now instead of spending more design turns (founder's Gear
+            # Reducer, 2026-11-19: three rounds on a correct blind hole a recognition bug read as through).
+            stuck = bool(hard) and n > 1 and list(r.get("last_findings") or []) == list(findings)
             service.comment(self.root, d, tid, "Changes requested:\n" + "\n".join(f"- {f}" for f in findings), g)
             tt["comments"][-1]["delivery"] = "stored"
+            if stuck:
+                _set_run(tt, review_round=n, last_findings=findings)
+                self._fail(d, tid, f"{sname} rebuilt {tt['title']}, but my measurement came back exactly the same: "
+                                   f"{findings[0]} When a redesign doesn't move the measurement, the measurement or the "
+                                   "interface spec is usually what's wrong, not the part. Look at the part: if the "
+                                   "feature is as specified, approve it yourself; if the spec asks for something the "
+                                   "part can't have, change the interface.")
+                return None
             if n > gage.MAX_SENDBACKS:
                 _set_run(tt, review_round=n)
                 self._fail(d, tid, f"Gage sent {tt['title']} back {n} times; a measurable check still fails: "
@@ -1222,7 +1258,7 @@ class Runner:
                 return None
             service.move(self.root, d, tid, "changes_requested", g)
             _set_run(tt, status="designing", next="design", review_round=n, feedback=findings,
-                     ai_findings=None if hard else findings,
+                     last_findings=findings if hard else None, ai_findings=None if hard else findings,
                      line=f"Gage sent {tt['title']} back: {findings[0]}")
             self.handoff(d, tt, "gage", spec, f"Gage → {sname}: {tt['title']} sent back. {findings[0]}")
             return "design"
@@ -1303,10 +1339,12 @@ class Runner:
                              f"{tt['title']} clashes in the assembly. {desc[0]}")
                 return "design"
             tt["fitted"] = True
+            checked = bool((res.get("last") or {}).get("checked"))  # "0 clashes" only when it was measured
+            cl = "0 clashes" if checked else "its clash check is left to the final assembly"
             _set_run(tt, status="done", next=None, agent="fitz", fit_attempt=0,
-                     line=f"Fitz swapped {tt['title']} in: interface mates re-attached, 0 clashes")
+                     line=f"Fitz swapped {tt['title']} in: interface mates re-attached, {cl}")
             service.emit(self.root, d, "ticket.fitted", f"Fitz swapped the real {tt['title']} in for its placeholder: "
-                         "every interface mate re-attached by name, 0 clashes"
+                         f"every interface mate re-attached by name, {cl}"
                          + (f" ({res['mates']} mates in the program assembly)." if res.get("mates") else "."), f, tid,
                          item=tt["item_id"])
             if res.get("problems"):
@@ -1340,7 +1378,7 @@ class Runner:
             f = service.agent_actor("fitz")
             if look:
                 text, acts = visual_office.level_message(tt, look)
-                tt["look"] = {k: look.get(k) for k in ("stop", "line", "image", "unconfirmed", "tokens")}
+                tt["look"] = {k: look.get(k) for k in ("stop", "line", "image", "unconfirmed", "tokens", "unplaced")}
                 if look.get("stop"):
                     self._fail(d, tid, look["reason"], tell=False)
                     if text:
@@ -1352,7 +1390,7 @@ class Runner:
                 if look.get("line"):
                     service.comment(self.root, d, tid, look["line"], service.agent_actor("archie"))
                     tt["comments"][-1]["delivery"] = "stored"
-                if text and (look.get("unconfirmed") or tt["item_id"] == "root"
+                if text and (look.get("unconfirmed") or look.get("unplaced") or tt["item_id"] == "root"
                              or (look.get("verdict") or {}).get("overall") != "looks_assembled"):
                     archie_chat.post(self.root, self.pid, text, acts, kind="look",
                                      visual={"level": tt["item_id"], "image": look.get("image"),

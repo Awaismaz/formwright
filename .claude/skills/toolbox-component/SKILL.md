@@ -27,6 +27,14 @@ Each generator returns `(shape, EXPECTED)`, with EXPECTED computed analytically,
 6. Update the agent's code list in `src/aicad/agent/prompt.py` ("Toolbox" section) with the new code and its
    parameter names.
 
+## Parts that go into an ICD seat (keys, rings, bearings)
+- Model them **as fitted** so they seat with 0 mm³ interference (DIN 471 ring: bore at the groove Ø d2, not the
+  free d3), give mounting corners their ISO 582 r_s min (bearings), and add a `seated()` branch in
+  `office/icd.py` with the part's own frame documented (see `icd.key_frame`). Prove it with a kernel test
+  that places every part by the ICD and intersects solid by solid (`tests/test_toolbox_keys.py`).
+- A Toolbox generator used for a *designed* part (a gear sized to the ICD) must carry every ICD feature
+  (`platform_env.toolbox_gear_for`), else the part stays designed.
+
 ## Tests (`tests/test_library.py`)
 - `test_every_toolbox_component_is_deterministic_and_matches_expected` iterates `COMPONENTS` automatically. It must
   pass for the new code: checks green, two builds give identical STEP bytes.

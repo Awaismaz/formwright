@@ -7,6 +7,7 @@ Spec (part frame, mm; built by ``aicad.office.icd.placeholder_spec`` / ``icd.bod
    "seats":    [{"c": [x, y], "d": Ø, "z0", "z1"}]                  a bore over a Z range (bearing seat, clearance)
    "journals": [{"c": [x, y], "d": Ø, "z0", "z1"}]                  a shaft turned down to Ø over a Z range
    "keyways":  [{"on": "shaft" | "hub", "c", "d", "b", "depth", "dir": [dx, dy], "z0", "z1"}]  DIN 6885 grooves
+   "grooves":  [{"c": [x, y], "d": Ø, "z0", "z1"}]                  a ring groove turned to Ø over a Z range (DIN 471)
    "pockets":  [{"min": [x, y, z], "max": [x, y, z]}]               a box removed (a housing's gear cavity)}
 A hole with ``z0`` / ``z1`` is blind over that range (a tapped hole). A feature with ``"ax": "x" | "y"`` runs along
 that part axis and is written in its canonical frame (``aicad.office.frames.CANON``: canonical Z = the feature
@@ -63,7 +64,7 @@ def cut(body: Any, spec: dict[str, Any]) -> Any:
         mx = [m + 1.0 if m >= half[k] - 1e-6 else m for k, m in enumerate(mx)]
         body = body - Pos(*[(a + b) / 2 for a, b in zip(mn, mx, strict=True)]) * Box(*[b - a for a, b in zip(mn, mx, strict=True)])
     groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
-    for key in ("journals", "holes", "seats", "keyways"):
+    for key in ("journals", "holes", "seats", "keyways", "grooves"):
         for f in spec.get(key) or []:
             groups.setdefault(str(f.get("ax") or "z"), {}).setdefault(key, []).append(f)
     for ax, g in groups.items():
@@ -105,6 +106,10 @@ def _cut_z(body: Any, spec: dict[str, Any], L: float, H: float) -> Any:
         body = body - Pos(float(sd["c"][0]), float(sd["c"][1]), (lo + hi) / 2) * Cylinder(float(sd["d"]) / 2, hi - lo)
     for k in spec.get("keyways") or []:
         body = body - _keyway(k, H)
+    for g in spec.get("grooves") or []:  # a retaining-ring groove: the ring outside Ø d between z0 and z1
+        z0, z1 = float(g["z0"]), float(g["z1"])
+        body = body - Pos(float(g["c"][0]), float(g["c"][1]), (z0 + z1) / 2) * (
+            Cylinder(L / 2 + 1, z1 - z0) - Cylinder(float(g["d"]) / 2, z1 - z0 + 0.02))
     return body
 
 

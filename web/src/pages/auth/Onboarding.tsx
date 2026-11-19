@@ -7,7 +7,8 @@ import { api, ApiError, track } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useTitle } from "@/lib/title";
 import type { Catalog } from "@/lib/types";
-import { Button, Input, Logo } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { Button3D, Card3D, KeyButton as Button, SiteLogo, SiteScope, ThemeSwitch } from "@/components/landing/site";
 import { cx, num } from "@/lib/format";
 
 const ROLES = ["Design / mechanical engineer", "Engineering manager", "Consultancy owner / principal", "Machinist / shop owner",
@@ -16,10 +17,10 @@ const ROLES = ["Design / mechanical engineer", "Engineering manager", "Consultan
 function Choice({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} aria-pressed={selected}
-      className={cx("flex items-center justify-between gap-3 rounded-lg border px-3.5 py-2.5 text-left text-sm transition",
-        selected ? "border-primary bg-primary-soft text-primary ring-1 ring-primary" : "border-border bg-panel hover:border-primary/50")}>
+      className={cx("flex min-h-[48px] items-center justify-between gap-3 border px-3.5 py-2.5 text-left text-[15px] transition-colors",
+        selected ? "border-ink bg-hi/30 text-ink shadow-[inset_0_-3px_0_rgb(var(--s-ink))]" : "border-rule2 bg-slab text-ink hover:border-ink")}>
       <span>{children}</span>
-      <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center rounded-full border", selected ? "border-primary bg-primary text-white" : "border-border")}>
+      <span className={cx("flex h-5 w-5 shrink-0 items-center justify-center border", selected ? "border-ink bg-ink text-sheet" : "border-rule2")}>
         {selected && <Check className="h-3 w-3" />}
       </span>
     </button>
@@ -56,11 +57,12 @@ export default function Onboarding() {
   };
 
   return (
-    <div className="flex min-h-full flex-col bg-bg">
-      <header className="flex h-16 items-center border-b border-border bg-panel px-6"><Logo size={24} /></header>
+    <SiteScope className="s-grid flex min-h-full flex-col">
+      <header className="flex h-16 items-center justify-between border-b border-ink/80 bg-sheet px-4 sm:px-6"><SiteLogo size={24} /><ThemeSwitch /></header>
       <main className="flex flex-1 items-start justify-center px-4 py-10 sm:py-16">
-        <div className="w-full max-w-2xl animate-fade-in">
-          <h1 className="text-[26px] font-semibold tracking-tight">Welcome{firstName ? `, ${firstName}` : ""}. A few seconds, then your first part.</h1>
+        <div className="w-full max-w-2xl animate-fade-in"><Card3D screws inner="p-6 sm:p-9">
+          <span className="s-anno text-bp">Setup · one screen</span>
+          <h1 className="s-h2 mt-3 text-[28px] text-ink sm:text-[34px]">Welcome{firstName ? `, ${firstName}` : ""}. A few seconds, then your first part.</h1>
           <p className="mt-1.5 text-muted">All optional: they set your units and tune the examples you see. Change them any time in Settings.</p>
 
           <div className="mt-8 text-[13px] font-medium">What best describes your role?</div>
@@ -68,22 +70,22 @@ export default function Onboarding() {
 
           <div className="mt-6 flex flex-wrap items-end gap-6">
             <div><div className="mb-2 text-[13px] font-medium">Units</div>
-              <div className="inline-flex rounded-lg border border-border p-1">{(["mm", "in"] as const).map(u =>
-                <button key={u} type="button" onClick={() => setUnits(u)} aria-pressed={units === u} className={cx("rounded px-4 py-1.5 text-sm", units === u ? "bg-primary text-white" : "text-muted")}>{u === "mm" ? "Millimetres" : "Inches"}</button>)}</div>
+              <div role="group" aria-label="Units" className="inline-flex gap-1.5">{(["mm", "in"] as const).map(u =>
+                <Button3D key={u} size="sm" finish="steel" pressed={units === u} onClick={() => setUnits(u)}>{u === "mm" ? "Millimetres" : "Inches"}</Button3D>)}</div>
             </div>
             <label className="min-w-[220px] flex-1"><div className="mb-2 text-[13px] font-medium">Workspace name</div>
               <Input value={workspace} onChange={e => setWorkspace(e.target.value)} maxLength={120} /></label>
           </div>
 
-          <div className="mt-6 rounded-lg border border-border bg-panel2 p-4 text-sm text-muted">
-            Your <b className="text-text">14-day free trial</b> starts now: <b className="text-text">{num(trial)} tokens</b>, about 3 new parts, and every module on your own parts. No card needed.
+          <div className="mt-6 border-l-2 border-bp bg-sheet2 p-4 text-[15px] text-ink2">
+            Your <b className="text-text">14-day free trial</b> starts now: <b className="text-text">{num(trial)} tokens</b>, enough for dozens of simple parts, and every module on your own parts. No card needed.
           </div>
           <div className="mt-8 flex items-center justify-end gap-2">
             <Button variant="ghost" loading={busy === "skip"} disabled={!!busy} onClick={() => finish(true)}>Skip</Button>
             <Button size="lg" loading={busy === "go"} disabled={!!busy} icon={<ArrowRight className="h-4 w-4" />} onClick={() => finish(false)}>Start designing</Button>
           </div>
-        </div>
+        </Card3D></div>
       </main>
-    </div>
+    </SiteScope>
   );
 }

@@ -132,7 +132,9 @@ def prepare(dest: Path, step: str | None = None, toolbox_spec: dict[str, Any] | 
             foot = p0 + v * float((c - p0) @ v)
             hole["exact"] = {"p": [float(x) for x in foot], "v": ax["v"], "r": ax["r"]}
         out_holes.append(hole)
-    info = {"volume": float(shape.volume), "solids": len(shape.solids()),
+    from aicad.recognize import VERSION as RECOGNIZE_VERSION
+
+    info = {"recognize_version": RECOGNIZE_VERSION, "volume": float(shape.volume), "solids": len(shape.solids()),
             "bbox": [bb.min.X, bb.min.Y, bb.min.Z, bb.max.X, bb.max.Y, bb.max.Z],
             "center": [(bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2, (bb.min.Z + bb.max.Z) / 2],
             "holes": out_holes,

@@ -305,9 +305,10 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
     summary = (f"Fitz assembled {prog['name']} from {n_ph} placeholder{'s' if n_ph != 1 else ''}"
                + (f" and {len(parts) - n_ph} real part{'s' if len(parts) - n_ph != 1 else ''}" if n_ph < len(parts) else "")
-               + f": {n_mates} mates by interface name, {len(clashes)} clash{'es' if len(clashes) != 1 else ''}.")
+               + f": {n_mates} mates by interface name.")
     return {"status": "ready", "final": final["id"], "subs": {k: v["id"] for k, v in sub_docs.items()},
             "parts": parts, "at": astore.now(), "summary": summary, "clashes": clashes, "mates": n_mates,
+            "check": {"status": "done", "scope": "placeholders", "count": len(clashes), "at": astore.now()},
             "problems": problems[:20], "solve": (final.get("solve") or {}).get("status"),
             "icd_version": prog["icd"]["version"]}
 
@@ -361,6 +362,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             await _placed(aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
+    checked = False  # the swapped parts' clash check ran (only then may anyone say "0 clashes")
     async with locks.hold(state["final"], locks.OFFICE):
         final = astore.load(aroot, state["final"])
         if final is not None:
@@ -377,12 +379,15 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             if analyse:
                 # only the swapped parts against everything else (CD-035): the whole-program check grows with every
                 # real part and runs at the final assembly; here it timed out once ten parts went in together
+                checked = True
                 ids = [i["id"] for i in final["instances"] if (i.get("office") or {}).get("item") in items]
                 keep = [c for c in clashes if _item_of(final, c["a"]) not in items and _item_of(final, c["b"]) not in items]
                 try:
                     fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
+                    fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)]
                     clashes = keep + [{**c, "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in fresh]
                 except aservice.WorkerError:
+                    checked = False
                     problems.append("Fitz's clash check on these parts didn't finish in time; the final assembly's "
                                     "check covers them.")
             astore.save(aroot, final)
@@ -390,14 +395,17 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     for i, key in updates.items():
         parts[i] = {"key": key, "kind": "placeholder" if key.startswith("h_") else "real",
                     "icd_version": prog["icd"]["version"]}
-    state["summary"] = summarize(parts, final, clashes)
+    state["summary"] = summarize(parts, final)
     state.update(parts=parts, clashes=clashes, at=astore.now(), problems=problems[:20],
                  solve=((final or {}).get("solve") or {}).get("status"), mates=len((final or {}).get("mates") or []))
     names = {i: sk["items"][i]["name"] for i in sk["items"]}
     mine = [c for c in clashes if _item_of(final, c["a"]) in items or _item_of(final, c["b"]) in items]
     by_item = {i: [c for c in mine if i in (_item_of(final, c["a"]), _item_of(final, c["b"]))] for i in items}
     state["last"] = {"items": sorted(items), "clashes": mine, "by_item": by_item, "problems": problems,
-                     "text": ", ".join(names.get(i, i) for i in sorted(items))}
+                     "text": ", ".join(names.get(i, i) for i in sorted(items)), "checked": checked}
+    if checked:
+        state["check"] = {**(state.get("check") or {}), "status": "done", "scope": "swap", "count": len(clashes),
+                          "at": astore.now()}
     return state
 
 
@@ -430,8 +438,30 @@ async def prewarm_swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: 
     return int(res["stats"]["computed"])
 
 
-def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, clashes: list[dict[str, Any]]) -> str:
-    """One line for the program page: real parts / placeholders, mates, fastener stacks, clashes."""
+def clash_status(state: dict[str, Any]) -> dict[str, Any]:
+    """The program assembly's clash count, from ONE place (``state["clashes"]`` with ``state["check"]``): every
+    page, comment and chat line takes it from here (live run 2026-11-19 showed "0 clashes" next to "2 clashes").
+    ``count`` is None while no finished check covers the assembly."""
+    chk = state.get("check") or {}
+    n = len(state.get("clashes") or [])
+    word = f"{n} clash{'es' if n != 1 else ''}"
+    if chk.get("status") == "running":
+        return {"count": None, "status": "running", "text": "the whole-program clash check is running (advisory)"}
+    if chk.get("status") == "failed":
+        return {"count": None, "status": "failed", "text": "the whole-program clash check didn't finish (check "
+                "clashes in Assembly Studio)"}
+    if chk.get("status") == "done" and chk.get("scope") in (None, "program"):
+        return {"count": n, "status": "done", "text": f"{word} in the whole-program check (advisory)"}
+    if chk.get("status") == "done":
+        return {"count": n, "status": "partial", "text": f"{word} at the last check ("
+                + ("placeholders" if chk.get("scope") == "placeholders" else "the parts swapped in so far") + ")"}
+    return {"count": None, "status": "none", "text": "no clash check yet"}
+
+
+def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None,
+              clashes: list[dict[str, Any]] | None = None) -> str:
+    """One line for the program page: real parts / placeholders, mates, fastener stacks. The clash count is not in
+    it (``clash_status`` is the one source); ``clashes`` is accepted for older callers and ignored."""
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
     n_real = len(parts) - n_ph
     mates = len((final or {}).get("mates") or [])
@@ -440,7 +470,23 @@ def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, cl
          f"{mates} mates (interfaces mated by name)")
     if stacks:
         s += f", {stacks} fastener stack{'s' if stacks != 1 else ''}"
-    return s + f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}."
+    _ = clashes
+    return s + "."
+
+
+def _envelope_mesh(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[str, Any]) -> bool:
+    """A real gear against the *placeholder* of the gear it meshes with: the placeholder is the tip-circle envelope,
+    so the real teeth always overlap it. That is not a clash (it says nothing about the real mesh, which the
+    whole-program check measures once both are real); reporting it sent a correct pinion back to its designer when
+    it happened to be swapped in before its gear."""
+    by = {i["id"]: i for i in adoc["instances"]}
+    a, b = by.get(c["a"]), by.get(c["b"])
+    if a is None or b is None:
+        return False
+    ia, ib = (a.get("office") or {}).get("item"), (b.get("office") or {}).get("item")
+    if not any(f["kind"] == "gear_mesh" and {f["a"]["item"], f["b"]["item"]} == {ia, ib} for f in ifaces):
+        return False
+    return str(a.get("part", "")).startswith("h_") != str(b.get("part", "")).startswith("h_")
 
 
 def _item_of(adoc: dict[str, Any] | None, iid: str) -> str | None:
@@ -566,6 +612,31 @@ def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str
     return {"inst": ib["id"], "hole": kb, "probe": probe}
 
 
+def _integration_order(t: dict[str, Any]) -> int:
+    """Fasteners first, then nuts and washers (counted against the stacks), then the rest (stable in plan order)."""
+    r = t.get("reuse") or {}
+    if r.get("kind") == "fastener" or r.get("code") in ("hex_bolt", "shcs"):
+        return 0
+    return 1 if r.get("code") in ("hex_nut", "washer") else 2
+
+
+def _stack_hardware(aroot: Path, adoc: dict[str, Any]) -> dict[tuple[str, float], int]:
+    """Washers and nuts in this assembly's fastener stacks: {(code, D): count}."""
+    from aicad.assembly import store as astore
+
+    stacks = {g["id"] for g in adoc.get("groups") or [] if g.get("kind") == "fastener"}
+    out: dict[tuple[str, float], int] = {}
+    for i in adoc["instances"]:
+        if i.get("group") not in stacks:
+            continue
+        p = astore.part(aroot, i["part"]) or {}
+        code = p.get("code")
+        if code in ("hex_nut", "washer") and (p.get("params") or {}).get("D") is not None:
+            k = (str(code), float(p["params"]["D"]))
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
 def plan_stacks(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], joints: list[dict[str, Any]],
                 fitted: set[tuple[str, int]]) -> list[dict[str, Any]]:
     """Every hole of these bolted joints that has no stack yet, as ``icd_stack`` plans it (``fitted`` is updated)."""
@@ -591,7 +662,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     sk, ifaces = prog["skeleton"], prog["icd"]["interfaces"]
     state = prog["assembly"]
     log: list[dict[str, str]] = []
-    stats = {"stacks": 0, "asked": 0, "binned": 0}
+    stats = {"stacks": 0, "asked": 0, "binned": 0, "unplaced": 0, "in_stacks": 0}
     unchecked = False  # the whole-program clash check didn't finish: never report "0 clashes" then
     seated: dict[str, int] = {}
 
@@ -612,9 +683,18 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
             bin_x = env["min"][0]
             sub_items = [x["id"] for x in prog["items"] if x["kind"] == "subassembly"]
             bin_x += 120.0 * (sub_items.index(level) if level in sub_items else 0)
-            for t in standard:
+            # fasteners first, then the plan's nuts and washers (they are the stacks' own when the sizes match),
+            # then everything else
+            stack_hw: dict[tuple[str, float], int] | None = None
+            for t in sorted(standard, key=_integration_order):
                 r = t.get("reuse") or {}
                 if r.get("source") != "toolbox":
+                    if t["kind"] in ("standard", "part") and not t.get("_kit") and t["item_id"] not in sk["items"]:
+                        # a bought-out part Hex didn't stock (a plug, a seal): modelled by a designer, but the ICD has
+                        # no place for it, so it is reported, never left lying beside the program
+                        stats["unplaced"] += int(t.get("qty") or 1)
+                        say(f"{t['title']} has no interface in the ICD, so Fitz didn't place it ({int(t.get('qty') or 1)}"
+                            " in the BOM as planned): fit it by hand in Assembly Studio", "warn")
                     continue
                 kind, code = r.get("kind"), r.get("code")
                 is_fastener = kind == "fastener" or code in ("hex_bolt", "shcs")
@@ -637,7 +717,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         inst = aservice.add_instance(aroot, adoc, key, T=T,
                                                      name=t["title"])
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
-                    what = "bearing" if seat["code"] == "bearing" else "dowel pin"
+                    what = {"bearing": "bearing", "dowel": "dowel pin", "parallel_key": "key",
+                            "retaining_ring": "retaining ring"}.get(seat["code"], "part")
                     seated[what] = seated.get(what, 0) + len(seat["at"])
                     if any(f["kind"] == "bearing_journal" and f["b"]["item"] == t["item_id"] for f in ifaces):
                         # bearings on shaft journals (no housing): mated to their shafts by interface name
@@ -661,7 +742,10 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     stats["asked"] += want
                     planned = planned[:want]
                     if not planned:
-                        say(f"{t['title']}: no bolted joint inside this sub-assembly; put in the parts bin", "warn")
+                        stats["unplaced"] += want
+                        say(f"{t['title']}: no bolted joint of the ICD inside this sub-assembly takes it, so Fitz "
+                            f"didn't place it ({want} in the BOM as planned)", "warn")
+                        continue
                     else:
                         # PD-71: straight from the ICD (positions, thickness, size): no probe, no clash check
                         try:
@@ -673,15 +757,44 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         stats["stacks"] += res["inserted"]
                         errs = sorted({h["proposal"]["error"] for h in res["plan"]["holes"]
                                        if not h["proposal"]["ok"] and h["proposal"].get("error")})
+                        stack_hw = None  # the stacks changed: count their washers and nuts again
                         if res["inserted"]:
                             summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
+                            extra = int(t.get("qty") or 1) - res["inserted"] if not t.get("_kit") else 0
+                            stats["unplaced"] += max(0, extra)
                             say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()} from the ICD: "
                                 + "; ".join(summ)
-                                + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else "")
+                                + (f" ({extra} more than the ICD's joints take: not placed, in the BOM as planned)"
+                                   if extra > 0 else "")
                                 + (f". Not fitted: {errs[0]}" if errs else ""),
-                                "ok" if res["inserted"] >= want else "warn")
+                                "ok" if extra <= 0 and not errs else "warn")
                             continue
-                        say(f"Fitz couldn't fit {t['title']}: {errs[0] if errs else 'no standard stack fits'}", "warn")
+                        stats["unplaced"] += want
+                        say(f"Fitz couldn't fit {t['title']}: {errs[0] if errs else 'no standard stack fits'} "
+                            f"({want} not placed, in the BOM as planned)", "warn")
+                        continue
+                if code in ("hex_nut", "washer") and not t.get("_kit") and (r.get("params") or {}).get("D"):
+                    # the plan's nuts / washers for its bolts: the ICD's stacks carry their own (ISO 4032 / 7089), so
+                    # the plan's are those when the size matches; the rest are more than the joints use
+                    if stack_hw is None:
+                        stack_hw = _stack_hardware(aroot, adoc)
+                    D = float(r["params"]["D"])
+                    want = int(t.get("qty") or 1)
+                    used = min(want, stack_hw.get((code, D), 0))
+                    stack_hw[(code, D)] = stack_hw.get((code, D), 0) - used
+                    stats["in_stacks"] += used
+                    stats["unplaced"] += want - used
+                    what = "nuts" if code == "hex_nut" else "washers"
+                    if used == want:
+                        say(f"{t['title']}: all {want} are in the bolt stacks Fitz fitted from the ICD")
+                    elif used:
+                        say(f"{t['title']}: {used} of {want} are in the bolt stacks Fitz fitted from the ICD; the other "
+                            f"{want - used} are more than the joints use (not placed, in the BOM as planned)", "warn")
+                    else:
+                        say(f"{t['title']}: no bolt stack of the ICD here uses M{D:g} {what}"
+                            + (" (its joints are tapped into the part)" if code == "hex_nut" else "")
+                            + f", so Fitz didn't place them ({want} in the BOM as planned)", "warn")
+                    continue
                 # everything else (and fasteners that found no joint): the parts bin, beside the program, no clash
                 try:
                     key = await aservice.ensure_toolbox_part(aroot, org_id, code, r.get("params") or {})
@@ -751,16 +864,18 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
         bits.append(f"seated {n} {what}{'s' if n != 1 else ''} per the ICD")
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
+    if stats["unplaced"]:
+        bits.append(f"{stats['unplaced']} planned part{'s' if stats['unplaced'] != 1 else ''} not placed (more than "
+                    "the ICD uses, or no interface: see the notes)")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)
-    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + (
-        ", clash check didn't finish (check clashes in Assembly Studio)" if unchecked else
-        f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}")
-    say(summary, "warn" if clashes else "ok")
+    # PD-71: integration measures no clashes, so it never states a count ("0 clashes" was said under "2 clashes"
+    # in the live run 2026-11-19); the final assembly's whole-program check reports them (``clash_status``)
+    tail = (". Fitz's whole-program clash check runs now (advisory)" if level == "root" and not unchecked else
+            ", clash check didn't finish (check clashes in Assembly Studio)" if unchecked else "")
+    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + tail + "."
+    say(summary, "ok")
     return {"summary": summary, "clashes": clashes, "log": log, "assembly_id": aid_out, "inserted": stats["stacks"],
-            "program_summary": summarize(state.get("parts") or {}, final, clashes if level == "root" else
-                                         state.get("clashes") or [])
-            .replace(", 0 clashes.", ", clash check didn't finish.") if unchecked else
-            summarize(state.get("parts") or {}, final, clashes if level == "root" else state.get("clashes") or [])}
+            "program_summary": summarize(state.get("parts") or {}, final)}
 
 
 # ----------------------------------------------------------------------------- advisory whole-program check (PD-71)
@@ -789,7 +904,7 @@ async def advisory_check(aroot: Path, org_id: str, prog: dict[str, Any]) -> dict
     else:
         text = (f"Fitz's whole-program clash check (advisory): no clashes across "
                 f"{an['interference']['checked_pairs']} candidate pairs in the final assembly.")
-    return {"status": "done", "clashes": clashes, "text": text, "at": astore.now(),
+    return {"status": "done", "scope": "program", "clashes": clashes, "text": text, "at": astore.now(),
             "checked_pairs": an["interference"]["checked_pairs"], "seconds": round(time.perf_counter() - t0, 1),
             "computed": an["pairs"]["computed"], "cached": an["pairs"]["cached"]}
 

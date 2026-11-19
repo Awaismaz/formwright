@@ -10,6 +10,7 @@ Protocol (one JSON object per line):
 from __future__ import annotations
 
 import asyncio
+import atexit
 import json
 import os
 import sys
@@ -17,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from aicad.agent.worker import Worker, child_env
+from aicad.agent.worker import MAX_LIVE, Worker, child_env, evict_idle
 
 
 def _handle(req: dict[str, Any]) -> Any:
@@ -101,6 +102,7 @@ _workers: dict[str, AssemblyWorker] = {}
 def get_worker(key: str) -> AssemblyWorker:
     w = _workers.get(key)
     if w is None:
+        evict_idle(_workers, keep=max(0, MAX_LIVE - 1))
         w = _workers[key] = AssemblyWorker()
     return w
 
@@ -133,6 +135,9 @@ def kill_all() -> None:
                 pass
         w.proc = None
     _workers.clear()
+
+
+atexit.register(kill_all)
 
 
 if __name__ == "__main__":

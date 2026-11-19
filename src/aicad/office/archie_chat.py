@@ -34,7 +34,7 @@ HISTORY_TURNS = 8
 
 ACTION_TYPES = ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority", "pause_program",
                 "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked",
-                "revise_plan")
+                "revise_plan", "keep_separate")
 
 CHAT_INSTRUCTIONS = """You are Archie, the Chief Designer of a mechanical design office. The engineering manager \
 talks to you while a program is planned or in work. You see the program state below. Answer in plain engineering \
@@ -66,6 +66,7 @@ out. "concurrency" is how many agents work at once in total; "threads" is parall
 - {"type": "retry_blocked"}: put every blocked part back to work under the current review rules (a part that \
 passes every measurable check is approved with Gage's open points recorded) and run the office.
 - {"type": "fix_icd"}: while the interfaces wait for approval and have problems: adjust them so every part can be made (smallest safe changes, listed for review).
+- {"type": "keep_separate", "parts": ["part name as listed", ...]}: only while the interfaces wait for approval: parts with no interface are meant to be separate (a kit, parts made on their own); the manager's decision is recorded and they no longer block approval. Only propose it when the manager says the parts are meant to be apart.
 - {"type": "revise_plan", "notes": "what to change", "add": {"sub": "sub-assembly name", "part": {"name": "...", \
 "family": "machined", "qty": 1, "description": "..."}}}: only while the interfaces wait for approval and no part \
 work has started: send the plan back to the manager for review with this change ("add" is optional: one part to add, \
@@ -126,7 +127,8 @@ def user_message(text: str, actor: dict[str, Any]) -> dict[str, Any]:
 
 def archie_message(text: str, actions: list[dict[str, Any]], *, kind: str, tokens: int = 0) -> dict[str, Any]:
     """``kind``: "status" (built from the program), "ai" (Archie's AI turn) or "office" (deterministic reader)."""
-    return {"id": store.new_id(), "role": "archie", "text": text.strip()[:MAX_TEXT], "t": store.now(), "kind": kind,
+    return {"id": store.new_id(), "role": "archie", "text": service.plain_names(text).strip()[:MAX_TEXT],
+            "t": store.now(), "kind": kind,
             "tokens": tokens, "actions": [{**a, "id": f"a{i + 1}", "status": "proposed"} for i, a in enumerate(actions)]}
 
 
@@ -145,10 +147,19 @@ def needs_you(doc: dict[str, Any]) -> list[str]:
         out.append("the plan waits for your approval")
     g = {x["code"]: x for x in doc.get("gates", [])}
     if (doc.get("icd") or {}).get("status") == "draft" and (g.get("icd") or {}).get("status") == "pending":
+        from aicad.office import interfaces as _ifs
+
         n = len(doc["icd"].get("problems") or [])
-        out.append(f"{n} interface problem{'s' if n != 1 else ''} block the interfaces (ICD): I can fix them "
-                   "(Fix with Archie on the Interfaces tab), then you approve and press Run" if n else
-                   "the interfaces (ICD) wait for your approval on the Interfaces tab; then press Run")
+        loose = len(_ifs.unconnected(doc)) if n else 0
+        if loose:  # a part with no interface: connect it, or keep it separate (the engineer's call, PD-85)
+            out.append(f"{loose} part{'s have' if loose != 1 else ' has'} no interface: connect "
+                       f"{'them' if loose != 1 else 'it'} on the Interfaces tab, or keep "
+                       f"{'them' if loose != 1 else 'it'} as separate parts if that is intended")
+        n -= loose
+        if n or not loose:
+            out.append(f"{n} interface problem{'s' if n != 1 else ''} block the interfaces (ICD): I can fix them "
+                       "(Fix with Archie on the Interfaces tab), then you approve and press Run" if n else
+                       "the interfaces (ICD) wait for your approval on the Interfaces tab; then press Run")
     for t in doc["tickets"]:
         st = (t.get("run") or {}).get("status")
         if st == "awaiting_review":
@@ -280,7 +291,9 @@ def offline_reply(doc: dict[str, Any], text: str, root: Path) -> tuple[str, list
                     "There's nothing to run yet: approve the plan first."), [], "office"
         return "I'll set the office working the tickets again.", [{"type": "resume_program"}], "office"
     icd = doc.get("icd") or {}
-    if icd.get("status") == "draft" and icd.get("problems") and re.search(
+    from aicad.office import interfaces as _ifs
+
+    if icd.get("status") == "draft" and icd.get("problems") and len(_ifs.unconnected(doc)) < len(icd["problems"]) and re.search(
             r"\b(fix|stuck|proceed|next|problem|interfer|blocked|can'?t|cannot|approve|dead)\w*", text, re.IGNORECASE):
         n = len(icd["problems"])
         return ((f"The interfaces have {n} problem{'s' if n != 1 else ''}: parts that can't be made as I laid them "
@@ -413,6 +426,16 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
     if typ == "fix_icd":
         icd = doc.get("icd") or {}
         return {"type": typ} if icd.get("status") == "draft" and icd.get("problems") else None
+    if typ == "keep_separate":
+        from aicad.office import interfaces
+
+        if (doc.get("icd") or {}).get("status") != "draft" or not doc.get("skeleton"):
+            return None
+        flagged = interfaces.unconnected(doc)
+        items = doc["skeleton"]["items"]
+        names = {str(n).strip().lower() for n in a.get("parts") or [] if isinstance(n, str)}
+        want = [i for i in flagged if i in (a.get("items") or []) or items[i]["name"].lower() in names]
+        return {"type": typ, "items": want, "parts": [items[i]["name"] for i in want]} if want else None
     if typ == "revise_plan":
         return revise_ok(doc, a, txt)
     if typ == "resize_part":
@@ -504,13 +527,25 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
     if typ == "replan":
         return f"Re-plan with: {a['notes']}"
     if typ == "retry_blocked":
+        if a.get("status") == "applied" and a.get("count") is not None:  # what was done, not what is blocked now
+            n = int(a["count"])
+            return (f"Retried {n} blocked part{'s' if n != 1 else ''} under the current review rules and ran the "
+                    "office")
         n = len(blocked(doc))
+        if not n:
+            return "Retry the blocked parts (none is blocked now: nothing to retry)"
         return (f"Retry the {n} blocked part{'s' if n != 1 else ''} under the current review rules and run the "
                 "office")
     if typ == "resize_part":
         return f"Resize {a['part']}: " + ", ".join(f"{k} {v:g} mm" for k, v in a["size"].items())
     if typ == "fix_icd":
         return "Fix the interface problems (smallest safe changes, listed in the ICD history for your review)"
+    if typ == "keep_separate":
+        sk_items = (doc.get("skeleton") or {}).get("items") or {}
+        names = list(a.get("parts") or [sk_items[i]["name"] for i in a.get("items") or [] if i in sk_items])
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1] if names else "them"
+        return (f"Keep {listed} as {'a separate part' if len(names) == 1 else 'separate parts'} (no interface "
+                "intended; recorded in the interfaces history)")
     if typ == "revise_plan":
         add = a.get("add") or {}
         if add:
@@ -523,7 +558,19 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
 
 
 def with_labels(doc: dict[str, Any], msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{**m, "actions": [{**a, "label": describe(doc, a)} for a in m.get("actions", [])]} for m in msgs]
+    """Each action with its one-line label; a proposal the program has moved past is marked ``stale`` (the chat
+    shows "No longer needed" instead of Apply: live run 2026-11-19 offered "Retry the 0 blocked parts")."""
+    def one(a: dict[str, Any]) -> dict[str, Any]:
+        out = {**a, "label": describe(doc, a)}
+        if a.get("status") == "proposed":
+            try:
+                live = normalise(doc, {k: v for k, v in a.items() if k not in ("id", "status", "label")})
+            except Exception:  # noqa: BLE001 - an old proposal the reader no longer knows: not offered
+                live = None
+            if live is None:
+                out["stale"] = True
+        return out
+    return [{**m, "actions": [one(a) for a in m.get("actions", [])]} for m in msgs]
 
 
 def emit_said(root: Path, doc: dict[str, Any], actor: dict[str, Any], text: str) -> None:

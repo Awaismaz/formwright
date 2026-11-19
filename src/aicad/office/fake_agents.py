@@ -14,7 +14,8 @@ every interface feature at its stated position; a gear from the Toolbox generato
 measurement passes and Fitz's swap-in mates by name. Scripted ICD behaviour: ``icd_shift`` (mm: the first hole is
 built that far off in X on the first ``omit_turns`` turns, so Gage sends it back with the measured position),
 ``icd_grow`` (mm: the body is built that much larger: out of its envelope, a shaft off its Ø) and
-``cr`` (a change request block on the first turn: {"interface", "values", "reason"}).
+``cr`` (a change request block on the first turn: {"interface", "values", "reason"}) and ``meter_overshoot`` (the
+first turn's last message reports usage far over any run budget, so the session stops the turn at its budget).
 
 Enable for a dev server with ``FW_OFFICE_FAKE_AGENTS=1`` (optionally ``FW_OFFICE_FAKE_DELAY`` seconds per step and
 ``FW_OFFICE_FAKE_DEFECTS`` = a regex: matching tickets omit a brief size on their first build).
@@ -256,6 +257,8 @@ class FakeClient:
             yield UserMessage(content=[ToolResultBlock(tool_use_id=f"b{self.turns}",
                                                        content=[{"type": "text", "text": report}], is_error=fail)])
             await asyncio.sleep(step)
+            if b.get("meter_overshoot") and self.turns == 1:  # the live meter passes the run budget after the build
+                usage = {"input_tokens": 1000, "output_tokens": 50_000_000}
             review = {"observed": [{"text": "Envelope matches the brief sizes", "basis": "CHK-04"}], "uncertain": []}
             text = "Done." if fail else "Built and checked.\n```fw-review\n" + json.dumps(review) + "\n```"
             cr = b.get("cr")
