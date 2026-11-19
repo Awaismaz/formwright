@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -19,6 +19,8 @@ export type ScenePart = {
   at?: V3;
   /** Offset at full explode (mm, CAD axes). */
   explode?: V3;
+  /** Offset used to frame the camera when it differs from `explode` (for example while a scroll story moves parts). */
+  fitExplode?: V3;
   color?: string;
   /** Fades the part in/out (default true). */
   show?: boolean;
@@ -36,6 +38,10 @@ export type PartSceneProps = {
   /** Extra zoom factor (>1 = closer). */
   zoom?: number;
   still?: boolean;
+  /** Turntable angle in degrees, set from outside (for example by scroll); eased. */
+  turn?: number;
+  /** Shown while the parts load and when WebGL is unavailable. */
+  poster?: ReactNode;
   className?: string;
   label: string;
 };
@@ -80,16 +86,16 @@ type Inst = {
   hl: THREE.MeshBasicMaterial[]; opacity: number;
 };
 
-export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1, 0.75], zoom = 1, still = false, className, label }: PartSceneProps) {
+export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1, 0.75], zoom = 1, still = false, turn, poster, className, label }: PartSceneProps) {
   const host = useRef<HTMLDivElement>(null);
-  const live = useRef({ parts, explode, spin, still });
-  live.current = { parts, explode, spin, still };
+  const live = useRef({ parts, explode, spin, still, turn, zoom });
+  live.current = { parts, explode, spin, still, turn, zoom };
   const kick = useRef<() => void>(() => {});
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const key = parts.map(p => `${p.id}:${p.url}`).join("|");
 
-  useEffect(() => { kick.current(); }, [parts, explode, spin, still]);
+  useEffect(() => { kick.current(); }, [parts, explode, spin, still, turn, zoom]);
 
   useEffect(() => {
     const el = host.current;
@@ -141,12 +147,13 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
     let settleFrames = 0;
 
     let sphere: THREE.Sphere | null = null;
+    let zNow = live.current.zoom;
     const place = () => {
       if (!sphere) return;
       // fit the bounding sphere in the narrower of the vertical and horizontal fields of view
       const half = THREE.MathUtils.degToRad(camera.fov / 2);
       const halfH = Math.atan(Math.tan(half) * Math.min(1, camera.aspect));
-      const dist = (sphere.radius / Math.sin(Math.min(half, halfH))) / zoom;
+      const dist = (sphere.radius / Math.sin(Math.min(half, halfH))) / zNow;
       const dir = cad(view).normalize();
       camera.position.copy(sphere.center).addScaledVector(dir, dist);
       camera.near = dist / 20; camera.far = dist * 6;
@@ -170,7 +177,8 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
       for (const i of insts) {
         const b = new THREE.Box3().setFromObject(i.holder);
         box.union(b);
-        if (i.part.explode) box.union(b.clone().translate(cad(i.part.explode)));
+        const fx = i.part.fitExplode ?? i.part.explode;
+        if (fx) box.union(b.clone().translate(cad(fx)));
       }
       if (box.isEmpty()) return;
       const s = box.getBoundingSphere(new THREE.Sphere());
@@ -184,7 +192,8 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
     const step = (now: number) => {
       raf = 0;
       if (disposed) return;
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // a kick can set `last` after this frame's timestamp: never let dt go negative (a negative step makes the easing diverge)
+      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       const L = live.current;
       let moving = false;
@@ -211,7 +220,13 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
         for (const m of i.hl) m.opacity = o * (L.still ? 0.55 : 0.18 + 0.5 * (0.5 + 0.5 * Math.sin(now / 1000 * 2.6)));
         if (i.hl.length && !L.still) moving = true;
       }
-      // turntable
+      // zoom can change after load (e.g. closer as an exploded view assembles)
+      if (Math.abs(L.zoom - zNow) > 1e-3) { zNow += (L.zoom - zNow) * k; place(); moving = true; }
+      // turntable: an angle set from outside, else a steady spin
+      if (L.turn != null) {
+        const d = THREE.MathUtils.degToRad(L.turn) - pivot.rotation.y;
+        if (Math.abs(d) > 1e-4) { pivot.rotation.y += d * k; moving = true; }
+      } else
       if (L.spin && !L.still && now > userHold) { pivot.rotation.y += THREE.MathUtils.degToRad(L.spin) * dt; moving = true; }
       if (controls.update()) moving = true;
       renderer.render(scene, camera);
@@ -276,8 +291,8 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
   return (
     <div className={cx("relative h-full w-full", className)}>
       <div ref={host} className={cx("absolute inset-0 transition-opacity duration-700", ready ? "opacity-100" : "opacity-0", !still && "cursor-grab active:cursor-grabbing")} />
-      {!ready && !failed && <div className="absolute inset-0 flex items-center justify-center"><div className="h-16 w-16 rounded-full border-2 border-primary/20 border-t-primary/70 motion-safe:animate-spin" /></div>}
-      {failed && <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-muted">3D preview unavailable in this browser.</div>}
+      {!ready && !failed && (poster ? <div className="absolute inset-0">{poster}</div> : <div className="absolute inset-0 flex items-center justify-center"><div className="h-16 w-16 rounded-full border-2 border-primary/20 border-t-primary/70 motion-safe:animate-spin" /></div>)}
+      {failed && (poster ? <div className="absolute inset-0">{poster}</div> : <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-muted">3D preview unavailable in this browser.</div>)}
     </div>
   );
 }

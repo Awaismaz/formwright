@@ -1,41 +1,84 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { BadgeCheck, Code2, GitBranch } from "lucide-react";
-import { Logo } from "@/components/ui";
+import LazyScene from "@/components/landing/LazyScene";
+import { useReducedMotion } from "@/components/landing/motion";
+import { Card3D, Dim, SiteLogo, SiteScope, ThemeSwitch } from "@/components/landing/site";
+
+const NOTES: [string, string][] = [
+  ["Checked on every build", "Dimensions and volume measured against your requirements, every time it builds."],
+  ["Parametric and editable", "Named dimensions you can change on the model, free and repeatable."],
+  ["Opens in your CAD", "Verified STEP into SOLIDWORKS, Creo, Fusion and the rest. Native bridges are on the way."],
+];
+
+function useWide() {
+  const q = "(min-width: 1024px)";
+  const [m, setM] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(q);
+    if (!mq) return;
+    const f = () => setM(mq.matches);
+    mq.addEventListener("change", f);
+    return () => mq.removeEventListener("change", f);
+  }, []);
+  return m;
+}
+
+/** Line drawing of the flange: shown while the 3D loads and when WebGL is unavailable. */
+const FlangePoster = () => (
+  <svg viewBox="0 0 200 200" className="h-full w-full" aria-hidden="true" fill="none" stroke="#9cc3ff" strokeWidth="1">
+    <circle cx="100" cy="100" r="75" /><circle cx="100" cy="100" r="30" /><circle cx="100" cy="100" r="60" strokeDasharray="8 3 1 3" opacity=".7" />
+    {Array.from({ length: 6 }, (_, i) => { const a = (i * Math.PI) / 3; return <circle key={i} cx={100 + 60 * Math.cos(a)} cy={100 + 60 * Math.sin(a)} r="7" />; })}
+  </svg>
+);
 
 export default function AuthLayout({ title, subtitle, children, footer }: { title: string; subtitle?: ReactNode; children: ReactNode; footer?: ReactNode }) {
+  const wide = useWide();
+  const reduced = useReducedMotion();
   return (
-    <div className="grid min-h-full lg:grid-cols-[1fr_1.05fr]">
-      <aside className="relative hidden overflow-hidden bg-chrome p-12 text-chrome-fg lg:flex lg:flex-col">
-        <div className="pointer-events-none absolute -left-24 bottom-[-120px] h-[420px] w-[420px] rounded-full bg-primary/40 blur-[120px]" />
-        <div className="pointer-events-none absolute right-[-80px] top-[-80px] h-72 w-72 rounded-full bg-accent/25 blur-[100px]" />
-        <div className="pointer-events-none absolute inset-0 opacity-[.08] [background-image:linear-gradient(#fff_1px,transparent_1px),linear-gradient(90deg,#fff_1px,transparent_1px)] [background-size:28px_28px]" />
-        <Link to="/" className="relative"><Logo size={28} dark /></Link>
-        <div className="relative mt-auto max-w-md">
-          <h2 className="text-3xl font-semibold leading-tight tracking-tight text-white">Start every part from a correct, verified model.</h2>
-          <ul className="mt-8 space-y-5">
-            {[
-              [BadgeCheck, "Numerically verified", "Dimensions and volume checked against your requirements on every build."],
-              [Code2, "Parametric and editable", "Named dimensions and readable source — no dumb geometry."],
-              [GitBranch, "Works with your CAD", "Export STEP into SOLIDWORKS, Creo, Fusion and more."],
-            ].map(([I, t, b]) => {
-              const C = I as typeof BadgeCheck;
-              return <li key={t as string} className="flex gap-3"><C className="mt-0.5 h-5 w-5 shrink-0 text-[#7FAAF0]" />
-                <div><div className="font-medium text-white">{t as string}</div><div className="text-sm text-chrome-muted">{b as string}</div></div></li>;
-            })}
-          </ul>
+    <SiteScope className="grid min-h-full lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
+      <aside className="s-print s-grid relative hidden flex-col overflow-hidden border-r border-ink p-10 lg:flex xl:p-12">
+        <Link to="/" aria-label="Formwright home" className="self-start"><SiteLogo size={28} onPrint /></Link>
+
+        <div className="relative mx-auto mt-6 aspect-square w-full max-w-[340px]">
+          {wide && <LazyScene parts={[{ id: "flange", url: "/landing/flange.glb", color: "#c4ccd6" }]} spin={reduced ? 0 : 9} still={reduced}
+            view={[1, -1, 0.9]} zoom={1.1} poster={<FlangePoster />} label="A Formwright flange, Ø150 with six Ø14 holes on PCD 120, turning slowly." />}
+          <span className="s-anno pointer-events-none absolute left-0 top-0 text-[#9cc3ff]">View 1 · Flange Ø150</span>
         </div>
-        <div className="relative mt-12 text-xs text-chrome-muted">© {new Date().getFullYear()} Formwright</div>
+        <Dim label="Ø150" className="mx-auto mt-2 w-full max-w-[300px] !text-[#9cc3ff]" />
+
+        <div className="mt-auto max-w-md pt-8">
+          <h2 className="s-h2 text-[34px] text-white">Start every part from a checked model.</h2>
+          <ol className="mt-7 space-y-5">
+            {NOTES.map(([t, b], i) => (
+              <li key={t} className="flex gap-3.5">
+                <span className="s-balloon text-[#9cc3ff]">{i + 1}</span>
+                <div><div className="text-[15.5px] font-semibold text-white">{t}</div><div className="mt-0.5 text-[14.5px] leading-relaxed text-[#b8c8e0]">{b}</div></div>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div className="s-anno mt-10 flex justify-between border-t border-white/20 pt-3 text-[10px] text-[#9cc3ff]"><span>© {new Date().getFullYear()} Formwright</span><span>Sheet 1 of 1</span></div>
       </aside>
-      <main className="flex items-center justify-center bg-panel px-4 py-12 sm:px-8">
-        <div className="w-full max-w-[400px]">
-          <Link to="/" className="mb-10 inline-block lg:hidden"><Logo size={26} /></Link>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          {subtitle && <p className="mt-1.5 text-sm text-muted">{subtitle}</p>}
-          <div className="mt-8">{children}</div>
-          {footer && <div className="mt-8 text-center text-sm text-muted">{footer}</div>}
+
+      <main className="s-grid flex flex-col px-4 py-6 sm:px-8">
+        <div className="flex items-center justify-between gap-3">
+          <Link to="/" aria-label="Formwright home" className="lg:invisible"><SiteLogo size={24} /></Link>
+          <ThemeSwitch />
+        </div>
+        <div className="flex flex-1 items-center justify-center py-10">
+          <div className="w-full max-w-[440px]">
+            <Card3D inner="p-6 sm:p-8">
+              <div className="flex items-center justify-between gap-3 border-b border-ink/70 pb-3">
+                <span className="s-anno text-bp">Formwright account</span><span className="s-anno text-ink2">Form FW-A1</span>
+              </div>
+              <h1 className="s-h2 mt-6 text-[30px] text-ink sm:text-[34px]">{title}</h1>
+              {subtitle && <p className="mt-2 text-[15px] leading-relaxed text-ink2">{subtitle}</p>}
+              <div className="mt-7">{children}</div>
+            </Card3D>
+            {footer && <div className="mt-8 text-center text-[15px] text-ink2">{footer}</div>}
+          </div>
         </div>
       </main>
-    </div>
+    </SiteScope>
   );
 }
