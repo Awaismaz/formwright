@@ -171,7 +171,15 @@ def test_dims_endpoint_maps_in_the_background_and_rechecks_after_a_param_edit(ap
             time.sleep(0.5)
         raise AssertionError("dimension mapping did not finish")
 
-    r = ready()
+    from aicad.platform import dims_service
+
+    budget = dims_service.BUDGET_S
+    dims_service.BUDGET_S = 0.0  # a machine so slow that every pass runs out of time after one parameter
+    try:
+        r = ready()
+    finally:
+        dims_service.BUDGET_S = budget
+    assert dims_service.read(_ws).get("partial") is None  # finished over several passes
     m = {d["param"]: d for d in r["dims"]}
     assert m["L"]["kind"] == "linear" and m["HOLE_D"]["kind"] == "diameter" and "reason" not in m["CH"]
     t_map = r["timings"]["total_s"]
@@ -179,4 +187,20 @@ def test_dims_endpoint_maps_in_the_background_and_rechecks_after_a_param_edit(ap
     r2 = ready()
     assert r2["build_id"] != r["build_id"]
     assert {d["param"]: d["kind"] for d in r2["dims"]} == {k: v["kind"] for k, v in m.items()}
-    assert r2["timings"]["total_s"] == t_map  # reused (checked, not re-mapped): same structure, same topology
+    assert r2["timings"] == r["timings"] and t_map  # reused (checked, not re-mapped): same structure, same topology
+
+
+def test_agent_style_part_without_hints(tmp_path: Path) -> None:
+    """A script as the design agent writes it (docs/reports/viewport-dims/motor_mount.py, also the replayed build of
+    the walkthrough): every value that is one measurable size gets a dimension, with no dimension hints."""
+    src = (Path(__file__).resolve().parents[1] / "docs" / "reports" / "viewport-dims" / "motor_mount.py").read_text(
+        encoding="utf-8")
+    m, rows = _map(tmp_path, src)
+    assert {k: v["kind"] for k, v in m.items()} == {
+        "BASE_L": "linear", "BASE_W": "linear", "BASE_T": "linear", "WALL_H": "linear", "WALL_T": "linear",
+        "MOTOR_BORE": "diameter", "BOLT_N": "count", "BOLT_PCD": "linear", "BOLT_D": "diameter", "SLOT_L": "linear",
+        "SLOT_W": "linear", "FILLET_R": "radius"}
+    # hand values: wall height from the base top (z = 8) to the wall top (z = 68); slot length over its round ends
+    assert sorted(dims._plane_x(rows[m["WALL_H"][k]["face"]], (0, 0, 1)) for k in ("a", "b")) == pytest.approx([8, 68])
+    assert m["SLOT_L"]["a"]["ref"] == m["SLOT_L"]["b"]["ref"] == "tangent" and m["SLOT_L"]["s"] == pytest.approx(30)
+    assert m["BOLT_PCD"]["circle"] and m["BOLT_D"]["count"] == 4 and m["FILLET_R"]["count"] == 1

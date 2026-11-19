@@ -96,10 +96,11 @@ async def run_pass(org_id: str, ws: Path, busy: Callable[[], bool]) -> bool:
     if not st.get("fingerprint") or not script.is_file() or busy():
         return True
     prev = read(ws)
-    if prev and prev.get("build_id") == build_id:
+    if prev and prev.get("build_id") == build_id and not prev.get("partial"):
         return True
     t0 = time.perf_counter()
-    b = await worker.dims_base(org_id, script, ws / "out" / "dims.json" if prev else None)
+    b = await worker.dims_base(org_id, script, ws / "out" / "dims.json" if prev and not prev.get("partial") else None)
+    queued = time.perf_counter() - t0 - float(b.get("elapsed_s") or 0)  # waiting behind builds / renders
     if not b.get("ok"):
         if b.get("starting"):
             return True  # the engine is starting: the viewer's next request tries again
@@ -108,18 +109,34 @@ async def run_pass(org_id: str, ws: Path, busy: Callable[[], bool]) -> bool:
     if _status(ws).get("build_id") != build_id:
         return False
     if b.get("valid"):
-        _write(ws, {**(prev or {}), "build_id": build_id, "checked_s": round(time.perf_counter() - t0, 3)})
+        _write(ws, {**(prev or {}), "build_id": build_id, "checked_s": round(time.perf_counter() - t0, 3),
+                    "checked_queued_s": round(queued, 3)})
         return True
     records: list[dict[str, Any]] = []
+    # a pass cut short by its time budget (a loaded machine) is finished by the next one, not redone
+    done = {d["param"]: d for d in (prev or {}).get("dims") or []
+            if prev and prev.get("partial") and prev.get("build_id") == build_id and prev.get("key") == b["key"]
+            and d.get("reason") != "time" and not d.get("explicit")}
+    stepped = 0  # every pass maps at least one parameter, so a slow machine still gets there
     for item in b.get("plan") or []:
+        if item["param"] in done:
+            records.append(done[item["param"]])
+            continue
         if busy() or _status(ws).get("build_id") != build_id:
             return False
-        if time.perf_counter() - t0 > BUDGET_S:
+        if stepped and time.perf_counter() - t0 > BUDGET_S:
             records.append({"param": item["param"], "kind": "none", "reason": "time"})
             continue
+        t1 = time.perf_counter()
         r = await worker.dims_step(org_id, script, item, b["key"])
+        stepped += 1
+        queued += time.perf_counter() - t1 - float(r.get("elapsed_s") or 0)
         records.append(r.get("dim") or {"param": item["param"], "kind": "none", "reason": "rebuild"})
     if _status(ws).get("build_id") != build_id:
         return False
-    _write(ws, dims.document(b, records, build_id, t0))
+    doc = dims.document(b, records, build_id, t0)
+    doc["timings"]["queued_s"] = round(queued, 3)
+    if any(r.get("reason") == "time" for r in records):
+        doc["partial"] = True
+    _write(ws, doc)
     return True

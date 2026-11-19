@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, Layers, MessageSquarePlus, MoreHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Box, ChevronRight, ChevronsDown, Crosshair, Download, Eye, EyeOff, FileDown, FileText, GitCompare, Hand, Layers, MessageSquarePlus, MoreHorizontal, MoveHorizontal, Pencil, PenLine, ScanSearch, SlidersHorizontal, Sparkles, Square, TextCursorInput, Trash2, TriangleAlert, Undo2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { BuildStatus, CheckResult, Impact, ManualFeature, Project, RepairItem } from "@/lib/types";
@@ -66,7 +66,9 @@ export function ChecksPanel({ status }: { status?: BuildStatus }) {
 }
 
 /* ------------------------------------------------------------------ parameters (smart) */
-export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, usedIn = 0 }: { project: Project; status?: BuildStatus; onChanged: () => void;
+export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, usedIn = 0, onModel }: { project: Project; status?: BuildStatus; onChanged: () => void;
+  /** dimensions on the model (viewport): the toggle, which parameters have one, and the hover shared with the viewer */
+  onModel?: { on: boolean; toggle: () => void; mapped: Set<string>; hover: string | null; onHover: (p: string | null) => void };
   /** assemblies using this part: a change is previewed on them first (ASM-018) */
   usedIn?: number;
   /** a design feature's name: its parameter group is highlighted (Edit from the tree) */
@@ -136,6 +138,12 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, 
         <p className="text-[12px] text-muted">Edits rebuild without AI or tokens and are kept only if checks pass.</p>
         <label className="flex shrink-0 items-center gap-1.5 text-[11.5px] text-muted">Auto <Toggle checked={auto} onChange={v => { setAuto(v); try { localStorage.setItem("fw_params_auto", v ? "1" : "0"); } catch { /* */ } }} /></label>
       </div>
+      {onModel && <button type="button" onClick={onModel.toggle} aria-pressed={onModel.on} data-dims-panel-toggle
+        className={cx("flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-[12px]", onModel.on ? "border-primary/50 bg-primary-soft text-primary" : "border-border text-muted hover:border-primary hover:text-primary")}>
+        <MoveHorizontal className="h-4 w-4 shrink-0" />
+        <span className="flex-1">{onModel.on ? "Dimensions shown on the model: click a value there to change it" : "Show these as dimensions on the model"}</span>
+        <span className="kbd">D</span>
+      </button>}
       {pending && <ImpactPanel impact={pending.impact} busy={busy} onApply={() => void apply(pending.values, true)} onBack={() => { setPending(null); setVals({}); }} />}
       {focus && <p className="rounded-md bg-primary-soft px-2.5 py-1.5 text-[12px] text-primary">{focusGroup ? `Parameters of “${focus}”: ${focusGroup}` : `“${focus}” has no parameter group of its own; all design parameters are below.`}</p>}
       {groups.map(([g, keys]) => (
@@ -147,9 +155,11 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, 
               const cur = vals[k] ?? String(editable[k] ?? shown[k]);
               const hasRange = can && m.min !== undefined && m.max !== undefined;
               return (
-                <div key={k} className="rounded-md border border-border px-2.5 py-1.5">
+                <div key={k} data-param-row={k} onPointerEnter={() => onModel?.onHover(k)} onPointerLeave={() => onModel?.onHover(null)}
+                  className={cx("rounded-md border px-2.5 py-1.5 transition-colors", onModel?.hover === k ? "border-primary bg-primary-soft/60" : "border-border")}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-[12.5px]" title={m.help ?? (m.label ? `${m.label} (${k} in the design)` : k)}>{m.label ?? k.replace(/_/g, " ").toLowerCase().replace(/^\w/, c => c.toUpperCase())}</span>
+                    <span className="flex min-w-0 items-center gap-1 truncate text-[12.5px]" title={m.help ?? (m.label ? `${m.label} (${k} in the design)` : k)}>{m.label ?? k.replace(/_/g, " ").toLowerCase().replace(/^\w/, c => c.toUpperCase())}
+                      {onModel?.mapped.has(k) && <MoveHorizontal className="h-3 w-3 shrink-0 text-primary/70" aria-label="Shown as a dimension on the model" />}</span>
                     {can ? <span className="flex items-center gap-1"><Input className={cx("h-7 w-20 text-right font-mono text-[12px]", ((m.min !== undefined && Number(cur) < m.min) || (m.max !== undefined && Number(cur) > m.max)) && "border-danger text-danger")} value={cur} inputMode="decimal" disabled={busy}
                         title={m.min !== undefined && m.max !== undefined ? `${m.min}–${m.max}${m.unit ? ` ${m.unit}` : ""}` : undefined}
                         onChange={e => setVals({ ...vals, [k]: e.target.value })} onBlur={() => schedule(vals)} onKeyDown={e => e.key === "Enter" && schedule(vals)} />

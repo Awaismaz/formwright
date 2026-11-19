@@ -292,6 +292,9 @@ def _linear_candidates(B: list[Row], P: list[Row], drv: set[int], v: float, d: f
             u = _unit(w0)
             w1 = _perp(_sub(P[j]["p"], P[i]["p"]), P[i]["a"])
             take(3, {"face": i, "ref": "axis"}, {"face": j, "ref": "axis"}, u, _norm(w0), _dot(w1, u))
+            # overall length of a slot / over two bosses: outer tangent to outer tangent
+            take(5, {"face": i, "ref": "tangent", "side": -1}, {"face": j, "ref": "tangent", "side": 1}, u,
+                 _norm(w0) + B[i]["r"] + B[j]["r"], _dot(w1, u) + P[i]["r"] + P[j]["r"])
     return out
 
 
@@ -309,7 +312,7 @@ def classify(B: list[Row], P: list[Row], name: str, v: float, d: float, is_int: 
     drv = {i for i, (b, p) in enumerate(zip(B, P, strict=True)) if moved(b, p)}
     rec["driven"] = sorted(drv)[:400]
     if not drv:
-        return {**rec, "kind": "none", "reason": "no change"}
+        return static_round(B, name, v) or {**rec, "kind": "none", "reason": "no change"}
     area = area or (lambda i: 0.0)
     cands = _linear_candidates(B, P, drv, v, d) if v > 0 else []
     best = None
@@ -333,13 +336,20 @@ def classify(B: list[Row], P: list[Row], name: str, v: float, d: float, is_int: 
     return {**rec, "kind": "none", "reason": "no single dimension"}
 
 
+def static_round(B: list[Row], name: str, v: float) -> Row | None:
+    """A size picked from a standard list (M8, a bearing series) can't be nudged: the build refuses the in-between
+    value or snaps back. Then the round faces equal to it are its dimension, by value alone (shown only while equal)."""
+    hit = [i for i, r in enumerate(B) if r["t"] == "cylinder" and _close(2 * r["r"], v, _vtol(v))]
+    return {"param": name, "kind": "diameter", "faces": hit, "count": _axis_groups(B, hit), "static": True}         if hit and v > 0 else None
+
+
 def _linear(rec: Row, c: tuple[Any, ...], B: list[Row]) -> Row:
     _, a, b, u, s = c
     out = {**rec, "kind": "linear", "a": a, "b": b, "u": [round(x, 9) for x in u], "s": s}
     if a["ref"] == b["ref"] == "axis":  # two holes opposite each other about a round body's axis: a pitch circle
         ra, rb = B[a["face"]], B[b["face"]]
         mid = tuple((x + y) / 2 for x, y in zip(ra["p"], rb["p"], strict=True))
-        if any(r["t"] == "cylinder" and abs(_dot(r["a"], ra["a"])) > 1 - 1e-9 and r["r"] > s / 2
+        if any(r["t"] == "cylinder" and abs(_dot(r["a"], ra["a"])) > 1 - 1e-9
                and _norm(_perp(_sub(mid, r["p"]), r["a"])) < 1e-6 for r in B):
             out["circle"] = True
     return out
@@ -518,7 +528,7 @@ def step(script: Path, key: str, param: str, value: float, is_int: bool, deltas:
         rec = classify(rows, prow, param, float(value), d, is_int, area)
         if rec is not None:
             break
-    rec = rec or {"param": param, "kind": "none", "reason": "rebuild"}
+    rec = rec or static_round(rows, param, float(value)) or {"param": param, "kind": "none", "reason": "rebuild"}
     rec["t_s"] = round(time.perf_counter() - t0, 3)
     return rec
 

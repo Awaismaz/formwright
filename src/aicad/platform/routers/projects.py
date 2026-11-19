@@ -872,7 +872,7 @@ async def get_dims(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
     if not st.get("fingerprint"):
         return {"state": "none", "dims": []}
     doc = dims_service.read(ws) or {}
-    fresh = doc.get("build_id") == st.get("build_id")
+    fresh = doc.get("build_id") == st.get("build_id") and not doc.get("partial")
     agent_busy = bool(_sessions.get(p.id) and _sessions[p.id].busy)
     if not fresh and not agent_busy:
         schedule_dims(p, ws)
@@ -880,7 +880,8 @@ async def get_dims(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
             "explicit")
     return {"state": "ready" if fresh else "paused" if agent_busy else "pending", "build_id": doc.get("build_id"),
             "dims": [{k: d[k] for k in keep if k in d} for d in doc.get("dims") or []],
-            "timings": doc.get("timings"), "error": bool(doc.get("error"))}
+            "timings": doc.get("timings"), "error": bool(doc.get("error")),
+            "whole": sorted(k for k, v in current_editable(ws).items() if isinstance(v, int) and not isinstance(v, bool))}
 
 
 @router.post("/projects/{project_id}/params")

@@ -63,6 +63,8 @@ export interface BuildStatus {
   ok?: boolean; part?: string; material?: string; error?: string; error_plain?: string; build_id?: number;
   fingerprint?: { volume: number; bbox: number[]; faces: number; edges: number; solids: number };
   params?: Record<string, unknown>; checks?: CheckResult[]; expected?: Record<string, unknown>;
+  /** parameters a user may change without the AI (declared, plain literal) and their current values */
+  editable_params?: Record<string, number>;
   timings_s?: Record<string, number>; traceback?: string;
   param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };

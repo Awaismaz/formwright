@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-dialog";
-import { Box, ChevronDown, Crosshair, Eye, EyeOff, Layers, MousePointer2, Ruler, Scissors, X } from "lucide-react";
+import { Box, ChevronDown, Crosshair, Eye, EyeOff, Layers, Loader2, MousePointer2, MoveHorizontal, Ruler, Scissors, X } from "lucide-react";
 import { CadViewer } from "@/viewer/engine";
 import { measure, describe, type MeasureResult } from "@/viewer/measure";
 import type { Axis, DisplayMode, Pick, SketchPreview, Topo, V3, ViewName } from "@/viewer/types";
 import { pickKey } from "@/viewer/types";
 import { cx } from "@/lib/format";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "./ui";
+import DimOverlay, { type DimOverlayProps } from "./DimOverlay";
 
 export type Tool = "orbit" | "measure" | "select";
 
@@ -40,6 +41,8 @@ interface Props {
   empty?: ReactNode;
   className?: string;
   apiRef?: { current: ViewerApi | null };
+  /** design parameters as on-model dimensions (Studio): the toolbar toggle and the overlay */
+  dims?: DimOverlayProps & { on: boolean; onToggle: () => void; pending?: boolean; shown: number };
 }
 
 const DISPLAY: { mode: DisplayMode; label: string }[] = [
@@ -53,7 +56,7 @@ function useStored<T>(key: string, init: T): [T, (v: T) => void] {
 }
 
 export default function Viewer3D(props: Props) {
-  const { topoUrl, version, tool, onToolChange, selection, onSelectionChange, selectKinds, highlightFaces, com, sketch, compare, onTopo, empty, className, apiRef } = props;
+  const { topoUrl, version, tool, onToolChange, selection, onSelectionChange, selectKinds, highlightFaces, com, sketch, compare, onTopo, empty, className, apiRef, dims } = props;
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<CadViewer | null>(null);
   const [topo, setTopo] = useState<Topo | null>(null);
@@ -191,6 +194,11 @@ export default function Viewer3D(props: Props) {
           </MenuContent>
         </Menu>
         {btn(section, () => setSection(!section), <Scissors className="h-4 w-4" />, "Section view")}
+        {dims && <Tip content={dims.on ? "Hide dimensions (D)" : "Dimensions (D): the design parameters on the model. Click a value to change it, no AI"} side="bottom">
+          <button onClick={dims.onToggle} aria-pressed={dims.on} aria-label="Dimensions" data-dims-toggle
+            className={cx("relative rounded p-1.5 transition", dims.on ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")}>
+            {dims.on && dims.pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoveHorizontal className="h-4 w-4" />}
+          </button></Tip>}
         <span className="mx-1 h-5 w-px bg-border" />
         {btn(tool === "measure", () => onToolChange(tool === "measure" ? "orbit" : "measure"), <Ruler className="h-4 w-4" />, "Measure (snaps to vertices, edges, centres, faces)")}
         {btn(tool === "select", () => onToolChange(tool === "select" ? "orbit" : "select"), <MousePointer2 className="h-4 w-4" />, "Select faces/edges (Ctrl+click to add)")}
@@ -209,6 +217,12 @@ export default function Viewer3D(props: Props) {
           </MenuContent>
         </Menu>}
       </div>
+
+      {dims?.on && topo && eng.current && <DimOverlay eng={eng.current} topo={topo} {...dims} />}
+      {dims?.on && topo && !dims.pending && dims.shown === 0 && (
+        <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-md bg-chrome/90 px-2.5 py-1 text-[11.5px] text-chrome-fg shadow-card" data-dims-empty>
+          {dims.specs.length ? "None of this part's parameters is a single dimension on the model: edit them in Params." : "This part has no design parameters to show."}
+        </div>)}
 
       {tool !== "orbit" && hover && topo && (
         <div className="pointer-events-none absolute left-3 top-14 rounded-md bg-chrome/90 px-2.5 py-1 text-[11.5px] text-chrome-fg shadow-card">
