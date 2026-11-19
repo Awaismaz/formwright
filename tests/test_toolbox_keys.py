@@ -177,7 +177,10 @@ def test_icd_places_keys_and_rings_and_hex_takes_them() -> None:
     assert "retaining ring groove Ø19 × 1.3 H13 (DIN 471 20)" in ex and "depth 0.5 on the Ø20 shaft" in ex
     # Hex: keys and rings from the ICD; the pinion and the gear as keyed Toolbox gears in the plan's material
     doc = {"items": [{"id": p["id"], "description": p["description"], "toolbox": None} for p in parts],
-           "skeleton": sk, "icd": {"interfaces": ifs, "version": 1}}
+           "skeleton": sk, "icd": {"interfaces": ifs, "version": 1, "status": "approved"}}
+    # the direct builder (office.direct, on by default) builds the keyed gears from the interfaces: Hex leaves them
+    assert platform_env.hex_lookup(doc, {"title": "Pinion", "kind": "part", "item_id": P_PIN}, []) is None
+    doc["direct_build"] = False  # with it off, the Toolbox gear carries the keyway and the plan's material
 
     def hex_(iid: str, title: str, kind: str = "standard") -> dict[str, Any] | None:
         return platform_env.hex_lookup(doc, {"title": title, "kind": kind, "item_id": iid}, [])
@@ -198,7 +201,7 @@ def test_toolbox_gear_is_never_swapped_in_without_an_icd_feature() -> None:
     parts = _parts(LIVE)
     sk, ifs = icd.build(parts, "")
     doc = {"items": [{"id": p["id"], "description": p["description"], "toolbox": None} for p in parts],
-           "skeleton": sk, "icd": {"interfaces": ifs, "version": 1}}
+           "skeleton": sk, "icd": {"interfaces": ifs, "version": 1, "status": "approved"}}
     # an extra ICD feature on the gear (a second, off-axis hole) the Toolbox gear can't carry: it stays designed
     extra = {"id": "IF-99", "kind": "dowel", "a": {"item": G_GEAR, "copy": 0, "name": "Gear"},
              "b": {"item": G_SH, "copy": 0, "name": "Gear shaft"}, "datums": [], "edited": [],
@@ -291,7 +294,8 @@ def test_bom_lists_a_toolbox_made_gear_as_made_in_the_plan_material() -> None:
         ("Spur gear m2 z20, keyed 6×2.8", "make", "42CrMo4"),
         ("Parallel key DIN 6885 A 6×6×18", "buy", "Steel C45+C (bright key steel)")]
     b0 = deliverables.bom(tickets, None)  # before the assembly: from the tickets
-    assert [(r["part"], r["make_buy"], r["material"]) for r in b0["rows"]][0] == ("Pinion", "make", "42CrMo4")
+    r0 = b0["rows"][0]
+    assert (r0["part"], r0["make_buy"], r0["material"]) == ("Pinion", "make", "42CrMo4")
 
 
 def test_studio_matching_reads_keys_and_rings_not_their_hosts() -> None:
@@ -325,10 +329,17 @@ def test_live_plan_assembles_with_keys_and_rings_seated(office: Any) -> None:  #
     c.post(f"/api/office/programs/{pid}/run")
     v = _wait(c, pid, lambda v: v["orchestrator"]["state"] in ("complete", "blocked", "stopped"), timeout=1500)
     assert v["status"] == "complete", [(t["title"], t["column"], (t.get("run") or {}).get("status")) for t in v["tickets"]]
-    reuse = {t["title"]: (t.get("reuse") or {}) for t in v["tickets"]}
-    assert reuse["Pinion"]["code"] == "spur_gear" and reuse["Pinion"]["params"]["KEY_B"] == 6
-    assert reuse["Pinion"]["material"] == "42CrMo4" and reuse["Gear"]["params"]["KEY_T2"] == 2.8
-    assert (reuse["Pinion key"]["code"], reuse["Gear circlip"]["code"]) == ("parallel_key", "retaining_ring")
+    by = {t["title"]: t for t in v["tickets"]}
+    assert (by["Pinion key"]["reuse"]["code"], by["Gear circlip"]["reuse"]["code"]) == ("parallel_key", "retaining_ring")
+    # the shafts and gears are built from the interfaces (office.direct, no AI): each shaft with its keyseat and the
+    # DIN 471 grooves of its rings, each gear with its hub keyway; Gage measured them against the ICD and approved
+    summary = {"Pinion shaft": "1 keyseat, 2 circlip grooves", "Gear shaft": "1 keyseat, 4 circlip grooves",
+               "Pinion": "with a keyway", "Gear": "with a keyway"}
+    for name, want in summary.items():
+        d = by[name].get("direct") or {}
+        assert d.get("path") == "direct" and d["summary"].endswith(want), (name, d)
+        gage = next(cm["text"] for cm in by[name]["comments"] if cm["by"].get("code") == "gage")
+        assert gage.startswith("Approved"), (name, gage)
     st = v["assembly"]
     assert st["clashes"] == [], st.get("summary")
     final = astore.load(_asm(c)[0], st["final"])

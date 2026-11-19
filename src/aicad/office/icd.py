@@ -43,6 +43,7 @@ from typing import Any
 
 from aicad.office import frames
 from aicad.toolbox import BEARING as _BEARING
+from aicad.toolbox import BEARING_RS as _BEARING_RS
 from aicad.toolbox import DIN471 as _DIN471
 
 # ----------------------------------------------------------------------------- constants (documented, PD-xx)
@@ -1471,7 +1472,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
                 "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(y0), _r2(y1)], "seats": seats,
                 "clearance_d": _r2(bd + 2), "flush_z": _r2(y0), "bearing_item": br["item"], "shaft_d": ks["d"],
-                "count": n_s, "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                "count": n_s, "r_s_min": _BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
                 ["A", "B", "C"], f"shaft in {n_s} bearing{'s' if n_s != 1 else ''} {des} (side walls)")
         elif ks["role"] == "shaft":
             top, bottom = at[host][hc][2] + hs["H"] / 2, at[host][hc][2] - hs["H"] / 2  # type: ignore[index]
@@ -1489,7 +1490,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING,
                     "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(bottom), _r2(top)], "seats": seats,
                     "clearance_d": _r2(bd + 2), "flush_z": _r2(bottom), "bearing_item": br["item"], "shaft_d": ks["d"],
-                    "count": n_s, "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                    "count": n_s, "r_s_min": _BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
                     ["A", "B", "C"], f"shaft in {n_s} bearing{'s' if n_s != 1 else ''} {des}")
             else:
                 fit = str(o.get("fit") or "H7/h6")
@@ -1631,7 +1632,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     "shaft_fit": SHAFT_FIT_BEARING, "ax": "y", "axis": a2, "z": [_r2(b0), _r2(b1)],
                     "journal_z": [_r2(jz[0]), _r2(jz[1])], "shoulder_z": None if plain else _r2(b1 if side < 0 else b0),
                     "side": side, "bearing_item": bitem, "shaft_d": ks["d"], "count": 1,
-                    "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                    "r_s_min": _BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
                     ["A", "B", "C"], f"bearing {des} on its journal ({'-' if side < 0 else '+'}Y end)")
             for k, c in stk.get((sh, 0), []):
                 pos_k = at[k][c]
