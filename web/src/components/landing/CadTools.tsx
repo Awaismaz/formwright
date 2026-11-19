@@ -4,15 +4,15 @@ import { cx } from "@/lib/format";
 import { Reveal } from "./motion";
 
 /**
- * "Integrates with your CAD": the desktop/cloud CAD and 3D tools Formwright works with. We do not ship vendor logo
- * artwork (trademark licences needed); each tool gets our own monogram tile. To use an official mark once licensed,
- * drop `web/public/landing/logos/<slug>.svg` in place: the glob below picks it up at build time and the tile shows it.
+ * "Integrates with your CAD": the desktop/cloud CAD and 3D tools Formwright works with. Each tool shows its product
+ * mark from `web/public/landing/logos/<slug>.(svg|png)` (square symbol, picked up at build time); a tool without one
+ * keeps our monogram tile. Marks are the owners' trademarks (footnote below).
  */
 
-const DROPPED = import.meta.glob("/public/landing/logos/*.svg", { query: "?url", import: "default", eager: true }) as Record<string, string>;
+const DROPPED = import.meta.glob("/public/landing/logos/*.{svg,png}", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 const logoFor = (slug: string) => {
-  const hit = Object.keys(DROPPED).find(k => k.endsWith(`/${slug}.svg`));
-  return hit ? `/landing/logos/${slug}.svg` : null;
+  const hit = Object.keys(DROPPED).find(k => k.endsWith(`/${slug}.svg`) || k.endsWith(`/${slug}.png`));
+  return hit ? hit.replace(/^\/public/, "") : null;
 };
 
 type Tool = { slug: string; name: string; mono: string; kind: string; hue: number };
