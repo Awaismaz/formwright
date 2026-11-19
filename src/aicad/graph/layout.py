@@ -150,11 +150,14 @@ class _Layout:
         by_name = {p["name"]: p for p in parts}
         self.comp = {c.id: c for c in g.components}
         self.item: dict[str, str] = {}
+        self.bought: set[str] = set()  # bought-out components (an "other" part the plan buys out counts)
         for c in g.components:
             p = by_name.get(c.name)
             if p is None:
                 raise Unsupported(f"{c.name} is in the design graph but not in the plan")
-            std = registry.COMPONENTS[c.kind].family == "standard"
+            std = registry.COMPONENTS[c.kind].family == "standard" or (c.kind == "other" and p["family"] == "standard")
+            if std:
+                self.bought.add(c.id)
             if std != (p["family"] == "standard"):
                 raise Unsupported(f"{c.name} is a {'bought-out' if std else 'designed'} part in the graph, not in the plan")
             self.item[c.id] = p["id"]
@@ -163,7 +166,7 @@ class _Layout:
         if extra:
             raise Unsupported(f"the plan has parts the design graph doesn't ({', '.join(extra[:3])})")
         self.cid_of = {v: k for k, v in self.item.items()}
-        self.designed = [c.id for c in g.components if registry.COMPONENTS[c.kind].family != "standard"]
+        self.designed = [c.id for c in g.components if c.id not in self.bought]
         self.spec: dict[str, dict[str, Any]] = {}
         self.at: dict[str, list[list[float] | None]] = {}
         self.notes: list[str] = []
@@ -177,8 +180,7 @@ class _Layout:
     def role(self, cid: str | None) -> str:
         if cid is None:
             return ""
-        return ROLE.get(self.comp[cid].kind, "block") if registry.COMPONENTS[self.comp[cid].kind].family != "standard" \
-            else "standard"
+        return "standard" if cid in self.bought else ROLE.get(self.comp[cid].kind, "block")
 
     def height(self, cid: str) -> float:
         s = self.spec[cid]
@@ -457,6 +459,8 @@ class _Layout:
             if len(hs) != 1 or vals != {"housing"}:
                 raise Unsupported("shafts outside the housing, or in two housings")
             self.housing = hs.pop()
+            if str((self.o(self.housing)).get("layout") or "") == "row":
+                raise Unsupported(f"the {self.name(self.housing)} keeps the row layout (an edit at the ICD gate)")
             other = [b for b in blocks if b != self.housing and self.comp[b].kind != "cover"]
             if other:
                 raise Unsupported(f"{self.name(other[0])} beside a housing")

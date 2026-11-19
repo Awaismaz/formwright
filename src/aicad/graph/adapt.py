@@ -94,6 +94,10 @@ def _from_rows(g: DesignGraph, rows: list[tuple[str, dict[str, Any], str]], skel
                                                 params={"count": Param(value=n, source="plan")}))
         elif k == "hole_pattern" and a and b:
             via = [x for x in [by_item.get(str(d.get("fastener_item")))] if x]
+            for v in via:  # the joint's screw size (the layout read it from the plan text)
+                fc = g.comp(v)
+                if fc is not None and fc.kind == "fastener" and d.get("fastener_size") and fc.v("size") is None:
+                    fc.set("size", int(d["fastener_size"]), "plan", force=True)
             g.connections.append(Connection(id=g.next_connection_id(), kind="bolted_joint", host=a, guest=b, via=via))
         elif k == "face" and a and b:
             g.connections.append(Connection(id=g.next_connection_id(), kind="mounted_on", host=a, guest=b))
