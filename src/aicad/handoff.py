@@ -165,12 +165,19 @@ def module_status(ws: Path, cur: dict[str, Any] | None = None) -> dict[str, dict
     return out
 
 
+def _verified(st: dict[str, Any] | None) -> bool:
+    """Gating checks passed and no deferred check (CHK-07/08, PS-01) is still pending."""
+    from aicad.agent.runner import is_verified
+
+    return is_verified(st)
+
+
 def deliverables_status(ws: Path) -> dict[str, Any]:
     """Everything the Make tab and module headers show: model rev, release state, one status per module."""
     st = deliverables.read_status(ws)
     cur = deliverables.build_stamp(ws, st)
     rel = release_view(ws, cur)
-    return {"verified": bool(st.get("ok")), "build": cur, "release": rel, "next_rev": next_rev(ws),
+    return {"verified": _verified(st), "build": cur, "release": rel, "next_rev": next_rev(ws),
             "changed_since_release": bool(rel) and not rel["current"], "modules": module_status(ws, cur)}
 
 
@@ -188,7 +195,10 @@ def gate(ws: Path, has_drawings: bool = True, leave_out: tuple[str, ...] | list[
     blocking: list[dict[str, str]] = []
     include: list[dict[str, str]] = []
     notes: list[str] = []
-    if not st.get("ok") or not (ws / "out" / "part.step").is_file():
+    if st.get("ok") and not _verified(st):
+        blocking.append({"kind": "model", "text": "The latest build is still being verified (STEP round trip and "
+                                                  "repeatability). Try again in a moment."})
+    elif not st.get("ok") or not (ws / "out" / "part.step").is_file():
         blocking.append({"kind": "model", "text": "The current model isn't verified. Fix the build in the Design Studio first."})
     elif not cur.get("step_sha256"):
         blocking.append({"kind": "model", "text": "The model's export files are still being written. Try again in a moment."})
@@ -275,7 +285,7 @@ def plan(ws: Path) -> dict[str, Any]:
     rev = _revision(ws)
     if rev is not None:
         items.append({"kind": "notice", "label": f"Change notice (rev {rev})", "ok": True})
-    return {"ready": bool(st.get("ok")), "build_id": build, "revision": rev, "items": items,
+    return {"ready": _verified(st), "build_id": build, "revision": rev, "items": items,
             "release": release_view(ws, cur), "releases": [{k: r.get(k) for k in ("rev", "date", "by", "note")}
                                                            for r in reversed(releases(ws))]}
 
@@ -298,7 +308,7 @@ def build_pack(ws: Path, project_name: str, user: str | None = None, include_sta
     For a release: ``release`` is the record being issued, ``drawing_dir`` holds its issue copy of the drawing and
     ``extra`` the other frozen files (calculation packages, print exports) by their path in the pack."""
     st = deliverables.read_status(ws)
-    if not st.get("ok"):
+    if not _verified(st):
         raise ValueError("The current model isn't verified; fix the build before handing it off")
     name = _safe(project_name)
     pl = plan(ws)

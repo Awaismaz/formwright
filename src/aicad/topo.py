@@ -16,9 +16,13 @@ import math
 from pathlib import Path
 from typing import Any
 
-from build123d import Edge, Face, Shape, Vertex
+from build123d import Face, Shape
+from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
-from OCP.BRepGProp import BRepGProp
+from OCP.BRepGProp import BRepGProp, BRepGProp_Face
+from OCP.BRepMesh import BRepMesh_IncrementalMesh
+from OCP.BRepTools import BRepTools
+from OCP.GCPnts import GCPnts_AbscissaPoint
 from OCP.GeomAbs import (
     GeomAbs_Circle,
     GeomAbs_Cone,
@@ -28,7 +32,12 @@ from OCP.GeomAbs import (
     GeomAbs_Sphere,
     GeomAbs_Torus,
 )
+from OCP.gp import gp_Pnt, gp_Vec
 from OCP.GProp import GProp_GProps
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED, TopAbs_VERTEX
+from OCP.TopExp import TopExp_Explorer
+from OCP.TopLoc import TopLoc_Location
+from OCP.TopoDS import TopoDS
 
 R = 4  # decimals for coordinates
 
@@ -53,13 +62,29 @@ SURF = {GeomAbs_Plane: "plane", GeomAbs_Cylinder: "cylinder", GeomAbs_Cone: "con
         GeomAbs_Torus: "torus"}
 
 
-def _face_info(f: Face) -> dict[str, Any]:
-    s = BRepAdaptor_Surface(f.wrapped)
-    t = s.GetType()
+_CAST = {TopAbs_FACE: TopoDS.Face, TopAbs_EDGE: TopoDS.Edge, TopAbs_VERTEX: TopoDS.Vertex}
+
+
+def _subs(shape: Any, kind: Any) -> list[Any]:
+    """Unique TopoDS sub-shapes in explorer order, exactly as build123d's faces()/edges()/vertices() list them (first
+    position, last occurrence), without wrapping each one in a Python object."""
+    out: dict[int, Any] = {}
+    cast = _CAST[kind]
+    exp = TopExp_Explorer(shape, kind)
+    while exp.More():
+        item = exp.Current()
+        out[hash(item)] = cast(item)
+        exp.Next()
+    return list(out.values())
+
+
+def _face_info(f: Any, s: Any, t: Any) -> dict[str, Any]:
     info: dict[str, Any] = {"type": SURF.get(t, "freeform")}
     if t == GeomAbs_Plane:
-        n = f.normal_at(f.center())
-        info["normal"] = _vec(n)
+        from aicad.fw import plane_eq
+
+        nx, ny, nz, _ = plane_eq(f)
+        info["normal"] = [_r(nx), _r(ny), _r(nz)]
     elif t == GeomAbs_Cylinder:
         c = s.Cylinder()
         info["radius"] = _r(c.Radius(), 6)
@@ -74,14 +99,28 @@ def _face_info(f: Face) -> dict[str, Any]:
     return info
 
 
-def _edge_info(e: Edge, defl: float) -> dict[str, Any]:
-    c = BRepAdaptor_Curve(e.wrapped)
+def _face_area_center(f: Any, planar: bool) -> tuple[float, Any]:
+    """Area and build123d's Face.center(): the centroid for a planar face, the mid-(u, v) point otherwise."""
+    props = GProp_GProps()
+    BRepGProp.SurfaceProperties_s(f, props)
+    if planar:
+        return props.Mass(), props.CentreOfMass()
+    u0, u1, v0, v1 = BRepTools.UVBounds_s(f)
+    p, n = gp_Pnt(), gp_Vec()
+    BRepGProp_Face(f).Normal(0.5 * (u0 + u1), 0.5 * (v0 + v1), p, n)
+    return props.Mass(), p
+
+
+def _edge_info(e: Any, defl: float) -> dict[str, Any]:
+    c = BRepAdaptor_Curve(e)
     t = c.GetType()
-    L = e.length
+    props = GProp_GProps()
+    BRepGProp.LinearProperties_s(e, props)
+    L = props.Mass()
     info: dict[str, Any] = {"length": _r(L, 6)}
     if t == GeomAbs_Line:
         info["type"] = "line"
-        n = 2
+        n = 1
     elif t == GeomAbs_Circle:
         circ = c.Circle()
         r = circ.Radius()
@@ -92,12 +131,42 @@ def _edge_info(e: Edge, defl: float) -> dict[str, Any]:
     else:
         info["type"] = "curve"
         n = max(8, min(400, math.ceil(L / max(defl * 20, 1e-6))))
+    # Edge.position_at(u): arc-length fraction along the curve, from the end the edge starts at. Lines and circles are
+    # parametrised by length already, so their points are evaluated directly (no abscissa solve per point).
+    forward = e.Orientation() != TopAbs_REVERSED
+    u0, u1 = c.FirstParameter(), c.LastParameter()
     pts: list[float] = []
-    for i in range(n + 1 if t != GeomAbs_Line else 2):
-        u = i / (n if t != GeomAbs_Line else 1)
-        pts += _vec(e.position_at(u))
+    if t in (GeomAbs_Line, GeomAbs_Circle):
+        for i in range(n + 1):
+            u = i / n if forward else 1 - i / n
+            pts += _pnt(c.Value(u0 + (u1 - u0) * u))
+    else:
+        clen = GCPnts_AbscissaPoint.Length_s(c)
+        for i in range(n + 1):
+            u = i / n if forward else 1 - i / n
+            pts += _pnt(c.Value(GCPnts_AbscissaPoint(c, clen * u, u0).Parameter()))
     info["pts"] = pts
     return info
+
+
+def _triangles(f: Any) -> tuple[list[float], list[int]]:
+    """The face's stored triangulation (the whole shape is meshed once, in parallel, before the face loop)."""
+    loc = TopLoc_Location()
+    poly = BRep_Tool.Triangulation_s(f, loc)
+    if poly is None:
+        return [], []
+    trsf = loc.Transformation()
+    ident = loc.IsIdentity()
+    pos: list[float] = []
+    for i in range(1, poly.NbNodes() + 1):
+        p = poly.Node(i) if ident else poly.Node(i).Transformed(trsf)
+        pos += _pnt(p)
+    rev = f.Orientation() == TopAbs_REVERSED
+    idx: list[int] = []
+    for i in range(1, poly.NbTriangles() + 1):
+        a, b, c = poly.Triangle(i).Get()
+        idx += (a - 1, c - 1, b - 1) if rev else (a - 1, b - 1, c - 1)
+    return pos, idx
 
 
 def mass_properties(shape: Shape) -> dict[str, Any]:
@@ -132,40 +201,50 @@ def export_topology(shape: Shape, path: Path, feature_log: list[dict[str, Any]] 
                                      if kids else [("", s) for s in (list(shape.solids()) or [shape])])
     faces_out: list[dict[str, Any]] = []
     edges_out: list[dict[str, Any]] = []
-    edge_ids: dict[Edge, int] = {}
-    vert_ids: dict[Vertex, int] = {}
+    edge_ids: dict[int, int] = {}  # hash of the TopoDS edge: the identity build123d's Edge hash/eq use (IsSame)
+    vert_ids: dict[int, int] = {}
     verts_out: list[list[float]] = []
     solids_out: list[dict[str, Any]] = []
+    if not BRepTools.Triangulation_s(shape.wrapped, defl):
+        BRepMesh_IncrementalMesh(shape.wrapped, defl, True, 0.2, True)  # Face.tessellate's settings, all faces at once
+    key_of = None
+    if first_feature:
+        from aicad.fw import face_key
+
+        def key_of(f: Any) -> Any:
+            return first_feature.get(face_key(Face(f)))
+
     for si, (body_label, sol) in enumerate(bodies):
         fids = []
-        for f in sol.faces():
+        for f in _subs(sol.wrapped, TopAbs_FACE):
             fid = len(faces_out)
             fids.append(fid)
-            info = _face_info(f)
-            vs, tris = f.tessellate(defl, 0.2)
-            pos: list[float] = []
-            for v in vs:
-                pos += _vec(v)
-            idx = [i for t in tris for i in t]
-            rec = {"id": fid, "solid": si, "area": _r(f.area, 4), "center": _vec(f.center()), **info,
+            s = BRepAdaptor_Surface(f)
+            t = s.GetType()
+            info = _face_info(f, s, t)
+            area, ctr = _face_area_center(f, t == GeomAbs_Plane)
+            pos, idx = _triangles(f)
+            rec = {"id": fid, "solid": si, "area": _r(area, 4), "center": _pnt(ctr), **info,
                    "pos": pos, "idx": idx, "edges": []}
-            if first_feature:
-                from aicad.fw import face_key
-
-                rec["feature"] = first_feature.get(face_key(f))
-            for e in f.edges():
-                if e not in edge_ids:
-                    edge_ids[e] = len(edges_out)
-                    er = {"id": edge_ids[e], **_edge_info(e, defl), "faces": []}
+            if key_of is not None:
+                rec["feature"] = key_of(f)
+            for e in _subs(f, TopAbs_EDGE):
+                if BRep_Tool.Degenerated_s(e):  # poles and apexes: build123d's edges() skips them too
+                    continue
+                h = hash(e)
+                if h not in edge_ids:
+                    edge_ids[h] = len(edges_out)
+                    er = {"id": edge_ids[h], **_edge_info(e, defl), "faces": []}
                     ends = []
-                    for v in e.vertices():
-                        if v not in vert_ids:
-                            vert_ids[v] = len(verts_out)
-                            verts_out.append([_r(v.X), _r(v.Y), _r(v.Z)])
-                        ends.append(vert_ids[v])
+                    for v in _subs(e, TopAbs_VERTEX):
+                        hv = hash(v)
+                        if hv not in vert_ids:
+                            vert_ids[hv] = len(verts_out)
+                            verts_out.append(_pnt(BRep_Tool.Pnt_s(v)))
+                        ends.append(vert_ids[hv])
                     er["verts"] = ends
                     edges_out.append(er)
-                eid = edge_ids[e]
+                eid = edge_ids[h]
                 if fid not in edges_out[eid]["faces"]:
                     edges_out[eid]["faces"].append(fid)
                 rec["edges"].append(eid)
@@ -181,3 +260,22 @@ def export_topology(shape: Shape, path: Path, feature_log: list[dict[str, Any]] 
     tmp.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     tmp.replace(path)
     return data
+
+
+def write_preview_stl(topo: dict[str, Any], path: Path) -> None:
+    """Binary STL of the viewer tessellation in topo.json: the mesh the 4-view render of a fast build reads (the
+    exported part.stl, at 0.01 mm, comes later with the other exports)."""
+    import struct
+
+    tris: list[bytes] = []
+    for f in topo.get("faces", []):
+        pos, idx = f.get("pos") or [], f.get("idx") or []
+        for k in range(0, len(idx) - 2, 3):
+            a, b, c = idx[k] * 3, idx[k + 1] * 3, idx[k + 2] * 3
+            tris.append(struct.pack("<12fH", 0.0, 0.0, 0.0, *pos[a:a + 3], *pos[b:b + 3], *pos[c:c + 3], 0))
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("wb") as fh:
+        fh.write(b"Formwright preview mesh".ljust(80, b"\0"))
+        fh.write(struct.pack("<I", len(tris)))
+        fh.write(b"".join(tris))
+    tmp.replace(path)

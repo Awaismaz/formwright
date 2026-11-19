@@ -150,6 +150,21 @@ def redefine_holes(part: Any, recognition: str, feature_id: str, d: float | None
     return feature(f"{feat.get('name', 'Holes')} (edited)", part, kind="edit", d=new_d)
 
 
+def plane_eq(face: Any) -> tuple[float, float, float, float]:
+    """Outward normal n and offset d = n . p of a planar TopoDS_Face, read from its plane: no surface integral (the
+    old normal_at(center()) path ran two per face, and fw.feature keys every face of the part at every step)."""
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.TopAbs import TopAbs_REVERSED
+
+    pos = BRepAdaptor_Surface(face).Plane().Position()
+    dv, p = pos.Direction(), pos.Location()
+    k = 1.0 if pos.Direct() else -1.0  # the surface normal is XDir x YDir
+    if face.Orientation() == TopAbs_REVERSED:
+        k = -k
+    nx, ny, nz = k * dv.X(), k * dv.Y(), k * dv.Z()
+    return nx, ny, nz, nx * p.X() + ny * p.Y() + nz * p.Z()
+
+
 def face_key(f: Any) -> tuple[Any, ...]:
     """Identity of a face's *underlying surface* (plane equation, cylinder axis + radius ...), so a face that a
     later boolean merely trims is still attributed to the feature that created its surface."""
@@ -163,9 +178,8 @@ def face_key(f: Any) -> tuple[Any, ...]:
         return round(x, 3) + 0.0
 
     if t == GeomAbs_Plane:
-        n = f.normal_at(f.center())
-        d = n.dot(f.center())
-        return ("plane", r(n.X), r(n.Y), r(n.Z), r(d))
+        nx, ny, nz, d = plane_eq(f.wrapped)
+        return ("plane", r(nx), r(ny), r(nz), r(d))
     if t in (GeomAbs_Cylinder, GeomAbs_Cone):
         ax = (s.Cylinder() if t == GeomAbs_Cylinder else s.Cone()).Axis()
         dv, p = ax.Direction(), ax.Location()
@@ -1163,3 +1177,17 @@ def jog(part: Any, edge_point: Any, distance: float, offset: float, angle: float
 
 def _no_sheet() -> Any:
     raise ValueError("an edge flange or hem needs a sheet-metal part: start it with base_flange")
+
+
+# High-level standard features (PS-03): gears, stepped shafts, keyways, Hole Wizard holes and bolt circles.
+from aicad.fw_std import (  # noqa: F401  (fw_std uses fw.feature, so it is imported once fw is defined)
+    DIN6885_SOURCE,
+    bolt_circle,
+    din6885,
+    hole,
+    hole_spec,
+    holes_at,
+    shaft_keyway,
+    spur_gear,
+    stepped_shaft,
+)

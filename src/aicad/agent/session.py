@@ -28,9 +28,11 @@ from claude_agent_sdk import (
 )
 
 from aicad.agent.blocks import extract_brief, extract_review
+from aicad.agent.deferred import DeferredChecks, failure_note, has_pending
 from aicad.agent.edits import extract_edit
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
+from aicad.agent.runner import is_verified
 from aicad.agent.runrecord import RunRecorder
 from aicad.agent.tools import make_cad_server
 
@@ -39,6 +41,8 @@ CAD_TOOLS = ["mcp__cad__build_model"]
 WEBFETCH_HOSTS = {"build123d.readthedocs.io"}
 PATH_KEYS = ("file_path", "path", "notebook_path")
 MAX_TURNS = 80
+PRECONNECT_IDLE_S = 600.0  # a pre-connected agent process nobody used is stopped after this
+MAX_VERIFY_FOLLOWUPS = 1  # automatic follow-ups per turn when a background check fails (PS-01)
 # The agent stream carries attached images (base64) inside single JSON messages; the SDK default of 1 MB
 # rejected ordinary photos and drawings. Uploads are capped well below this.
 AGENT_BUFFER_BYTES = 32 * 1024 * 1024
@@ -149,7 +153,8 @@ _SCRUB = [
     (_re.compile(r"`?\bmcp__cad__\w+`?"), "the build"),
     (_re.compile(r"`?\brefs/[\w.-]+`?"), "the reference image"),
     (_re.compile(r"\bbuild123d\b", _re.IGNORECASE), "the CAD kernel"),
-    (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual|thread|base_flange|edge_flange|hem|jog|sheet)\b`?"),
+    (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual|thread|base_flange|edge_flange|hem|jog|sheet|"
+                 r"spur_gear|stepped_shaft|shaft_keyway|bolt_circle|holes_at|hole_spec|hole|din6885)\b`?"),
      "the design tools"),
     (_re.compile(r"`?\bSUPPRESSED_FEATURES\b`?"), "the suppressed-features list"),
     (_re.compile(r"`?\bMANUAL_FEATURES\b`?"), "the manual features"),
@@ -222,6 +227,31 @@ def scrub(text: str) -> str:
     return text
 
 
+COMPACT_BASE = """You are the design agent inside Formwright, working in one project folder with file tools and a CAD
+build tool. Work autonomously and efficiently:
+- Read a file before you Edit it; use Edit for changes to existing files and Write for new files; keep edits minimal.
+- Use paths inside the working folder only. Never print or paste file contents or code to the user.
+- Call independent tools in the same response when you can. Don't repeat a tool call whose result you already have.
+- Be concise: short plain sentences, no preamble, no restating the request.
+"""
+
+
+def compact_system_prompt() -> str:
+    """PS-04: a compact custom system prompt (every Formwright rule, without the generic coding-assistant preset)."""
+    return COMPACT_BASE + CAD_AGENT_INSTRUCTIONS
+
+
+def system_prompt() -> Any:
+    """The agent's system prompt. Default: the Claude Code preset + the CAD instructions (unchanged behaviour).
+    ``FW_AGENT_SYSTEM_PROMPT=compact`` switches to the compact prompt (measured in docs/reports/pipeline-speed.md;
+    parked as a founder decision before it becomes the default)."""
+    import os
+
+    if os.environ.get("FW_AGENT_SYSTEM_PROMPT", "").strip().lower() == "compact":
+        return compact_system_prompt()
+    return {"type": "preset", "preset": "claude_code", "append": CAD_AGENT_INSTRUCTIONS}
+
+
 def provider_client(options: ClaudeAgentOptions) -> Any:
     """Default client factory: the ``design_agent`` role's provider (AGT-001). For the default Claude Agent SDK
     provider this is the SDK client, or the replay/record client when ``FW_AGENT_REPLAY`` / ``FW_AGENT_RECORD`` is
@@ -239,6 +269,7 @@ class AgentSession:
         self.model = model
         self.on_event = on_event
         self.worker_key = worker_key
+        self.deferred = DeferredChecks(worker_key or str(self.workspace), self.out_dir)  # PS-01 background checks
         self.client: Any = None  # ClaudeSDKClient, or a replay stand-in
         self.history: list[dict[str, Any]] = []
         self.last_prompt: str | None = None  # the request behind the next revision (change notices)
@@ -257,6 +288,10 @@ class AgentSession:
         self._run_costs: dict[str, float] = {}  # response id -> estimated cost, this run
         self._budget_hit = False
         self._result_seen = False
+        self._connect_lock: asyncio.Lock | None = None
+        self._sends = 0  # messages sent (an idle pre-connected agent process is dropped)
+        self._idle: asyncio.Task[None] | None = None
+        self._held_review: str | None = None  # a self-review written while background checks were pending
         self._tool_names: dict[str, str] = {}  # merged into the next result event (e.g. rev_before for undo)
         self._rec: RunRecorder | None = None  # AGT-009 run record of the current turn (server-side, admin only)
         self._last_run_cost: float | None = None
@@ -310,8 +345,8 @@ class AgentSession:
             tools=BUILTIN_TOOLS,
             allowed_tools=BUILTIN_TOOLS + CAD_TOOLS,
             permission_mode="dontAsk",
-            mcp_servers={"cad": make_cad_server(self.workspace, self.out_dir, self.worker_key)},
-            system_prompt={"type": "preset", "preset": "claude_code", "append": CAD_AGENT_INSTRUCTIONS},
+            mcp_servers={"cad": make_cad_server(self.workspace, self.out_dir, self.worker_key, self.deferred)},
+            system_prompt=system_prompt(),
             setting_sources=[],  # isolate from the developer's personal ~/.claude config
             hooks={"PreToolUse": [HookMatcher(matcher="Read|Write|Edit|Glob|Grep|WebFetch|mcp__cad__build_model",
                                               hooks=[make_guard(self.workspace, lambda: self.mode)])]},
@@ -332,12 +367,39 @@ class AgentSession:
             q.put_nowait(ev)
 
     async def ensure_connected(self) -> Any:
-        if self.client is None:
-            self.workspace.mkdir(parents=True, exist_ok=True)
-            self.client = self.client_factory(self.options())
-            await self.client.connect()
-            self._cost_base = 0.0  # a new agent process reports cost from zero
+        if self._connect_lock is None:
+            self._connect_lock = asyncio.Lock()
+        async with self._connect_lock:  # a pre-connect may still be starting the agent when the first message arrives
+            if self.client is None:
+                self.workspace.mkdir(parents=True, exist_ok=True)
+                client = self.client_factory(self.options())
+                await client.connect()
+                self.client = client
+                self._cost_base = 0.0  # a new agent process reports cost from zero
         return self.client
+
+    async def preconnect(self, idle_s: float = PRECONNECT_IDLE_S) -> None:
+        """PS-04: start the agent process when the Studio opens a project, so the first message skips the connect
+        (no model call, no tokens). Dropped again if no message arrives within ``idle_s``."""
+        if self.client is not None or self.busy:
+            return
+        mark = self._sends
+        try:
+            await self.ensure_connected()
+        except Exception:  # noqa: BLE001 - the first message connects (and reports) as before
+            self.client = None
+            return
+
+        async def drop() -> None:
+            await asyncio.sleep(idle_s)
+            if self._sends == mark and not self.busy and self.client is not None:
+                client, self.client = self.client, None
+                try:
+                    await client.disconnect()
+                except Exception:  # noqa: BLE001,S110 - an idle pre-connected process is simply dropped
+                    pass
+
+        self._idle = asyncio.get_running_loop().create_task(drop())
 
     def _provider_name(self) -> str:
         """The provider behind this session's client, for the run record (``custom`` for injected factories)."""
@@ -368,6 +430,7 @@ class AgentSession:
         if self.busy:
             raise RuntimeError("agent is busy")
         self.busy = True
+        self._sends += 1
         self.mode = mode if mode in ("discuss", "brief") else "build"
         if self.mode != "build":
             shown, prompt = shown or prompt, (DISCUSS_PREFIX if self.mode == "discuss" else BRIEF_PREFIX) + prompt
@@ -397,11 +460,27 @@ class AgentSession:
                 self._rec.mark("connected")
             await client.query(prompt)
             stopping = False
-            async for msg in client.receive_response():
-                self._handle(msg)
-                if self._budget_hit and not stopping:
-                    stopping = True
-                    await client.interrupt()
+            builds_before, followups = self.deferred.started, 0
+            while True:
+                held = None
+                async for msg in client.receive_response():
+                    if isinstance(msg, ResultMessage) and self.deferred.started != builds_before:
+                        held = msg  # the verdict waits for the build's background checks (PS-01)
+                        continue
+                    self._handle(msg)
+                    if self._budget_hit and not stopping:
+                        stopping = True
+                        await client.interrupt()
+                if held is None:
+                    break
+                follow = await self._settle_builds(followups, stopping)
+                if follow:
+                    followups += 1
+                    builds_before = self.deferred.started
+                    await client.query(follow)  # the held result is superseded by the follow-up's (cost is cumulative)
+                    continue
+                self._handle(held)
+                break
         except Exception:
             import logging
 
@@ -421,6 +500,34 @@ class AgentSession:
             self._write_run_record(failed, build_before)
             self.busy = False
             self.publish({"type": "busy", "value": False})
+
+    async def _settle_builds(self, followups: int, stopping: bool) -> str | None:
+        """End of a turn that built: wait until the latest build's deferred checks (exports, CHK-07 round trip, CHK-08
+        repeatability) have run, so the verdict, run record and notifications see a complete status. Returns a
+        follow-up prompt when one of them failed (once per turn), else None."""
+        st = self.deferred.read() if not has_pending(self.deferred.read()) else None
+        if st is None:
+            vid = f"verify-{time.time_ns()}"
+            self.publish({"type": "tool", "id": vid, "name": "step", "brief": "Finishing verification"})
+            st = await self.deferred.settle()
+            self.publish({"type": "tool_result", "id": vid, "is_error": not is_verified(st), "build": False,
+                          "brief": "Verification complete" if is_verified(st) else "Verification found a problem"})
+        else:
+            st = await self.deferred.settle()
+        self.turn_meta["build_verified"] = is_verified(st)
+        if self._rec is not None:
+            self._rec.mark("verified")
+        failed = self.deferred.take_failures()
+        if not failed or followups >= MAX_VERIFY_FOLLOWUPS or stopping or self._budget_hit or self.mode != "build":
+            held, self._held_review = self._held_review, None
+            if held:
+                _, review = extract_review(held, st, scrub)
+                if review:
+                    self.publish({"type": "review", **review})
+            return None
+        self._held_review = None  # the follow-up writes a new self-review
+        return ("[Background verification] " + failure_note(failed, previous=False)
+                + "\nFix the design so these checks pass, rebuild, and update your summary and self-review.")
 
     def _write_run_record(self, failed: bool, build_before: Any) -> None:
         """AGT-009: persist the turn's run record (never published to the chat; read by the admin console only)."""
@@ -453,7 +560,12 @@ class AgentSession:
                         self._save_recognition(recog)
                     text, questions = extract_questions(text)
                     text, brief = extract_brief(text, scrub)
-                    text, review = extract_review(text, self._status() if "fw-review" in text else None, scrub)
+                    review = None
+                    if "fw-review" in text and has_pending(self._status()):
+                        self._held_review = text  # reconciled with the settled checks at the end of the turn
+                        text, _ = extract_review(text, None, scrub)
+                    else:
+                        text, review = extract_review(text, self._status() if "fw-review" in text else None, scrub)
                     edit, edit_note = None, None
                     if "fw-edit" in text:  # DS-035: a small edit handed to the PropertyManager
                         text, edit, edit_note = extract_edit(text, self.workspace, scrub)

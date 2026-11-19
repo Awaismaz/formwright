@@ -21,6 +21,14 @@ Principle: **renders and vision critique are signals; deterministic geometric ch
 | CHK-13 | DFM rules (CNC) | Min internal corner radius vs tool, hole depth/diameter ratio, thin walls, standard drill sizes | Advisory, reported |
 | CHK-14 | Budget | iterations ≤ 3, wall time ≤ 120 s, LLM cost ≤ job cap | Yes |
 
+**When CHK-07/08 run (PS-01).** An agent build returns its report after CHK-02..05 (and CHK-09/10); CHK-07 (with
+the STEP/STL/GLB exports) and CHK-08 run straight after on the same warm worker, in the background, and are shown
+as pending. They still gate: `status.json` carries `pending_checks` and `verified` (`runner.is_verified`), and a
+build counts as verified only when every gating check has run and passed. The agent turn's verdict, run record,
+notifications, the release gate and modules reading `part.step` wait for them; a failure is reported to the agent at
+its next build or as one automatic follow-up at the end of the turn. Interactive edits defer CHK-07 the same way and
+skip CHK-08 (the structure was verified at the agent build).
+
 ## 2. Vertical slice VS-1 (proposed for M1)
 
 **Demo:** user types

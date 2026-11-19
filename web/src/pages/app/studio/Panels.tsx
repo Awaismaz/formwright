@@ -33,7 +33,7 @@ export function checkSentence(c: CheckResult): string {
     case "CHK-05": return d.expected_mm3 !== undefined ? `${n3(d.got_mm3)} mm³ vs the stated ${n3(d.expected_mm3)} mm³ (difference ${pct(d.rel_err)})` : `${n3(d.got_mm3)} mm³ (the design states no volume to compare)`;
     case "CHK-06": return c.passed ? "Cylinder count by radius as stated" : "Cylinder count by radius differs from the design's statement";
     case "CHK-07": return d.pending ? "Being verified in the background…" : c.passed ? `Re-imported STEP is identical (volume difference ${pct(d.volume_rel_err)})` : "The re-imported STEP differs from the model";
-    case "CHK-08": return d.note ? "Checked at the last full build (skipped for this quick edit)" : d.fingerprint_equal && d.step_bytes_equal ? "Rebuilt twice: identical geometry and identical STEP file" : "Two rebuilds differ";
+    case "CHK-08": return d.pending ? "Being verified in the background…" : d.note ? "Checked at the last full build (skipped for this quick edit)" : d.fingerprint_equal && d.step_bytes_equal ? "Rebuilt twice: identical geometry and identical STEP file" : "Two rebuilds differ";
     case "CHK-09": return `Differs from the imported original by ${pct(d.rel_err)} of its volume`;
     default: return c.name;
   }
@@ -44,7 +44,7 @@ export function ChecksPanel({ status }: { status?: BuildStatus }) {
   if (status.error) return <div className="m-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-[13px] text-danger"><b>Build failed</b><div className="mt-1 text-[12px]">{status.error_plain ?? "The model couldn't be built."}</div></div>;
   return (
     <div className="space-y-3 p-3" data-tour="checks">
-      <div className={cx("rounded-lg px-3 py-2 text-sm font-semibold", status.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>{status.ok ? "All gating checks pass" : "Some checks fail"}</div>
+      <div className={cx("rounded-lg px-3 py-2 text-sm font-semibold", !status.ok ? "bg-danger/10 text-danger" : status.pending_checks?.length ? "bg-primary-soft text-primary" : "bg-success/10 text-success")} data-testid="checks-verdict">{!status.ok ? "Some checks fail" : status.pending_checks?.length ? "Checks so far pass · finishing verification…" : "All gating checks pass"}</div>
       <ul className="divide-y divide-border rounded-lg border border-border">
         {(status.checks ?? []).map(c => {
           const raw = Object.entries(c.detail).filter(([k]) => !["original", "reimported"].includes(k)).map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("\n");

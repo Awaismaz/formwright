@@ -88,14 +88,19 @@ def suppressed_features(source: str) -> list[str]:
     return managed_list(source, "SUPPRESSED_FEATURES")
 
 
-def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
+def _exec(script: Path, use_cache: bool = False, source: str | None = None) -> dict[str, Any]:
     """Run a model script. Its folder is importable (helper modules), and anything imported from that
     folder is purged afterwards so a warm worker never serves stale helpers to the next build.
-    With use_cache, the agent-authored base geometry is reused when only manual features changed."""
+    With use_cache, the agent-authored base geometry is reused when only manual features changed.
+    `source` runs that text instead of the file's current content (a deferred CHK-08 re-runs exactly what was built,
+    even if the file has been edited since)."""
     import hashlib
 
     folder = str(script.parent.resolve())
-    source = script.read_text(encoding="utf-8")
+    if source is None:
+        source = script.read_text(encoding="utf-8")
+    else:
+        tripwire(source)
     base_src, manual = _manual_block(source)
     helpers = sorted(f for f in script.parent.glob("*.py") if f.resolve() != script.resolve())
     for f in helpers:
@@ -116,14 +121,16 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
         fw._STATE["sheet"] = cached.get("sheet")  # immutable model: safe to share with the cache
     else:
         sys.path.insert(0, folder)
+        before = set(sys.modules)
         try:
             ns = {"__name__": "__aicad_model__", "__file__": str(script), "__builtins__": __builtins__}
             exec(compile(base_src, str(script), "exec"), ns)  # noqa: S102 - model scripts are tripwired above
         finally:
             if sys.path and sys.path[0] == folder:
                 sys.path.pop(0)
-            for name, mod in list(sys.modules.items()):
-                f = getattr(mod, "__file__", None)
+            # only modules this run imported can come from the folder (resolving all ~2000 cost ~0.7 s per build)
+            for name in set(sys.modules) - before:
+                f = getattr(sys.modules[name], "__file__", None)
                 if f and str(Path(f).resolve()).startswith(folder):
                     del sys.modules[name]
         if "result" not in ns:
@@ -145,11 +152,12 @@ def _exec(script: Path, use_cache: bool = False) -> dict[str, Any]:
     return ns
 
 
-def _write(out: Path, status: dict[str, Any]) -> None:
+def _write(out: Path, status: dict[str, Any], keep_id: bool = False) -> None:
     import os
     import tempfile
 
-    status["build_id"] = time.time_ns()
+    if not keep_id or status.get("build_id") is None:
+        status["build_id"] = time.time_ns()
     fd, tmp = tempfile.mkstemp(dir=out, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(status, f, indent=2, default=str)
@@ -358,18 +366,57 @@ def check_reference(shape: Any, rel: str) -> Any:
                                                     "rel_err": rel_err, "tol": 1e-3, "reference": rel})
 
 
+DEFERRED = ("CHK-07", "CHK-08")  # the checks an agent build may run in the background (PS-01)
+
+
+def _pending(cid: str, what: str) -> Any:
+    from aicad import checks
+
+    return checks.CheckResult(cid, f"{what} (running in background)", False, gating=False, detail={"pending": True})
+
+
+def recompute_ok(status: dict[str, Any]) -> None:
+    """`ok`: every gating check that has run passed. `verified`: ok, and nothing is still pending. Only `verified`
+    may be reported as a verified build (a turn's verdict, run records, notifications, the release gate)."""
+    pend = [c["id"] for c in status.get("checks", []) if (c.get("detail") or {}).get("pending")]
+    status["ok"] = all(c["passed"] for c in status.get("checks", []) if c["gating"])
+    status["pending_checks"] = pend
+    status["verified"] = bool(status["ok"] and not pend and not status.get("error"))
+
+
+def is_verified(status: dict[str, Any] | None) -> bool:
+    """A build counts as verified only when its gating checks passed and no deferred check is still pending.
+    (Status files written before pending_checks existed are judged on `ok`.)"""
+    if not status or status.get("error") or not status.get("ok"):
+        return False
+    if "verified" in status:
+        return bool(status["verified"])
+    return not status.get("exports_pending")
+
+
 def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) -> int:
-    """Build + verify. fast=True (interactive edits): geometry, validity, topology and mass are written
-    immediately; file exports and the STEP round-trip check are deferred to finalize()."""
+    """Build + verify.
+
+    fast=False: everything in one go (exports, CHK-07 round trip, CHK-08 determinism when asked).
+    fast=True: geometry, validity, bbox/volume, topology, mass and a preview mesh are written immediately; the STEP/STL/
+    GLB exports and the CHK-07 round trip are deferred to finalize(). With determinism=True as well (an agent build,
+    PS-01) CHK-08 is deferred too, and status["verified"] stays False until finalize() has run both."""
     import hashlib
 
-    from build123d import Shape, export_step
+    from build123d import Shape
 
     from aicad import checks
-    from aicad.topo import export_topology, mass_properties
+    from aicad.topo import export_topology, mass_properties, write_preview_stl
 
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.perf_counter()
+    T: dict[str, float] = {}
+
+    def lap(name: str, since: float) -> float:
+        now = time.perf_counter()
+        T[name] = round(now - since, 3)
+        return now
+
     status: dict[str, Any] = {"ok": False, "script": script.name, "checks": []}
     try:
         source = script.read_text(encoding="utf-8")
@@ -381,33 +428,36 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
         if not isinstance(shape, Shape):
             raise ScriptRejected(f"`result` is {type(shape).__name__}, expected a build123d Shape")
         t_build = time.perf_counter() - t0
+        t = lap("build_s", t0)
         exp: dict[str, Any] = dict(ns.get("EXPECTED") or {})
         manual = int(ns.get("__fw_manual__", 0) or 0)
 
         results: list[checks.CheckResult] = []
         n_solids = len(shape.solids())
         exp_solids = exp.get("solids")
+        valid = bool(shape.is_valid)  # BRepCheck_Analyzer: once (it was run twice)
         results.append(checks.CheckResult(
             "CHK-02", "valid B-rep, solid count",
-            bool(shape.is_valid) and n_solids > 0 and (exp_solids is None or n_solids == exp_solids),
-            detail={"is_valid": shape.is_valid, "solids": n_solids, "expected": exp_solids}))
+            valid and n_solids > 0 and (exp_solids is None or n_solids == exp_solids),
+            detail={"is_valid": valid, "solids": n_solids, "expected": exp_solids}))
         fe = checks.free_edge_count(shape)
         results.append(checks.CheckResult("CHK-03", "closed manifold (no free edges)", fe == 0,
                                           detail={"free_or_nonmanifold_edges": fe}))
+        volume = shape.volume
         if "bbox" in exp:
             results.append(checks.check_bbox(shape, tuple(exp["bbox"])))  # type: ignore[arg-type]
         else:
             results.append(checks.CheckResult("CHK-04", "bounding box (no expectation given)", False, gating=False,
                                               detail={"got_mm": checks.bbox_size(shape)}))
         if "volume" in exp:
-            r = checks.check_volume(shape, float(exp["volume"]))
+            r = checks.check_volume(shape, float(exp["volume"]), got=volume)
             tol = float(exp.get("volume_tol", checks.VOLUME_REL_TOL))
             r.passed = r.detail["rel_err"] <= tol
             r.detail["tol"] = tol
             results.append(r)
         else:
             results.append(checks.CheckResult("CHK-05", "volume (no expectation given)", False, gating=False,
-                                              detail={"got_mm3": shape.volume}))
+                                              detail={"got_mm3": volume}))
         if ns.get("REFERENCE_STEP") and not ns.get("IMPORTED"):
             results.append(check_reference(ns.get("__fw_base__", shape), str(ns["REFERENCE_STEP"])))
         n_sup = sum(1 for e in ns.get("__fw_log__", []) if e.get("suppressed")) + len(ns.get("DELETED_FEATURES") or [])
@@ -420,10 +470,12 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
                     r.name += f" (informational: {why} not in EXPECTED)"
                     r.detail["manual_features"] = manual
                     r.detail["suppressed_features"] = n_sup
+        t = lap("checks_s", t)
 
         declared = ns.get("PARAMS") if isinstance(ns.get("PARAMS"), dict) else {}
         params = {str(k): v for k, v in declared.items() if isinstance(v, (int, float, str, bool))}
-        export_topology(shape, out / "topo.json", ns.get("__fw_log__"))
+        topo = export_topology(shape, out / "topo.json", ns.get("__fw_log__"))
+        t = lap("topology_s", t)
         mass = mass_properties(shape)
         status.update(
             part=ns.get("NAME", script.stem), material=ns.get("MATERIAL", "unspecified"),
@@ -436,39 +488,40 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
             threads=ns.get("__fw_threads__") or [],
             sheet_metal=sheet_outputs(shape, ns.get("__fw_sheet__"), out, str(ns.get("MATERIAL") or "")),
             bbox_minmax=_bbox_minmax(shape),
-            fingerprint=checks.fingerprint(shape), imported=bool(ns.get("IMPORTED")),
+            fingerprint=checks.fingerprint(shape, volume=volume), imported=bool(ns.get("IMPORTED")),
             env={"build123d": _ver("build123d"), "cadquery-ocp": _ver("cadquery-ocp", "cadquery_ocp", "cadquery-ocp-novtk")},
         )
+        t = lap("mass_meta_s", t)
 
         if fast:
-            results.append(checks.CheckResult("CHK-07", "STEP export -> reimport (running in background)", False,
-                                              gating=False, detail={"pending": True}))
-            results.append(checks.CheckResult(
-                "CHK-08", "deterministic regeneration (skipped for interactive edit)", False, gating=False,
-                detail={"note": "design structure verified at the last agent build"}))
-            _LAST[str(out)] = {"shape": shape, "threads": ns.get("__fw_threads__") or []}
+            write_preview_stl(topo, out / "preview.stl")  # the 4-view render of a fast build reads this
+            results.append(_pending("CHK-07", "STEP export -> reimport"))
+            if determinism:
+                results.append(_pending("CHK-08", "deterministic regeneration"))
+            else:
+                results.append(checks.CheckResult(
+                    "CHK-08", "deterministic regeneration (skipped for interactive edit)", False, gating=False,
+                    detail={"note": "design structure verified at the last agent build"}))
+            _LAST[str(out)] = {"shape": shape, "threads": ns.get("__fw_threads__") or [], "script": str(script),
+                               "source": source, "fingerprint": status["fingerprint"]}
             status.update(exports_pending=True, cache_hit=bool(ns.get("__cache_hit__")))
+            t = lap("preview_s", t)
         else:
             reimported, step = _exports(shape, out, ns.get("__fw_threads__") or [])
-            results.append(checks.check_roundtrip(shape, reimported))
+            t = lap("exports_s", t)
+            results.append(checks.check_roundtrip(shape, reimported, original_fp=status["fingerprint"]))
+            t = lap("roundtrip_s", t)
             if determinism:
-                ns2 = _exec(script)
-                same_fp = checks.fingerprint(ns2["result"]) == checks.fingerprint(shape)
-                with tempfile.TemporaryDirectory() as td:
-                    p2 = Path(td) / "p2.step"
-                    export_step(ns2["result"], str(p2), timestamp=STEP_TIMESTAMP)
-                    stamp_threads(p2, ns2.get("__fw_threads__") or [])
-                    normalize_step(p2)
-                    same_step = p2.read_bytes() == step.read_bytes()
-                results.append(checks.CheckResult("CHK-08", "deterministic regeneration", same_fp and same_step,
-                                                  detail={"fingerprint_equal": same_fp, "step_bytes_equal": same_step}))
+                results.append(_determinism(script, source, status["fingerprint"], step))
+                t = lap("determinism_s", t)
             else:
                 results.append(checks.CheckResult(
                     "CHK-08", "deterministic regeneration (skipped for parameter edit)", False, gating=False,
                     detail={"note": "script structure unchanged since the agent build that verified it"}))
             status.update(exports_pending=False, step_sha256=hashlib.sha256(step.read_bytes()).hexdigest())
-        status.update(ok=all(r.passed for r in results if r.gating), checks=checks.as_dicts(results),
-                      timings_s={"build_s": round(t_build, 3), "total_s": round(time.perf_counter() - t0, 3)})
+        status["checks"] = checks.as_dicts(results)
+        recompute_ok(status)
+        status["timings_s"] = {**T, "build_s": round(t_build, 3), "total_s": round(time.perf_counter() - t0, 3)}
     except ScriptRejected as e:
         status.update(error=f"rejected: {e}")
     except Exception as e:  # noqa: BLE001 - report any script/kernel failure to the agent
@@ -478,39 +531,78 @@ def main(script: Path, out: Path, determinism: bool = True, fast: bool = False) 
         from aicad.platform.plain import build_error
 
         status["error_plain"] = build_error(status["error"])  # what the app shows; `error` is for the agent
+        status["verified"] = False
+        _LAST.pop(str(out), None)
     _write(out, status)
+    if str(out) in _LAST:
+        _LAST[str(out)]["build_id"] = status["build_id"]
     return 0 if status.get("ok") else 1
 
 
-def finalize(out: Path) -> int:
-    """Complete a fast build: file exports + STEP round-trip check, merged into status.json."""
+def _determinism(script: Path, source: str, fingerprint: dict[str, Any], step: Path) -> Any:
+    """CHK-08: run the same source again from scratch; the geometry fingerprint and the STEP bytes must be equal."""
+    from build123d import export_step
+
+    from aicad import checks
+
+    ns2 = _exec(script, source=source)
+    same_fp = checks.fingerprint(ns2["result"]) == fingerprint
+    with tempfile.TemporaryDirectory() as td:
+        p2 = Path(td) / "p2.step"
+        export_step(ns2["result"], str(p2), timestamp=STEP_TIMESTAMP)
+        stamp_threads(p2, ns2.get("__fw_threads__") or [])
+        normalize_step(p2)
+        same_step = p2.read_bytes() == step.read_bytes()
+    return checks.CheckResult("CHK-08", "deterministic regeneration", same_fp and same_step,
+                              detail={"fingerprint_equal": same_fp, "step_bytes_equal": same_step})
+
+
+SUPERSEDED = 3
+
+
+def finalize(out: Path, stage: str = "all") -> int:
+    """Complete a fast build, merged into status.json (same build id, so the viewer doesn't reload).
+
+    stage "exports": STEP/STL/GLB/3MF + the CHK-07 round trip. stage "determinism": CHK-08, when the fast build
+    deferred it (an agent build). "all": both. Returns 0 (done), 2 (nothing pending for this folder) or 3 (a newer
+    build replaced the one this would have verified; nothing written)."""
     import hashlib
 
     from aicad import checks
 
-    last = _LAST.pop(str(out), None)
+    key = str(out)
+    last = _LAST.get(key)
     status_p = out / "status.json"
     if last is None or not status_p.is_file():
         return 2
     status = json.loads(status_p.read_text(encoding="utf-8"))
-    if not status.get("exports_pending"):
-        return 0
+    if last.get("build_id") is not None and status.get("build_id") != last["build_id"]:
+        _LAST.pop(key, None)
+        return SUPERSEDED
     t0 = time.perf_counter()
-    reimported, step = _exports(last["shape"], out, last.get("threads") or [])
-    rt = checks.as_dicts([checks.check_roundtrip(last["shape"], reimported)])[0]
-    status["checks"] = [rt if c["id"] == "CHK-07" else c for c in status.get("checks", [])]
-    status["ok"] = all(c["passed"] for c in status["checks"] if c["gating"])
-    status["exports_pending"] = False
-    status["step_sha256"] = hashlib.sha256(step.read_bytes()).hexdigest()
-    status.setdefault("timings_s", {})["finalize_s"] = round(time.perf_counter() - t0, 3)
-    build_id = status.get("build_id")
-    _write(out, status)
-    # keep the original build id so the viewer doesn't reload identical geometry
-    st2 = json.loads(status_p.read_text(encoding="utf-8"))
-    st2["build_id"] = build_id
-    tmp = status_p.with_suffix(".final.tmp")  # atomic: the app reads status.json while this runs
-    tmp.write_text(json.dumps(st2, indent=2, default=str), encoding="utf-8")
-    tmp.replace(status_p)
+    timings = status.setdefault("timings_s", {})
+    done: dict[str, dict[str, Any]] = {}
+    if stage in ("exports", "all") and status.get("exports_pending"):
+        reimported, step = _exports(last["shape"], out, last.get("threads") or [])
+        t1 = time.perf_counter()
+        timings["exports_s"] = round(t1 - t0, 3)
+        done["CHK-07"] = checks.as_dicts([checks.check_roundtrip(last["shape"], reimported,
+                                                                 original_fp=last.get("fingerprint"))])[0]
+        timings["roundtrip_s"] = round(time.perf_counter() - t1, 3)
+        status["exports_pending"] = False
+        status["step_sha256"] = hashlib.sha256(step.read_bytes()).hexdigest()
+    pend8 = any(c["id"] == "CHK-08" and (c.get("detail") or {}).get("pending") for c in status.get("checks", []))
+    if stage in ("determinism", "all") and pend8 and not status.get("exports_pending"):
+        t2 = time.perf_counter()
+        done["CHK-08"] = checks.as_dicts([_determinism(Path(last["script"]), last["source"], last["fingerprint"],
+                                                       out / "part.step")])[0]
+        timings["determinism_s"] = round(time.perf_counter() - t2, 3)
+    status["checks"] = [done.get(c["id"], c) for c in status.get("checks", [])]
+    recompute_ok(status)
+    timings["finalize_s"] = round(timings.get("finalize_s", 0) + time.perf_counter() - t0, 3)
+    if not status.get("exports_pending") and not status["pending_checks"]:
+        _LAST.pop(key, None)
+    _write(out, status, keep_id=True)
     return 0
 
 

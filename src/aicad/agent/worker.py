@@ -10,6 +10,7 @@ Protocol (one JSON object per line; every request carries an "id" that its reply
   worker -> parent  {"ready": true}                                       once, after start-up
   parent -> worker  {"id": int, "op": "build", "script": str, "out": str, "determinism": bool}
                     {"id": int, "op": "render", "stl": str, "png": str, "title": str}
+                    {"id": int, "op": "finalize", "out": str, "stage": "exports" | "determinism" | "all"}
   worker -> parent  {"id": int, "ok": bool, "rc": int, "error": str | None, "elapsed_s": float}
 
 The parent drops any line whose id doesn't match the request it is waiting for (a late "ready", or the reply to a
@@ -81,7 +82,7 @@ def serve() -> None:
                 Path(req["out"]).write_text(json.dumps(rec), encoding="utf-8")
                 resp = {"ok": True, "rc": 0}
             elif req["op"] == "finalize":
-                resp = {"ok": True, "rc": runner.finalize(Path(req["out"]))}
+                resp = {"ok": True, "rc": runner.finalize(Path(req["out"]), str(req.get("stage") or "all"))}
             elif req["op"] == "diff":
                 resp = {"ok": True, "rc": 0, **_diff(Path(req["a"]), Path(req["b"]), Path(req["out"]))}
             elif req["op"] == "render":
@@ -165,7 +166,9 @@ class Worker:
     async def request(self, req: dict[str, Any], timeout: float) -> dict[str, Any]:
         async with self._guard():
             try:
-                if self.proc is None or self.proc.returncode is not None or self.jobs >= self.max_jobs:
+                # a finalize needs the shape the previous build left in this process: never recycle right before it
+                recycle = self.jobs >= self.max_jobs and req.get("op") != "finalize"
+                if self.proc is None or self.proc.returncode is not None or recycle:
                     await self.stop()
                     await self._start()
             except (WorkerUnavailable, OSError, RuntimeError, TimeoutError):
@@ -220,8 +223,9 @@ async def recognize(key: str, script: Path, out: Path, timeout: float = 300) -> 
     return await get_worker(key).request({"op": "recognize", "script": str(script), "out": str(out)}, timeout)
 
 
-async def finalize(key: str, out: Path, timeout: float = 180) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "finalize", "out": str(out)}, timeout)
+async def finalize(key: str, out: Path, timeout: float = 180, stage: str = "all") -> dict[str, Any]:
+    """Complete a fast build (runner.finalize): stage "exports" (files + CHK-07), "determinism" (CHK-08) or "all"."""
+    return await get_worker(key).request({"op": "finalize", "out": str(out), "stage": stage}, timeout)
 
 
 async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float = 60) -> dict[str, Any]:

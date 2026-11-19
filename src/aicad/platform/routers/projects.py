@@ -17,6 +17,7 @@ from sqlalchemy import select
 from aicad import llm
 from aicad.agent import worker
 from aicad.agent.runner import editable_params
+from aicad.agent.runner import is_verified as runner_verified
 from aicad.agent.session import AgentSession
 from aicad.platform import metering
 from aicad.platform.collab import branches, permissions
@@ -195,7 +196,10 @@ def _snapshot(p: Project, ws: Path, cause: str | None = None, kind: str | None =
     d.mkdir()
     shutil.copy2(model_p, d / "model.py")
     shutil.copy2(status_p, d / "status.json")
+    pending = bool(json.loads(status_p.read_text(encoding="utf-8")).get("exports_pending"))
     for extra in ("topo.json", "part.step"):  # needed for revision overlay and compare
+        if extra == "part.step" and pending:
+            continue  # still the previous build's file: copied when the background exports finish (PS-01)
         if (ws / "out" / extra).is_file():
             shutil.copy2(ws / "out" / extra, d / extra)
     if (ws / "out" / "views.png").is_file():
@@ -246,6 +250,8 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                     if rev:
                         ev["revision"] = rev
                         notify_revision(db, p, rev, who, why)
+                        if s is not None and st.get("exports_pending"):
+                            s.deferred.when_verified(st.get("build_id"), _complete_revision(ws, rev))
                     if p.builds == 1:
                         track(db, "first_build", who, p.org_id, ok=bool(st.get("ok")))
                 db.commit()
@@ -267,7 +273,13 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                            "upgrade to keep designing.", "/app/billing#tokens")
             track(db, "agent_run", user, p.org_id, subtype=ev.get("subtype"), tokens=tokens, turns=ev.get("turns"))
             built = (latest_revision(ws) or 0) > (ev.get("rev_before") or 0)
-            verified = bool((p.last_status or {}).get("ok")) if built else None
+            if built:  # the turn waited for the deferred checks (PS-01): judge the settled status, not the snapshot
+                st_now = _read_status(ws)
+                if st_now:
+                    p.last_status = _status_summary(st_now)
+                verified = runner_verified(st_now) if st_now else bool((p.last_status or {}).get("ok"))
+            else:
+                verified = None
             status = ("stopped_budget" if ev.get("budget_stopped") else "ok" if ev.get("subtype") == "success"
                       else "stopped" if ev.get("subtype") == "stopped" else "failed")
             run = db.get(AgentRun, ev.get("run_id") or "")
@@ -680,10 +692,35 @@ def schedule_finalize(p: Project, ws: Path, rev: int | None = None) -> None:
     t.add_done_callback(_tasks.discard)
 
 
-async def wait_finalized(project_id: str) -> None:
+async def wait_finalized(project_id: str, full: bool = False) -> None:
+    """Wait for the background exports of the project's latest build: an interactive edit's finalize, or an agent
+    build's deferred work (PS-01). Modules call this before they read part.step. ``full``: also wait for the deferred
+    checks (CHK-08 repeatability), e.g. before a release."""
     t = _finalizing.get(project_id)
     if t is not None and not t.done():
         await asyncio.shield(t)
+    s = _sessions.get(project_id)
+    if s is not None:
+        await s.deferred.settle(exports_only=not full)
+
+
+def _complete_revision(ws: Path, rev: int) -> Any:
+    """After an agent build's background exports: give its revision snapshot the STEP and the final status."""
+    def done() -> None:
+        d = ws / "revisions" / str(rev)
+        if not d.is_dir():
+            return
+        try:
+            snap = json.loads((d / "status.json").read_text(encoding="utf-8"))
+            cur = json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if snap.get("build_id") != cur.get("build_id"):
+            return
+        for f in ("part.step", "status.json"):
+            if (ws / "out" / f).is_file():
+                shutil.copy2(ws / "out" / f, d / f)
+    return done
 
 
 async def _rebuild(p: Project, ws: Path, determinism: bool, fast: bool = False) -> dict[str, Any]:

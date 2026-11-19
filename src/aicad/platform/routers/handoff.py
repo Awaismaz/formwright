@@ -94,7 +94,7 @@ async def issue(p: Any, *, by: str, by_id: str | None, note: str = "", leave_out
     ws = workspace_for(p)
     lock = _locks.setdefault(p.id, asyncio.Lock())
     async with lock:
-        await wait_finalized(p.id)
+        await wait_finalized(p.id, full=True)  # the gate needs every check, CHK-08 included (PS-01)
         g = handoff.gate(ws, has_drawings=has_drawings, leave_out=leave_out)
         if not g["ready"]:
             latest = handoff.latest_release(ws)
