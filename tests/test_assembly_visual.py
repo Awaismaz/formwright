@@ -31,6 +31,13 @@ GEAR_PAIR = {"title": "Spur gear pair 1:3", "subassemblies": [{"name": "Gear pai
     {"name": "Deep groove ball bearing 6204", "family": "standard", "complexity": 1, "qty": 4,
      "description": "6204 ball bearing"}]}]}
 BRIEF = "Simple spur gear pair 1:3 with shafts and bearings"
+# A genuinely degenerate plan (the layout engine can't connect it): gears and a spacer, no shafts, no base or housing.
+ROW_PLAN = {"subassemblies": [{"name": "Gear pair", "parts": [
+    {"name": "Pinion", "family": "gear", "complexity": 2, "qty": 1, "description": "spur pinion module 2, 20 teeth"},
+    {"name": "Gear", "family": "gear", "complexity": 2, "qty": 1, "description": "spur gear module 2, 60 teeth"},
+    {"name": "Spacer", "family": "turned", "complexity": 1, "qty": 1, "description": "spacer ring 30 mm diameter, 10 long"},
+    {"name": "Deep groove ball bearing 6204", "family": "standard", "complexity": 1, "qty": 4,
+     "description": "6204 ball bearing"}]}]}
 
 ROW_REPLY = '''```json
 {"overall": "looks_wrong",
@@ -58,21 +65,26 @@ def _parts(plan: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _row_layout() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    return icd.build(_parts(ROW_PLAN), BRIEF)
+
+
+def _pair_layout() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """The founder's gear pair: since the shaft-line layout (wip/office-layout) it lays out correctly."""
     return icd.build(_parts(GEAR_PAIR), BRIEF)
 
 
 # ============================================================================ the picture
 def test_skeleton_render_row_case(tmp_path: Path) -> None:
     sk, ifs = _row_layout()
-    assert ifs == []  # the founder's case: no interfaces at all (the layout engine's row fallback)
+    assert ifs == []  # nothing connects: the layout engine's row fallback
     scene = render.scene_from_skeleton(sk, "Gear pair (layout)", ifs)
-    assert [k["label"] for k in scene["key"]] == ["Pinion", "Gear", "Input shaft", "Output shaft"]
-    assert len({k["color"] for k in scene["key"]}) == 4  # every item its own colour
+    assert [k["label"] for k in scene["key"]] == ["Pinion", "Gear", "Spacer"]
+    assert len({k["color"] for k in scene["key"]}) == 3  # every item its own colour
     # the pinion envelope is its tip circle: m (z + 2) = 44 mm, 20 wide
     pin = next(b for b in scene["bodies"] if b["label"] == "Pinion")
     assert pin["prim"] == "cyl" and pin["size"] == [44.0, 44.0, 20.0]
     out = render.render(scene, tmp_path / "layout.png")
-    assert out["bodies"] == 4 and out["seconds"] < 60  # measured ~1.2 s on the dev workstation
+    assert out["bodies"] == 3 and out["seconds"] < 60  # measured ~1.2 s on the dev workstation
     with Image.open(tmp_path / "layout.png") as im:
         assert im.size == render.SIZE
 
@@ -90,10 +102,28 @@ def test_seated_bearings_are_drawn_where_fitz_seats_them() -> None:
 def test_quick_skeleton_row_and_unplaced_bearings() -> None:
     sk, ifs = _row_layout()
     q = visual.quick_skeleton(sk, ifs)
-    codes = [f["code"] for f in q["findings"]]
-    assert codes == ["row", "unplaced_standard"]
-    assert q["findings"][0]["severity"] == "block" and "4 of 4 parts touch nothing" in q["findings"][0]["text"]
-    assert "4 × Deep groove ball bearing 6204 have no seat" in q["findings"][1]["text"]
+    got = [(f["code"], f["severity"]) for f in q["findings"]]
+    # the layout engine's own codes (icd.issues) replace ours: row_layout -> row, no_interface, bearing_unplaced -> note
+    assert got == [("row", "block"), ("no_interface", "block"), ("no_interface", "block"), ("no_interface", "block"),
+                   ("unplaced_standard", "note")]
+    assert "4 of 4" in q["findings"][-1]["text"] and "6204" in q["findings"][-1]["text"]
+
+
+def test_founder_gear_pair_now_passes_every_quick_check(tmp_path: Path) -> None:
+    """Shaft line: pinion on the input shaft, gear on the output shaft, a = m (z1 + z2) / 2 = 2 (20 + 60) / 2 = 80 mm,
+    four 6204 on journals (two per shaft). No measured finding; the simulated look follows: looks assembled."""
+    sk, ifs = _pair_layout()
+    assert sk.get("layout") == "shaft_line"
+    assert sum(1 for f in ifs if f["kind"] == "bearing_journal") == 4
+    mesh = next(f for f in ifs if f["kind"] == "gear_mesh")
+    assert mesh["data"]["centre_distance"] == 80.0
+    q = visual.quick_skeleton(sk, ifs)
+    assert q["findings"] == []
+    scene = render.scene_from_skeleton(sk, "Gear pair", ifs)
+    assert sum(1 for b in scene["bodies"] if "6204" in b["label"]) == 4  # every bearing drawn on its journal
+    rec = asyncio.run(visual.look(scene, visual.relations_from_skeleton(sk, ifs, BRIEF), tmp_path / "v",
+                                  simulated=True, quick=q))
+    assert rec["verdict"]["overall"] == "looks_assembled" and rec["tokens"] == 0
 
 
 def test_quick_skeleton_catches_stacked_gears() -> None:
@@ -195,6 +225,18 @@ def test_targets_from_numbers_and_names() -> None:
 
 
 # ============================================================================ relations
+def test_relations_of_the_shaft_line_name_parts_never_ids() -> None:
+    sk, ifs = _pair_layout()
+    rels = [r["text"] for r in visual.relations_from_skeleton(sk, ifs, BRIEF)]
+    assert rels[0] == "Pinion meshes with Gear: axes parallel, 80 mm apart (m (z1 + z2) / 2), the two gears in one plane"
+    assert "Deep groove ball bearing 6204 #1 sits on its journal on Input shaft" in rels
+    assert "Deep groove ball bearing 6204 #4 sits on its journal on Output shaft" in rels
+    assert "Pinion sits on Input shaft (the shaft passes through its bore)" in rels
+    assert not any("i_s" in r for r in rels)  # no internal item id ever reaches the text
+    # a side the skeleton can't name is "a part", never its id
+    assert visual._side_name({"items": {}, "standard": []}, {"item": "i_s9_p9"}) == "a part"
+
+
 def test_relations_from_the_brief_roles() -> None:
     sk, ifs = _row_layout()
     rels = [r["text"] for r in visual.relations_from_skeleton(sk, ifs, BRIEF)]
@@ -206,7 +248,6 @@ def test_relations_from_the_brief_roles() -> None:
         *GEAR_PAIR["subassemblies"][0]["parts"]]}]}), BRIEF)
     if ifs2 and not any(f["kind"] == "gear_mesh" for f in ifs2):
         assert visual.relations_from_skeleton(sk2, ifs2)[0]["text"].startswith("Pinion meshes with Gear")
-    assert any("each gear sits on its own shaft" in r for r in rels)
     assert any(r.startswith("4 × Deep groove ball bearing 6204 carry the shafts") for r in rels)
 
 
@@ -235,25 +276,25 @@ def test_look_simulated_follows_quick_checks(tmp_path: Path) -> None:
 
 
 # ============================================================================ Archie
-def _program(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
+def _program(tmp_path: Path, plan: dict[str, Any] | None = None) -> tuple[Path, dict[str, Any]]:
     from aicad.office import store
 
     root = store.org_root(tmp_path, "org1")
     doc = service.new_program("Spur gear pair", BRIEF, "org1", "u1", 2, 3000, "standard")
-    service.set_plan(root, doc, planner.normalise_plan(GEAR_PAIR, "standard"), {"name": "Eng"})
+    service.set_plan(root, doc, planner.normalise_plan(plan or GEAR_PAIR, "standard"), {"name": "Eng"})
     service.approve_plan(root, doc, None, {"name": "Eng"})
     store.save(root, doc)
     return root, doc
 
 
 def test_archie_tells_the_row_layout_and_proposes_a_housing(tmp_path: Path) -> None:
-    _root, doc = _program(tmp_path)
+    _root, doc = _program(tmp_path, ROW_PLAN)
     q = visual.quick_skeleton(doc["skeleton"], doc["icd"]["interfaces"])
     verdict = visual.parse_verdict(ROW_REPLY, visual.relations_from_skeleton(doc["skeleton"], []))
     text, acts = visual_office.layout_message(doc, q, {"verdict": verdict})
     assert text.startswith("Before you approve the interfaces, I looked at the layout of Spur gear pair.")
     assert "There's no housing or base in this plan, so the parts can't be mounted" in text
-    assert "4 × Deep groove ball bearing 6204 have no seat" in text
+    assert "Pinion, Gear and Spacer: no interface connects them to the rest of the program" in text
     assert "Visual check (advisory): it looks wrong" in text and "which?" in text
     assert [a["type"] for a in acts] == ["revise_plan", "revise_plan"]
     assert acts[0]["add"]["part"]["name"] == "Housing" and acts[1]["add"]["part"]["name"] == "Base plate"
@@ -385,3 +426,12 @@ def test_quick_checks_on_the_hand_built_gear_pair(gear_docs: Any, tmp_path: Path
                     "one plane")]
     out = render.render(render.scene_from_doc(root, docs["ok"], "Gear pair"), tmp_path / "ok.png")
     assert out["bodies"] == 8 and out["seconds"] < 60  # measured 1.3-2.6 s
+
+
+def test_archie_is_happy_with_the_founder_gear_pair(tmp_path: Path) -> None:
+    _root, doc = _program(tmp_path)
+    q = visual.quick_skeleton(doc["skeleton"], doc["icd"]["interfaces"])
+    verdict = visual.parse_verdict(OK_REPLY, visual.relations_from_skeleton(doc["skeleton"], doc["icd"]["interfaces"])[:1])
+    text, acts = visual_office.layout_message(doc, q, {"verdict": verdict})
+    assert q["findings"] == [] and acts == []
+    assert "the placement checks pass" in text and "it looks assembled" in text

@@ -1401,9 +1401,18 @@ async def checks_by_policy(root: Path, org_id: str, doc: dict[str, Any], res: di
         clashes = visual.clash_rows(an)
     elif d["exact"] == "targeted":
         targets = d["targets"] or (visual.targets_from(verdict, doc, (rec or {}).get("key") or []) if verdict else [])
+        # Fitz's own outcome codes name the parts he couldn't place: measure those too
+        targets = sorted(set(targets) | {o["inst"] for o in res.get("outcomes") or []
+                                         if o.get("severity") == "warn" and o.get("inst")})
         clashes = await visual.targeted(root, org_id, doc, targets)
         d = visual.confirm(d, verdict, clashes)
     res["clashes"] = clashes
+    for c in clashes:  # the same outcome record Fitz writes when he checks clashes himself
+        res.setdefault("outcomes", []).append({"code": "clash", "severity": "warn", "item": None, "inst": c["a"],
+                                               "name": c.get("a_name"), "other": c["b"],
+                                               "text": f"{c.get('a_name')} and {c.get('b_name')} overlap by "
+                                                       f"{c['volume_mm3']:.3g} mm³"})
+    unplaced = [o for o in res.get("outcomes") or [] if o.get("severity") == "warn" and o.get("code") != "clash"]
     n = len(clashes)
     exact_txt = {"inline": f"{n} clash{'es' if n != 1 else ''}",
                  "targeted": f"{n} clash{'es' if n != 1 else ''} among the parts in question; the whole clash check "
@@ -1416,7 +1425,8 @@ async def checks_by_policy(root: Path, org_id: str, doc: dict[str, Any], res: di
     res["checks"] = {"quick": q["findings"], "estimate": est, "policy": {k: d[k] for k in ("exact", "stop", "why")},
                      "reason": d.get("reason") or "", "quick_s": q["seconds"],
                      "seconds": round(time.perf_counter() - t0, 2),
-                     "visual": "done" if rec else ("running" if acc is not None else "off")}
+                     "visual": "done" if rec else ("running" if acc is not None else "off"),
+                     "unplaced": [{"code": o["code"], "name": o.get("name"), "text": o.get("text")} for o in unplaced]}
     return {"exact": d["exact"], "look_after": rec is None and acc is not None}
 
 

@@ -93,23 +93,45 @@ def _gear_of(it: dict[str, Any]) -> tuple[float, int] | None:
     return (float(m), int(z)) if m and z else None
 
 
+def _side_name(skel: dict[str, Any], side: dict[str, Any]) -> str:
+    """A side of an interface in plain words: its own name (copies numbered), the item's or the standard part's name,
+    never an internal id."""
+    if side.get("name"):
+        return str(side["name"])
+    it = (skel.get("items") or {}).get(side.get("item"))
+    if it:
+        return str(it["name"])
+    st = next((x for x in skel.get("standard") or [] if x.get("item") == side.get("item")), None)
+    if st:
+        return f"{st['name']} #{int(side.get('copy') or 0) + 1}" if int(st.get("qty") or 1) > 1 else str(st["name"])
+    return "a part"
+
+
+def _num(v: Any) -> str:
+    return f"{v:g}" if isinstance(v, int | float) else str(v)
+
+
 def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], brief: str = "") -> list[dict[str, Any]]:
-    """What the layout intends, from the ICD's interfaces, or (no interfaces) from the parts' roles: gears mesh in
-    pairs on parallel shafts at m (z1 + z2) / 2, every gear sits on a shaft, shafts run in their bearings, parts
-    mount on the block they hang from."""
+    """What the layout intends, in plain words: the gear meshes first (the brief's point), then the ICD's interfaces
+    (bearings on their journals or in their seats, gears on their shafts, bolted joints), or (no interfaces) the
+    parts' roles: gears mesh in pairs on parallel shafts at m (z1 + z2) / 2, every gear sits on a shaft, shafts run in
+    their bearings, parts mount on the block they hang from."""
     items = skel.get("items") or {}
-    name = {i: it["name"] for i, it in items.items()}
+    mesh: list[str] = []
     out: list[str] = []
     for f in ifaces:
-        a, b = name.get(f["a"]["item"], f["a"]["item"]), name.get(f["b"]["item"], f["b"]["item"])
+        a, b = _side_name(skel, f["a"]), _side_name(skel, f["b"])
         d = f.get("data") or {}
         k = f["kind"]
         if k == "gear_mesh":
-            out.append(f"{a} meshes with {b}: axes parallel, {d.get('centre_distance', '?')} mm apart, in one plane")
+            mesh.append(f"{a} meshes with {b}: axes parallel, {_num(d.get('centre_distance', '?'))} mm apart "
+                        "(m (z1 + z2) / 2), the two gears in one plane")
         elif k == "shaft_bore":
-            out.append(f"{a} passes through the bore of {b}")
+            out.append(f"{a} sits on {b} (the shaft passes through its bore)")
+        elif k == "bearing_journal":  # side a: the shaft, side b: the bearing
+            out.append(f"{b} sits on its journal on {a}")
         elif k == "bearing_seat":
-            out.append(f"{a} carries {b} in {len(d.get('seats') or [])} bearing(s) {d.get('designation', '')}".strip())
+            out.append(f"{a} carries {b} in {len(d.get('seats') or [])} bearing seat(s)")
         elif k == "hole_pattern":
             out.append(f"{a} is bolted to {b}")
         elif k == "key":
@@ -118,28 +140,33 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
             out.append(f"{a} is located on {b} by dowel pins")
         else:
             out.append(f"{a} sits on {b}")
-    meshed = any(f["kind"] == "gear_mesh" for f in ifaces)
     gears = [(i, it) for i, it in items.items() if it.get("role") == "gear"]
-    if not meshed:  # the brief's intent even when the ICD has no mesh: a wrong ICD must not set the bar (live run)
+    if not mesh:  # the brief's intent even when the ICD has no mesh: a wrong ICD must not set the bar (live run)
         for k, (_i, g1) in enumerate(gears):
             for _j, g2 in gears[k + 1:]:
-                a, b = _gear_of(g1), _gear_of(g2)
-                if a and b and abs(a[0] - b[0]) < 1e-6 and g1.get("sub") == g2.get("sub"):
-                    c = a[0] * (a[1] + b[1]) / 2
-                    out.insert(0, f"{g1['name']} meshes with {g2['name']}: axes parallel, {c:g} mm apart "
-                                  "(m (z1 + z2) / 2), the two gears in one plane, each on its own shaft")
+                ga, gb = _gear_of(g1), _gear_of(g2)
+                if ga and gb and abs(ga[0] - gb[0]) < 1e-6 and g1.get("sub") == g2.get("sub"):
+                    c = ga[0] * (ga[1] + gb[1]) / 2
+                    mesh.append(f"{g1['name']} meshes with {g2['name']}: axes parallel, {c:g} mm apart "
+                                "(m (z1 + z2) / 2), the two gears in one plane, each on its own shaft")
+    shafts = [it["name"] for it in items.values() if it.get("role") == "shaft"]
     if not ifaces:
-        shafts = [it["name"] for it in items.values() if it.get("role") == "shaft"]
         if gears and shafts:
             out.append("each gear sits on its own shaft (" + ", ".join(shafts) + ")")
         blocks = [it["name"] for it in items.values() if it.get("role") == "block"]
         if blocks:
             out.append(f"the other parts mount on {blocks[0]}")
-    for s in skel.get("standard") or []:
-        nm = str(s.get("name") or "")
-        if re.search(r"\bbearing|\b6[02]0\d\b", nm, re.IGNORECASE):
-            out.append(f"{s.get('qty', 1)} × {nm} carry the shafts (typically two per shaft, one either side of "
-                       "its gear)")
+    journals = [f for f in ifaces if f["kind"] in ("bearing_journal", "bearing_seat")]
+    if skel.get("layout") == "shaft_line" and shafts:
+        out.insert(0, "each shaft runs in two bearings, one either side of its gear; the shafts are parallel and "
+                      "nothing holds them but their bearings (no housing)")
+    elif not journals:
+        for st in skel.get("standard") or []:
+            nm = str(st.get("name") or "")
+            if re.search(r"\bbearing|\b6[02]0\d\b", nm, re.IGNORECASE):
+                out.append(f"{st.get('qty', 1)} × {nm} carry the shafts (typically two per shaft, one either side of "
+                           "its gear)")
+    out = mesh + out
     if not out and brief:
         out.append("the parts are assembled as the brief describes")
     return [{"id": f"R{k + 1}", "text": t} for k, t in enumerate(out[:12])]
@@ -331,9 +358,36 @@ def quick_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]]) -> dict[s
             findings.append({"code": "unplaced_standard", "severity": "note", "items": [s["item"]],
                              "text": f"{s.get('qty', 1)} × {nm} have no seat in this layout: they would be left "
                                      "loose in the parts bin."})
+    findings = merge_issues(findings, skel, ifaces)
     if not any(f["code"] == "row" for f in findings):
         findings += skeleton_gear_findings(skel, ifaces)
     return {"findings": findings, "bodies": len(sc["bodies"])}
+
+
+# the office layout's own codes (``icd.issues``) where they say what the picture would: one finding each
+ISSUE_MAP = {"row_layout": ("row", "block"), "no_interface": ("no_interface", "block"),
+             "bearing_unplaced": ("unplaced_standard", "note"), "shaft_support": ("shaft_support", "block"),
+             "line_clash": ("line_clash", "block"), "journal_off_shaft": ("journal_off_shaft", "block")}
+
+
+def merge_issues(findings: list[dict[str, Any]], skel: dict[str, Any], ifaces: list[dict[str, Any]]
+                 ) -> list[dict[str, Any]]:
+    """Add the layout engine's issues (codes: row_layout, no_interface, bearing_unplaced, ...) and drop our own
+    finding of the same kind, so the engineer reads one sentence per problem. Older layouts without ``issues``: as is."""
+    from aicad.office import icd
+
+    try:
+        raw = icd.issues(skel, ifaces) if hasattr(icd, "issues") else []
+    except Exception:  # noqa: BLE001 - a layout the issue reader doesn't know: our own checks stand
+        raw = []
+    mapped = []
+    for x in raw:
+        m = ISSUE_MAP.get(str(x.get("code")))
+        if m:
+            mapped.append({"code": m[0], "severity": m[1], "items": list(x.get("items") or []),
+                           "text": str(x.get("text") or x.get("message") or "")})
+    have = {f["code"] for f in mapped}
+    return [f for f in findings if f["code"] not in have] + mapped
 
 
 def skeleton_gear_findings(skel: dict[str, Any], ifaces: list[dict[str, Any]]) -> list[dict[str, Any]]:
