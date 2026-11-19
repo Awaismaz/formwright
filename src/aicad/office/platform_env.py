@@ -611,6 +611,20 @@ class PlatformEnv(orchestrator.Env):
                 return {"blocked": f"Fitz is still waiting for the real {ph[0]}: it has not been swapped in for its "
                                    "placeholder. Retry once it is approved."}
             std = [k for k in kids if k["kind"] == "standard"]
+            # a sub-assembly of bought-out parts only (a fastener kit) has no layout of its own: its parts are fitted
+            # where the joints are, as every other level is integrated (CD-034)
+            designed = {s["id"] for s in program_assembly.subs_of(doc)}
+            kit_subs = [i["id"] for i in doc["items"] if i["kind"] == "subassembly" and i["id"] not in designed]
+            if t["item_id"] in kit_subs:
+                n = len(std)
+                return {"summary": f"{t['title'].removeprefix('Assemble ')} is a kit of {n} bought-out part"
+                                   f"{'s' if n != 1 else ''}: Fitz fits them at the joints as each sub-assembly and the "
+                                   "final assembly are integrated", "clashes": [], "log": [], "inserted": 0,
+                        "children": [k["id"] for k in kids]}
+            kit = [{**k, "_kit": True} for k in doc["tickets"] if k["kind"] == "standard" and k["item_id"] != t["item_id"]
+                   and k["column"] in service.DONE_COLUMNS and any(
+                       x["id"] == k["item_id"] and x.get("parent_id") in kit_subs for x in doc["items"])]
+            std = std + kit
             try:
                 res = await program_assembly.integrate(_aroot(self.org_id), self.org_id, doc, t["item_id"], std)
             except (AssemblyInputError, WorkerError) as e:

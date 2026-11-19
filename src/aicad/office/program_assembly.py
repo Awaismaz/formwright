@@ -448,6 +448,9 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 if r.get("source") != "toolbox":
                     continue
                 kind, code = r.get("kind"), r.get("code")
+                is_fastener = kind == "fastener" or code in ("hex_bolt", "shcs")
+                if t.get("_kit") and not is_fastener:
+                    continue  # kit parts that aren't fasteners (inserts, pins) are not this level's to place
                 # integrating again (a change reopened the level): the pieces Fitz seated or binned last time go,
                 # so they are placed once, where the ICD says now (fastener stacks are skipped by ``fitted``)
                 for old in [i for i in adoc["instances"] if (i.get("office") or {}).get("item") == t["item_id"]
@@ -487,6 +490,10 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                                 targets.append({"inst": ib["id"], "hole": k})
                                 fitted.add((ib["id"], k))
                     want = int(t.get("qty") or 1)
+                    if t.get("_kit"):
+                        if not targets:
+                            continue  # no joint for the kit here: other levels take them
+                        want = len(targets)
                     stats["asked"] += want
                     targets = targets[:want]
                     if not targets:

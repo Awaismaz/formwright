@@ -43,6 +43,14 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f5) — Fastener-kit sub-assemblies integrate (CD-034); layout-envelopes merged (CD-029)
+
+Founder: Assemble Fasteners stuck on F1. Cause: Archie's plan put every bought-out part in a "Fasteners" sub-assembly
+with no designed part, so the layout made no assembly document for it and Fitz blocked on every retry. Fix: kit
+levels complete at once and their fasteners go into each level's bolted joints; the old block heals on office start
+(F1: FC-39 back with Fitz after the restart). Also merged wip/layout-envelopes (CD-029, PD-69) after the full office
+suite passed on the merged tree (128).
+
 ## 2026-11-19 (f4) — Part preview in the ticket (CD-033)
 
 Founder: clicking a completed part should show a preview instead of going to the Design Studio. The ticket drawer now

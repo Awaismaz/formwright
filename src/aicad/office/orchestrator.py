@@ -427,6 +427,13 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
     for t in doc["tickets"]:
         r = run_of(t)
         why = str(r.get("blocked") or "")
+        if r.get("status") == "blocked" and t["kind"] == "integration" \
+                and why.startswith("The sub-assembly's assembly document is missing"):
+            close_wait(t)  # a fastener-kit level: it integrates now (CD-034)
+            _set_run(t, status="queued", next="integrate", attempt=0, blocked=None,
+                     line="Back to Fitz: a kit of bought-out parts is fitted where the joints are")
+            out.append(t)
+            continue
         if r.get("status") == "blocked" and why.startswith("Hex couldn't find") and t["kind"] == "standard" \
                 and not t.get("taken_over"):
             close_wait(t)

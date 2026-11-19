@@ -513,3 +513,28 @@ def test_advisory_review_points_never_block_a_part_that_passes_every_check(offic
     r = c.post(f"/api/office/programs/{pid}/archie/actions", json={"message": m["id"], "action": "a1"})
     assert r.status_code == 200, r.text
     v = _wait(c, pid, lambda v: _tk(v, "Base plate")["column"] in ("approved", "integrated"))
+
+
+def test_a_fastener_kit_subassembly_integrates_instead_of_blocking(office: Any) -> None:
+    """CD-034: a sub-assembly of bought-out parts only (no designed part, so no layout of its own) used to block with
+    "the sub-assembly's assembly document is missing" on every retry."""
+    plan = {"source": "standard", "summary": "", "assumptions": [], "subassemblies": [
+        {"name": "Base", "description": "", "parts": [
+            {"name": "Base plate", "family": "machined", "complexity": 2, "qty": 1,
+             "description": "Plate 120 x 80 x 10 mm."},
+            {"name": "Spacer", "family": "turned", "complexity": 1, "qty": 1, "description": "Spacer Ø20 x 15 mm.",
+             "mounts_on": "Base plate"}]},
+        {"name": "Fasteners", "description": "", "parts": [
+            {"name": "Cap screw", "family": "standard", "complexity": 1, "qty": 4, "description": "Hex bolts M6 x 25."},
+            {"name": "Washer", "family": "standard", "complexity": 1, "qty": 4, "description": "Washer M6."}]}]}
+    c = office
+    v = _program(c, "kit@x.com", plan)
+    pid = v["id"]
+    c.post(f"/api/office/programs/{pid}/run")
+    v = _wait(c, pid, lambda v: v["orchestrator"]["state"] == "complete"
+              or any((t.get("run") or {}).get("status") == "blocked" for t in v["tickets"]), timeout=180)
+    blocked = [(t["title"], (t.get("run") or {}).get("line")) for t in v["tickets"]
+               if (t.get("run") or {}).get("status") == "blocked"]
+    assert not blocked, blocked
+    kit = _tk(v, "Assemble Fasteners")
+    assert kit["column"] == "integrated" and "kit of 2 bought-out parts" in kit["run"]["line"]
