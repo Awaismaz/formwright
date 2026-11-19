@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Moon, Sun } from "lucide-react";
 import { LogoMark } from "@/components/ui";
 import { cx } from "@/lib/format";
-import { useReducedMotion } from "./motion";
 import "./site.css";
 
 /**
@@ -43,13 +43,15 @@ export function SiteScope({ children, className }: { children: ReactNode; classN
   );
 }
 
-/** Paper / Blueprint: a two-key rocker; the chosen key stays pressed down. */
+/** Paper (day, light) / Blueprint (night, dark): a two-key rocker with sun and moon icons; the chosen key stays pressed. */
 export function ThemeSwitch({ className }: { className?: string }) {
   const { theme, set } = useSiteTheme();
   return (
     <div role="group" aria-label="Page theme" className={cx("inline-flex gap-1", className)}>
-      {([["light", "Paper"], ["dark", "Blueprint"]] as const).map(([t, l]) => (
-        <Button3D key={t} size="xs" finish="steel" pressed={theme === t} onClick={() => set(t)}>{l}</Button3D>
+      {([["light", "Paper", Sun], ["dark", "Blueprint", Moon]] as const).map(([t, l, Icon]) => (
+        <Button3D key={t} size="xs" finish="steel" pressed={theme === t} onClick={() => set(t)}>
+          <span className="inline-flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" aria-hidden="true" />{l}</span>
+        </Button3D>
       ))}
     </div>
   );
@@ -220,41 +222,6 @@ export function Zones({ n = 8, className }: { n?: number; className?: string }) 
       ))}
     </div>
   );
-}
-
-/**
- * The drafting cursor: thin crosshair lines and a coordinate readout in millimetres from the element's origin.
- * Pointer devices only; nothing moves under reduced motion.
- */
-export function Crosshair() {
-  const ref = useRef<HTMLDivElement>(null);
-  const reduced = useReducedMotion();
-  useEffect(() => {
-    const el = ref.current;
-    const host = el?.parentElement;
-    if (!el || !host || reduced || !window.matchMedia?.("(pointer: fine)").matches) return;
-    const [x, y, tag] = [el.children[0] as HTMLElement, el.children[1] as HTMLElement, el.children[2] as HTMLElement];
-    let raf = 0, px = 0, py = 0;
-    const draw = () => {
-      raf = 0;
-      x.style.transform = `translate3d(0, ${py}px, 0)`;
-      y.style.transform = `translate3d(${px}px, 0, 0)`;
-      const mm = (v: number) => (v * 25.4 / 96).toFixed(1).padStart(5, " ");
-      tag.textContent = `X ${mm(px)}  Y ${mm(py)}`;
-      tag.style.transform = `translate3d(${px + 12}px, ${py + 12}px, 0)`;
-    };
-    const move = (e: PointerEvent) => {
-      const r = host.getBoundingClientRect();
-      px = e.clientX - r.left; py = e.clientY - r.top;
-      el.classList.add("is-on");
-      if (!raf) raf = requestAnimationFrame(draw);
-    };
-    const leave = () => el.classList.remove("is-on");
-    host.addEventListener("pointermove", move, { passive: true });
-    host.addEventListener("pointerleave", leave);
-    return () => { host.removeEventListener("pointermove", move); host.removeEventListener("pointerleave", leave); if (raf) cancelAnimationFrame(raf); };
-  }, [reduced]);
-  return <div ref={ref} className="s-xhair" aria-hidden="true"><i className="x" /><i className="y" /><b /></div>;
 }
 
 /**

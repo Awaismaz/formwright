@@ -14,7 +14,7 @@ import AppDevices from "@/components/landing/AppDevices";
 import Showcase from "@/components/landing/Showcase";
 import ExplodeOnScroll from "@/components/landing/ExplodeOnScroll";
 import { Reveal } from "@/components/landing/motion";
-import { Badge3D, Button3D, Card3D, Crosshair, Dim, Fcf, SectionHead, Zones } from "@/components/landing/site";
+import { Badge3D, Button3D, Card3D, Dim, Fcf, SectionHead, Zones } from "@/components/landing/site";
 
 export const SALES = "mailto:sales@formwright.dev?subject=Formwright%20Enterprise";
 
@@ -102,7 +102,6 @@ export default function Landing() {
     <main>
       {/* ------------------------------------------------ hero */}
       <section className="s-grid relative overflow-hidden border-b border-ink/80">
-        <Crosshair />
         <div className="relative mx-auto max-w-[1240px] px-4 pb-14 pt-10 sm:px-6 lg:pt-14">
           <div className="flex flex-wrap items-center gap-3">
             <Fcf cells={["Ø 0.00", "Brief"]} />
