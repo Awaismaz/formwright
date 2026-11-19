@@ -401,6 +401,9 @@ def evaluate(doc: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
     ov = icd.apply_values(ic["overrides"], f, c["values"])
     sk2, ifs2 = _rebuild(doc, ov)
     probs = icd.problems(sk2, ifs2)
+    if probs:  # a change may not add a problem (one the approved layout already had, e.g. an older check, stays)
+        had = set(icd.problems(doc["skeleton"], ic["interfaces"]))
+        probs = [p for p in probs if p not in had]
     if probs:
         return {"ok": False, "reason": f"It can't be built inside the frozen envelopes: {probs[0]}"}
     d = icd.diff(doc["skeleton"], ic["interfaces"], sk2, ifs2)
@@ -552,7 +555,11 @@ def view(doc: dict[str, Any]) -> dict[str, Any] | None:
             extra["limits"] = {"hole": icd.zone(d["D"], d["housing_fit"]), "shaft": icd.zone(d["d"], d["shaft_fit"])}
         out.append({**f, "label": icd.KIND_LABEL[f["kind"]], "sides": sides, "crs": crs,
                     "editable": list(icd.EDITABLE[f["kind"]]), **extra})
+    probs = ic.get("problems") or []
     return {"version": ic["version"], "status": ic["status"], "interfaces": out, "history": ic["history"][-60:],
-            "problems": ic.get("problems") or [], "skeleton": {k: v for k, v in sk.items()},
+            "problems": probs, "warnings": icd.warnings(sk, ic["interfaces"]),
+            # the problems with their codes and the items / interfaces they name (computed only when there are any)
+            "issues": [x for x in icd.issues(sk, ic["interfaces"]) if x["severity"] == "error"] if probs else [],
+            "skeleton": {k: v for k, v in sk.items()},
             "fits": list(icd.FITS), "fasteners": [f"M{m}" for m in icd.CLEARANCE],
             "bearings": [str(k) for k in sorted(icd.BEARINGS)], "housing_fits": list(icd.HOUSING_FITS)}

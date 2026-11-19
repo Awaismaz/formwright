@@ -165,6 +165,14 @@ def icd_mates(aroot: Path, adoc: dict[str, Any], skel: dict[str, Any], f: dict[s
         eb = next((x for x in fb if x["type"] == "face"), None)
         if ea and eb:
             pairs.append(("flush", "end", ea, eb))
+    elif f["kind"] == "bearing_journal":  # the shaft's journal in the bearing's bore (+ its shoulder on the ring)
+        journal = next(x for x in fa if x["type"] == "boss")
+        bore = next(x for x in fb if x["type"] == "seat")
+        pairs.append(("concentric", "axis", journal, bore))
+        sa = next((x for x in fa if x["type"] == "face"), None)
+        sb = next((x for x in fb if x["type"] == "face"), None)
+        if sa and sb:
+            pairs.append(("coincident", "shoulder", sa, sb))
     elif f["kind"] == "face":
         pairs.append(("coincident", "face", fa[0], fb[0]))
     made, problems = 0, []
@@ -631,6 +639,12 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
                     what = "bearing" if seat["code"] == "bearing" else "dowel pin"
                     seated[what] = seated.get(what, 0) + len(seat["at"])
+                    if any(f["kind"] == "bearing_journal" and f["b"]["item"] == t["item_id"] for f in ifaces):
+                        # bearings on shaft journals (no housing): mated to their shafts by interface name
+                        _nm, pm = await asyncio.to_thread(
+                            lambda adoc=adoc, it=t["item_id"]: relink(aroot, adoc, sk, ifaces, {it}))
+                        if pm:
+                            say(f"{t['title']}: {pm[0]}", "warn")
                     extra = int(t.get("qty") or 1) - len(seat["at"])
                     say(f"Fitz seated {len(seat['at'])} × {seat['title']} in the {seat['what']} of {seat['interface']}"
                         + (f" ({extra} more than the ICD places: left out)" if extra > 0 else ""),

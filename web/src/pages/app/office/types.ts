@@ -55,7 +55,7 @@ export interface Ticket {
 }
 
 // ------------------------------------------------------------------ Phase 4: skeleton, ICD, change requests
-export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel";
+export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel" | "bearing_journal";
 export interface CheckRow { feature: string; spec: string; measured: string; ok: boolean; delta_mm?: number; d_mm?: number }
 /** The part's own frame as Gage matched it to the ICD part frame (identity: modelled in the ICD frame). */
 export interface PartFrame { R: number[][]; t: number[]; identity: boolean; label: string }
@@ -89,7 +89,9 @@ export interface SkeletonItem {
   bearing?: { designation: number; item: string; journal: number; seats: number };
 }
 export interface Skeleton {
-  units: "mm"; base: string | null; csys: string; envelope: { min: number[]; max: number[]; size: number[] };
+  units: "mm"; base: string | null; csys: string;
+  /** How the program is laid out: on a block, in a gearbox housing, as a shaft line (no housing) or a row (nothing to mount on). */
+  layout?: "block" | "gearbox" | "shaft_line" | "row"; envelope: { min: number[]; max: number[]; size: number[] };
   datums: { id: string; kind: string; name: string; origin: number[]; normal: number[] }[];
   axes: { id: string; name: string; item: string; origin: number[]; dir: number[] }[];
   items: Record<string, SkeletonItem>; notes: string[];
@@ -97,6 +99,10 @@ export interface Skeleton {
 }
 export interface Icd {
   version: number; status: "draft" | "approved"; interfaces: Interface[]; history: IcdHistory[]; problems: string[];
+  /** Layout warnings shown at the gate, not blocking (e.g. bearings no seat or journal takes). */
+  warnings?: string[];
+  /** The problems with a stable code and the items / interfaces they name. */
+  issues?: { code: string; severity: "error" | "warning"; text: string; items: string[]; interfaces: string[] }[];
   skeleton: Skeleton; fits: string[]; fasteners: string[]; bearings?: string[]; housing_fits?: string[];
 }
 export interface ChangeRequest {

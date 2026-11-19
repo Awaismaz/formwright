@@ -236,6 +236,8 @@ export function ifaceSummary(f: Pick<Interface, "kind" | "data">): string {
     case "gear_mesh": return `m${n(d.module)} · ${d.teeth_a} / ${d.teeth_b} teeth · a = ${n(d.centre_distance)}`;
     case "bearing_seat": return `${d.count} × ${d.designation} · seat Ø${n(d.D)} ${d.housing_fit} × ${n(d.B)} · journal Ø${n(d.d)} ${d.shaft_fit}`
       + (A !== "Z" ? ` · shaft along ${A} (side walls)` : "");
+    case "bearing_journal": return `${d.designation} on a journal Ø${n(d.d)} ${d.shaft_fit} · OD ${n(d.D)} × ${n(d.B)}`
+      + (A !== "Z" ? ` · shaft along ${A} (no housing)` : "");
     case "key": return `key ${n(d.b)} × ${n(d.h)} × ${n(d.length)} (DIN 6885) · shaft ${n(d.t1)} / hub ${n(d.t2)} deep`;
     case "dowel": return `${d.count} × Ø${n(d.d)} × ${n(d.length)} (ISO 8734) · holes ${String(d.fit).split("/")[0]}`;
     default: return "";
