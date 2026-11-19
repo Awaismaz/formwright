@@ -229,7 +229,7 @@ def test_bearing_seats_keys_dowels_and_rotation_layout() -> None:
     assert kf["shaft"]["depth"] == 3.5 and kf["hub"]["depth"] == 2.8 and kf["hub"]["dir"] == [1, 0]
     # Fitz seats the two bearings at the seat bottoms; Hex takes exactly that bearing
     assert icd.seated(ifs, BEARING) == {"code": "bearing", "params": {"SERIES": 6204}, "at": [[0, 0, -14], [0, 0, -40]],
-                                        "interface": "IF-01", "title": "Ball bearing 6204", "standard": "ISO 15",
+                                        "interface": "IF-01", "interfaces": ["IF-01"], "title": "Ball bearing 6204", "standard": "ISO 15",
                                         "what": "bearing seats"}
     ex = icd.excerpt(sk, {"version": 1, "interfaces": ifs}, HOUSING)
     assert "2 × Deep-groove ball bearing 6204 (bore 20, OD 47, width 14)" in ex and "bearing seat Ø47 H7 (top)" in ex
