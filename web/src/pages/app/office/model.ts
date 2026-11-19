@@ -239,6 +239,7 @@ export function ifaceSummary(f: Pick<Interface, "kind" | "data">): string {
     case "bearing_journal": return `${d.designation} on a journal Ø${n(d.d)} ${d.shaft_fit} · OD ${n(d.D)} × ${n(d.B)}`
       + (A !== "Z" ? ` · shaft along ${A} (no housing)` : "");
     case "key": return `key ${n(d.b)} × ${n(d.h)} × ${n(d.length)} (DIN 6885) · shaft ${n(d.t1)} / hub ${n(d.t2)} deep`;
+    case "retaining_ring": return `${d.ring} · groove Ø${n(d.d2)} × ${n(d.m)} on the Ø${n(d.d)} shaft, against the ${d.against}`;
     case "dowel": return `${d.count} × Ø${n(d.d)} × ${n(d.length)} (ISO 8734) · holes ${String(d.fit).split("/")[0]}`;
     default: return "";
   }

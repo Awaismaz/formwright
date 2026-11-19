@@ -131,6 +131,8 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
             out.append(f"{a} sits on {b} (the shaft passes through its bore)")
         elif k == "bearing_journal":  # side a: the shaft, side b: the bearing
             out.append(f"{b} sits on its journal on {a}")
+        elif k == "retaining_ring":  # side a: the shaft, side b: the ring (a thin flat ring in a shaft groove)
+            out.append(f"{b} (a thin retaining ring) sits in a groove on {a}, against the {d.get('against') or 'hub'} face")
         elif k == "bearing_seat":
             out.append(f"{a} carries {b} in {len(d.get('seats') or [])} bearing seat(s)")
         elif k == "hole_pattern":

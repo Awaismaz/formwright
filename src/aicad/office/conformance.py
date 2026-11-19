@@ -14,6 +14,7 @@ Per feature:
          housing fit's zone (or nominal); the seat depth is the shoulder face next to it
   keyway two exact side planes at ±b/2 from the keyway's centre line (width ±0.05) and the groove bottom (shaft) or
          the keyway top (hub) at the stated depth (±0.1), on the stated side of the axis
+  groove a DIN 471 ring groove: circular edges of radius d2 / 2 on the axis at both groove ends (Ø, ends ±0.1)
   envelope  the part's bounding box inside its envelope (+0.1 mm)
 Features along X or Y (``ax``, Phase 6: a gearbox housing's wall seats and cap screw holes) are measured with the
 same code after the part data is turned into the feature's canonical frame (``frames.CANON``). A ``blind`` hole (a
@@ -216,6 +217,29 @@ def _keyway(f: dict[str, Any], refs: dict[str, Any]) -> dict[str, Any]:
             "width_mm": round(width, 4), "depth_mm": round(got, 4)}
 
 
+def _groove(f: dict[str, Any], refs: dict[str, Any]) -> dict[str, Any]:
+    """A DIN 471 ring groove: circular edges of radius d2 / 2 on the axis at the groove's two ends."""
+    c = _xy(f["c"])
+    tol = float(f.get("tol") or icd.POS_TOL)
+    z0, z1, r = float(f["z0"]), float(f["z1"]), float(f["d"]) / 2
+    spec_txt = f"Ø{f['d']:g}, {z1 - z0:g} wide, from {(f.get('ax') or 'z').upper()} {z0:g} to {z1:g}"
+    found: list[tuple[float, float]] = []
+    for e in (refs.get("edges") or {}).values():
+        if e.get("kind") != "axis" or e.get("r") is None or not _along_z(e["v"]):
+            continue
+        if abs(float(e["r"]) - r) > icd.DEPTH_TOL / 2 or \
+                math.hypot(float(e["p"][0]) - c[0], float(e["p"][1]) - c[1]) > tol:
+            continue
+        if z0 - 0.5 <= float(e["p"][2]) <= z1 + 0.5:
+            found.append((float(e["p"][2]), 2 * float(e["r"])))
+    if len(found) < 2:
+        return {"feature": f["label"], "spec": spec_txt, "measured": "no groove of that size there", "ok": False}
+    lo, hi = min(found)[0], max(found)[0]
+    dd = min(found, key=lambda x: abs(x[1] - float(f["d"])))[1]
+    ok = abs(lo - z0) <= icd.DEPTH_TOL and abs(hi - z1) <= icd.DEPTH_TOL and abs(dd - float(f["d"])) <= icd.DEPTH_TOL
+    return {"feature": f["label"], "spec": spec_txt, "measured": f"Ø{dd:.3f} from {lo:.3f} to {hi:.3f}", "ok": ok}
+
+
 def envelope(item: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     L, W, H = item["size"]
     bb = info.get("bbox") or [0, 0, 0, 0, 0, 0]
@@ -260,6 +284,8 @@ def _row(f: dict[str, Any], info: dict[str, Any], refs: dict[str, Any]) -> dict[
         return _seat(f, refs)
     if f["type"] == "keyway":
         return _keyway(f, refs)
+    if f["type"] == "groove":
+        return _groove(f, refs)
     return _gear(f, info)
 
 

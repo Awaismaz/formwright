@@ -61,7 +61,7 @@ export interface Ticket {
 }
 
 // ------------------------------------------------------------------ Phase 4: skeleton, ICD, change requests
-export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel" | "bearing_journal";
+export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel" | "bearing_journal" | "retaining_ring";
 export interface CheckRow { feature: string; spec: string; measured: string; ok: boolean; delta_mm?: number; d_mm?: number }
 /** The part's own frame as Gage matched it to the ICD part frame (identity: modelled in the ICD frame). */
 export interface PartFrame { R: number[][]; t: number[]; identity: boolean; label: string }

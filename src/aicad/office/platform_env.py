@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -442,12 +443,23 @@ class PlatformEnv(orchestrator.Env):
         if tb_gear:  # a designed gear Hex took from the Toolbox (sized to the ICD): it goes in like a built part. The
             # Toolbox gear runs from Z 0 to its face width with a tooth on +X: its ICD frame is that, moved down B / 2
             from aicad.assembly import service as aservice
+            from aicad.assembly import store as astore
             from aicad.office import frames as rigid
 
             r = t["reuse"]
             key = await aservice.ensure_toolbox_part(_aroot(self.org_id), self.org_id, "spur_gear", r["params"])
-            t["icd_check"] = {**(t.get("icd_check") or {}), "part_key": key,
-                              "frame": rigid.frame(rigid.IDENT, [0.0, 0.0, -float(r["params"]["B"]) / 2])}
+            fr = rigid.frame(rigid.IDENT, [0.0, 0.0, -float(r["params"]["B"]) / 2])
+            t["icd_check"] = {**(t.get("icd_check") or {}), "part_key": key, "frame": fr}
+            if interfaces.has_icd(doc):  # Gage's ICD measurement, as for a designed part (bore, hub keyway, faces)
+                try:
+                    info = (astore.part(_aroot(self.org_id), key) or {}).get("info") or {}
+                    refs = astore.refs(_aroot(self.org_id), key)
+                    i2, r2 = rigid.info_in(info, fr["R"], fr["t"]), rigid.refs_in(refs, fr["R"], fr["t"])
+                    res = conformance.measure(doc["skeleton"], doc["icd"], t["item_id"], i2, r2, frame_tolerant=False)
+                    t["icd_check"].update(version=doc["icd"]["version"], ok=res["ok"], interfaces=res["interfaces"],
+                                          envelope=res["envelope"])
+                except Exception:
+                    log.warning("toolbox gear conformance failed", exc_info=True)
             with store.lock(pid):
                 d = store.load(root, pid)
                 if d is not None:
@@ -847,8 +859,76 @@ def children(doc: dict[str, Any], t: dict[str, Any]) -> list[dict[str, Any]]:
 TOOLBOX_FOR_PARTS = {"fastener", "dowel", "gear"}
 # standard parts the Toolbox doesn't stock: their names often carry the host's noun ("Pinion key", "Gear circlip"),
 # which must not be read as that host (a key read as a spur gear, a circlip as a shaft; live run 2026-11-19)
-NOT_STOCKED = re.compile(r"\b(keys?|circlips?|retaining rings?|snap rings?|e-?clips?|seals?|o-?rings?|springs?|"
-                         r"grease nipples?|lock ?nuts?|tab washers?|spacer sleeves?)\b", re.IGNORECASE)
+# Keys (DIN 6885) and shaft retaining rings (DIN 471) are stocked now (2026-11-19) and read before any host noun
+# (``librarian.read_toolbox``); with an ICD they are seated in their keyseats / grooves (``icd.seated``).
+NOT_STOCKED = re.compile(r"\b(e-?clips?|internal circlips?|seals?|o-?rings?|springs?|grease nipples?|lock ?nuts?|"
+                         r"tab washers?|spacer sleeves?)\b", re.IGNORECASE)
+# a plan's material name in a description: EN steel names (42CrMo4, 16MnCr5, 18CrNiMo7-6, C45E), AISI / SAE
+# numbers, common non-ferrous metals and plastics
+_MATERIAL = re.compile(r"\b(\d{2}(?:Cr|Mn|Ni|Mo|Si)[A-Za-z]*\d+(?:-\d+)?|C\d{2}E?|S\d{3}(?:JR|J0|J2)?|"
+                       r"(?:AISI|SAE)\s?\d{4}|\d{4}\s+steel|stainless(?: steel)?(?: \d{3})?|brass|bronze|"
+                       r"POM|PA ?6{1,2}|nylon|acetal|cast iron)\b", re.IGNORECASE)
+
+
+def plan_material(text: str) -> str | None:
+    """The material a plan item names in its description ("... in 42CrMo4, induction hardened"), verbatim."""
+    m = _MATERIAL.search(text or "")
+    return m.group(1) if m else None
+
+
+def toolbox_gear_for(doc: dict[str, Any], item_id: str, params: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """The Toolbox spur-gear parameters that carry every ICD feature of a designed gear (module, teeth, face width,
+    bore, one through DIN 6885 hub keyway, its own faces), or (None, why) when the ICD asks for something the
+    Toolbox gear can't carry (a hub, holes, a blind or off-axis bore, a second keyway ...): the gear then stays
+    designed, so the Toolbox path never drops an ICD feature silently (live gear run 2026-11-19)."""
+    from aicad import toolbox
+    from aicad.office import frames, icd
+
+    skel = doc["skeleton"]
+    it = skel["items"][item_id]
+    B = float(it["face_width"])
+    if abs(float(it["size"][2]) - B) > 1e-6:
+        return None, "its envelope is longer than its face width (a hub)"
+    vals: dict[str, Any] = {**params, "M": it["module"], "Z": it["teeth"], "B": B, "KEY_B": 0, "KEY_T2": 0,
+                            "KEY_ANG": 0}
+    if it.get("bore"):
+        vals["BORE"] = it["bore"]
+    feats = icd.item_features(skel, doc["icd"]["interfaces"], item_id)
+
+    def on_axis(f: dict[str, Any]) -> bool:
+        return not f.get("ax") and abs(float(f["c"][0])) < 1e-6 and abs(float(f["c"][1])) < 1e-6
+
+    kw: dict[str, Any] | None = None
+    for f in feats:
+        if f["type"] == "gear":
+            if abs(float(f["module"]) - float(it["module"])) > 1e-9 or int(f["teeth"]) != int(it["teeth"]):
+                return None, f"the ICD gives {f['label']}"
+        elif f["type"] == "hole" and on_axis(f) and f.get("z0") is None:
+            vals["BORE"] = float(f["d"])
+        elif f["type"] == "keyway" and f["on"] == "hub" and on_axis(f) and kw is None:
+            kw = f
+            # the keyway's direction in the gear's part frame, exact (the feature's ``dir`` is rounded to 0.01, a
+            # 0.14° error at a 3° tooth phase: the key would bite 0.03 mm into the keyway side)
+            src = next(x for x in doc["icd"]["interfaces"] if x["id"] == f["if"])["data"]
+            q = frames.apply(frames.transpose(icd.item_R(it)), icd.point3(icd.ax_of(src), src["dir"], 0.0))
+            vals.update(KEY_B=float(f["b"]), KEY_T2=float(f["depth"]),
+                        KEY_ANG=round(math.degrees(math.atan2(q[1], q[0])), 6) + 0.0)
+        elif f["type"] == "face" and not f.get("ax") and abs(abs(float(f["z"])) - B / 2) < 1e-6 \
+                and (float(f["z"]) > 0) == (int(f["n"]) > 0):
+            continue  # one of the gear's own faces
+        else:
+            return None, f"the ICD asks for {f['label']}"
+    if kw is not None and abs(float(kw["d"]) - float(vals.get("BORE") or 0)) > 1e-6:
+        return None, "the hub keyway is not on the bore"
+    try:
+        p = toolbox.normalize("spur_gear", vals)
+    except toolbox.ToolboxError as e:
+        return None, str(e)
+    rf = p["M"] * p["Z"] / 2 - 1.25 * p["M"]  # the generator's limits (``toolbox._spur_gear``), checked before use
+    if p["BORE"] / 2 >= rf - p["M"] or (p["KEY_B"] and not (p["KEY_B"] < p["BORE"] and
+                                                            p["BORE"] / 2 + p["KEY_T2"] < rf - p["M"] / 2)):
+        return None, "the bore or hub keyway leaves no rim under the teeth"
+    return p, ""
 
 
 def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -873,36 +953,44 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
     unstocked = standard and NOT_STOCKED.search(t["title"]) is not None
     tb = None if unstocked else (librarian.read_toolbox(text) or (
         librarian.read_toolbox(f"{t['title']} {item['toolbox']}") if standard and item.get("toolbox") else None))
-    if tb is not None:
-        ok = standard or (tb.get("kind") in TOOLBOX_FOR_PARTS and tb.get("confidence") == "high")
-        if ok:
-            params = tb.get("params")
-            note = ""
-            if params is None:
-                params = toolbox.normalize(tb["code"], {})
-                tb = {**tb, "title": toolbox.spec(tb["code"]).title(params)}
-            it = ((doc.get("skeleton") or {}).get("items") or {}).get(t["item_id"]) or {}
-            if not standard and tb["code"] == "spur_gear" and it.get("role") == "gear" and interfaces.has_icd(doc):
-                from aicad.office import direct, icd
+    if tb is not None and (standard or (tb.get("kind") in TOOLBOX_FOR_PARTS and tb.get("confidence") == "high")):
+        params = tb.get("params")
+        note = ""
+        if params is None:
+            params = toolbox.normalize(tb["code"], {})
+            tb = {**tb, "title": toolbox.spec(tb["code"]).title(params)}
+        it = ((doc.get("skeleton") or {}).get("items") or {}).get(t["item_id"]) or {}
+        extra: dict[str, Any] = {}
+        keep = True
+        if not standard and tb["code"] == "spur_gear":
+            if it.get("role") == "gear" and interfaces.has_icd(doc):
+                from aicad.office import direct
 
                 if direct.enabled(doc) and direct.plan(doc, t)["path"] == "direct":
-                    # the interfaces fix the gear: it is built from them (bore, hub keyway, the plan's material, true
-                    # involute) in seconds, never swapped for a plain Toolbox gear that drops the keyway and material
+                    # the interfaces fix the gear: it is built from them (bore, hub keyway, the plan's material,
+                    # true involute) in seconds, through the Studio build and its checks (wip/office-direct)
                     return None
-                if any(f["type"] not in ("hole", "gear", "face") for f in
-                       icd.item_features(doc["skeleton"], doc["icd"]["interfaces"], t["item_id"])):
-                    return None  # a keyed bore: the Toolbox gear has none, the designer builds it (direct, no AI)
-                # a designed gear Hex takes from the Toolbox is made to its ICD: module, teeth, face width, bore
-                params = toolbox.normalize("spur_gear", {**params, "M": it["module"], "Z": it["teeth"],
-                                                         "B": it["face_width"], **({"BORE": it["bore"]} if it.get("bore") else {})})
-                tb = {**tb, "title": toolbox.spec("spur_gear").title(params), "read": True}
+                # the direct builder is off or declined: the Toolbox gear only if it carries every ICD feature
+                # a designed gear Hex takes from the Toolbox is made to its ICD: module, teeth, face width, bore and
+                # hub keyway, in the plan's material; anything else the ICD asks for keeps it designed
+                faithful, _why = toolbox_gear_for(doc, t["item_id"], params)
+                keep = faithful is not None
+                if faithful is not None:
+                    params = faithful
+                    tb = {**tb, "title": toolbox.spec("spur_gear").title(params), "read": True}
+            elif re.search(r"\bkey(?:ed|way|seat)?s?\b|\bhub\b|\bspline", text, re.IGNORECASE):
+                keep = False  # no ICD to size the keyway / hub from: a plain Toolbox gear would drop it
+            mat = plan_material(item.get("description") or "")
+            extra = {"material": mat or toolbox.spec("spur_gear").material, "designed": True}
+        if keep:
             if not tb.get("read") and tb.get("kind") != "fastener":
                 note = " (default size: the brief gives none, check it)"
             elif tb.get("kind") == "fastener" and not (tb.get("fasten") or {}).get("size"):
                 note = " (size to suit the holes at assembly)"
             return {"source": "toolbox", "code": tb["code"], "params": params, "title": tb["title"],
                     "standard": tb.get("standard"), "kind": tb.get("kind"), "fasten": tb.get("fasten"),
-                    "confidence": tb.get("confidence"), "found": f"Hex found {tb['title']} in the Toolbox{note}"}
+                    "confidence": tb.get("confidence"), "found": f"Hex found {tb['title']} in the Toolbox{note}",
+                    **extra}
     hits = librarian.find_parts(t["title"], candidates, limit=1)
     if hits and hits[0]["score"] >= (0.67 if standard else 0.99):
         h = hits[0]

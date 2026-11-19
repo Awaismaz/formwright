@@ -208,12 +208,18 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
         if ts and (r["kind"] != "toolbox" or any((inst_items.get(i) or {}).get("bin") for i in r.get("instances") or [])):
             qty = max(qty, planned)
         each = r.get("mass_each_g")
+        # a designed part Hex made from a Toolbox generator (a gear sized to the ICD) is still made, in the plan's
+        # material, not bought (live gear run 2026-11-19: "Steel C45, buy" for a 42CrMo4 pinion)
+        made_tb = r["kind"] == "toolbox" and t is not None and t["kind"] == "part" \
+            and bool((t.get("reuse") or {}).get("designed"))
         rows.append({
-            "qty": qty, "part": r["part"], "make_buy": "buy" if r["kind"] == "toolbox" else "make",
+            "qty": qty, "part": r["part"], "make_buy": "buy" if r["kind"] == "toolbox" and not made_tb else "make",
             "kind": r["kind"], "designation": r.get("designation"), "standard": r.get("standard"),
-            "material": r.get("material"), "mass_each_g": each,
+            "material": (t.get("reuse") or {}).get("material") if made_tb and t is not None else r.get("material"),
+            "mass_each_g": each,
             "mass_total_g": None if each is None else round(float(each) * qty, 2),
-            "description": (("Placeholder: still in design" if r["kind"] == "placeholder" else
+            "description": ("Designed in this program (Toolbox generator, sized by the ICD)" if made_tb else
+                            ("Placeholder: still in design" if r["kind"] == "placeholder" else
                              "Company part, reused" if t is not None and (t.get("reuse") or {}).get("source") == "project"
                              else "Designed in this program") if r["kind"] != "toolbox" else
                             ("From the plan" if t is not None else "Added by Fitz for the bolted joints")),
@@ -227,13 +233,13 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
         r = t.get("reuse") or {}
         pid = t.get("project_id") or (r.get("project_id") if r.get("source") == "project" else None)
         info = project_info.get(pid or "") or {}
-        buy = r.get("source") == "toolbox" or (t["kind"] == "standard" and not pid)
+        buy = (r.get("source") == "toolbox" and not r.get("designed")) or (t["kind"] == "standard" and not pid)
         each = info.get("mass_g")
         qty = int(t.get("qty") or 1)
         rows.append({"qty": qty, "part": info.get("name") or (r.get("title") if buy else None) or t["title"],
                      "make_buy": "buy" if buy else "make", "kind": "toolbox" if buy else "project",
                      "designation": r.get("title") if buy else None, "standard": r.get("standard") if buy else None,
-                     "material": info.get("material"), "mass_each_g": each,
+                     "material": info.get("material") or r.get("material"), "mass_each_g": each,
                      "mass_total_g": None if each is None else round(float(each) * qty, 2),
                      "description": "Not in the program assembly yet" if not buy else "From the plan (not placed)",
                      "ticket": t["id"], "key": t["key"], "part_key": None, "instances": []})
