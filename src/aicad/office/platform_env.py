@@ -134,7 +134,7 @@ class PlatformEnv(orchestrator.Env):
                            fake_agents.FakeClient if self.simulated else None)
 
     async def design(self, project_id: str, prompt: str, shown: str, budget: int | None,
-                     on_event: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+                     on_event: Callable[[dict[str, Any]], None], job: dict[str, Any] | None = None) -> dict[str, Any]:
         from aicad.platform import metering
         from aicad.platform.db import utcnow
         from aicad.platform.models import AgentRun, Organization
@@ -188,6 +188,7 @@ class PlatformEnv(orchestrator.Env):
             except Exception:
                 log.exception("progress update failed")
 
+        s.job_hint = dict(job or {})  # PD-82: the program's size routes small-program parts to a lighter model
         task = asyncio.create_task(s.send(prompt, shown=shown, mode="build"))
         try:
             while not task.done() or not q.empty():
@@ -208,7 +209,7 @@ class PlatformEnv(orchestrator.Env):
     async def warm(self) -> None:
         from aicad.agent import worker
 
-        await worker.warm(self.org_id)  # the warm worker the Studio builds of this organisation run on
+        await worker.warm_pool(self.org_id)  # the warm worker(s) the Studio builds of this organisation run on
 
     async def design_direct(self, project_id: str, script: str, note: str) -> dict[str, Any]:
         """A model script written without AI (``office.direct``), built exactly as the design agent's build tool
@@ -1085,7 +1086,7 @@ async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str
     from aicad.agent import worker
 
     # parts built from the interfaces (office.direct) start as soon as Run is pressed: have the engine warm by then
-    warm = asyncio.get_running_loop().create_task(worker.warm(org_id))
+    warm = asyncio.get_running_loop().create_task(worker.warm_pool(org_id))
     _ADVISORY.add(warm)
     warm.add_done_callback(_ADVISORY.discard)
     if not assembly_allowed(org_id, god_paywall):

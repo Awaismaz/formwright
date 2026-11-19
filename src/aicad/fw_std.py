@@ -287,11 +287,31 @@ def shaft_keyway(part: Any, d: float, z_center: float, length: float, *, b: floa
 
 # ------------------------------------------------------------------ holes
 def hole_spec(spec: Any, fit: str = "medium") -> dict[str, Any]:
-    """'M8', 'M8 clearance', 'M6 tapped', 'M10 cbore', 'M8 csk' (Hole Wizard tables) or a plain diameter."""
+    """'M8', 'M8 clearance', 'M6 tapped', 'M10 cbore', 'M8 csk' (Hole Wizard tables), a plain diameter, or a custom
+    hole as a dict: {"d": 6.6, "cbore": (11, 6.5)} (counterbore Ø × depth) or {"d": 6.6, "csk": (13, 90)}
+    (countersink Ø × included angle)."""
     from aicad import holes
 
     if isinstance(spec, (int, float)):
         return {"d": float(spec), "spec": {"label": f"Ø{spec:g}"}}
+    if isinstance(spec, dict):
+        d = float(spec["d"])
+        if d <= 0:
+            raise ValueError("hole Ø must be positive")
+        out: dict[str, Any] = {"d": d, "spec": {"label": f"Ø{d:g}"}}
+        if spec.get("cbore"):
+            cd, ch = (float(x) for x in spec["cbore"])
+            if cd <= d or ch <= 0:
+                raise ValueError("counterbore needs a Ø larger than the hole and a positive depth")
+            out["cbore"] = {"d": cd, "depth": ch}
+            out["spec"]["label"] = f"Ø{d:g}, counterbore Ø{cd:g} × {ch:g}"
+        elif spec.get("csk"):
+            cd, ang = (float(x) for x in spec["csk"])
+            if cd <= d or not 0 < ang < 180:
+                raise ValueError("countersink needs a Ø larger than the hole and an angle between 0 and 180°")
+            out["csk"] = {"d": cd, "angle": ang}
+            out["spec"]["label"] = f"Ø{d:g}, countersink Ø{cd:g} × {ang:g}°"
+        return out
     words = str(spec).replace("×", "x").split()
     size = words[0].upper().lstrip("M").split("X")[0]
     kind = (words[1] if len(words) > 1 else "clearance").lower()
@@ -368,3 +388,99 @@ def bolt_circle(part: Any, n: int, pcd: float, spec: Any, depth: float, *, z: fl
     part, info = holes_at(part, pts, spec, depth, normal=normal, fit=fit,
                           name=name or f"{n}× {lab} on PCD {pcd:g}")
     return part, {**info, "points": [list(p) for p in pts]}
+
+
+# ------------------------------------------------------------------ plates, gussets, cross holes, limits (agent-latency)
+def plate(length: float, width: float, thickness: float, *, corner_r: float = 0.0, name: str = "Plate",
+          z0: float = 0.0) -> tuple[Any, dict[str, Any]]:
+    """A rectangular plate length (X) × width (Y) × thickness (Z), centred on X/Y, from Z = z0 up, with optional
+    vertical corner radii. Returns (part, expected) with the hand volume (L W - (4 - pi) r²) T."""
+    from build123d import Align, Box, Pos, RectangleRounded, extrude
+
+    from aicad import fw
+
+    if min(length, width, thickness) <= 0:
+        raise ValueError("plate sizes must be positive")
+    r = float(corner_r)
+    if r < 0 or 2 * r >= min(length, width):
+        raise ValueError("corner radius must be below half the smaller side")
+    body = extrude(RectangleRounded(length, width, r), thickness) if r else \
+        Box(length, width, thickness, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    if z0:
+        body = Pos(0, 0, z0) * body
+    part = fw.feature(name + (f" (R{r:g} corners)" if r else ""), body, length=length, width=width, t=thickness)
+    return part, {"bbox": [length, width, thickness], "volume": (length * width - (4 - math.pi) * r * r) * thickness,
+                  "solids": 1}
+
+
+def gusset(part: Any, corner: Any, leg_a: Any, leg_b: Any, thickness: float, *, align: str = "center",
+           name: str = "Gusset") -> tuple[Any, float]:
+    """A flat triangular gusset (rib) in an inside corner. ``corner`` is the inside corner point; ``leg_a`` and
+    ``leg_b`` are vectors from it along the two faces, their lengths being the gusset's legs, e.g.
+    ``fw.gusset(part, (x, 52, 8), (0, -40, 0), (0, 0, 40), 8)``. The plate is ``thickness`` thick across the legs'
+    plane: ``align`` "center" (default) centres it on the corner point, "min" / "max" puts it on the negative /
+    positive side of leg_a × leg_b. Returns (part, added volume |leg_a × leg_b| · thickness / 2, exact when the
+    gusset lies outside the part)."""
+    from build123d import Plane, Polygon, Vector, extrude
+
+    from aicad import fw
+
+    c, a, b = Vector(*corner), Vector(*leg_a), Vector(*leg_b)
+    n = a.cross(b)
+    if n.length < 1e-9 or thickness <= 0:
+        raise ValueError("gusset legs must not be parallel and thickness must be positive")
+    n = n.normalized()
+    off = {"center": -thickness / 2, "min": -thickness, "max": 0.0}.get(align)
+    if off is None:
+        raise ValueError("align is center, min or max")
+    pl = Plane(origin=c + n * off, x_dir=a.normalized(), z_dir=n)
+    ua = a.normalized()
+    bx = b.dot(ua)
+    by = (b - ua * bx).length
+    tri = Polygon((0, 0), (a.length, 0), (bx, by), align=None)
+    body = extrude(pl * tri, thickness, dir=(n.X, n.Y, n.Z))
+    part = fw.feature(name, part + body, legs=(round(a.length, 6), round(b.length, 6)), t=thickness)
+    return part, 0.5 * a.cross(b).length * thickness
+
+
+def cross_hole_volume(shaft_d: float, d: float) -> float:
+    """Material a Ø d through hole removes from a round bar Ø shaft_d when the axes cross at right angles: the
+    integral of the hole's section chord times the bar's chord, ∫ 2 sqrt(r² - y²) · 2 sqrt(R² - y²) dy over |y| < r."""
+    R, r = shaft_d / 2, d / 2
+    if r >= R:
+        raise ValueError("a cross hole must be smaller than the bar")
+    # y = r sin(t), dy = r cos(t) dt keeps the integrand smooth at the rim
+    return _simpson(lambda t: 4 * (r * math.cos(t)) ** 2 * math.sqrt(R * R - (r * math.sin(t)) ** 2),
+                    -math.pi / 2, math.pi / 2, 800)
+
+
+def cross_hole(part: Any, d: float, shaft_d: float, z: float, *, angle: float = 0.0,
+               center: tuple[float, float] = (0.0, 0.0), name: str | None = None) -> tuple[Any, float]:
+    """A Ø d hole straight through a round bar Ø shaft_d whose axis is Z (through ``center``), at height z, along the
+    direction ``angle`` degrees from +X about Z (0 = along X). Returns (part, removed volume by the hand integral)."""
+    from build123d import Cylinder, Pos, Rot
+
+    from aicad import fw
+
+    vol = cross_hole_volume(shaft_d, d)
+    tool = Pos(center[0], center[1], z) * Rot(0, 0, angle) * Rot(0, 90, 0) * Cylinder(d / 2, shaft_d + 2)
+    return fw.feature(name or f"Cross hole Ø{d:g}", part - tool, d=d), vol
+
+
+def meta(group: str | None = None, unit: str = "mm", **limits: Any) -> dict[str, dict[str, Any]]:
+    """PARAM_META in one line per parameter: ``NAME=(min, max)``, ``(min, max, "label")`` or ``(min, max, "label",
+    step)``. Step defaults to 1 for ranges of 50 or more, 0.5 from 10, else 0.1; unit mm. Merge groups with |:
+    ``PARAM_META = fw.meta("Plate", W=(50, 300, "Width")) | fw.meta("Holes", HOLE_D=(3, 20, "Hole Ø"))``."""
+    out: dict[str, dict[str, Any]] = {}
+    for k, v in limits.items():
+        lo, hi = float(v[0]), float(v[1])
+        if hi <= lo:
+            raise ValueError(f"{k}: max must exceed min")
+        step = float(v[3]) if len(v) > 3 else 1.0 if hi - lo >= 50 else 0.5 if hi - lo >= 10 else 0.1
+        m: dict[str, Any] = {"min": v[0], "max": v[1], "step": step, "unit": unit}
+        if len(v) > 2 and v[2]:
+            m["label"] = str(v[2])
+        if group:
+            m["group"] = group
+        out[k] = m
+    return out
