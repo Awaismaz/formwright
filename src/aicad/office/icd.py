@@ -1647,7 +1647,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         th = math.degrees(math.atan2(v[1], v[0]))
         pa, pb = 360.0 / d["teeth_a"], 360.0 / d["teeth_b"]
         u = ((th - phase.get(ga, 0.0)) % pa) / pa       # 0 = a tooth faces gear b, 0.5 = a space does
-        v = (u + 0.5) % 1.0                              # gear b shows the opposite at the contact
+        v = (0.5 - u) % 1.0                              # gear b shows the opposite at the contact (the gears turn
+        #                                                  opposite ways, so an offset +s on a is -s on b)
         if gb not in phase:
             phase[gb] = round(((th + 180.0) - v * pb) % pb, 6)
         d["phase_b"] = phase[gb]
