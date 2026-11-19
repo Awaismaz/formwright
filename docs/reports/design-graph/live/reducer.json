@@ -1,0 +1,1048 @@
+{
+  "case": "reducer",
+  "brief": "Build a Single stage 3:1 reducer with Spur Gears",
+  "new": {
+    "wall_s": 19.7,
+    "error": null,
+    "cost_usd": 0.0638307,
+    "meta": {
+      "job": "complex",
+      "seconds": 19.69,
+      "tokens": {
+        "input_tokens": 2,
+        "output_tokens": 2408,
+        "cache_creation_input_tokens": 3106,
+        "cache_read_input_tokens": 0
+      },
+      "tier": "opus",
+      "check": [
+        "Output gear on Output shaft: the interfaces fit it on Ø20, the graph Ø30.",
+        "Key on Output shaft: the interfaces say 6 x 6, DIN 6885 says 8 x 7.",
+        "Output shaft: the interfaces carry it on 6204, the graph on 6206."
+      ]
+    },
+    "questions": [
+      {
+        "id": "material_spur_gear",
+        "question": "What material should the gears be?",
+        "options": [
+          "Steel (e.g. 42CrMo4, hardened)",
+          "Carbon steel (C45)",
+          "Cast iron",
+          "Acetal / nylon"
+        ],
+        "default": "Steel (e.g. 42CrMo4, hardened)",
+        "multi": false,
+        "other": true,
+        "why": "It sets the material of every spur gear."
+      }
+    ],
+    "notes": [],
+    "raw_reply": {
+      "summary": "Single-stage spur gear reducer, 3:1. A pinion on the input shaft meshes with a wheel on the output shaft. Both gears are keyed and seated against shaft shoulders. Each shaft runs in two deep-groove ball bearings in a split housing (base and cover) with bolted bearing caps.",
+      "assumptions": [
+        "The 3:1 ratio is a single spur pinion/wheel pair. Module, teeth and widths are left for standard sizing.",
+        "Each shaft leaves the housing on one side only. That side gets an open cap and the opposite side a blind cap.",
+        "The input and output shafts may need different bearing sizes, so each shaft has its own bearing entry.",
+        "Each gear is keyed and sits against a shoulder on a stepped shaft.",
+        "There are no seals, couplings or shaft-end keys, because the brief does not ask for them.",
+        "Fastener counts are typical: 4 screws per cap and 6 bolts joining the cover to the base."
+      ],
+      "components": [
+        {
+          "id": "housing_base",
+          "kind": "housing",
+          "name": "Housing base",
+          "params": {
+            "style": "split"
+          },
+          "group": "Housing"
+        },
+        {
+          "id": "housing_cover",
+          "kind": "cover",
+          "name": "Housing cover",
+          "group": "Housing"
+        },
+        {
+          "id": "cover_bolts",
+          "kind": "fastener",
+          "name": "Cover bolts",
+          "qty": 6,
+          "params": {
+            "style": "hex_bolt"
+          },
+          "group": "Housing"
+        },
+        {
+          "id": "input_shaft",
+          "kind": "shaft",
+          "name": "Input shaft",
+          "params": {
+            "role": "input",
+            "stepped": true
+          },
+          "group": "Input"
+        },
+        {
+          "id": "pinion",
+          "kind": "spur_gear",
+          "name": "Pinion",
+          "params": {
+            "role": "pinion"
+          },
+          "group": "Input"
+        },
+        {
+          "id": "pinion_key",
+          "kind": "key",
+          "name": "Pinion key",
+          "group": "Input"
+        },
+        {
+          "id": "input_bearings",
+          "kind": "bearing",
+          "name": "Input shaft bearings",
+          "qty": 2,
+          "group": "Input"
+        },
+        {
+          "id": "input_open_cap",
+          "kind": "bearing_cap",
+          "name": "Input open cap",
+          "params": {
+            "style": "open"
+          },
+          "group": "Input"
+        },
+        {
+          "id": "input_blind_cap",
+          "kind": "bearing_cap",
+          "name": "Input blind cap",
+          "params": {
+            "style": "blind"
+          },
+          "group": "Input"
+        },
+        {
+          "id": "output_shaft",
+          "kind": "shaft",
+          "name": "Output shaft",
+          "params": {
+            "role": "output",
+            "stepped": true
+          },
+          "group": "Output"
+        },
+        {
+          "id": "output_gear",
+          "kind": "spur_gear",
+          "name": "Output gear",
+          "params": {
+            "role": "wheel"
+          },
+          "group": "Output"
+        },
+        {
+          "id": "output_gear_key",
+          "kind": "key",
+          "name": "Output gear key",
+          "group": "Output"
+        },
+        {
+          "id": "output_bearings",
+          "kind": "bearing",
+          "name": "Output shaft bearings",
+          "qty": 2,
+          "group": "Output"
+        },
+        {
+          "id": "output_open_cap",
+          "kind": "bearing_cap",
+          "name": "Output open cap",
+          "params": {
+            "style": "open"
+          },
+          "group": "Output"
+        },
+        {
+          "id": "output_blind_cap",
+          "kind": "bearing_cap",
+          "name": "Output blind cap",
+          "params": {
+            "style": "blind"
+          },
+          "group": "Output"
+        },
+        {
+          "id": "cap_screws",
+          "kind": "fastener",
+          "name": "Bearing cap screws",
+          "qty": 16,
+          "params": {
+            "style": "shcs"
+          },
+          "group": "Housing"
+        }
+      ],
+      "connections": [
+        {
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "housing_cover",
+          "via": [
+            "cover_bolts"
+          ]
+        },
+        {
+          "kind": "keyed_hub",
+          "host": "input_shaft",
+          "guest": "pinion",
+          "via": [
+            "pinion_key"
+          ]
+        },
+        {
+          "kind": "shoulder_stop",
+          "host": "input_shaft",
+          "guest": "pinion"
+        },
+        {
+          "kind": "keyed_hub",
+          "host": "output_shaft",
+          "guest": "output_gear",
+          "via": [
+            "output_gear_key"
+          ]
+        },
+        {
+          "kind": "shoulder_stop",
+          "host": "output_shaft",
+          "guest": "output_gear"
+        },
+        {
+          "kind": "gear_mesh",
+          "host": "pinion",
+          "guest": "output_gear",
+          "params": {
+            "ratio": 3
+          }
+        },
+        {
+          "kind": "bearing_journal",
+          "host": "input_shaft",
+          "guest": "input_bearings",
+          "params": {
+            "count": 2
+          }
+        },
+        {
+          "kind": "bearing_journal",
+          "host": "output_shaft",
+          "guest": "output_bearings",
+          "params": {
+            "count": 2
+          }
+        },
+        {
+          "kind": "bearing_seat",
+          "host": "housing_base",
+          "guest": "input_bearings"
+        },
+        {
+          "kind": "bearing_seat",
+          "host": "housing_base",
+          "guest": "output_bearings"
+        },
+        {
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "input_open_cap",
+          "via": [
+            "cap_screws"
+          ]
+        },
+        {
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "input_blind_cap",
+          "via": [
+            "cap_screws"
+          ]
+        },
+        {
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "output_open_cap",
+          "via": [
+            "cap_screws"
+          ]
+        },
+        {
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "output_blind_cap",
+          "via": [
+            "cap_screws"
+          ]
+        }
+      ],
+      "questions": [
+        {
+          "id": "gear_material",
+          "question": "What material should the gears be?",
+          "options": [
+            "Steel (e.g. 42CrMo4, hardened)",
+            "Carbon steel (C45)",
+            "Cast iron",
+            "Acetal / nylon"
+          ],
+          "default": "Steel (e.g. 42CrMo4, hardened)"
+        }
+      ]
+    },
+    "graph": {
+      "schema": "fw-design-graph",
+      "version": 1,
+      "name": "Gear Reducer",
+      "brief": "Build a Single stage 3:1 reducer with Spur Gears",
+      "summary": "Single-stage spur gear reducer, 3:1. A pinion on the input shaft meshes with a wheel on the output shaft. Both gears are keyed and seated against shaft shoulders. Each shaft runs in two deep-groove ball bearings in a split housing (base and cover) with bolted bearing caps.",
+      "units": "mm",
+      "components": [
+        {
+          "id": "housing_base",
+          "kind": "housing",
+          "name": "Housing base",
+          "qty": 1,
+          "group": "Housing",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "split",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "housing_cover",
+          "kind": "cover",
+          "name": "Housing cover",
+          "qty": 1,
+          "group": "Housing",
+          "material": "",
+          "params": {},
+          "implied": false
+        },
+        {
+          "id": "cover_bolts",
+          "kind": "fastener",
+          "name": "Cover bolts",
+          "qty": 6,
+          "group": "Housing",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "hex_bolt",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "input_shaft",
+          "kind": "shaft",
+          "name": "Input shaft",
+          "qty": 1,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "role": {
+              "value": "input",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "stepped": {
+              "value": true,
+              "source": "rule",
+              "note": "a part locates against its shoulder"
+            },
+            "d": {
+              "value": 20.0,
+              "source": "assumed",
+              "note": "no size in the brief"
+            },
+            "shoulder_d": {
+              "value": 26.0,
+              "source": "rule",
+              "note": "shoulder step max(2.5, 0.1 d + 1) per side"
+            },
+            "journal_d": {
+              "value": 20.0,
+              "source": "standard",
+              "note": "the bore of the 6204"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "pinion",
+          "kind": "spur_gear",
+          "name": "Pinion",
+          "qty": 1,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "role": {
+              "value": "pinion",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "teeth": {
+              "value": 20,
+              "source": "rule",
+              "note": "pinion z = 20 (no undercut at 20 deg)"
+            },
+            "module": {
+              "value": 2.0,
+              "source": "assumed",
+              "note": "no module in the brief"
+            },
+            "face_width": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "face width 10 m"
+            },
+            "bore": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "bored to the Ø20 seat"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "pinion_key",
+          "kind": "key",
+          "name": "Pinion key",
+          "qty": 1,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "shaft_d": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "the seat it sits in"
+            },
+            "b": {
+              "value": 6.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "h": {
+              "value": 6.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "t1": {
+              "value": 3.5,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "t2": {
+              "value": 2.8,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø20"
+            },
+            "length": {
+              "value": 18.0,
+              "source": "rule",
+              "note": "floor(max(b + 2, B - 2)) for the hub width"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "input_bearings",
+          "kind": "bearing",
+          "name": "Input shaft bearings",
+          "qty": 2,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "designation": {
+              "value": 6204,
+              "source": "standard",
+              "note": "ISO 15, largest 62xx bore not above Ø20"
+            },
+            "d": {
+              "value": 20.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            },
+            "D": {
+              "value": 47.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            },
+            "B": {
+              "value": 14.0,
+              "source": "standard",
+              "note": "ISO 15 6204"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "input_open_cap",
+          "kind": "bearing_cap",
+          "name": "Input open cap",
+          "qty": 1,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "open",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "input_blind_cap",
+          "kind": "bearing_cap",
+          "name": "Input blind cap",
+          "qty": 1,
+          "group": "Input",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "blind",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_shaft",
+          "kind": "shaft",
+          "name": "Output shaft",
+          "qty": 1,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "role": {
+              "value": "output",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "stepped": {
+              "value": true,
+              "source": "rule",
+              "note": "a part locates against its shoulder"
+            },
+            "d": {
+              "value": 30.0,
+              "source": "rule",
+              "note": "Ø20 x 3^(1/3), up to a bearing bore"
+            },
+            "shoulder_d": {
+              "value": 38.0,
+              "source": "rule",
+              "note": "shoulder step max(2.5, 0.1 d + 1) per side"
+            },
+            "journal_d": {
+              "value": 30.0,
+              "source": "standard",
+              "note": "the bore of the 6206"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_gear",
+          "kind": "spur_gear",
+          "name": "Output gear",
+          "qty": 1,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "role": {
+              "value": "wheel",
+              "source": "assumed",
+              "note": "the model's guess"
+            },
+            "teeth": {
+              "value": 60,
+              "source": "rule",
+              "note": "round(3 x 20)"
+            },
+            "module": {
+              "value": 2.0,
+              "source": "assumed",
+              "note": "no module in the brief"
+            },
+            "face_width": {
+              "value": 20.0,
+              "source": "rule",
+              "note": "face width 10 m"
+            },
+            "bore": {
+              "value": 30.0,
+              "source": "rule",
+              "note": "bored to the Ø30 seat"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_gear_key",
+          "kind": "key",
+          "name": "Output gear key",
+          "qty": 1,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "shaft_d": {
+              "value": 30.0,
+              "source": "rule",
+              "note": "the seat it sits in"
+            },
+            "b": {
+              "value": 8.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø30"
+            },
+            "h": {
+              "value": 7.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø30"
+            },
+            "t1": {
+              "value": 4.0,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø30"
+            },
+            "t2": {
+              "value": 3.3,
+              "source": "standard",
+              "note": "DIN 6885-1 for Ø30"
+            },
+            "length": {
+              "value": 18.0,
+              "source": "rule",
+              "note": "floor(max(b + 2, B - 2)) for the hub width"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_bearings",
+          "kind": "bearing",
+          "name": "Output shaft bearings",
+          "qty": 2,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "designation": {
+              "value": 6206,
+              "source": "standard",
+              "note": "ISO 15, largest 62xx bore not above Ø30"
+            },
+            "d": {
+              "value": 30.0,
+              "source": "standard",
+              "note": "ISO 15 6206"
+            },
+            "D": {
+              "value": 62.0,
+              "source": "standard",
+              "note": "ISO 15 6206"
+            },
+            "B": {
+              "value": 16.0,
+              "source": "standard",
+              "note": "ISO 15 6206"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_open_cap",
+          "kind": "bearing_cap",
+          "name": "Output open cap",
+          "qty": 1,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "open",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "output_blind_cap",
+          "kind": "bearing_cap",
+          "name": "Output blind cap",
+          "qty": 1,
+          "group": "Output",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "blind",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        },
+        {
+          "id": "cap_screws",
+          "kind": "fastener",
+          "name": "Bearing cap screws",
+          "qty": 16,
+          "group": "Housing",
+          "material": "",
+          "params": {
+            "style": {
+              "value": "shcs",
+              "source": "assumed",
+              "note": "the model's guess"
+            }
+          },
+          "implied": false
+        }
+      ],
+      "connections": [
+        {
+          "id": "c1",
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "housing_cover",
+          "via": [
+            "cover_bolts"
+          ],
+          "params": {}
+        },
+        {
+          "id": "c2",
+          "kind": "keyed_hub",
+          "host": "input_shaft",
+          "guest": "pinion",
+          "via": [
+            "pinion_key"
+          ],
+          "params": {
+            "fit": {
+              "value": "H7/k6",
+              "source": "standard",
+              "note": "ISO 286 transition fit"
+            }
+          }
+        },
+        {
+          "id": "c3",
+          "kind": "shoulder_stop",
+          "host": "input_shaft",
+          "guest": "pinion",
+          "via": [],
+          "params": {}
+        },
+        {
+          "id": "c4",
+          "kind": "keyed_hub",
+          "host": "output_shaft",
+          "guest": "output_gear",
+          "via": [
+            "output_gear_key"
+          ],
+          "params": {
+            "fit": {
+              "value": "H7/k6",
+              "source": "standard",
+              "note": "ISO 286 transition fit"
+            }
+          }
+        },
+        {
+          "id": "c5",
+          "kind": "shoulder_stop",
+          "host": "output_shaft",
+          "guest": "output_gear",
+          "via": [],
+          "params": {}
+        },
+        {
+          "id": "c6",
+          "kind": "gear_mesh",
+          "host": "pinion",
+          "guest": "output_gear",
+          "via": [],
+          "params": {
+            "ratio": {
+              "value": 3.0,
+              "source": "rule",
+              "note": "z2 / z1"
+            },
+            "centre_distance": {
+              "value": 80.0,
+              "source": "rule",
+              "note": "a = m (z1 + z2) / 2"
+            }
+          }
+        },
+        {
+          "id": "c7",
+          "kind": "bearing_journal",
+          "host": "input_shaft",
+          "guest": "input_bearings",
+          "via": [],
+          "params": {
+            "count": {
+              "value": 2,
+              "source": "assumed",
+              "note": ""
+            }
+          }
+        },
+        {
+          "id": "c8",
+          "kind": "bearing_journal",
+          "host": "output_shaft",
+          "guest": "output_bearings",
+          "via": [],
+          "params": {
+            "count": {
+              "value": 2,
+              "source": "assumed",
+              "note": ""
+            }
+          }
+        },
+        {
+          "id": "c9",
+          "kind": "bearing_seat",
+          "host": "housing_base",
+          "guest": "input_bearings",
+          "via": [],
+          "params": {}
+        },
+        {
+          "id": "c10",
+          "kind": "bearing_seat",
+          "host": "housing_base",
+          "guest": "output_bearings",
+          "via": [],
+          "params": {}
+        },
+        {
+          "id": "c11",
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "input_open_cap",
+          "via": [
+            "cap_screws"
+          ],
+          "params": {}
+        },
+        {
+          "id": "c12",
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "input_blind_cap",
+          "via": [
+            "cap_screws"
+          ],
+          "params": {}
+        },
+        {
+          "id": "c13",
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "output_open_cap",
+          "via": [
+            "cap_screws"
+          ],
+          "params": {}
+        },
+        {
+          "id": "c14",
+          "kind": "bolted_joint",
+          "host": "housing_base",
+          "guest": "output_blind_cap",
+          "via": [
+            "cap_screws"
+          ],
+          "params": {}
+        }
+      ],
+      "constraints": {
+        "named": [
+          "gear"
+        ],
+        "excluded": [],
+        "exclusive": false
+      },
+      "assumptions": [
+        "The 3:1 ratio is a single spur pinion/wheel pair. Module, teeth and widths are left for standard sizing.",
+        "Each shaft leaves the housing on one side only. That side gets an open cap and the opposite side a blind cap.",
+        "The input and output shafts may need different bearing sizes, so each shaft has its own bearing entry.",
+        "Each gear is keyed and sits against a shoulder on a stepped shaft.",
+        "There are no seals, couplings or shaft-end keys, because the brief does not ask for them.",
+        "Fastener counts are typical: 4 screws per cap and 6 bolts joining the cover to the base."
+      ],
+      "questions": [
+        {
+          "id": "material_spur_gear",
+          "question": "What material should the gears be?",
+          "options": [
+            "Steel (e.g. 42CrMo4, hardened)",
+            "Carbon steel (C45)",
+            "Cast iron",
+            "Acetal / nylon"
+          ],
+          "default": "Steel (e.g. 42CrMo4, hardened)",
+          "multi": false,
+          "why": "It sets the material of every spur gear."
+        }
+      ],
+      "answers": {},
+      "notes": [],
+      "source": "intent",
+      "layout": {}
+    },
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Housing base",
+        "1 x Housing cover",
+        "6 x Cover bolts",
+        "16 x Bearing cap screws",
+        "1 x Input shaft",
+        "1 x Pinion",
+        "1 x Pinion key",
+        "2 x Input shaft bearings",
+        "1 x Input open cap",
+        "1 x Input blind cap",
+        "1 x Output shaft",
+        "1 x Output gear",
+        "1 x Output gear key",
+        "2 x Output shaft bearings",
+        "1 x Output open cap",
+        "1 x Output blind cap"
+      ],
+      "kinds": {
+        "housing": 1,
+        "cap": 5,
+        "fastener": 22,
+        "shaft": 2,
+        "gear": 2,
+        "key": 2,
+        "bearing": 4
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "gearbox",
+      "problems": [],
+      "mesh": [
+        80.0
+      ],
+      "direct": {
+        "Housing base": "agent",
+        "Housing cover": "agent",
+        "Input shaft": "direct",
+        "Pinion": "direct",
+        "Input open cap": "agent",
+        "Input blind cap": "agent",
+        "Output shaft": "direct",
+        "Output gear": "direct",
+        "Output open cap": "agent",
+        "Output blind cap": "agent"
+      },
+      "n_direct": 4,
+      "n_designed": 10,
+      "correct": true
+    },
+    "check": [],
+    "platform_tokens": 7,
+    "limits": [
+      "Pinion against a shoulder of Input shaft: inside a housing the layout seats it on a plain shaft between the bearings for now.",
+      "Output gear against a shoulder of Output shaft: inside a housing the layout seats it on a plain shaft between the bearings for now."
+    ],
+    "rescored": true
+  },
+  "old": {
+    "wall_s": 33.79,
+    "cost_usd": 0.08141369999999999,
+    "tokens": {
+      "input_tokens": 2,
+      "output_tokens": 3529,
+      "cache_creation_input_tokens": 2004,
+      "cache_read_input_tokens": 3365
+    },
+    "model": "claude-opus-5-5",
+    "note": null,
+    "text": "This is a complete single-stage spur reducer: a two-piece housing with two shaft assemblies. The brief does not limit the scope, so the plan includes the bearings, seals, keys and cover fasteners a working reducer needs. It adds no motor, base frame or couplings. The 3:1 ratio is met with a 20-tooth pinion driving a 60-tooth gear at module 2, which gives an 80 mm centre distance. The housing is a machined aluminium box with a bolted side cover, and each shaft runs in a pair of deep-groove ball bearings. The input shaft exits through the body and the output shaft exits through the cover.\n\n```fw-plan\n{\"summary\": \"Single-stage 3:1 spur gear reducer: m2 20T pinion driving 60T gear at 80 mm centres, two shafts on ball bearings in a machined aluminium housing with bolted cover.\",\n \"assumptions\": [\"Rated for a small drive of about 1.5 kW at 1500 rpm input; no torque or speed was given\", \"Module 2, 20 deg pressure angle, 20 mm face width, 20T/60T for an exact 3:1 ratio, 80 mm centre distance\", \"Housing split as a body and a flat side cover, machined from 6061 aluminium, oil splash lubricated\", \"Input shaft exits through the body wall, output shaft through the cover, on opposite sides\", \"Bearings 6204-2RS on the input shaft and 6206-2RS on the output shaft\", \"Shafts in 42CrMo4 / 4140, gears in case-hardened 20MnCr5 or 4140 through-hardened\", \"Customer supplies couplings, motor and mounting base\"],\n \"subassemblies\": [\n  {\"name\": \"Housing\", \"description\": \"Machined gearbox body and side cover carrying both bearing pairs, aligned by dowels and closed with screws.\",\n   \"parts\": [\n    {\"name\": \"Gearbox body\", \"family\": \"machined\", \"complexity\": 5, \"qty\": 1, \"description\": \"Open-sided 6061 aluminium box, about 210 x 70 x 160 mm (assumed), with a 180 x 50 mm internal cavity, bored seats for 47 mm and 62 mm bearings at 80 mm centres, a seal bore for the input shaft, a cover flange with tapped M6 holes and dowel holes, and foot mounting holes in the base.\", \"envelope\": [210, 70, 160]},\n    {\"name\": \"Side cover\", \"family\": \"machined\", \"complexity\": 4, \"qty\": 1, \"description\": \"6061 aluminium plate about 210 x 160 x 30 mm (assumed) with matching bearing bosses for 47 mm and 62 mm bearings at 80 mm centres, a seal bore for the output shaft, 8 clearance holes for M6 and 2 dowel holes.\", \"envelope\": [210, 160, 30], \"mounts_on\": \"Gearbox body\"},\n    {\"name\": \"Cover screw\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 8, \"description\": \"ISO 4762 M6 x 20 socket head cap screw, 8.8, fixing the side cover to the body.\", \"mounts_on\": \"Gearbox body\"},\n    {\"name\": \"Cover dowel\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 2, \"description\": \"ISO 8734 6 m6 x 20 dowel pin locating the side cover on the body.\", \"mounts_on\": \"Gearbox body\"}\n   ]},\n  {\"name\": \"Input shaft assembly\", \"description\": \"High-speed shaft carrying the 20T pinion, supported on two 6204 bearings, with a keyed extension for the motor coupling.\",\n   \"parts\": [\n    {\"name\": \"Input shaft\", \"family\": \"turned\", \"complexity\": 3, \"qty\": 1, \"description\": \"Stepped 4140 shaft with 20 mm bearing and pinion seats, a 25 mm shoulder and a 20 mm keyed drive extension; overall length about 150 mm (assumed).\", \"envelope\": [25, 25, 150]},\n    {\"name\": \"Pinion\", \"family\": \"gear\", \"complexity\": 3, \"qty\": 1, \"description\": \"Spur pinion, m2, 20 teeth, 40 mm PCD, 44 mm OD, 20 mm face, 20 mm keyed bore, case-hardened steel.\", \"envelope\": [44, 44, 20], \"mounts_on\": \"Input shaft\", \"module\": 2, \"teeth\": 20},\n    {\"name\": \"Input bearing\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 2, \"description\": \"6204-2RS deep-groove ball bearing, 20 x 47 x 14 mm, one in the body and one in the cover.\", \"mounts_on\": \"Input shaft\"},\n    {\"name\": \"Input seal\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"Radial lip seal 20 x 35 x 7 mm in the body wall around the input extension.\", \"mounts_on\": \"Gearbox body\"},\n    {\"name\": \"Pinion key\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"DIN 6885 A parallel key 6 x 6 x 18 mm fixing the pinion to the input shaft.\", \"mounts_on\": \"Input shaft\"},\n    {\"name\": \"Input drive key\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"DIN 6885 A parallel key 6 x 6 x 28 mm on the input extension for the customer coupling.\", \"mounts_on\": \"Input shaft\"}\n   ]},\n  {\"name\": \"Output shaft assembly\", \"description\": \"Low-speed shaft carrying the 60T gear, supported on two 6206 bearings, with a keyed output extension.\",\n   \"parts\": [\n    {\"name\": \"Output shaft\", \"family\": \"turned\", \"complexity\": 3, \"qty\": 1, \"description\": \"Stepped 4140 shaft with 30 mm bearing and gear seats, a 35 mm shoulder and a 30 mm keyed output extension; overall length about 170 mm (assumed).\", \"envelope\": [35, 35, 170]},\n    {\"name\": \"Output gear\", \"family\": \"gear\", \"complexity\": 3, \"qty\": 1, \"description\": \"Spur gear, m2, 60 teeth, 120 mm PCD, 124 mm OD, 20 mm face, 30 mm keyed bore, through-hardened 4140; lightening web optional.\", \"envelope\": [124, 124, 20], \"mounts_on\": \"Output shaft\", \"module\": 2, \"teeth\": 60},\n    {\"name\": \"Output bearing\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 2, \"description\": \"6206-2RS deep-groove ball bearing, 30 x 62 x 16 mm, one in the body and one in the cover.\", \"mounts_on\": \"Output shaft\"},\n    {\"name\": \"Output seal\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"Radial lip seal 30 x 47 x 7 mm in the side cover around the output extension.\", \"mounts_on\": \"Side cover\"},\n    {\"name\": \"Gear key\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"DIN 6885 A parallel key 8 x 7 x 18 mm fixing the output gear to the output shaft.\", \"mounts_on\": \"Output shaft\"},\n    {\"name\": \"Output drive key\", \"family\": \"standard\", \"complexity\": 1, \"qty\": 1, \"description\": \"DIN 6885 A parallel key 8 x 7 x 36 mm on the output extension for the customer coupling.\", \"mounts_on\": \"Output shaft\"}\n   ]}\n ]}\n```",
+    "score": {
+      "plan": true,
+      "parts": [
+        "1 x Gearbox body",
+        "1 x Side cover",
+        "8 x Cover screw",
+        "2 x Cover dowel",
+        "1 x Input shaft",
+        "1 x Pinion",
+        "2 x Input bearing",
+        "1 x Input seal",
+        "1 x Pinion key",
+        "1 x Input drive key",
+        "1 x Output shaft",
+        "1 x Output gear",
+        "2 x Output bearing",
+        "1 x Output seal",
+        "1 x Gear key",
+        "1 x Output drive key"
+      ],
+      "kinds": {
+        "housing": 1,
+        "cap": 1,
+        "fastener": 8,
+        "pin": 2,
+        "shaft": 2,
+        "gear": 2,
+        "bearing": 4,
+        "seal": 2,
+        "key": 4
+      },
+      "missing": {},
+      "unwanted": [],
+      "layout": "gearbox",
+      "problems": [
+        "Side cover: laid out at 216 × 160 × 146 mm, 4.9 times its planned 210 × 160 × 30 mm in one direction (at most 1.5 times). What it carries or the bolts it needs don't fit the planned size: use smaller or fewer bolts, mount the parts elsewhere, or resize it on purpose.",
+        "Gearbox body: no interface connects it to the rest of the program, so it would be placed beside the assembly, unconnected. Say what it mounts on (or resize the part it should fit), remove it from the plan, or keep it as a separate part."
+      ],
+      "mesh": [
+        80.0
+      ],
+      "direct": {
+        "Gearbox body": "agent",
+        "Side cover": "agent",
+        "Input shaft": "agent",
+        "Pinion": "direct",
+        "Output shaft": "agent",
+        "Output gear": "agent"
+      },
+      "n_direct": 1,
+      "n_designed": 6,
+      "correct": false
+    },
+    "platform_tokens": 9
+  }
+}

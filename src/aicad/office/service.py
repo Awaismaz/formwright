@@ -256,6 +256,8 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
     """Brief approval gate: the (possibly edited) plan becomes the item tree and the tickets."""
     if doc["status"] != "plan_review" or not doc.get("plan"):
         raise OfficeInputError("There is no plan waiting for approval.")
+    if ((doc["plan"].get("graph") or {}).get("questions")):  # design graph (PD-110): answer before approving
+        raise OfficeInputError("Archie has questions about the brief: answer them (or take his defaults) first.")
     if plan is not None:
         source = doc["plan"]["source"]
         p2 = planner.normalise_plan(plan, source)

@@ -67,3 +67,16 @@ No test may make a paid or subscription model call: drive agent turns with a rep
   expectations, never on the agent's own claims.
 - **AGT-009** (done): `agent/runrecord.py` writes `.fw/runs/<id>/run.json` per turn from `AgentSession.send`/`_handle` (never published as an event). If you add a phase, tool or outcome, record it there; read it via `/api/admin/projects/{id}/runs`. Prompt policy `FW_RUN_RECORD_PROMPTS` (hash | redacted (default) | raw, dev only).
 - **EVAL-008** (done): `aicad repeat --case P01` (fake ×5), `--replay DIR`, `--live` (confirmed) for variance.
+
+## Design graph intent (architecture v2, `src/aicad/graph/`, docs/architecture/design-graph.md)
+- Role `intent` (`llm/base.ROLES`), routed by `intent.job_of(brief)`: `intent.simple` Sonnet, else Opus (PD-111).
+  One call with `INTENT_SCHEMA` and `standalone_system=True`; the prompt's vocabulary is generated from
+  `graph/registry.py`, so add a component or connection kind there, never in the prompt text.
+- The model never sizes: `resolve.py` / `standards.py` do; a value it gives that is not in the brief is `assumed`.
+  Exclusions come from `office/scope.py`, never from the model. Questions: `questions.py` (max 3, code's first).
+- Tests replay recorded replies with `StubProvider` on role `intent` (`tests/golden/design_graph/*.json`, the
+  `*.live.json` files are the live replies). Live comparison: `docs/reports/design-graph/live_intent.py`
+  (`--rescore` re-scores recorded replies with no call).
+- Every compile is cross-checked against its ICD (`compile.check`); a non-empty check is a bug in the compile.
+- Pitfall: Python written through a Git Bash heredoc can turn `\b` into a backspace byte; write scripts with the
+  Write tool and grep new files for `\x08`.

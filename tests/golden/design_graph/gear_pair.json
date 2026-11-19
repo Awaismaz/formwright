@@ -1,0 +1,25 @@
+{
+  "case": "gear_pair",
+  "name": "Gear pair 1:3",
+  "brief": "Simple spur gear pair 1:3, module 2, 20 and 60 teeth, on two Ø20 shafts with four 6204 bearings. No housing, nothing else.",
+  "recorded": "hand-written reply in the intent schema (stub provider)",
+  "reply": {
+    "summary": "A 1:3 spur pair on two shafts, each carried by two 6204 bearings, no housing.",
+    "components": [
+      {"id": "input_shaft", "kind": "shaft", "name": "Input shaft", "qty": 1, "params": {"d": 20, "role": "input"}},
+      {"id": "output_shaft", "kind": "shaft", "name": "Output shaft", "qty": 1, "params": {"d": 20, "role": "output"}},
+      {"id": "pinion", "kind": "spur_gear", "name": "Pinion", "qty": 1, "params": {"module": 2, "teeth": 20}},
+      {"id": "gear", "kind": "spur_gear", "name": "Gear", "qty": 1, "params": {"module": 2, "teeth": 60}},
+      {"id": "bearing", "kind": "bearing", "name": "Deep groove ball bearing 6204", "qty": 4, "params": {"designation": 6204}}
+    ],
+    "connections": [
+      {"kind": "hub_fit", "host": "input_shaft", "guest": "pinion"},
+      {"kind": "hub_fit", "host": "output_shaft", "guest": "gear"},
+      {"kind": "gear_mesh", "host": "pinion", "guest": "gear", "params": {"ratio": 3}},
+      {"kind": "bearing_journal", "host": "input_shaft", "guest": "bearing", "params": {"count": 2}},
+      {"kind": "bearing_journal", "host": "output_shaft", "guest": "bearing", "params": {"count": 2}}
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

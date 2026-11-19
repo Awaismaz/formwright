@@ -8,6 +8,7 @@ import { Badge, Button, Card, Input, Modal } from "@/components/ui";
 import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
 import SpeedPanel from "./SpeedPanel";
+import DesignGraphCard, { GraphQuestions } from "./DesignGraph";
 import { estimateMinutes, fmtEta, fmtMinutes, planPreview } from "./model";
 import type { Family, Plan, PlanPart, Program } from "./types";
 
@@ -116,6 +117,7 @@ export default function PlanReview({ program }: { program: Program }) {
     );
   };
 
+  const asking = (program.plan?.graph?.questions?.length ?? 0) > 0;
   const empty = plan.subassemblies.some(s => s.parts.length === 0 || !s.name.trim()) || plan.subassemblies.length === 0;
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
@@ -141,6 +143,9 @@ export default function PlanReview({ program }: { program: Program }) {
           <details className="mt-3 text-[12.5px]"><summary className="cursor-pointer select-none font-medium text-muted">The brief</summary>
             <p className="mt-1 whitespace-pre-line">{program.brief}</p></details>
         </Card>
+
+        {program.plan?.graph && <GraphQuestions program={program} graph={program.plan.graph} />}
+        {program.plan?.graph && <DesignGraphCard graph={program.plan.graph} />}
 
         {plan.subassemblies.map((s, si) => (
           <Card key={s.id} className="p-4">
@@ -189,13 +194,14 @@ export default function PlanReview({ program }: { program: Program }) {
               <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-semibold text-primary"><Zap className="h-3.5 w-3.5" />
                 Small program · {program.light.parts} part{program.light.parts === 1 ? "" : "s"}</div>
               <p className="mb-2 text-[11.5px] text-muted">{program.light.text}</p>
-              <Button className="w-full" loading={busy === "express"} disabled={!!busy || empty} icon={<Zap className="h-4 w-4" />} onClick={express} data-express
+              <Button className="w-full" loading={busy === "express"} disabled={!!busy || empty || asking} icon={<Zap className="h-4 w-4" />} onClick={express} data-express
                 title="Approves the plan and, when they have no problems, the interfaces; then runs the office">
                 Approve and build</Button>
             </div>}
-            <Button className="w-full" variant={program.light ? "secondary" : "primary"} loading={busy === "approve"} disabled={!!busy || empty} icon={<CheckCircle2 className="h-4 w-4" />} onClick={approve}>
+            <Button className="w-full" variant={program.light ? "secondary" : "primary"} loading={busy === "approve"} disabled={!!busy || empty || asking} icon={<CheckCircle2 className="h-4 w-4" />} onClick={approve}>
               {program.light ? "Approve the plan only" : `Approve plan${dirty ? " with edits" : ""}`}</Button>
             {empty && <p className="text-[11.5px] text-danger">Every sub-assembly needs a name and at least one part.</p>}
+            {asking && <p className="text-[11.5px] text-muted">Answer Archie's questions first (or take his defaults).</p>}
             <Button className="w-full" variant="secondary" disabled={!!busy} icon={<Sparkles className="h-4 w-4" />} onClick={() => setAskOpen(true)}>Ask Archie to revise</Button>
             <div className="flex gap-2">
               {plan.source !== "standard" && <Button className="flex-1" size="sm" variant="ghost" loading={busy === "standard"} disabled={!!busy} onClick={() => replan("standard")}>Standard breakdown</Button>}
