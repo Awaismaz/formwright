@@ -147,10 +147,19 @@ def needs_you(doc: dict[str, Any]) -> list[str]:
         out.append("the plan waits for your approval")
     g = {x["code"]: x for x in doc.get("gates", [])}
     if (doc.get("icd") or {}).get("status") == "draft" and (g.get("icd") or {}).get("status") == "pending":
+        from aicad.office import interfaces as _ifs
+
         n = len(doc["icd"].get("problems") or [])
-        out.append(f"{n} interface problem{'s' if n != 1 else ''} block the interfaces (ICD): I can fix them "
-                   "(Fix with Archie on the Interfaces tab), then you approve and press Run" if n else
-                   "the interfaces (ICD) wait for your approval on the Interfaces tab; then press Run")
+        loose = len(_ifs.unconnected(doc)) if n else 0
+        if loose:  # a part with no interface: connect it, or keep it separate (the engineer's call, PD-85)
+            out.append(f"{loose} part{'s have' if loose != 1 else ' has'} no interface: connect "
+                       f"{'them' if loose != 1 else 'it'} on the Interfaces tab, or keep "
+                       f"{'them' if loose != 1 else 'it'} as separate parts if that is intended")
+        n -= loose
+        if n or not loose:
+            out.append(f"{n} interface problem{'s' if n != 1 else ''} block the interfaces (ICD): I can fix them "
+                       "(Fix with Archie on the Interfaces tab), then you approve and press Run" if n else
+                       "the interfaces (ICD) wait for your approval on the Interfaces tab; then press Run")
     for t in doc["tickets"]:
         st = (t.get("run") or {}).get("status")
         if st == "awaiting_review":
@@ -282,7 +291,9 @@ def offline_reply(doc: dict[str, Any], text: str, root: Path) -> tuple[str, list
                     "There's nothing to run yet: approve the plan first."), [], "office"
         return "I'll set the office working the tickets again.", [{"type": "resume_program"}], "office"
     icd = doc.get("icd") or {}
-    if icd.get("status") == "draft" and icd.get("problems") and re.search(
+    from aicad.office import interfaces as _ifs
+
+    if icd.get("status") == "draft" and icd.get("problems") and len(_ifs.unconnected(doc)) < len(icd["problems"]) and re.search(
             r"\b(fix|stuck|proceed|next|problem|interfer|blocked|can'?t|cannot|approve|dead)\w*", text, re.IGNORECASE):
         n = len(icd["problems"])
         return ((f"The interfaces have {n} problem{'s' if n != 1 else ''}: parts that can't be made as I laid them "

@@ -99,7 +99,7 @@ def test_archie_stops_raising_kept_parts_and_offers_the_decision(tmp_path: Path)
     q = visual.quick_skeleton(doc["skeleton"], doc["icd"]["interfaces"])
     assert q["findings"] == []  # neither a row nor an unconnected part: as the engineer decided
     text, acts = visual_office.layout_message(doc, q, None)
-    assert "the placement checks pass" in text and acts == []
+    assert "kept separate as you decided, so there is nothing to assemble" in text and acts == []
     assert archie_chat.normalise(doc, keep) is None  # nothing left to keep separate
     # a level whose parts touch nothing only because they were kept separate is not stopped
     adoc = {"instances": [{"id": "a1", "office": {"item": i}} for i in doc["skeleton"]["items"]]}

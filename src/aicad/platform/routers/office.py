@@ -493,7 +493,7 @@ def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
 
 
 @router.post("/programs/{pid}/icd/separate")
-def keep_separate(pid: str, body: SeparateIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+async def keep_separate(pid: str, body: SeparateIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """The engineer's decision at the ICD gate: parts with no interface are meant to be separate (a kit, shafts made
     on their own). Recorded in the ICD history; those parts become an acknowledged warning instead of blocking."""
     out: list[list[str]] = []
@@ -502,6 +502,8 @@ def keep_separate(pid: str, body: SeparateIn, ctx: Ctx = Depends(verified_ctx)) 
     audit(ctx.db, "office.icd_separate" if body.keep else "office.icd_connect", ctx.user, doc["org_id"], target=pid,
           items=out[0])
     ctx.db.commit()
+    if body.keep and not doc["icd"].get("problems"):  # the gate can now be approved: Archie looks again, once
+        _look_at_layout(ctx, pid, doc)
     return _view(doc)
 
 
@@ -1352,7 +1354,7 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
     elif typ == "fix_icd":
         fix_icd(pid, ctx)
     elif typ == "keep_separate":
-        keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
+        await keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
     elif typ == "revise_plan":
         _mutate(ctx, pid, lambda root, d: service.revise_plan(root, d, a, _actor(ctx)))
     elif typ == "retry_blocked":

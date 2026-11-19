@@ -68,10 +68,18 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
     verdict = (rec or {}).get("verdict")
     vline = visual.summary_line(verdict) if verdict else ""
     name = doc["name"]
+    kept = [sk["items"][i]["name"] for i in sk.get("separate") or [] if i in (sk.get("items") or {})]
     if not probs and not found and (verdict is None or verdict["overall"] == "looks_assembled"):
         tail = f" {vline}" if vline else ""
+        if kept and len(kept) == len(sk.get("items") or {}):  # a kit: nothing is meant to be assembled
+            listed = ", ".join(kept[:-1]) + " and " + kept[-1] if len(kept) > 1 else kept[0]
+            return ((f"I looked at the layout of {name} before you approve the interfaces: {listed} "
+                     f"{'are' if len(kept) > 1 else 'is'} kept separate as you decided, so there is nothing to "
+                     "assemble and no interface to check. Approve the interfaces when you're happy."), [])
+        sep = (f" {', '.join(kept)} {'are' if len(kept) > 1 else 'is'} kept separate as you decided (placed beside "
+               "the assembly)." if kept else "")
         return ((f"I looked at the layout of {name} before you approve the interfaces: the parts are placed where they "
-                f"connect and the placement checks pass.{tail} Approve the interfaces when you're happy."), [])
+                f"connect and the placement checks pass.{sep}{tail} Approve the interfaces when you're happy."), [])
     lines: list[str] = []
     row = any(f["code"] == "row" for f in found) or bool(codes & {"row_layout", "no_mount", "no_host"})
     mountless = _mountless(sk)

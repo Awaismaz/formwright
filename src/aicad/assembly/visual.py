@@ -116,7 +116,8 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
     (bearings on their journals or in their seats, gears on their shafts, bolted joints), or (no interfaces) the
     parts' roles: gears mesh in pairs on parallel shafts at m (z1 + z2) / 2, every gear sits on a shaft, shafts run in
     their bearings, parts mount on the block they hang from."""
-    items = skel.get("items") or {}
+    kept = set(skel.get("separate") or [])  # parts the engineer kept separate: nothing to relate them to
+    items = {i: it for i, it in (skel.get("items") or {}).items() if i not in kept}
     mesh: list[str] = []
     out: list[str] = []
     for f in ifaces:
@@ -170,7 +171,7 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
                 out.append(f"{st.get('qty', 1)} × {nm} carry the shafts (typically two per shaft, one either side of "
                            "its gear)")
     out = mesh + out
-    if not out and brief:
+    if not out and brief and not (kept and not items):  # a kit of separate parts: nothing is meant to be assembled
         out.append("the parts are assembled as the brief describes")
     return [{"id": f"R{k + 1}", "text": t} for k, t in enumerate(out[:12])]
 
