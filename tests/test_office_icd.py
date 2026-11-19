@@ -315,8 +315,12 @@ def test_gate_placeholders_and_assembly_from_minute_one(office: Any) -> None:  #
     assert r["instances"] == [] and r["subassemblies"] == []
 
 
-def test_parts_swap_in_and_keep_every_mate(office: Any) -> None:  # noqa: F811
+def test_parts_swap_in_and_keep_every_mate(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from aicad.assembly import store as astore
+    from aicad.office import program_assembly
+
+    # the geometric fastener auto-fit is off in the office for now (PD-71 interim); this test keeps it covered
+    monkeypatch.setattr(program_assembly, "GEOMETRIC_FASTENER_FIT", True)
 
     c = office
     fake_agents.SCRIPT.append((r"Design the Bracket", {"icd_shift": 0.5, "omit_turns": 1}))

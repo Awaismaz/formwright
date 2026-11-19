@@ -43,6 +43,18 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f8) — F1 assembled; the office places, it doesn't solve (CD-038, PD-71)
+
+Founder (frustrated): intervene, fix, finish the F1 assembly. Measured on a copy: one numerical mate solve of the F1
+final assembly (311 instances, 600 mates) takes 387 s, and the office ran it after every swap and assembly step (the
+server burned 600 CPU s in 11 min; the clash geometry worker sat idle). Every office part is placed by the approved
+layout, so the office now records that placement and checks each mate once against it; the geometric fastener
+auto-fit is off in the office (interim), clashes are advisory, an unfinished whole-program check says so. Result: the
+remaining F1 steps (Rear wing, Suspension, Final assembly) completed within minutes; F1 final assembly integrated at
+10:00 UTC (28 real parts, 600 mates, 62 fastener stacks from earlier geometric fits); drawings and manufacturing
+review started. Tests: office + assembly 69 passed. Note: F1's stored assembly summary says "0 clashes" from before
+the honest-summary fix; its final ticket notes the check didn't finish.
+
 ## 2026-11-19 (f7) — The app stays responsive during assembly (CD-037); CSP allows Cloudflare analytics (PD-72)
 
 Founder: opening the completed Engine cover ticket hung the server; later the local server stopped answering.

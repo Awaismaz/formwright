@@ -9,6 +9,11 @@ export function SolveChip({ status, solve, compact, dof, spins: spinsIn }: {
   const spins = solve?.free_spins ?? spinsIn ?? 0;
   const known = solve ? solve.dof : dof ?? null;
   const other = known === null ? 1 : known - spins;
+  if (status === "placed") {  // a Design Office program assembly: every part placed from the approved layout
+    return <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[11.5px] font-semibold text-success"
+      title="Every part sits where the approved layout puts it; mates record how the parts connect. Run Solve to check them.">
+      <CheckCircle2 className="h-3.5 w-3.5" />Placed by the layout</span>;
+  }
   if (status === "over_defined") {
     return <span className="inline-flex items-center gap-1 rounded-full border border-danger/30 bg-danger/10 px-2 py-0.5 text-[11.5px] font-semibold text-danger">
       <AlertOctagon className="h-3.5 w-3.5" />Over-defined{solve && !compact ? ` · ${solve.conflicts.length} conflicting` : ""}</span>;

@@ -45,6 +45,20 @@ def placeholder_key(pid: str, item: str, spec: dict[str, Any]) -> str:
     return f"h_{pid}_{item}_{h}"[:120]
 
 
+GEOMETRIC_FASTENER_FIT = False
+
+# CD-038: every instance in a program assembly is placed from the approved layout (``place``); its mates record how
+# the parts connect. Solving them numerically took 387 s per call on a 311-instance, 600-mate program (F1) and ran
+# after every swap and integration, so the office records the layout placement instead of solving.
+
+
+async def _placed(aroot: Path, doc: dict[str, Any]) -> None:
+    """Record the layout placement and check every mate against it (one pass, no solve)."""
+    from aicad.assembly import service as aservice
+
+    await asyncio.to_thread(aservice.check_placement, aroot, doc)  # PD-71 interim: off in the office until fasteners are placed straight from the ICD
+
+
 def subs_of(prog: dict[str, Any]) -> list[dict[str, Any]]:
     """Sub-assembly items (plan order) that hold at least one designed part."""
     sk = prog["skeleton"]
@@ -259,7 +273,7 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
                 adoc["instances"][0]["fixed"] = True
             _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, None))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
         sub_docs[sub["id"]] = adoc
     fid = state.get("final")
@@ -276,7 +290,7 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
             i["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
         _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, None, top_only=True))
         problems += p
-        await asyncio.to_thread(aservice.run_solve, aroot, final)
+        await _placed(aroot, final)
         an = await aservice.analyse(aroot, org_id, final)
         astore.save(aroot, final)
     clashes = _clashes(an)
@@ -337,7 +351,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                         aservice.remove_group(adoc, g["id"])
             _n, p = await asyncio.to_thread(lambda adoc=adoc: relink(aroot, adoc, sk, ifaces, items))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
     async with locks.hold(state["final"], locks.OFFICE):
@@ -352,7 +366,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                 inst["fixed"] = o.get("item") == sk["base"] and o.get("copy") == 0
             _n, p = await asyncio.to_thread(lambda: relink(aroot, final, sk, ifaces, items, top_only=True))
             problems += p
-            await asyncio.to_thread(aservice.run_solve, aroot, final)
+            await _placed(aroot, final)
             if analyse:
                 # only the swapped parts against everything else (CD-035): the whole-program check grows with every
                 # real part and runs at the final assembly; here it timed out once ten parts went in together
@@ -434,6 +448,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     log: list[dict[str, str]] = []
     stats = {"stacks": 0, "asked": 0, "binned": 0}
     stack_clashes: list[dict[str, Any]] = []
+    unchecked = False  # the whole-program clash check didn't finish: never report "0 clashes" then
     seated: dict[str, int] = {}
 
     def say(text: str, tone: str = "ok") -> None:
@@ -484,6 +499,18 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     say(f"Fitz seated {len(seat['at'])} × {seat['title']} in the {seat['what']} of {seat['interface']}"
                         + (f" ({extra} more than the ICD places: left out)" if extra > 0 else ""),
                         "ok" if extra <= 0 else "warn")
+                    continue
+                if (kind == "fastener" or code in ("hex_bolt", "shcs")) and not GEOMETRIC_FASTENER_FIT:
+                    # interim (PD-71): the geometric auto-fit took minutes per sub-assembly; Fitz lists the joints the
+                    # fasteners go in and the ICD-direct placement puts them in place when it lands
+                    mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
+                    if mine:
+                        holes = sum(len(f["data"]["positions"]) for f in mine)
+                        say(f"{t['title']}: {holes} for the {len(mine)} bolted joint{'s' if len(mine) != 1 else ''} here "
+                            f"({', '.join(f['id'] for f in mine[:6])}); listed in the BOM, not placed in the 3D assembly yet",
+                            "muted")
+                    elif not t.get("_kit"):
+                        say(f"{t['title']}: no bolted joint inside this sub-assembly", "muted")
                     continue
                 if kind == "fastener" or code in ("hex_bolt", "shcs"):
                     mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
@@ -537,7 +564,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     stats["binned"] += 1
                 say(f"{t['title']} is in the parts bin beside the program: the ICD has no interface for it yet, mate it "
                     "by hand", "muted")
-            await asyncio.to_thread(aservice.run_solve, aroot, adoc)
+            await _placed(aroot, adoc)
             astore.save(aroot, adoc)
             # every part was clash-checked when Fitz swapped it in; here only the fastener stacks just fitted are new
             # (CD-036: the whole sub-assembly used to be re-checked, minutes on detailed parts)
@@ -576,17 +603,22 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         k = _hole_index(info, g["c"], g.get("ax"))
                         if k is not None and (ib["id"], k) not in fitted:
                             targets.append({"inst": ib["id"], "hole": k})
-                if targets:
+                if targets and GEOMETRIC_FASTENER_FIT:
                     try:
                         res = await aservice.accept(aroot, org_id, final, targets, "hex_bolt", "both", False)
                         stats["stacks"] += res["inserted"]
                         say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (ISO auto-fit)")
                     except AssemblyInputError as e:
                         say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
-            await asyncio.to_thread(aservice.run_solve, aroot, final)
-            if level == "root":  # the whole-program check, once, at the final assembly
-                an = await aservice.analyse(aroot, org_id, final)
-                clashes = _clashes(an)
+            await _placed(aroot, final)
+            if level == "root":  # the whole-program check, once, at the final assembly; advisory (PD-71)
+                try:
+                    an = await aservice.analyse(aroot, org_id, final)
+                    clashes = _clashes(an)
+                except aservice.WorkerError as e:
+                    unchecked = True
+                    say(f"The whole-program clash check didn't finish ({e}); the assembly is complete, check clashes "
+                        "in Assembly Studio", "warn")
             astore.save(aroot, final)
     bits = []
     if stats["asked"]:
@@ -598,12 +630,15 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)
-    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + \
-        f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}"
+    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + (
+        ", clash check didn't finish (check clashes in Assembly Studio)" if unchecked else
+        f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}")
     say(summary, "warn" if clashes else "ok")
     return {"summary": summary, "clashes": clashes, "log": log, "assembly_id": aid_out, "inserted": stats["stacks"],
             "program_summary": summarize(state.get("parts") or {}, final, clashes if level == "root" else
-                                         state.get("clashes") or [])}
+                                         state.get("clashes") or [])
+            .replace(", 0 clashes.", ", clash check didn't finish.") if unchecked else
+            summarize(state.get("parts") or {}, final, clashes if level == "root" else state.get("clashes") or [])}
 
 
 # ----------------------------------------------------------------------------- the live view (CD-013)

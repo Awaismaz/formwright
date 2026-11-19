@@ -6,7 +6,7 @@ export interface AsmSummary {
   own_thumbnail: boolean; broken_mates?: number; stale_parts?: number; stacks_to_check?: number;
 }
 
-export type SolveStatus = "fully_defined" | "under_defined" | "over_defined";
+export type SolveStatus = "fully_defined" | "under_defined" | "over_defined" | "placed";
 
 export interface InstDof { dof: number; rot: number; trans: number; spin: boolean; fixed: boolean; over: boolean }
 

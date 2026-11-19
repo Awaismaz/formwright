@@ -288,6 +288,26 @@ def _spec(m: dict[str, Any]) -> solver.MateSpec:
                            solver.Ref.of(m["b"]["ref"]), float(m.get("value") or 0.0), bool(m.get("flip")))
 
 
+def check_placement(root: Path, doc: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate every mate at the instances' current placement, without solving (CD-038). Used where placement
+    comes from a layout (Design Office programs): one pass over the mates instead of a numerical solve."""
+    poses = {i["id"]: xform.from12(i["T"]) for i in doc["instances"]}
+    active = [m for m in doc["mates"] if not m.get("suppressed") and not m.get("broken")]
+    mates: dict[str, Any] = {}
+    for m in active:
+        ok, e_mm, e_deg = solver._satisfied(_spec(m), poses)
+        mates[m["id"]] = {"ok": bool(ok), "residual_mm": round(float(e_mm), 9), "residual_deg": round(float(e_deg), 9),
+                          "conflict": False}
+    off = [k for k, v in mates.items() if not v["ok"]]
+    rep = {"status": "placed", "dof": None, "redundant": 0, "conflicts": [], "free_spins": 0, "iterations": 0,
+           "mates": mates, "instances": {}, "placed_by": "layout", "unsatisfied": off,
+           "suppressed": sum(1 for m in doc["mates"] if m.get("suppressed")),
+           "broken": sum(1 for m in doc["mates"] if m.get("broken")),
+           "no_fixed": bool(doc["instances"]) and not any(i["fixed"] for i in doc["instances"])}
+    doc["solve"] = rep
+    return rep
+
+
 def run_solve(root: Path, doc: dict[str, Any], prealign: list[str] | tuple[str, ...] = ()) -> dict[str, Any]:
     parts = _parts(root, doc)
     insts = {i["id"]: solver.Inst(i["id"], xform.from12(i["T"]), bool(i["fixed"]),
