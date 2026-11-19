@@ -18,7 +18,7 @@ from aicad import llm
 from aicad.agent import worker
 from aicad.agent.runner import editable_params
 from aicad.agent.session import AgentSession
-from aicad.platform import metering
+from aicad.platform import dims_service, metering
 from aicad.platform.collab import branches, permissions
 from aicad.platform.config import get_settings
 from aicad.platform.db import session_factory, utcnow
@@ -250,6 +250,7 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                         track(db, "first_build", who, p.org_id, ok=bool(st.get("ok")))
                 db.commit()
                 return
+            schedule_dims(p, ws)  # the run is over: map the parameters of what it built
             org = db.get(Organization, p.org_id)
             user = db.get(User, user_id)
             tokens = metering.tokens_for_usd(ev.get("cost_est_usd"))
@@ -666,6 +667,7 @@ async def _finalize_later(p: Project, ws: Path, rev: int | None = None) -> None:
                 for f in ("part.step", "status.json"):
                     if (ws / "out" / f).is_file():
                         shutil.copy2(ws / "out" / f, d / f)
+        schedule_dims(p, ws)
         await _render_later(p, ws)
     except Exception:
         import logging
@@ -701,7 +703,14 @@ async def _rebuild(p: Project, ws: Path, determinism: bool, fast: bool = False) 
         t = asyncio.create_task(_render_later(p, ws))
         _tasks.add(t)
         t.add_done_callback(_tasks.discard)
+        schedule_dims(p, ws)
     return _read_status(ws)
+
+
+def schedule_dims(p: Project, ws: Path) -> None:
+    """Map the design parameters to on-model dimensions in the background (no AI; paused while the agent works)."""
+    pid = p.id
+    dims_service.schedule(p.org_id, ws, lambda: bool(_sessions.get(pid) and _sessions[pid].busy))
 
 
 def current_editable(ws: Path) -> dict[str, float | int]:
@@ -850,6 +859,28 @@ def rewrite_params(src: str, editable: dict[str, Any], meta_all: dict[str, Any],
 @router.get("/projects/{project_id}/params")
 def get_params(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     return {"editable": current_editable(workspace_for(_project(ctx, project_id)))}
+
+
+@router.get("/projects/{project_id}/dims")
+async def get_dims(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Design parameters as on-model dimensions (viewport overlay): which faces each one measures, found by
+    rebuilding with each value nudged (no AI, no tokens). ``pending`` while the current build is being mapped; the
+    last mapping is returned meanwhile (the viewer re-checks it against the current geometry)."""
+    p = _project(ctx, project_id)
+    ws = workspace_for(p)
+    st = _read_status(ws)
+    if not st.get("fingerprint"):
+        return {"state": "none", "dims": []}
+    doc = dims_service.read(ws) or {}
+    fresh = doc.get("build_id") == st.get("build_id")
+    agent_busy = bool(_sessions.get(p.id) and _sessions[p.id].busy)
+    if not fresh and not agent_busy:
+        schedule_dims(p, ws)
+    keep = ("param", "kind", "a", "b", "u", "s", "faces", "count", "per", "driven", "circle", "pa", "pb", "at", "as",
+            "explicit")
+    return {"state": "ready" if fresh else "paused" if agent_busy else "pending", "build_id": doc.get("build_id"),
+            "dims": [{k: d[k] for k in keep if k in d} for d in doc.get("dims") or []],
+            "timings": doc.get("timings"), "error": bool(doc.get("error"))}
 
 
 @router.post("/projects/{project_id}/params")
