@@ -1749,6 +1749,11 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             "items": items_out, "notes": notes,
             "standard": [{"item": p["id"], "name": p["name"], "qty": p["qty"], "sub": p["sub"]}
                          for p in parts if p["family"] == "standard"]}
+    # parts the engineer decided to keep separate at the ICD gate (a kit, two shafts to be made): no interface is
+    # their intended state, an acknowledged warning instead of a blocking ``no_interface`` (``keep_separate``)
+    sep = sorted(i for i in (ov.get("separate") or {}) if i in items_out)
+    if sep:
+        skel["separate"] = sep
     return skel, ifs
 
 
@@ -2225,26 +2230,34 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                         [f["a"]["item"]], [f["id"]])
     for x in out:
         x["severity"] = "error"
-    return out + [{**x, "severity": "error"} for x in _layout_issues(skel, ifs)] + _bearing_issues(skel, ifs)
+    return out + [{"severity": "error", **x} for x in _layout_issues(skel, ifs)] + _bearing_issues(skel, ifs)
 
 
 def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Layouts that don't assemble (the founder's "parts on the floor"): never silent at the ICD gate."""
     out: list[dict[str, Any]] = []
     items = skel.get("items") or {}
-    if skel.get("layout") == "row" and len(items) > 1:
+    if skel.get("layout") == "row" and len(set(items) - set(skel.get("separate") or [])) > 1:
         out.append({"code": "row_layout", "items": sorted(items), "interfaces": [],
                     "text": "Layout: there is nothing to mount the parts on (no base plate, housing or frame) and no "
                             "shaft to carry them, so they are laid out in a row with no interfaces and would not be "
                             "assembled. Add a base plate or housing to the plan, or the shafts the parts sit on."})
     linked = {f[w]["item"] for f in ifs for w in ("a", "b")}
+    separate = set(skel.get("separate") or [])
     if len(items) > 1:
         for i, it in items.items():
-            if i not in linked:
-                out.append({"code": "no_interface", "items": [i], "interfaces": [],
-                            "text": f"{it['name']}: no interface connects it to the rest of the program, so it would "
-                                    "be placed beside the assembly, unconnected. Say what it mounts on (or resize the "
-                                    "part it should fit), or remove it from the plan."})
+            if i in linked:
+                continue
+            if i in separate:  # the engineer's recorded decision at the gate: shown, never blocking
+                out.append({"code": "no_interface", "severity": "warning", "acknowledged": True, "items": [i],
+                            "interfaces": [],
+                            "text": f"{it['name']}: kept as a separate part (your decision at the interfaces gate). "
+                                    "No interface connects it, so Fitz places it beside the assembly."})
+                continue
+            out.append({"code": "no_interface", "items": [i], "interfaces": [],
+                        "text": f"{it['name']}: no interface connects it to the rest of the program, so it would "
+                                "be placed beside the assembly, unconnected. Say what it mounts on (or resize the "
+                                "part it should fit), remove it from the plan, or keep it as a separate part."})
     if skel.get("layout") != "shaft_line":
         return out
     # a shaft line: two bearings per shaft, and nothing on one shaft overlapping another shaft's parts
@@ -2254,7 +2267,7 @@ def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict
         if f["kind"] == "bearing_journal" and f["a"]["item"] in nb:
             nb[f["a"]["item"]] += 1
     for i in shafts:
-        if nb[i] < 2:
+        if nb[i] < 2 and i not in separate:
             out.append({"code": "shaft_support", "items": [i], "interfaces": [],
                         "text": f"{items[i]['name']}: runs in {nb[i]} bearing{'s' if nb[i] != 1 else ''}; a shaft "
                                 "with no housing needs two (one either side of what it carries). Plan two more "
@@ -2321,8 +2334,9 @@ def _line_clashes(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[
 
 
 def warnings(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
-    """Plain-language layout warnings (shown at the ICD gate, not blocking): bearings no seat or journal takes."""
-    return [x["text"] for x in _bearing_issues(skel, ifs)]
+    """Plain-language layout warnings (shown at the ICD gate, not blocking): bearings no seat or journal takes, and
+    parts the engineer kept separate."""
+    return [x["text"] for x in issues(skel, ifs) if x["severity"] == "warning"]
 
 
 def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:

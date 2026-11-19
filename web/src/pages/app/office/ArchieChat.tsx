@@ -81,10 +81,11 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
                 <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted"><VerdictBadge v={m.visual.verdict} />Visual check, advisory{m.visual.tokens ? ` · ${m.visual.tokens} tokens` : ""}</div>
               </div>}
               {(m.actions ?? []).map(a => (
-                <div key={a.id} className={cx("mt-1.5 rounded-md border px-2.5 py-2 text-[12.5px]", a.status === "proposed" ? "border-primary/30" : "border-border opacity-75")} data-archie-action={a.type}>
+                <div key={a.id} className={cx("mt-1.5 rounded-md border px-2.5 py-2 text-[12.5px]", a.status === "proposed" && !a.stale ? "border-primary/30" : "border-border opacity-75")} data-archie-action={a.type}>
                   <div>{a.label}</div>
                   <div className="mt-1.5 flex items-center gap-2">
-                    {a.status === "proposed" && canEdit ? <>
+                    {a.status === "proposed" && a.stale ? <Badge tone="neutral">No longer needed</Badge>
+                      : a.status === "proposed" && canEdit ? <>
                       <Button size="sm" loading={acting === `${m.id}:${a.id}`} disabled={!!acting} icon={<Check className="h-3.5 w-3.5" />} onClick={() => act(m, a.id, "apply")}>Apply</Button>
                       <Button size="sm" variant="ghost" disabled={!!acting} onClick={() => act(m, a.id, "dismiss")}>Dismiss</Button></>
                       : <Badge tone={a.status === "applied" ? "success" : "neutral"}>{a.status === "applied" ? `Applied${a.by ? ` by ${a.by.name}` : ""}` : a.status === "dismissed" ? "Dismissed" : "Proposed"}</Badge>}

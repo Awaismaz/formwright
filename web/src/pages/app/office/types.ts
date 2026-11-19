@@ -79,7 +79,7 @@ export interface Interface {
   limits?: { hole: [number, number] | null; shaft: [number, number] | null };
 }
 export interface IcdHistory {
-  version: number; at: string | null; by: string | null; kind: "created" | "edited" | "approved" | "cr_accepted";
+  version: number; at: string | null; by: string | null; kind: "created" | "edited" | "approved" | "cr_accepted" | "fixed" | "separate" | "connect";
   text: string; interface?: string; cr?: string; reason?: string;
   changes: { interface: string; name?: string; field: string; before: unknown; after: unknown }[];
 }
@@ -104,6 +104,8 @@ export interface Icd {
   warnings?: string[];
   /** The problems with a stable code and the items / interfaces they name. */
   issues?: { code: string; severity: "error" | "warning"; text: string; items: string[]; interfaces: string[] }[];
+  /** Parts the engineer kept separate at the gate (no interface intended): an acknowledged warning. */
+  separate?: { item: string; name: string; by?: string; at?: string }[];
   skeleton: Skeleton; fits: string[]; fasteners: string[]; bearings?: string[]; housing_fits?: string[];
   /** PD-73: Archie's look at the drafted layout. */
   look?: { at: string; verdict: VisualVerdict | null; quick: QuickFinding[]; image: boolean; line: string } | null;
@@ -133,6 +135,8 @@ export interface LiveAssembly {
   /** PD-71: the whole-program clash check after the final assembly (advisory, never blocks). */
   check?: { status: "running" | "done" | "failed" | "skipped"; text?: string; at?: string; count?: number } | null;
   clashes: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
+  /** The one clash count every view shows (null while no finished check covers the assembly). */
+  clash?: { count: number | null; status: "running" | "done" | "failed" | "partial" | "none"; text: string };
   view: null | {
     assembly_id: string; rev: number; instances: LiveInstance[];
     parts: Record<string, { key: string; topo_url: string; bbox: number[]; kind: string }>;
@@ -183,6 +187,8 @@ export interface Program {
 export interface ArchieAction {
   id: string; type: string; label: string; status: "proposed" | "applied" | "dismissed"; ticket?: string;
   by?: Actor; at?: string;
+  /** A proposal the program has moved past (nothing left to apply): shown as "No longer needed". */
+  stale?: boolean;
 }
 export interface ArchieMessage {
   id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;

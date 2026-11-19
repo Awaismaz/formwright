@@ -75,9 +75,20 @@ def agent_actor(code: str) -> dict[str, Any]:
 STUDIO_ACTOR = {"kind": "studio", "name": "Design Studio"}
 
 
+_INSTANCE = re.compile(r"<(\d+)>")
+
+
+def plain_names(text: str) -> str:
+    """Agents' sentences say part names as people do: ``Gear shaft<1>`` -> ``Gear shaft``, ``Bearing<2>`` ->
+    ``Bearing #2`` (the Assembly Studio tree keeps its SOLIDWORKS-style ``<n>``; live run 2026-11-19)."""
+    return _INSTANCE.sub(lambda m: "" if m.group(1) == "1" else f" #{m.group(1)}", text or "")
+
+
 def emit(root: Path, doc: dict[str, Any], type_: str, text: str, actor: dict[str, Any],
          ticket_id: str | None = None, **data: Any) -> dict[str, Any]:
     """Record one event (log + live bus). ``text`` is plain engineering language: it is shown as-is."""
+    if actor.get("kind") == "agent":
+        text = plain_names(text)
     doc["event_seq"] = int(doc.get("event_seq", 0)) + 1
     ev = {"seq": doc["event_seq"], "t": store.now(), "type": type_, "program_id": doc["id"], "ticket_id": ticket_id,
           "actor": actor, "text": text, "data": data}
@@ -88,6 +99,12 @@ def emit(root: Path, doc: dict[str, Any], type_: str, text: str, actor: dict[str
 
 
 # --------------------------------------------------------------------------- program lifecycle
+def default_budget(wallet: int, unlimited: bool = False) -> int:
+    """A new program's token budget when the engineer sets none: ``DEFAULT_BUDGET_TOKENS``, but never more than the
+    workspace has left (a 1,000-token trial wallet got a 3,000 budget: live run 2026-11-19)."""
+    return DEFAULT_BUDGET_TOKENS if unlimited else max(0, min(DEFAULT_BUDGET_TOKENS, int(wallet)))
+
+
 def key_prefix(name: str) -> str:
     words = re.findall(r"[A-Za-z0-9]+", name)
     p = "".join(w[0] for w in words[:4]).upper() if len(words) > 1 else (words[0][:3].upper() if words else "PRG")
@@ -436,7 +453,7 @@ def update(root: Path, doc: dict[str, Any], tid: str, actor: dict[str, Any], *, 
 
 def comment(root: Path, doc: dict[str, Any], tid: str, text: str, actor: dict[str, Any]) -> dict[str, Any]:
     t = ticket(doc, tid)
-    body = text.strip()[:MAX_COMMENT]
+    body = (plain_names(text) if actor.get("kind") == "agent" else text).strip()[:MAX_COMMENT]
     if not body:
         raise OfficeInputError("Write a comment first")
     c = {"id": store.new_id(), "by": actor, "text": body, "t": store.now()}
