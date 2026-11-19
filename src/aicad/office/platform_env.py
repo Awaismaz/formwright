@@ -748,6 +748,10 @@ def children(doc: dict[str, Any], t: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 TOOLBOX_FOR_PARTS = {"fastener", "dowel", "gear"}
+# standard parts the Toolbox doesn't stock: their names often carry the host's noun ("Pinion key", "Gear circlip"),
+# which must not be read as that host (a key read as a spur gear, a circlip as a shaft; live run 2026-11-19)
+NOT_STOCKED = re.compile(r"\b(keys?|circlips?|retaining rings?|snap rings?|e-?clips?|seals?|o-?rings?|springs?|"
+                         r"grease nipples?|lock ?nuts?|tab washers?|spacer sleeves?)\b", re.IGNORECASE)
 
 
 def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -769,8 +773,9 @@ def hex_lookup(doc: dict[str, Any], t: dict[str, Any], candidates: list[dict[str
                     "title": seat["title"], "standard": seat["standard"], "kind": seat["code"], "confidence": "high",
                     "read": True, "found": f"Hex found {seat['title']} in the Toolbox, sized by the ICD "
                                            f"({seat['interface']})"}
-    tb = librarian.read_toolbox(text) or (librarian.read_toolbox(f"{t['title']} {item['toolbox']}")
-                                          if standard and item.get("toolbox") else None)
+    unstocked = standard and NOT_STOCKED.search(t["title"]) is not None
+    tb = None if unstocked else (librarian.read_toolbox(text) or (
+        librarian.read_toolbox(f"{t['title']} {item['toolbox']}") if standard and item.get("toolbox") else None))
     if tb is not None:
         ok = standard or (tb.get("kind") in TOOLBOX_FOR_PARTS and tb.get("confidence") == "high")
         if ok:

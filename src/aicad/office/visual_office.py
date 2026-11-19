@@ -239,7 +239,8 @@ def level_message(t: dict[str, Any], look: dict[str, Any]) -> tuple[str, list[di
     if look.get("stop"):
         found = [f["text"] for f in look.get("quick") or [] if f["severity"] == "block"]
         bullets = "\n".join(f"- {x}" for x in (found or [look["reason"]])[:4])
-        extra = f"\n{look['line']}" if look.get("line") else ""
+        line = look.get("line") or ""  # the reason already carries the visual line when a measurement confirmed it
+        extra = f"\n{line}" if line and line not in bullets else ""
         return ((f"I stopped {t['key']} {t['title']}: {what} isn't assembled as the interfaces say.\n{bullets}{extra}\n\n"
                 "This usually comes from the layout, not from the parts: the interfaces place every part. I can "
                 "rebuild the program assembly from the approved interfaces and retry the step; if it stops again, "

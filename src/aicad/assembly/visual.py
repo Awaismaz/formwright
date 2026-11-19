@@ -157,9 +157,12 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
         if blocks:
             out.append(f"the other parts mount on {blocks[0]}")
     journals = [f for f in ifaces if f["kind"] in ("bearing_journal", "bearing_seat")]
-    if skel.get("layout") == "shaft_line" and shafts:
+    if skel.get("layout") == "shaft_line" and len(shafts) > 1:
         out.insert(0, "each shaft runs in two bearings, one either side of its gear; the shafts are parallel and "
                       "nothing holds them but their bearings (no housing)")
+    elif skel.get("layout") == "shaft_line" and shafts:  # one shaft's sub-assembly: no "parallel pair" to look for
+        out.insert(0, f"{shafts[0]} runs in two bearings, one either side of its gear; nothing holds it but its "
+                      "bearings (no housing)")
     elif not journals:
         for st in skel.get("standard") or []:
             nm = str(st.get("name") or "")
@@ -678,16 +681,20 @@ def clash_rows(an: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 async def targeted(root: Path, org_id: str, doc: dict[str, Any], targets: list[str]) -> list[dict[str, Any]]:
-    """Exact interference of the pairs that involve the flagged instances only (through the pair cache)."""
+    """Exact interference of the pairs that involve the flagged instances only (through the pair cache). With two
+    or more flagged parts, only a clash *between* flagged parts confirms the picture: a flagged shaft touching an
+    unflagged bearing (a 2.2 mm³ shoulder fillet, live run 2026-11-19) is not what the picture complained about, and
+    clashes alone are advisory (PD-71)."""
     from aicad.assembly import service
 
     if not targets:
         return []
     res = await service.check_pairs(root, org_id, doc, only=targets)
     names = service.display_names(doc)
+    mine = set(targets)
     return [{"a": p["a"], "b": p["b"], "a_name": names.get(p["a"]), "b_name": names.get(p["b"]),
              "volume_mm3": round(float(p["volume_mm3"]), 3)} for p in res["interference"]["pairs"]
-            if p["kind"] == "interference"]
+            if p["kind"] == "interference" and (len(mine) < 2 or (p["a"] in mine and p["b"] in mine))]
 
 
 def confirm(decision: dict[str, Any], verdict: dict[str, Any] | None, clashes: list[dict[str, Any]]) -> dict[str, Any]:
