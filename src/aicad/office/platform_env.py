@@ -475,13 +475,27 @@ class PlatformEnv(orchestrator.Env):
         (d / "spec.json").write_text(json.dumps(spec, indent=1, sort_keys=True), encoding="utf-8")
         meta = md._meta(p, ws, self._user_name(), md.local_date(None, None))
         old = md._record(ws) or {}
-        try:
-            res = await md._generate(p, ws, old.get("options") or {}, meta, md._edits(ws), d)
-        except HTTPException as e:
-            return {"ok": False, "error": e.detail if isinstance(e.detail, str) else "The drawing failed."}
-        except Exception as e:
-            log.exception("drawing failed")
-            return {"ok": False, "error": f"The drawing failed: {e}"}
+        base = old.get("options") or {}
+        # CD-039: a sheet whose consistency check (CHK-12) fails is laid out again, simpler each time (no section
+        # view, then three views, then two); the first layout that passes is kept
+        tries = [base, {**base, "section": None}, {**base, "section": None, "views": ["front", "top", "right"]},
+                 {**base, "section": None, "views": ["front", "top"]}]
+        res = None
+        for k, opts in enumerate(tries):
+            try:
+                res = await md._generate(p, ws, opts, meta, md._edits(ws), d)
+            except HTTPException as e:
+                if res is None:
+                    return {"ok": False, "error": e.detail if isinstance(e.detail, str) else "The drawing failed."}
+                break
+            except Exception as e:
+                log.exception("drawing failed")
+                if res is None:
+                    return {"ok": False, "error": f"The drawing failed: {e}"}
+                break
+            if res["result"]["check"]["passed"] or k == len(tries) - 1:
+                break
+        assert res is not None
         rec = res["result"]
         dims = rec.get("dimensions") or []
         return {"ok": True, "check_passed": bool(rec["check"]["passed"]), "problems": rec["check"].get("problems") or [],

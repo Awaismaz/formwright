@@ -427,6 +427,12 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
     for t in doc["tickets"]:
         r = run_of(t)
         why = str(r.get("blocked") or "")
+        if r.get("status") == "blocked" and t["kind"] == "deliverable" and why.startswith("Ortho couldn't finish every"):
+            close_wait(t)  # CD-039: sheets needing a touch-up no longer stop the drawing set
+            _set_run(t, status="queued", next=t.get("deliverable") or "drawings", attempt=0, blocked=None,
+                     line="Back to Ortho: sheets that need a touch-up are flagged, not a stop")
+            out.append(t)
+            continue
         parts = (doc.get("assembly") or {}).get("parts") or {}
         if t["kind"] == "part" and t["column"] in service.DONE_COLUMNS and r.get("status") == "done" \
                 and (parts.get(t["item_id"]) or {}).get("kind") == "placeholder" \
@@ -1317,11 +1323,16 @@ class Runner:
                 lines.append(f"- Assembly drawing: {asm.get('error') or 'not drawn'}")
             service.comment(self.root, d, tid, "\n".join(lines), o)
             tt["comments"][-1]["delivery"] = "stored"
-            if bad or not asm.get("ok"):
-                self._fail(d, tid, "Ortho couldn't finish every sheet: " + (f"{bad[0]['title']}: "
-                           f"{bad[0].get('error') or 'CHK-12 fails'}" if bad else asm.get("error") or "assembly drawing")
+            drawn = [x for x in sheets if x.get("ok")]
+            if not asm.get("ok") or not drawn:
+                self._fail(d, tid, "Ortho couldn't finish the drawings: " + (asm.get("error") or "assembly drawing"
+                           if not asm.get("ok") else f"{bad[0]['title']}: {bad[0].get('error') or 'not drawn'}")
                            + ". Fix it in Drawing Studio, then retry.")
                 return
+            if bad:  # CD-039: the set is delivered; sheets needing a touch-up are flagged, never a stop
+                tt["sheet_notes"] = [f"{x['key']} {x['title']}" for x in bad]
+                lines[0] += (f" {len(bad)} sheet{'s' if len(bad) != 1 else ''} need a touch-up in Drawing Studio: "
+                             + ", ".join(tt["sheet_notes"][:4]) + ".")
             service.move(self.root, d, tid, "approved", o)
             _set_run(tt, status="done", line=lines[0], agent="ortho")
             service.emit(self.root, d, "deliverable.done", lines[0], o, tid, deliverable="drawings")

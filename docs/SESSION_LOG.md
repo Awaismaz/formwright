@@ -101,6 +101,13 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f9) — Assembly speed merged; drawing sets don't stop on one sheet (ASM-023, CD-039)
+
+Merged wip/asm-perf (pair cache, fasteners placed from the ICD, advisory background final check, block DOF analysis;
+F1 copy: Centre body 8+ min -> 4 s, final 12 s, full check 65 s cold / 1 s warm) on top of CD-038 (the office places,
+it doesn't solve); assembly + office suites 150 passed. F1 final assembly done; its drawing set was blocked by 2 of 29
+sheets failing CHK-12: Ortho now relays them out simpler and flags what still needs a touch-up (CD-039).
+
 ## 2026-11-19 (f8) — F1 assembled; the office places, it doesn't solve (CD-038, PD-71)
 
 Founder (frustrated): intervene, fix, finish the F1 assembly. Measured on a copy: one numerical mate solve of the F1
