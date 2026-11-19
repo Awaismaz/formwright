@@ -1,0 +1,20 @@
+{"case": "motor_drive", "name": "Motor drive",
+ "brief": "A motor on a bracket bolted to a base plate drives a 20 mm shaft through a coupling; the shaft runs in two pillow blocks with 6204 bearings.",
+ "reply": {"summary": "A motor on its bracket, coupled to a shaft in two pillow blocks, all on one base plate.",
+  "components": [
+   {"id": "base_plate", "kind": "plate", "name": "Base plate"},
+   {"id": "motor", "kind": "motor", "name": "Motor"},
+   {"id": "bracket", "kind": "bracket", "name": "Motor bracket"},
+   {"id": "coupling", "kind": "coupling", "name": "Coupling"},
+   {"id": "shaft", "kind": "shaft", "name": "Drive shaft", "params": {"d": 20}},
+   {"id": "pb", "kind": "pillow_block", "name": "Pillow block", "qty": 2},
+   {"id": "brg", "kind": "bearing", "name": "Shaft bearing", "qty": 2, "params": {"designation": 6204}},
+   {"id": "bolts", "kind": "fastener", "name": "Bolt", "qty": 12, "params": {"style": "hex_bolt"}}],
+  "connections": [
+   {"kind": "bolted_joint", "host": "base_plate", "guest": "bracket", "via": ["bolts"]},
+   {"kind": "bolted_joint", "host": "bracket", "guest": "motor", "via": ["bolts"]},
+   {"kind": "coupling", "host": "motor", "guest": "shaft", "via": ["coupling"]},
+   {"kind": "bearing_journal", "host": "shaft", "guest": "brg", "params": {"count": 2}},
+   {"kind": "bearing_seat", "host": "pb", "guest": "brg"},
+   {"kind": "bolted_joint", "host": "base_plate", "guest": "pb", "via": ["bolts"]}],
+  "assumptions": [], "questions": []}}

@@ -43,9 +43,17 @@ def _out_of_scope(g: DesignGraph, c: Component) -> str | None:
         return None
     if k in g.constraints.excluded:
         return "excluded"
-    if g.constraints.exclusive and g.constraints.named and k not in g.constraints.named:
+    if g.constraints.exclusive and g.constraints.named and k not in g.constraints.named and not _said(c.name, g.brief):
         return "not_named"
     return None
+
+
+def _said(name: str, brief: str) -> bool:
+    """The brief names this part in its own words ("two guide rods" for a "Guide rod"), though not in a scope word."""
+    import re
+
+    n = re.sub(r"\s+", " ", (name or "").strip().lower())
+    return bool(n) and re.search(r"(?<![a-z])" + re.escape(n) + r"(?:e?s)?(?![a-z])", (brief or "").lower()) is not None
 
 
 def issues(g: DesignGraph) -> list[dict[str, Any]]:

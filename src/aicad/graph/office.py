@@ -195,12 +195,15 @@ def view(g: DesignGraph) -> dict[str, Any]:
                 "shoulder_stop": f"{gu} against the shoulder of {h}", "bearing_journal": f"{gu} on {h}",
                 "bearing_seat": f"{gu} in {h}", "gear_mesh": f"{h} meshes with {gu}",
                 "bolted_joint": f"{gu} bolted to {h}", "ring_retained": f"{gu} held on {h}",
-                "mounted_on": f"{gu} on {h}"}.get(x.kind, f"{gu} - {h}")
+                "mounted_on": f"{gu} on {h}", "belt_drive": f"{h} belted to {gu}",
+                "coupling": f"{h} coupled to {gu}"}.get(x.kind, f"{gu} with {h}")
         if via:
             text += f" ({', '.join(via)})"
         extra = []
         if x.kind == "gear_mesh" and x.v("centre_distance") is not None:
             extra.append(f"a = {_fmt(x.v('centre_distance'))} mm, ratio {_fmt(x.v('ratio'))}")
+        if x.kind == "belt_drive" and x.v("centre_distance") is not None:
+            extra.append(f"C = {_fmt(x.v('centre_distance'))} mm")
         if x.kind in ("keyed_hub", "hub_fit") and x.v("fit"):
             extra.append(f"fit {x.v('fit')}")
         if x.kind in ("bearing_journal", "bearing_seat") and x.v("count"):

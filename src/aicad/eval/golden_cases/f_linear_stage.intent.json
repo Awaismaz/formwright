@@ -1,0 +1,77 @@
+{
+  "case": "f_linear_stage",
+  "name": "Linear stage",
+  "brief": "A manual linear stage: an 80 x 100 x 25 mm carriage that slides on two Ø12 guide rods 60 mm apart; the rods are held in two end blocks on a 300 x 100 x 12 mm base plate. Just these parts.",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "A carriage sliding on two guide rods held in two end blocks on a base plate.",
+    "components": [
+      {
+        "id": "plate",
+        "kind": "plate",
+        "name": "Base plate",
+        "qty": 1,
+        "params": {
+          "L": 300,
+          "W": 100,
+          "T": 12
+        }
+      },
+      {
+        "id": "block",
+        "kind": "bracket",
+        "name": "End block",
+        "qty": 2,
+        "params": {
+          "L": 30,
+          "W": 100,
+          "H": 40
+        }
+      },
+      {
+        "id": "rod",
+        "kind": "shaft",
+        "name": "Guide rod",
+        "qty": 2,
+        "params": {
+          "d": 12,
+          "length": 240
+        }
+      },
+      {
+        "id": "carriage",
+        "kind": "other",
+        "name": "Carriage",
+        "qty": 1,
+        "params": {
+          "L": 80,
+          "W": 100,
+          "H": 25
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "plate",
+        "guest": "block"
+      },
+      {
+        "kind": "rod_support",
+        "host": "block",
+        "guest": "rod",
+        "params": {
+          "spacing": 60,
+          "height": 25
+        }
+      },
+      {
+        "kind": "slide",
+        "host": "rod",
+        "guest": "carriage"
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}
