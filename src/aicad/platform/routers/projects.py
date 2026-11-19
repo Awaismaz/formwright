@@ -250,7 +250,7 @@ def _on_event(project_id: str, user_id: str, god_tokens: bool) -> Any:
                     if rev:
                         ev["revision"] = rev
                         notify_revision(db, p, rev, who, why)
-                        if s is not None and st.get("exports_pending"):
+                        if getattr(s, "deferred", None) is not None and st.get("exports_pending"):
                             s.deferred.when_verified(st.get("build_id"), _complete_revision(ws, rev))
                     if p.builds == 1:
                         track(db, "first_build", who, p.org_id, ok=bool(st.get("ok")))
@@ -699,9 +699,9 @@ async def wait_finalized(project_id: str, full: bool = False) -> None:
     t = _finalizing.get(project_id)
     if t is not None and not t.done():
         await asyncio.shield(t)
-    s = _sessions.get(project_id)
-    if s is not None:
-        await s.deferred.settle(exports_only=not full)
+    d = getattr(_sessions.get(project_id), "deferred", None)
+    if d is not None:
+        await d.settle(exports_only=not full)
 
 
 def _complete_revision(ws: Path, rev: int) -> Any:

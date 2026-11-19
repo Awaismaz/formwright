@@ -6,10 +6,10 @@ Branch `wip/pipeline-speed`. Founder ask: "make the part modelling and assembly 
 
 The agent's `build_model` call used to run everything on the critical path: build, checks, topology, STEP export,
 STEP re-import (CHK-07), a second full rebuild (CHK-08), STL/GLB/3MF, then a render of the 0.01 mm STL. On the
-agent's own 125-line gear script that was **~54 s per build**. Now:
+agent's own 125-line gear script that was **~51 s per build** (median, loaded machine). Now:
 
 1. **PS-01 Deferred verification.** The report returns after build + CHK-02..05 + topology + a render of the viewer
-   mesh (**~12 s** on that script under load, **0.5 s** for a plate, **2.6 s** for the same gear built with the new
+   mesh (**~11 s** on that script under load, **0.5 s** for a plate, **2.6 s** for the same gear built with the new
    helper). Exports, CHK-07 and CHK-08 run in the background on the same warm worker, and the turn's verdict waits
    for them.
 2. **PS-02 Cheaper steps.** Topology export 2-6x faster with output identical by value, `is_valid` run once instead
@@ -79,9 +79,9 @@ build + render of `preview.stl`. "Background" is the deferred exports, CHK-07 an
 
 | Script | Faces | Old critical (s) | New critical (s) | New background (s) | Verdicts |
 |---|---:|---:|---:|---:|---|
-| Agent's own gear (125 lines, polygon teeth) | 2048 | RESULTS_GEAR_OLD | RESULTS_GEAR_NEW | RESULTS_GEAR_BG | identical (CHK-02..05, 07, 08 pass) |
-| Plate with holes, pocket, fillets | 19 | RESULTS_PLATE_OLD | RESULTS_PLATE_NEW | RESULTS_PLATE_BG | identical |
-| Same gear via `fw.spur_gear` (15 lines) | 248 | n/a (helper is new) | RESULTS_FW_NEW | RESULTS_FW_BG | all pass; CHK-05 rel. error 1.3e-7 |
+| Agent's own gear (125 lines, polygon teeth) | 2048 | **50.7** (57.4, 50.2, 51.1, 48.3) | **10.9** (14.1, 10.1, 11.6, 8.7) | 24.9 | identical (CHK-02..05, 07, 08 pass) |
+| Plate with holes, pocket, fillets | 19 | **2.78** (3.51, 2.86, 2.69, 2.70) | **0.48** (0.47, 0.52, 0.48, 0.48) | 0.24 | identical |
+| Same gear via `fw.spur_gear` (15 lines) | 248 | n/a (helper is new) | **2.6** (2.59, 2.67, 2.35, 2.60) | 2.8 | all pass; CHK-05 rel. error 1.3e-7 |
 
 The new code's stage timings for the 2048-face gear (`status.timings_s`, one run, loaded machine):
 
@@ -111,12 +111,18 @@ DIN 6885 keyway, hub OD 40 x 30 long on one side. Steel C45."
 
 | | Before (master, idle-ish) | After (this branch, loaded machine) |
 |---|---:|---|
-| Total | 145 s | LIVE_TOTAL |
-| Script written | 125 lines (hand involute), ~61 s to write | LIVE_SCRIPT |
-| build_model tool | 58 s | LIVE_BUILD |
-| End of turn | ~11 s | LIVE_END |
-| Cost | ~305 tokens (cold) | LIVE_COST |
-| Verdict | verified | LIVE_VERDICT |
+| Total | 145 s | **52.2 s** (2.8x faster) |
+| Script written | 125 lines (hand involute), ~61 s to write | 32 lines, one `fw.spur_gear` call; written by 28 s (the first build call at 12.9 s found no file yet, 0.08 s) |
+| build_model tool | 58 s | **11.7 s** wall incl. the worker cold start, which the Studio avoids by warming the worker when a project opens (runner: build 1.0 + checks 0.24 + topology 0.68 = 2.2 s); background exports+CHK-07 1.9 s, CHK-08 1.3 s |
+| End of turn | ~11 s | ~12 s (final message); no wait for verification, it had finished |
+| Cost | ~305 tokens (cold) | 286 Formwright tokens ($2.85, cold cache) |
+| Verdict | verified | verified (CHK-02..05, 07, 08 pass; 248 faces; volume rel. err 1.3e-7); result event `build_verified: true` |
+
+Notes on the live run:
+- The agent used `fw.spur_gear` straight away.
+- It called the build once before writing the file. That call cost 0.08 s and a few seconds of re-thinking.
+- Its final message said the background checks were "still running". The prompt now tells it not to mention them,
+  because the app shows the verdict.
 
 ### PS-04: start-up probe (trivial prompt, the same options as the session)
 
@@ -168,7 +174,7 @@ DIN 6885 keyway, hub OD 40 x 30 long on one side. Steel C45."
   - `handoff.py`: verified = `is_verified`.
   - `platform/routers/projects.py`: settled verdict, revision completion, `wait_finalized(full=)`.
   - `platform/routers/studio.py`: `/warm` pre-connects the agent.
-  - `platform/routers/handoff.py`: release waits for all checks.
+  - `platform/routers/handoff.py`: the release, the handoff plan and the zip wait for all checks.
   - `web/.../ProjectStudio.tsx`: polls status while checks are pending.
   - `web/.../studio/Panels.tsx`: pending verdict and CHK-08 text.
   - `web/src/lib/types.ts`: new status fields.
@@ -199,7 +205,16 @@ DIN 6885 keyway, hub OD 40 x 30 long on one side. Steel C45."
   - Keyway removed volume.
   - ISO 273 clearance, tapped holes with threads, counterbore volume by hand.
   - Scrubbing of the helper names.
-- Neighbour suites: `RESULTS_TESTS`.
+- Neighbour suites (loaded machine):
+  - `test_agent`, `test_ai_quality`, `test_run_record`, `test_io_roundtrip`: 54 passed.
+  - `test_pipeline_speed`, `test_fw_std`, `test_handoff`, `test_release`, `test_studio`, `test_studio_fixes`,
+    `test_studio_intel`, `test_library`, `test_collab`, `test_sheet_metal`, `test_native_formats`,
+    `test_office_orchestrator`: 147 passed and 3 failed. All three were fixed and re-run green:
+    - the fw test's state isolation;
+    - the handoff plan/zip now wait for verification instead of reading a status whose CHK-07 is pending;
+    - `wait_finalized` tolerates the test's fake session.
+  - `test_drawings`, `test_manufacturing`, `test_office_phase6_review_ecn`, `test_assembly`, `test_fw_std`: 97 passed.
+  - `ruff` clean; `tsc --noEmit` clean.
 
 ## Parked decisions (defaults used)
 

@@ -11,6 +11,7 @@ from aicad import checks, fw
 
 
 def test_spur_gear_matches_its_hand_formulas_with_clean_brep() -> None:
+    fw.reset()
     part, exp = fw.spur_gear(2, 60, 20, bore=20, hub_d=40, hub_l=30, keyway=True)
     assert part.is_valid and len(part.solids()) == 1 and checks.free_edge_count(part) == 0
     assert exp["volume"] == pytest.approx(part.volume, rel=1e-5)  # spline flanks vs the exact involute integral
