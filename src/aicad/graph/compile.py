@@ -5,7 +5,8 @@
   (``office/direct.py``) are tested on, with the layout hints (envelope, module, teeth, mounts_on). ICD overrides for
   values the description can't carry (a gear face width other than 10 m) go in ``plan["graph"]["icd_overrides"]``,
   keyed by part name, and are applied when the ICD is drafted.
-* ``to_icd(graph)``: (skeleton, interfaces) through ``icd.build``, exactly as the office does at plan approval.
+* ``to_icd(graph)``: (skeleton, interfaces) solved from the connections (``graph/layout.py``), exactly as the
+  office does at plan approval (the template ``icd.build`` is the fallback).
 * ``check(graph, skeleton, interfaces)``: the cross-check. Every connection must come out as the interface it means,
   with the numbers the graph sized (centre distance, key size, bearing, seat and shoulder Ø), nothing the brief
   excludes may appear, and every component must be placed or listed. Mismatches are returned in plain words.
@@ -184,6 +185,17 @@ def part(g: DesignGraph, c: Component) -> dict[str, Any]:
         p["description"] = "Dowel pin" + (f" {_f(c.v('d'))} x {_f(c.v('length'))}" if c.v("d") and c.v("length")
                                           else "") + "."
         p["toolbox"] = "dowel"
+    elif k == "pillow_block":
+        p["description"] = ("Pillow block: carries one bearing of its shaft, bolted to the base plate; sized by the "
+                             "layout from its bearing and the shaft height.")
+    elif k == "motor":
+        dims = [c.v(n) for n in ("L", "W", "H")]
+        p["description"] = ("Bought-out electric motor (envelope only, replace with the maker's dimensions)"
+                            + (f": body {' x '.join(_f(x) for x in dims)} mm" if all(dims) else "")
+                            + (f", shaft Ø{_f(c.v('shaft_d'))}" if c.v("shaft_d") else "") + ".")
+    elif k == "coupling":
+        p["description"] = ("Shaft coupling joining two shaft ends" + (f", Ø{_f(c.v('od'))}" if c.v("od") else "")
+                            + (f" x {_f(c.v('length'))}" if c.v("length") else "") + ".")
     elif k in ("plate", "bracket"):
         dims = [c.v(n) for n in ("L", "W", "T" if k == "plate" else "H")]
         p["description"] = f"{ct.label} " + (" x ".join(_f(x) for x in dims) + " mm." if all(dims) else "(size assumed).")
@@ -277,12 +289,25 @@ def plan_parts(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def to_icd(graph: DesignGraph, plan: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def to_icd(graph: DesignGraph, plan: dict[str, Any] | None = None, *, template: bool = False
+           ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """(skeleton, interfaces) as the office lays out this graph's program at plan approval: solved from the
+    connections (``graph/layout.py``, architecture v2 step 2), or the template layout (``icd.build``) when
+    ``template`` is set, the switch ``FW_GRAPH_LAYOUT=0`` is on, or the solver can't lay this graph out yet."""
+    from aicad.graph import layout
     from aicad.office import icd
 
     plan = plan or to_plan(graph)
     parts = plan_parts(plan)
-    return icd.build(parts, graph.brief, overrides_for(plan, parts))
+    ov = overrides_for(plan, parts)
+    if not template and layout.enabled():
+        try:
+            return layout.build(graph, parts, graph.brief, ov)
+        except layout.Unsupported as e:
+            skel, ifs = icd.build(parts, graph.brief, ov)
+            skel["notes"].append(f"Laid out with the standard layout: {e}.")
+            return skel, ifs
+    return icd.build(parts, graph.brief, ov)
 
 
 # ----------------------------------------------------------------------------- the cross-check
@@ -370,10 +395,10 @@ def check(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -
 
 
 def limits(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
-    """Connections the graph states that today's layout does not realise yet (said, never hidden): a shoulder stop
-    inside a housing (the gearbox layout seats hubs between the bearings, on a plain shaft). Step 2 of architecture
-    v2 lays these out from the connection semantics."""
-    out: list[str] = []
+    """Connections the graph states that the layout does not realise (said, never hidden): a shoulder stop the
+    interfaces don't carry (the template layout seats hubs inside a housing on a plain shaft), and the solver's
+    layout conflicts. The connection solver (``graph/layout.py``) lays shoulders out, so this is empty on it."""
+    out: list[str] = [c["text"] for c in skel.get("conflicts") or []]
     for x in graph.connections:
         h, gu = graph.comp(x.host), graph.comp(x.guest)
         if x.kind != "shoulder_stop" or h is None or gu is None:

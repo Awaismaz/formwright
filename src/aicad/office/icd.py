@@ -78,11 +78,12 @@ SHAFT_END = 10.0     # mm of shaft beyond each outer bearing face (at least half
 SEAT_END = 2.0       # mm of seat beyond the free face of the hub on a stepped shaft with no bearings (a sub-assembly)
 KIND_LABEL = {"hole_pattern": "bolted joint", "shaft_bore": "shaft / bore fit", "face": "seating face",
               "gear_mesh": "gear mesh", "bearing_seat": "bearing seat", "key": "keyed joint", "dowel": "dowel pins",
-              "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring"}
+              "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring", "belt_drive": "belt drive"}
 EDITABLE = {"hole_pattern": ("fastener", "d", "count", "inset", "flatness", "position_tol"),
             "shaft_bore": ("d", "fit"), "face": ("flatness", "position_tol"),
             "gear_mesh": ("module", "teeth_a", "teeth_b"), "bearing_seat": ("designation", "housing_fit"),
-            "key": ("length",), "dowel": ("d",), "bearing_journal": ("designation",), "retaining_ring": ()}
+            "key": ("length",), "dowel": ("d",), "bearing_journal": ("designation",), "retaining_ring": (),
+            "belt_drive": ()}
 ROTATIONS = (0, 90, 180, 270)  # quarter turns of a part frame about +Z (Archie's ``rotate`` hint or an ICD edit)
 
 # Deep-groove ball bearings (the Toolbox table, ISO 15): designation -> (bore d, OD D, width B). 62xx first: the
@@ -2275,14 +2276,18 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
             if hi - lo > 0.5:
                 out.append({"type": "seat", **_axial(skel, side, d, d["axis"], lo, hi), "d": d["clearance_d"], "tol": tol,
                             "label": f"shaft clearance Ø{d['clearance_d']:g}"})
-            out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
-                        "label": ("outer face (-Y wall), shaft end flush with it" if horiz
-                                  else "bottom face, shaft end flush with it")})
+            if d.get("flush_z") is not None:  # (a pillow block's seat has no flush shaft end)
+                out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
+                            "label": ("outer face (-Y wall), shaft end flush with it" if horiz
+                                      else "bottom face, shaft end flush with it")})
         else:  # the shaft: the bearing journal through the housing, end flush with its bottom
-            out.append({"type": "boss", **_axial(skel, side, d, d["axis"], d["z"][0], d["z"][1]), "d": d["d"],
-                        "fit": d["shaft_fit"], "tol": tol, "label": f"bearing journal Ø{d['d']:g} {d['shaft_fit']}"})
-            out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
-                        "label": "end face flush with the " + ("-Y wall" if horiz else "bottom")})
+            # a stepped shaft (graph layout) names its journal spans: the shaft between them may be larger
+            for z0, z1 in d.get("journals") or [d["z"]]:
+                out.append({"type": "boss", **_axial(skel, side, d, d["axis"], z0, z1), "d": d["d"],
+                            "fit": d["shaft_fit"], "tol": tol, "label": f"bearing journal Ø{d['d']:g} {d['shaft_fit']}"})
+            if d.get("flush_z") is not None:
+                out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
+                            "label": "end face flush with the " + ("-Y wall" if horiz else "bottom")})
     elif f["kind"] == "bearing_journal":
         sd = int(d.get("side") or -1)
         if which == "a":  # the shaft: the journal (bearing bore Ø, k6), and the shoulder when the shaft is larger
@@ -2527,6 +2532,8 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                              has no bearings at all: the shaft is delivered as a sub-assembly)
         ``line_clash``       two things on different shafts of a shaft line overlap (gears are taken at the pitch circle)
         ``journal_off_shaft`` a bearing beyond the end of its shaft
+        ``layout_conflict``  the design graph's connections can't all hold (an over-constrained or inconsistent loop,
+                             a part no connection reaches): it names the parts and connections
       geometry (a part can't be made):
         ``outgrown``, ``hole_diameter``, ``hole_edge``, ``rim``, ``cavity_breach``, ``hole_overlap``, ``keyway_rim``,
         ``washer_overlap``, ``fit_unknown``, ``bearing_depth``, ``bearing_wall``, ``bearing_bore``
@@ -2668,6 +2675,10 @@ def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict
                     "text": "Layout: there is nothing to mount the parts on (no base plate, housing or frame) and no "
                             "shaft to carry them, so they are laid out in a row with no interfaces and would not be "
                             "assembled. Add a base plate or housing to the plan, or the shafts the parts sit on."})
+    for c in skel.get("conflicts") or []:  # the graph layout's solve (graph/layout.py): never silent, never guessed
+        out.append({"code": "layout_conflict", "items": list(c.get("items") or []), "interfaces": [],
+                    "parts": list(c.get("parts") or []), "connections": list(c.get("connections") or []),
+                    "text": c["text"]})
     linked = {f[w]["item"] for f in ifs for w in ("a", "b")}
     separate = set(skel.get("separate") or [])
     if len(items) > 1:
@@ -2716,8 +2727,9 @@ def _bearing_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dic
     """Bearings of the plan that no bearing seat or journal takes (warnings: Fitz puts them in the parts bin)."""
     out: list[dict[str, Any]] = []
     for st in skel.get("standard") or []:
-        if not _BEARINGY.search(st.get("name") or ""):
-            continue
+        if not _BEARINGY.search(st.get("name") or "") or re.search(r"screw|bolt|\bnut|washer", st.get("name") or "",
+                                                                    re.IGNORECASE):
+            continue  # ("Bearing cap screws" are screws)
         placed = len((seated(ifs, st["item"]) or {}).get("at") or [])
         want = int(st.get("qty") or 0)
         if placed < want:
@@ -2784,9 +2796,10 @@ def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
 
 
 # ----------------------------------------------------------------------------- the ICD document
-def new_icd(parts: list[dict[str, Any]], brief: str, actor: str, overrides: dict[str, Any] | None = None
-            ) -> tuple[dict[str, Any], dict[str, Any]]:
-    skel, ifs = build(parts, brief, overrides)
+def new_icd(parts: list[dict[str, Any]], brief: str, actor: str, overrides: dict[str, Any] | None = None,
+            built: tuple[dict[str, Any], list[dict[str, Any]]] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The draft ICD document. ``built``: a layout already solved (the design graph's, ``graph/layout.py``)."""
+    skel, ifs = built if built is not None else build(parts, brief, overrides)
     icd = {"version": 1, "status": "draft", "interfaces": ifs, "overrides": overrides or {"items": {}, "interfaces": {}},
            "history": [{"version": 1, "at": None, "by": actor, "kind": "created",
                         "text": f"Archie laid out the program and named {len(ifs)} interfaces.", "changes": []}],

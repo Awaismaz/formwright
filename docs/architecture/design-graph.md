@@ -141,9 +141,14 @@ the gearbox layout seats gears on plain shafts between the bearings). Both are s
 2. **Flag on by default** once the golden suite (WORKLIST 46) passes on the graph path for every case it holds, with
    the old planner as the fallback when the intent step fails (already wired: a failure falls back to the standard
    breakdown, as an Archie failure does today).
-3. **Step 2 (WORKLIST 44):** the layout solves positions from the connections directly (`graph.layout` becomes the
-   layout's output, not a read-back); the plan text stops being the carrier (the ICD reads the graph); shoulders and
-   rings inside housings, bolted joints from the graph. `limits` goes to zero.
+3. **Step 2 (WORKLIST 44, built on `wip/connection-layout`):** the layout solves positions from the connections
+   directly (`graph/layout.py`): each connection kind places its guest by its registry rule, a walk from a fixed base
+   (housing, base plate, else the input shaft) over an axis graph of meshes, belts and couplings, closed loops checked
+   (a `layout_conflict` names the parts and connections), heights two paths fix solved together. Same skeleton and
+   ICD format as `icd.build`; the template stays the fallback for graphs the solver doesn't lay out yet and for plans
+   without a graph (`FW_GRAPH_LAYOUT=0` switches graph plans back to it). Shoulders inside housings lay out; `limits`
+   is empty on the golden cases. New kinds: `pillow_block`, `motor` (bought out, envelope only), `coupling`;
+   connections `belt_drive` and `coupling`. Report: `docs/reports/connection-layout.md`.
 4. **Step 3 (WORKLIST 45):** generators for housings, caps, brackets, plates and pulleys from the graph (the direct
    builder grows per component kind).
 5. **Instant preview (WORKLIST 47):** the graph plus the solved layout draws a dimensioned 3D preview at plan time.
@@ -153,9 +158,11 @@ the gearbox layout seats gears on plain shafts between the bearings). Both are s
 
 ## 7. Limits today (honest)
 
-* The layout still reads the plan text; the compile writes text the layout is tested on, and the cross-check proves
-  the result matches. Text is still the carrier until step 2.
-* Inside a housing the layout has no shoulders or rings yet (`limits`).
+* Step 2: the connection solver reads the graph, but part sizes it doesn't carry yet (a block's initial envelope, a
+  cap's height) still come through `icd._initial` from the plan part, which the compile writes from the graph.
+* The solver lays out shafts along +Y only (housings, pillow blocks, free shaft lines, shaft sub-assemblies); block
+  layouts with no shafts, vertical shafts in a plate, a housing on a plate and 2-D trains use the template (said in
+  the skeleton notes).
 * Fastener sizes and housing envelopes are the layout's rules (`icd.py`), not the graph's.
 * Only deep-groove ball bearings (60xx / 62xx) and external spur gears are sized; anything else is "other" and goes
   to the design agent as before.

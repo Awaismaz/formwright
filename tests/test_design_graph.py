@@ -91,7 +91,7 @@ def test_registries_are_consistent() -> None:
     kh = registry.CONNECTIONS["keyed_hub"]
     assert kh.hosts == ("shaft",) and "spur_gear" in kh.guests and kh.via == ("key",) and kh.via_required
     assert any("keyseat" in f for f in kh.host_features) and any("keyway" in f for f in kh.guest_features)
-    assert registry.CONNECTIONS["bearing_seat"].hosts == ("housing",)
+    assert registry.CONNECTIONS["bearing_seat"].hosts == ("housing", "pillow_block", "bracket")  # step 2: pillow blocks
     assert any("groove" in f for f in registry.CONNECTIONS["ring_retained"].host_features)
     assert any("hole" in f for f in registry.CONNECTIONS["bolted_joint"].guest_features)
     assert "m (z1 + z2) / 2" in registry.CONNECTIONS["gear_mesh"].placement
@@ -602,7 +602,10 @@ def test_live_intent_replies_replayed(case: str, direct: int, question: str | No
     assert icd.problems(sk, ifs) == []
     assert sum(1 for v in gc.to_direct(g, out.plan).values() if v["path"] == "direct") == direct
     if case == "reducer":
-        assert sk["layout"] == "gearbox" and len(pg["limits"]) == 2  # shoulders inside a housing: said, step 2
+        # shoulders inside a housing: laid out from the connections (step 2); the template still can't (said as limits)
+        from aicad.graph import layout
+
+        assert sk["layout"] == "gearbox" and len(pg["limits"]) == (0 if layout.enabled() else 2)
         doc = {"plan": out.plan}
         new, notes = goffice.answer(doc, {question: "Carbon steel (C45)"})
         assert notes is None and new is not None and new.plan is not None and new.plan["graph"]["questions"] == []

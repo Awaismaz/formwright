@@ -102,6 +102,13 @@ COMPONENTS: dict[str, ComponentType] = {c.kind: c for c in [
         "style": ParamSpec(unit="", choices=("open", "blind")), "seat_D": _D}, complexity=2),
     ComponentType("plate", "Plate", "machined", "plate", {"L": _L, "W": _L, "T": _L}, complexity=2),
     ComponentType("bracket", "Bracket", "machined", "support", {"L": _L, "W": _L, "H": _L}, complexity=2),
+    ComponentType("pillow_block", "Pillow block", "machined", "support", {
+        "L": _L, "W": _L, "H": _L, "centre_height": ParamSpec(lo=5, hi=2000, label="shaft centre height")},
+        complexity=2),
+    ComponentType("motor", "Motor (bought out: envelope only)", "machined", "motor", {
+        "L": _L, "W": _L, "H": _L, "shaft_d": _D, "shaft_length": _L}, complexity=1),
+    ComponentType("coupling", "Shaft coupling", "turned", "coupling", {"od": _D, "length": _L, "bore": _D},
+                  complexity=2, rotates=True),
     ComponentType("fastener", "Screw or bolt", "standard", "fastener", {
         "style": ParamSpec(unit="", choices=("hex_bolt", "shcs")),
         "size": ParamSpec(unit="M", integer=True, choices=(3, 4, 5, 6, 8, 10, 12, 16)), "length": _L},
@@ -139,7 +146,7 @@ CONNECTIONS: dict[str, ConnectionType] = {c.kind: c for c in [
         placement="coaxial; two per shaft, one either side of what it carries",
         standards=("ISO 15", "ISO 286 k6"), icd=("bearing_journal", "bearing_seat")),
     ConnectionType(
-        "bearing_seat", "bearing in a housing bore", ("housing",), ("bearing",),
+        "bearing_seat", "bearing in a housing bore", ("housing", "pillow_block", "bracket"), ("bearing",),
         host_features=("bore Ø D (H7) through the wall", "shoulder behind the outer ring"),
         guest_features=("outer ring D",),
         placement="the shaft axis through the housing walls; the outer ring against the wall shoulder",
@@ -149,8 +156,18 @@ CONNECTIONS: dict[str, ConnectionType] = {c.kind: c for c in [
         placement="parallel axes at a = m (z1 + z2) / 2, mid-planes coplanar, teeth phased",
         standards=("ISO 53",), icd=("gear_mesh",)),
     ConnectionType(
-        "bolted_joint", "bolted joint", ("housing", "plate", "bracket", "cover", "other"),
-        ("cover", "bearing_cap", "plate", "bracket", "housing", "other"), via=("fastener", "nut", "washer", "dowel"),
+        "belt_drive", "belt drive between two pulleys", ("pulley",), ("pulley",),
+        placement="parallel axes at the centre distance C (given, else C = D1 + D2), pulley mid-planes coplanar",
+        icd=("belt_drive",), params={"centre_distance": ParamSpec(lo=10, hi=10000, label="centre distance C")}),
+    ConnectionType(
+        "coupling", "shafts coupled end to end", ("shaft", "motor"), ("shaft",), via=("coupling",),
+        via_required=True, host_features=("shaft end Ø d",), guest_features=("shaft end Ø d",),
+        placement="coaxial, end to end with a 2 mm gap; the coupling across the joint, clear of the bearings",
+        icd=("shaft_bore",)),
+    ConnectionType(
+        "bolted_joint", "bolted joint", ("housing", "plate", "bracket", "cover", "pillow_block", "other"),
+        ("cover", "bearing_cap", "plate", "bracket", "housing", "pillow_block", "motor", "other"),
+        via=("fastener", "nut", "washer", "dowel"),
         host_features=("mounting face", "tapped or clearance holes on a pattern"),
         guest_features=("mounting face", "clearance holes (ISO 273)"),
         placement="faces coincident, holes aligned", standards=("ISO 273", "ISO 4762 / ISO 4017"),
