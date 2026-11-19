@@ -28,6 +28,9 @@ wall_live_s = 1800
 
 [expect]
 complete = true
+parts = 7                # the founder's plan: top, legs, brackets, wood screws, pivot bolts, washers, lock nuts
+pieces = 41              # 1 + 4 + 4 + 16 + 4 + 8 + 4
+only_simulated = ["parts", "pieces"]
 clashes = 0
 binned = 0
 loose = 0                # nothing floating (leg #2 floated)

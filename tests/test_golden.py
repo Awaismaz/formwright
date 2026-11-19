@@ -225,7 +225,9 @@ def test_design_graph_runs_replay_the_recorded_intent_reply_and_nothing_else() -
     from aicad.llm.base import CallRequest
 
     with_intent = {c["id"] for c in golden.load_cases() if c["sim"].get("intent_data")}
-    assert with_intent == {"keyed-gear", "gear-pair", "reducer"}
+    # (a), (b), (c): the live replies of the design-graph report; the others: hand-written graph replies
+    # (connection-layout report), so every case runs on the graph path
+    assert with_intent == {c["id"] for c in golden.load_cases()}
     case = golden.load_cases(["a"])[0]
     complete = golden_run._sim_llm(case["sim"]["intent_data"])
     res = asyncio.run(complete(CallRequest(role="intent", system="", prompt="x")))

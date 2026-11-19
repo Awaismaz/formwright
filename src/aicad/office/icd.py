@@ -475,6 +475,16 @@ def _planned(p: dict[str, Any], s: dict[str, Any], io: dict[str, Any]) -> list[f
 
 
 # ----------------------------------------------------------------------------- shaft lines: who sits where
+_BASEY = re.compile(r"\btop\b|\btable\b|\bdesk\b|\bdeck\b|\bframe\b|chassis|\bbase\b|\bhousing\b", re.IGNORECASE)
+
+
+def _base_rank(p: dict[str, Any]) -> tuple[int, int]:
+    """What the others mount on, before the largest box (the founder's "TEST Project": a leg x 4 was the base and
+    legs #2 .. #4 floated): a single part first (a part made in copies can't carry the rest from one of them), then a
+    top, base, frame or housing by name."""
+    return (int(int(p.get("qty") or 1) == 1), int(bool(_BASEY.search(p.get("name") or ""))))
+
+
 def _line_class(name: str) -> str | None:
     return next((c for c, rx in _LINE_CLASS if rx.search(name or "")), None)
 
@@ -759,10 +769,10 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             continue
         blocks = [i for i in mine if spec[i]["role"] == "block"]
         shafts = [i for i in mine if spec[i]["role"] == "shaft"]
-        sub_base[sb] = max(blocks, key=lambda i: (area(i), -mine.index(i))) if blocks else (shafts or mine)[0]
+        sub_base[sb] = max(blocks, key=lambda i: (_base_rank(by_id[i]), area(i), -mine.index(i))) if blocks else             (shafts or mine)[0]
     bases = [sub_base[s] for s in subs if s in sub_base]
     block_bases = [b for b in bases if spec[b]["role"] == "block"]
-    prog_base = max(block_bases, key=lambda i: (area(i), -bases.index(i))) if block_bases else (bases[0] if bases else None)
+    prog_base = max(block_bases, key=lambda i: (_base_rank(by_id[i]), area(i), -bases.index(i))) if block_bases else         (bases[0] if bases else None)
     names = {p["name"].lower(): p["id"] for p in designed}
     parent: dict[str, str | None] = {}
     notes: list[str] = []
