@@ -20,8 +20,8 @@ from aicad.native import part as fpart
 _PART_ENTRY = re.compile(r"^parts/[a-f0-9]{16}\.fwpart$")
 _ASM_ENTRY = re.compile(r"^assemblies/[a-f0-9]{16}\.fwasm$")
 MAX_DOC_BYTES = 8 * 1024 * 1024
-MAX_INSTANCES = 200
-MAX_MATES = 400
+MAX_INSTANCES = 1000
+MAX_MATES = 3000
 
 
 def _dump(obj: Any) -> bytes:

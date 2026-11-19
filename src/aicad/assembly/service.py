@@ -23,8 +23,8 @@ from aicad.assembly import AssemblyInputError, fasteners, pairs, solver, store, 
 from aicad.assembly import worker as aworker
 
 THREADED = {"hex_bolt", "shcs", "hex_nut"}
-MAX_INSTANCES = 200
-MAX_MATES = 600
+MAX_INSTANCES = 1000  # a 1:8 car with every bolted joint fitted: ~650 (PD-71)
+MAX_MATES = 3000
 NEAR_CAP_MM = 25.0  # clearance rows: neighbours within 5 % of the assembly size, capped (PD-70)
 
 
@@ -294,7 +294,8 @@ def run_solve(root: Path, doc: dict[str, Any], prealign: list[str] | tuple[str, 
                                   tuple(parts[i["part"]]["info"]["center"]))  # type: ignore[arg-type]
              for i in doc["instances"]}
     active = [m for m in doc["mates"] if not m.get("suppressed") and not m.get("broken")]
-    res = solver.solve(insts, [_spec(m) for m in active], length_scale(doc, parts), prealign)
+    blocks = {i["id"]: i["group"] for i in doc["instances"] if i.get("group")}
+    res = solver.solve(insts, [_spec(m) for m in active], length_scale(doc, parts), prealign, blocks)
     for i in doc["instances"]:
         if not i["fixed"]:
             i["T"] = xform.to12(res.poses[i["id"]])
@@ -661,7 +662,8 @@ def _pair_caller(org_id: str) -> pairs.Call:
 
 
 async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: list[str] | None = None,
-                      near_mm: float | None = None, vol_tol: float = 1e-6, use_cache: bool = True) -> dict[str, Any]:
+                      near_mm: float | None = None, vol_tol: float = 1e-6, use_cache: bool = True,
+                      skip_same_group: bool = False) -> dict[str, Any]:
     """Exact interference (and, with ``near_mm``, clearance) through the pair cache (ASM-023). Same results as the
     whole-assembly worker checks: interference for every pair whose boxes meet (``only``: pairs involving those
     instances), clearance for mated pairs and pairs whose boxes come within ``near_mm`` (overlapping pairs: 0 at the
@@ -671,6 +673,7 @@ async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: lis
     ids = [i["id"] for i in insts]
     focus = set(only) if only is not None else None
     boxes = [pairs.world_box(i) for i in insts]
+    groups = [i.get("group") for i in doc["instances"]]
     want_int, want_clr = [], []
     why: dict[tuple[int, int], set[str]] = {}
     if near_mm is not None:
@@ -683,6 +686,8 @@ async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: lis
         for b in range(a + 1, n):
             if focus is not None and ids[a] not in focus and ids[b] not in focus:
                 continue
+            if skip_same_group and groups[a] and groups[a] == groups[b]:
+                continue  # the parts of one fastener stack touch by construction
             gap = np.maximum(0, np.maximum(boxes[a][0] - boxes[b][1], boxes[b][0] - boxes[a][1]))
             if not (np.any(boxes[a][0] > boxes[b][1] + 1e-6) or np.any(boxes[b][0] > boxes[a][1] + 1e-6)):
                 want_int.append((a, b))
@@ -713,12 +718,16 @@ async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: lis
     return out
 
 
-async def analyse(root: Path, org_id: str, doc: dict[str, Any], save: bool = True) -> dict[str, Any]:
+async def analyse(root: Path, org_id: str, doc: dict[str, Any], save: bool = True,
+                  clearance: bool = True) -> dict[str, Any]:
+    """Interference + clearance of the whole assembly, saved as analysis.json. ``clearance=False``: interference
+    only, pairs inside one fastener stack skipped (the Design Office's advisory whole-program check, PD-71)."""
     parts = _parts(root, doc)
     # neighbours closer than 5 % of the assembly size, at most NEAR_CAP_MM: on a large assembly the uncapped band
     # (260 mm on a 1:8 car) asked for the exact distance of nearly every pair, ~90 % of the check time (PD-70)
     near = min(NEAR_CAP_MM, max(2.0, 0.05 * length_scale(doc, parts) * 2))
-    res = await check_pairs(root, org_id, doc, near_mm=near)
+    res = await check_pairs(root, org_id, doc, near_mm=near if clearance else None, skip_same_group=not clearance)
+    res.setdefault("clearance", {"rows": []})
     names = display_names(doc)
     inter = res["interference"]
     by_pair = {tuple(sorted((p["a"], p["b"]))): p for p in inter["pairs"]}
@@ -885,10 +894,36 @@ def _tb_ref(root: Path, key: str, kind: str, *, r: float | None = None, z: float
 async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dict[str, Any]], style: str,
                  washers: str, flip: bool) -> dict[str, Any]:
     plan = await propose(root, org_id, doc, targets, style, washers, flip)
-    pattern_id = store.next_id(doc, "fp") if len(targets) > 1 else None
-    made = 0
     before = {i["id"] for i in doc["instances"]}
-    for h in plan["holes"]:
+    made = await _place_stacks(root, org_id, doc, plan["holes"], style, washers, flip)
+    if not made:
+        raise AssemblyInputError(next((h["proposal"].get("error") for h in plan["holes"] if h["proposal"].get("error")),
+                                      "No fastener could be fitted."))
+    run_solve(root, doc)
+    new_ids = [i["id"] for i in doc["instances"] if i["id"] not in before]
+    clashes = await stack_clashes(root, org_id, doc, new_ids)
+    return {"inserted": made, "plan": plan, "clashes": clashes}
+
+
+async def insert_planned(root: Path, org_id: str, doc: dict[str, Any], holes: list[dict[str, Any]], style: str,
+                         washers: str = "both") -> dict[str, Any]:
+    """Fastener stacks for holes whose stack is already known (PD-71: the Design Office places them from the ICD):
+    ``holes`` = [{inst, hole, probe}] with a probe in the shape ``geometry.probe`` returns, built from the plan, so
+    no kernel work, no clash check (the parts were checked when they were approved and swapped in). Same stacks,
+    groups and mates as ``accept``; the caller solves once after placing them all."""
+    plan = []
+    for h in holes:
+        prop = fasteners.propose(h["probe"], style=style, washers=washers)
+        plan.append({"inst": h["inst"], "hole": h["hole"], "probe": h["probe"], "proposal": prop})
+    made = await _place_stacks(root, org_id, doc, plan, style, washers, False) if plan else 0
+    return {"inserted": made, "plan": {"holes": plan}}
+
+
+async def _place_stacks(root: Path, org_id: str, doc: dict[str, Any], holes: list[dict[str, Any]], style: str,
+                        washers: str, flip: bool) -> int:
+    pattern_id = store.next_id(doc, "fp") if len(holes) > 1 else None
+    made = 0
+    for h in holes:
         prop = h["proposal"]
         if not prop["ok"]:
             continue
@@ -904,13 +939,7 @@ async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dic
                                                                "clearance", "length", "warnings", "sources")},
                                        "style": style, "washers": washers, "flip": flip}})
         _insert_stack(root, doc, h, keys, gid)
-    if not made:
-        raise AssemblyInputError(next((h["proposal"].get("error") for h in plan["holes"] if h["proposal"].get("error")),
-                                      "No fastener could be fitted."))
-    run_solve(root, doc)
-    new_ids = [i["id"] for i in doc["instances"] if i["id"] not in before]
-    clashes = await stack_clashes(root, org_id, doc, new_ids)
-    return {"inserted": made, "plan": plan, "clashes": clashes}
+    return made
 
 
 async def stack_clashes(root: Path, org_id: str, doc: dict[str, Any], ids: list[str]) -> list[dict[str, Any]]:

@@ -54,7 +54,7 @@ export default function AssemblyView({ program, recent }: { program: Program; re
     const fresh = recent.filter(e => e.seq > lastSeq.current);  // a burst can bring several at once
     if (!fresh.length) return;
     lastSeq.current = Math.max(...fresh.map(e => e.seq));
-    if (fresh.some(e => ["ticket.fitted", "assembly.updated", "ticket.integrated", "gate.approved", "cr.accepted", "program.done"].includes(e.type)))
+    if (fresh.some(e => ["ticket.fitted", "assembly.updated", "ticket.integrated", "ticket.comment", "gate.approved", "cr.accepted", "program.done"].includes(e.type)))
       qc.invalidateQueries({ queryKey: ["office-assembly", program.id] });
   }, [recent, qc, program.id]);
 
@@ -159,6 +159,8 @@ export default function AssemblyView({ program, recent }: { program: Program; re
           <div className="mb-1 flex items-center gap-2 font-semibold"><Box className="h-4 w-4 text-primary" />Program assembly
             {view.clashes.length === 0 ? <Badge tone="success" className="ml-auto">0 clashes</Badge> : <Badge tone="danger" className="ml-auto">{view.clashes.length} clashes</Badge>}</div>
           <p className="text-muted">{data.summary}</p>
+          {data.check && <p className="mt-1.5 text-[11.5px] text-muted" data-advisory-check>
+            {data.check.status === "running" ? "Whole-program clash check running (advisory: nothing waits for it)…" : data.check.text}</p>}
           <div className="mt-2 space-y-1">
             {view.subs.map(s => <div key={s.id} className="flex items-center gap-1.5"><Layers className="h-3.5 w-3.5 text-muted" />{s.name}
               <Link to={`/app/modules/assembly?assembly=${s.assembly_id}`} className="ml-auto inline-flex items-center gap-0.5 text-[11.5px] text-primary hover:underline">open<ExternalLink className="h-3 w-3" /></Link></div>)}

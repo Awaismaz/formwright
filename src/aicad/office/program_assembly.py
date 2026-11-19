@@ -410,20 +410,6 @@ async def prewarm_swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: 
     return int(res["stats"]["computed"])
 
 
-async def prewarm_final(aroot: Path, org_id: str, prog: dict[str, Any]) -> int:
-    """Fill the pair cache with the whole final assembly as saved (interference + clearance, as ``analyse`` asks)
-    before the program lock is taken for the final integration; only the joints fitted under the lock are new."""
-    from aicad.assembly import service as aservice
-    from aicad.assembly import store as astore
-
-    fid = (prog.get("assembly") or {}).get("final")
-    final = astore.load(aroot, fid) if fid else None
-    if final is None or not final["instances"]:
-        return 0
-    res = await aservice.analyse(aroot, org_id, final, save=False)
-    return int(res["pairs"]["computed"])
-
-
 def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, clashes: list[dict[str, Any]]) -> str:
     """One line for the program page: real parts / placeholders, mates, fastener stacks, clashes."""
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
@@ -464,6 +450,102 @@ def _hole_index(info: dict[str, Any], c: list[float], lax: str | None = None) ->
     return None
 
 
+def _hole_span(aroot: Path, inst: dict[str, Any], k: int, c: Any, u: Any) -> tuple[dict[str, Any], float, float]:
+    """A recognised hole of a placed part (its info.json, part frame) as an interval along the joint axis (world)."""
+    from aicad.assembly import store as astore
+    from aicad.assembly import xform
+
+    h = ((astore.part(aroot, inst["part"]) or {}).get("info") or {})["holes"][k]
+    T = xform.from12(inst["T"])
+    if h.get("open") is not None and h.get("dir") is not None:
+        e0 = [float(x) for x in h["open"]]
+        e1 = [e0[i] + float(h["dir"][i]) * float(h["depth"]) for i in range(3)]
+    else:
+        e0 = [float(h["center"][i]) - float(h["axis"][i]) * float(h["depth"]) / 2 for i in range(3)]
+        e1 = [float(h["center"][i]) + float(h["axis"][i]) * float(h["depth"]) / 2 for i in range(3)]
+    t0, t1 = sorted(float((xform.pt(T, e) - c) @ u) for e in (e0, e1))
+    return h, t0, t1
+
+
+def _seat_face(aroot: Path, inst: dict[str, Any], point: Any, out: Any) -> int | None:
+    """The planar face of a placed part through ``point`` whose outward normal is ``out`` (world): where a washer,
+    head or nut sits (exact references, refs.json)."""
+    from aicad.assembly import store as astore
+    from aicad.assembly import xform
+
+    Ti = xform.inv(xform.from12(inst["T"]))
+    q, n = xform.pt(Ti, point), xform.unit(xform.vec(Ti, out))
+    best = None
+    for fid, r in (astore.refs(aroot, inst["part"]).get("faces") or {}).items():
+        if r.get("kind") != "plane" or float(n @ r["v"]) < 1 - 1e-6:
+            continue
+        off = abs(float((q - r["p"]) @ r["v"]))
+        if off <= 0.05 and (best is None or off < best[0]):
+            best = (off, int(fid))
+    return best[1] if best else None
+
+
+def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str, Any], xy: list[float],
+              fitted: set[tuple[str, int]]) -> dict[str, Any] | None:
+    """One bolted-joint hole as the stack Fitz fits there, straight from the ICD (PD-71): the hole the ICD put in each
+    part (looked up in the part's recognised holes, no kernel work), the clamped thickness from those holes along
+    the joint axis, head on the mounted part, nut under the host or a screw into the host's tapped hole. Returns
+    {inst, hole, probe} in the shape ``assembly.service.insert_planned`` takes, or None (the hole isn't there, or it
+    already has a stack)."""
+    import numpy as np
+
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+    from aicad.assembly import xform
+
+    d = f["data"]
+    ia, ib = _inst_of(adoc, f["a"]["item"], f["a"]["copy"]), _inst_of(adoc, f["b"]["item"], f["b"]["copy"])
+    if ia is None or ib is None:
+        return None
+    gb = icd._axial(sk, f["b"], d, xy, d["plane_z"])
+    kb = _hole_index(_part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1], gb["c"], gb.get("ax"))
+    if kb is None or (ib["id"], kb) in fitted:
+        return None
+    ga = icd._axial(sk, f["a"], d, xy, d["plane_z"])
+    ka = _hole_index(_part_data(aroot, ia["part"], (ia.get("office") or {}).get("frame"))[1], ga["c"], ga.get("ax"))
+    hb = ((astore.part(aroot, ib["part"]) or {}).get("info") or {})["holes"][kb]
+    Tb = xform.from12(ib["T"])
+    c = xform.pt(Tb, (hb.get("exact") or {}).get("p") or hb["center"])
+    u = xform.unit(xform.vec(Tb, hb["axis"]))
+    normal = np.asarray(d.get("normal") or [0, 0, 1], dtype=float)
+    if float(u @ normal) < 0:
+        u = -u  # u: from the host (a) to the mounted part (b), the head side
+    _h, b0, b1 = _hole_span(aroot, ib, kb, c, u)
+    tp = d.get("tapped")
+    if ka is None:
+        if not tp:
+            return None  # a through joint needs the host's hole for the nut side
+        a0, a1, ha = b0 - float(tp["depth"]), b0, {"d": tp["d"], "through": False}
+    else:
+        ha, a0, a1 = _hole_span(aroot, ia, ka, c, u)
+    names = aservice.display_names(adoc)
+    head_pt, nut_pt = c + u * b1, c + u * a0
+    probe: dict[str, Any] = {
+        "kind": "tapped" if tp else "through", "hole_d": float(hb["d"]), "warnings": [], "tapped": None,
+        "axis": {"p": [float(x) for x in c], "u": [float(x) for x in u]},
+        "hole": {"faces": hb.get("faces") or []}, "planned": f["id"],
+        "head": {"point": [float(x) for x in head_pt], "out": [float(x) for x in u], "inst": ib["id"],
+                 "face": _seat_face(aroot, ib, head_pt, u), "space": None},
+        "nut": {"point": [float(x) for x in nut_pt], "out": [float(x) for x in -u], "inst": ia["id"],
+                "face": None if tp else _seat_face(aroot, ia, nut_pt, -u), "space": None}}
+    if tp:
+        probe["grip"] = round(b1 - b0, 4)
+        probe["members"] = [{"inst": ib["id"], "name": names[ib["id"]], "t": round(b1 - b0, 4)}]
+        probe["tapped"] = {"inst": ia["id"], "name": names[ia["id"]], "d": float(ha["d"]),
+                           "depth": round(a1 - a0, 4), "blind": not ha.get("through"),
+                           "material": (astore.part(aroot, ia["part"]) or {}).get("material")}
+    else:
+        probe["grip"] = round(b1 - a0, 4)
+        probe["members"] = [{"inst": ib["id"], "name": names[ib["id"]], "t": round(b1 - b0, 4)},
+                            {"inst": ia["id"], "name": names[ia["id"]], "t": round(a1 - a0, 4)}]
+    return {"inst": ib["id"], "hole": kb, "probe": probe}
+
+
 async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     standard: list[dict[str, Any]]) -> dict[str, Any]:
     """Fit the level's fasteners into its bolted joints (ISO auto-fit through both parts), put its other standard
@@ -477,7 +559,6 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     state = prog["assembly"]
     log: list[dict[str, str]] = []
     stats = {"stacks": 0, "asked": 0, "binned": 0}
-    stack_clashes: list[dict[str, Any]] = []
     seated: dict[str, int] = {}
 
     def say(text: str, tone: str = "ok") -> None:
@@ -531,40 +612,42 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     continue
                 if kind == "fastener" or code in ("hex_bolt", "shcs"):
                     mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
-                    targets = []
+                    planned = []
                     for f in mine:
-                        ib = _inst_of(adoc, f["b"]["item"], f["b"]["copy"])
-                        if ib is None:
-                            continue
-                        info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
                         for xy in f["data"]["positions"]:
-                            g = icd._axial(sk, f["b"], f["data"], xy, f["data"]["plane_z"])
-                            k = _hole_index(info, g["c"], g.get("ax"))
-                            if k is not None and (ib["id"], k) not in fitted:
-                                targets.append({"inst": ib["id"], "hole": k})
-                                fitted.add((ib["id"], k))
+                            h = icd_stack(aroot, adoc, sk, f, xy, fitted)
+                            if h is not None:
+                                planned.append(h)
+                                fitted.add((h["inst"], h["hole"]))
                     want = int(t.get("qty") or 1)
                     if t.get("_kit"):
-                        if not targets:
+                        if not planned:
                             continue  # no joint for the kit here: other levels take them
-                        want = len(targets)
+                        want = len(planned)
                     stats["asked"] += want
-                    targets = targets[:want]
-                    if not targets:
+                    planned = planned[:want]
+                    if not planned:
                         say(f"{t['title']}: no bolted joint inside this sub-assembly; put in the parts bin", "warn")
                     else:
+                        # PD-71: straight from the ICD (positions, thickness, size): no probe, no clash check
                         try:
-                            res = await aservice.accept(aroot, org_id, adoc, targets, "shcs" if code == "shcs" else "hex_bolt",
-                                                        "both", False)
-                            stats["stacks"] += res["inserted"]
-                            stack_clashes += res.get("clashes") or []
+                            res = await aservice.insert_planned(aroot, org_id, adoc, planned,
+                                                                "shcs" if code == "shcs" else "hex_bolt")
+                        except AssemblyInputError as e:  # e.g. the assembly is full
+                            say(f"Fitz couldn't fit {t['title']}: {e}", "warn")
+                            continue
+                        stats["stacks"] += res["inserted"]
+                        errs = sorted({h["proposal"]["error"] for h in res["plan"]["holes"]
+                                       if not h["proposal"]["ok"] and h["proposal"].get("error")})
+                        if res["inserted"]:
                             summ = sorted({h["proposal"]["summary"] for h in res["plan"]["holes"] if h["proposal"]["ok"]})
-                            say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()}: " + "; ".join(summ)
-                                + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else ""),
+                            say(f"Fitz fitted {res['inserted']} of {want} {t['title'].lower()} from the ICD: "
+                                + "; ".join(summ)
+                                + (f" ({want - res['inserted']} more than the joints take)" if want > res["inserted"] else "")
+                                + (f". Not fitted: {errs[0]}" if errs else ""),
                                 "ok" if res["inserted"] >= want else "warn")
                             continue
-                        except AssemblyInputError as e:
-                            say(f"Fitz couldn't fit {t['title']}: {e}", "warn")
+                        say(f"Fitz couldn't fit {t['title']}: {errs[0] if errs else 'no standard stack fits'}", "warn")
                 # everything else (and fasteners that found no joint): the parts bin, beside the program, no clash
                 try:
                     key = await aservice.ensure_toolbox_part(aroot, org_id, code, r.get("params") or {})
@@ -583,10 +666,9 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     "by hand", "muted")
             aservice.run_solve(aroot, adoc)
             astore.save(aroot, adoc)
-            # every part was clash-checked when Fitz swapped it in; here only the fastener stacks just fitted are new
-            # (CD-036: the whole sub-assembly used to be re-checked, minutes on detailed parts)
-            clashes = [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
-                        "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in stack_clashes]
+            # PD-71: no interference work in a sub-assembly step: every part was checked by Gage and when Fitz swapped
+            # it in, and the stacks come from the ICD; the whole-program check runs after the final assembly (advisory)
+            clashes = []
             aid_out = adoc["id"]
     else:
         clashes = []
@@ -609,28 +691,28 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 joints = [f for f in ifaces if f["kind"] == "hole_pattern"
                           and sk["items"][f["a"]["item"]]["sub"] != sk["items"][f["b"]["item"]]["sub"]]
                 fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in final["groups"] if g.get("hole")}
-                targets = []
+                planned = []
                 for f in joints:
-                    ib = _inst_of(final, f["b"]["item"], f["b"]["copy"])
-                    if ib is None:
-                        continue
-                    info = _part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1]
                     for xy in f["data"]["positions"]:
-                        g = icd._axial(sk, f["b"], f["data"], xy, f["data"]["plane_z"])
-                        k = _hole_index(info, g["c"], g.get("ax"))
-                        if k is not None and (ib["id"], k) not in fitted:
-                            targets.append({"inst": ib["id"], "hole": k})
-                if targets:
+                        h = icd_stack(aroot, final, sk, f, xy, fitted)
+                        if h is not None:
+                            planned.append(h)
+                            fitted.add((h["inst"], h["hole"]))
+                if planned:  # PD-71: from the ICD, like every level
                     try:
-                        res = await aservice.accept(aroot, org_id, final, targets, "hex_bolt", "both", False)
-                        stats["stacks"] += res["inserted"]
-                        say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (ISO auto-fit)")
-                    except AssemblyInputError as e:
-                        say(f"Fitz couldn't fit the joints between sub-assemblies: {e}", "warn")
+                        res = await aservice.insert_planned(aroot, org_id, final, planned, "hex_bolt")
+                    except AssemblyInputError as e:  # e.g. the assembly is full
+                        res = {"inserted": 0, "plan": {"holes": [{"proposal": {"ok": False, "error": str(e)}}]}}
+                    stats["stacks"] += res["inserted"]
+                    if res["inserted"]:
+                        say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (from the ICD)")
+                    else:
+                        say("Fitz couldn't fit the joints between sub-assemblies: " + next(
+                            (h["proposal"]["error"] for h in res["plan"]["holes"] if h["proposal"].get("error")),
+                            "no standard stack fits"), "warn")
             aservice.run_solve(aroot, final)
-            if level == "root":  # the whole-program check, once, at the final assembly
-                an = await aservice.analyse(aroot, org_id, final)
-                clashes = _clashes(an)
+            # PD-71: the whole-program clash check is advisory and runs after this, outside the program lock
+            # (``advisory_check``): it never holds up or fails the integration
             astore.save(aroot, final)
     bits = []
     if stats["asked"]:
@@ -648,6 +730,37 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     return {"summary": summary, "clashes": clashes, "log": log, "assembly_id": aid_out, "inserted": stats["stacks"],
             "program_summary": summarize(state.get("parts") or {}, final, clashes if level == "root" else
                                          state.get("clashes") or [])}
+
+
+# ----------------------------------------------------------------------------- advisory whole-program check (PD-71)
+async def advisory_check(aroot: Path, org_id: str, prog: dict[str, Any]) -> dict[str, Any]:
+    """The whole-program clash check after the final assembly: exact interference of every pair (the pair cache
+    makes most of them hits), saved as the final assembly's analysis so the Assembly tab shows the clash volumes.
+    Advisory: called outside the program lock, it never blocks or fails anything. Returns {clashes, text, ...}."""
+    import time
+
+    from aicad.assembly import store as astore
+
+    t0 = time.perf_counter()
+    fid = (prog.get("assembly") or {}).get("final")
+    final = astore.load(aroot, fid) if fid else None
+    if final is None:
+        return {"status": "skipped", "clashes": [], "text": "No final assembly to check."}
+    from aicad.assembly import service as aservice
+
+    an = await aservice.analyse(aroot, org_id, final, clearance=False)
+    clashes = _clashes(an)
+    n = len(clashes)
+    if n:
+        top = "; ".join(f"{c['a_name']} ↔ {c['b_name']} {c['volume_mm3']:.1f} mm³" for c in clashes[:5])
+        text = (f"Fitz's whole-program clash check (advisory): {n} clash{'es' if n != 1 else ''} in the final "
+                f"assembly: {top}. They are shown on the Assembly tab; nothing was held up.")
+    else:
+        text = (f"Fitz's whole-program clash check (advisory): no clashes across "
+                f"{an['interference']['checked_pairs']} candidate pairs in the final assembly.")
+    return {"status": "done", "clashes": clashes, "text": text, "at": astore.now(),
+            "checked_pairs": an["interference"]["checked_pairs"], "seconds": round(time.perf_counter() - t0, 1),
+            "computed": an["pairs"]["computed"], "cached": an["pairs"]["cached"]}
 
 
 # ----------------------------------------------------------------------------- the live view (CD-013)

@@ -208,3 +208,44 @@ def test_prune_keeps_the_cache_bounded(tmp_path: Path) -> None:
     removed = pairs.prune(tmp_path, max_entries=20)
     assert removed == 30 - int(20 * pairs.PRUNE_TO)
     assert pairs.get(tmp_path, "clr", "k3") is not None and pairs.get(tmp_path, "clr", "k0") is None
+
+
+def test_block_dof_analysis_equals_the_whole_jacobian(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PD-71: a large assembly's degrees of freedom are analysed per fastener stack (leaf block) plus the parts; the
+    result must be the whole-J SVD's. Fixture: a fixed base, a block on it (coincident + concentric: spin left), and
+    stacks of two pins on the block's axis (concentric + seated: each spins) plus one pin also tied by an angle
+    mate to the base (fully defined)."""
+    import numpy as np
+
+    from aicad.assembly import solver
+
+    top = solver.Ref("plane", (0.0, 0.0, 10.0), (0.0, 0.0, 1.0))
+    axis = solver.Ref("axis", (30.0, 20.0, 0.0), (0.0, 0.0, 1.0), 4.0)
+    side = solver.Ref("plane", (50.0, 0.0, 5.0), (1.0, 0.0, 0.0))
+    bottom = solver.Ref("plane", (0.0, 0.0, 0.0), (0.0, 0.0, -1.0))
+    up = solver.Ref("plane", (0.0, 0.0, 20.0), (0.0, 0.0, 1.0))
+    bax = solver.Ref("axis", (0.0, 0.0, 10.0), (0.0, 0.0, 1.0), 4.0)
+    bside = solver.Ref("plane", (10.0, 0.0, 10.0), (1.0, 0.0, 0.0))
+    insts = {"base": solver.Inst("base", xform.ident(), fixed=True, ref_point=(0, 0, 5)),
+             "blk": solver.Inst("blk", xform.translate((30, 20, 10)), ref_point=(0, 0, 10))}
+    mates = [solver.MateSpec("m1", "coincident", "base", top, "blk", bottom),
+             solver.MateSpec("m2", "concentric", "base", axis, "blk", bax)]
+    blocks = {}
+    for k in range(4):
+        a, b = f"p{k}a", f"p{k}b"
+        insts[a] = solver.Inst(a, xform.translate((30, 20, 30 + 20 * k)), ref_point=(0, 0, 10))
+        insts[b] = solver.Inst(b, xform.translate((30, 20, 50 + 20 * k)), ref_point=(0, 0, 10))
+        blocks |= {a: f"g{k}", b: f"g{k}"}
+        mates += [solver.MateSpec(f"c{k}a", "concentric", "blk", bax, a, bax),
+                  solver.MateSpec(f"c{k}b", "concentric", a, bax, b, bax),
+                  solver.MateSpec(f"s{k}b", "coincident", a, up, b, bottom)]
+        if k == 0:
+            mates.append(solver.MateSpec("ang", "angle", "base", side, b, bside, 0.0))
+    whole = solver.solve(insts, mates, L=60)
+    monkeypatch.setattr(solver, "BLOCKS_FROM_COLS", 0)
+    split = solver.solve(insts, mates, L=60, blocks=blocks)
+    assert whole.insts == split.insts
+    assert (whole.dof, whole.redundant, whole.status) == (split.dof, split.redundant, split.status)
+    assert whole.dof > 0 and any(s.spin for s in whole.insts.values())
+    for k, T in whole.poses.items():
+        assert np.allclose(T, split.poses[k], atol=1e-12)

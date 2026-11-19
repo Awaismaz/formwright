@@ -244,7 +244,10 @@ def _mesh(shape: Any, tol: float, digits: int = 4) -> dict[str, list[float] | li
     pos: list[float] = []
     idx: list[int] = []
     for f in shape.faces():
-        vs, tris = f.tessellate(tol, 0.3)
+        try:
+            vs, tris = f.tessellate(tol, 0.3)
+        except AttributeError:  # OCCT left a face of a boolean result without a triangulation: skip it
+            continue
         b = len(pos) // 3
         for v in vs:
             pos += [round(v.X, digits), round(v.Y, digits), round(v.Z, digits)]

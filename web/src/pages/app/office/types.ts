@@ -119,6 +119,8 @@ export interface LiveInstance {
 }
 export interface LiveAssembly {
   status: AssemblyState["status"] | null; summary?: string | null; at?: string | null;
+  /** PD-71: the whole-program clash check after the final assembly (advisory, never blocks). */
+  check?: { status: "running" | "done" | "failed" | "skipped"; text?: string; at?: string; count?: number } | null;
   clashes: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
   view: null | {
     assembly_id: string; rev: number; instances: LiveInstance[];
