@@ -57,7 +57,7 @@ export default function Pricing() {
           </h1>
           <Dim label="Trial: 14 days, every module" load delay={0.4} className="mt-2 max-w-[700px]" />
           <p className="mt-6 max-w-2xl text-[17px] leading-relaxed text-ink2 sm:text-[18px]">
-            Every plan starts with a free 14-day trial: {num(trial)} tokens (about 3 new parts) and every module on your own parts.
+            Every plan starts with a free 14-day trial: {num(trial)} tokens (enough for dozens of simple parts) and every module on your own parts.
             Add modules when you need them, top up tokens any time.
           </p>
         </div>

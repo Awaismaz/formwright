@@ -78,7 +78,7 @@ export default function Onboarding() {
           </div>
 
           <div className="mt-6 border-l-2 border-bp bg-sheet2 p-4 text-[15px] text-ink2">
-            Your <b className="text-text">14-day free trial</b> starts now: <b className="text-text">{num(trial)} tokens</b>, about 3 new parts, and every module on your own parts. No card needed.
+            Your <b className="text-text">14-day free trial</b> starts now: <b className="text-text">{num(trial)} tokens</b>, enough for dozens of simple parts, and every module on your own parts. No card needed.
           </div>
           <div className="mt-8 flex items-center justify-end gap-2">
             <Button variant="ghost" loading={busy === "skip"} disabled={!!busy} onClick={() => finish(true)}>Skip</Button>

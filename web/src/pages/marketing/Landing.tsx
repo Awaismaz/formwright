@@ -92,7 +92,7 @@ export default function Landing() {
     ...FAQ.slice(0, 2),
     ["What are tokens?", `AI work is metered in tokens, so you pay for what you use. ${run
       ? `A new part from a written brief typically uses ${run.new.low} to ${run.new.high} tokens; a change to an existing part usually uses less. `
-      : ""}Parameter edits, manual features, Toolbox parts and restores are free. Every run shows a live meter and stops at the budget you set. The trial includes ${num(trial)} tokens, about 3 new parts.`],
+      : ""}Parameter edits, manual features, Toolbox parts and restores are free. Every run shows a live meter and stops at the budget you set. The trial includes ${num(trial)} tokens, enough for dozens of simple parts.`],
     ["Which modules are included?", mods.length ? `${list(mods.map(m => m.name))}. The trial includes every module; afterwards, add the ones your team needs.`
       : "Every module in the parts list above. The trial includes all of them."],
     ...FAQ.slice(2),
