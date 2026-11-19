@@ -974,7 +974,19 @@ async def warm(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, A
     t = asyncio.create_task(worker.warm(p.org_id))
     _WARMING.add(t)
     t.add_done_callback(_WARMING.discard)
-    return {"ok": True}
+    preconnect = False
+    if ctx.project_access.at_least("edit"):  # PS-04: also start the design agent for someone who can use it
+        from aicad.platform.routers import projects as prj
+
+        allowed, _reason, _cta = prj.permissions.agent_gate(ctx, p) or prj.can_run_agent(ctx)
+        if allowed:
+            s = prj.get_session(p, ctx, drive=False)
+            if s.client is None and not s.busy:
+                t2 = asyncio.create_task(s.preconnect())
+                _WARMING.add(t2)
+                t2.add_done_callback(_WARMING.discard)
+                preconnect = True
+    return {"ok": True, "agent": preconnect}
 
 
 _WARMING: set[Any] = set()

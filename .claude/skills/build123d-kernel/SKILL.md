@@ -51,6 +51,18 @@ Acceptance is deterministic checks, never renders (`src/aicad/checks.py`, `src/a
 - `src/aicad/topo.py` exports exact edges and faces (`topo.json`) for snapping and measurement. Measurements must
   match the kernel to about 1e-9 (`test_topology_is_exact_brep`).
 
+## Pipeline cost (PS-02, measured on a 2048-face part)
+- Cost scales with face count: a polygonal gear (2048 faces) spent ~10 s in the STEP re-import alone; the same gear
+  with spline involute flanks (`fw.spur_gear`, 248 faces) builds, checks and exports in ~7 s total. Prefer splines
+  and arcs to dense polylines.
+- STEP re-import: OCCT 8's plain `STEPControl_Reader` is no faster than build123d's XCAF `import_step` here, and
+  disabling shape healing changes nothing; the time is in the transfer. It runs in the background now (CHK-07).
+- `shape.is_valid` (BRepCheck, parallel) is ~1.5 s on 2048 faces: call it once. `fingerprint()` counts sub-shapes
+  without wrapping them (`checks._count`), and `topo.export_topology` meshes the whole shape once in parallel and reads
+  each face's triangulation; the old per-face `Face.tessellate` + `position_at` loop was 3-6x slower with
+  identical output. `fw.face_key` reads a plane's equation straight from the surface (no GProp per face).
+- `runner._exec` purges only modules imported during the run (resolving all ~2000 `sys.modules` paths cost 0.7 s).
+
 ## OCP 7.9 API pitfalls
 - Downcasts are `TopoDS.Edge(shape)` / `TopoDS.Face(...)`, not `TopoDS.Edge_s`. Static methods elsewhere keep the `_s`
   suffix, e.g. `BRep_Tool.Degenerated_s(e)`.

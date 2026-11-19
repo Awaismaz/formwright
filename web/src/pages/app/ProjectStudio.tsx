@@ -135,7 +135,8 @@ export default function ProjectStudio() {
   const project = useQuery({ queryKey: ["project", id], queryFn: () => api.get<Project>(`/api/projects/${id}`), refetchInterval: 15_000 });
   const hasBuilds = (project.data?.builds ?? 0) > 0;
   const status = useQuery({ queryKey: ["status", id, hasBuilds], enabled: hasBuilds,
-    queryFn: () => fetch(`/api/projects/${id}/files/status.json`).then(r => (r.ok ? (r.json() as Promise<BuildStatus>) : null)) });
+    queryFn: () => fetch(`/api/projects/${id}/files/status.json`).then(r => (r.ok ? (r.json() as Promise<BuildStatus>) : null)),
+    refetchInterval: q => (q.state.data?.exports_pending || q.state.data?.pending_checks?.length ? 2500 : false) });  // PS-01
   const manual = useQuery({ queryKey: ["manual", id, status.data?.build_id], enabled: !!id, queryFn: () => api.get<{ features: ManualFeature[] }>(`/api/projects/${id}/manual`) });
   const recog = useQuery({ queryKey: ["recognition", id, status.data?.build_id], enabled: hasBuilds,
     queryFn: () => api.get<{ recognition: Recognition | null }>(`/api/projects/${id}/recognition`) });

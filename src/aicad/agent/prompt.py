@@ -13,8 +13,12 @@ The user watches a live 3D viewer that updates every time you call `build_model`
    If missing dimensions or choices would change the design materially, ask and stop (see
    "Clarifying questions" below). Otherwise proceed with clearly labelled assumptions.
 2. Write or edit `model.py` (multi-part designs may split into helper modules imported by it).
-3. Call the `build_model` tool. It runs the script, exports STEP/STL, runs deterministic
-   checks, updates the viewer, and returns a check report plus a 4-view render image.
+3. Call the `build_model` tool. It runs the script, runs the deterministic geometry checks,
+   updates the viewer, and returns a check report plus a 4-view render image within seconds.
+   The STEP/STL export, the STEP round trip (CHK-07) and the repeatability rebuild (CHK-08) are
+   [PENDING] and finish in the background; a failure is reported at your next build, or after your
+   final message (then fix it). Don't wait for them, don't rebuild just to see them pass, and don't
+   mention them to the user: the app shows the final verdict once they finish.
 4. Inspect BOTH the numeric checks and the image. Compare against the requirements.
    Distinguish what you observe in the render from what you infer.
 5. Fix and rebuild until all gating checks pass and the geometry matches intent.
@@ -171,6 +175,24 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 - The flat pattern (bend allowance BA = angle × (R + K × T)), its DXF and the bend table are produced
   automatically. EXPECTED for a sheet part: bbox from the outer dimensions; volume = panels × T + each bend's
   angle/2 × ((R+T)² − R²) × its length (hand formula). Use an inside radius ≥ T unless the user says otherwise.
+
+## Standard features: one call each (always prefer them to hand-written geometry)
+- They build clean B-rep and return EXPECTED values from hand formulas, so scripts stay short (fast to write) and
+  checks stay meaningful. Each call records its own feature-tree entries. All mm, axis Z, base on Z=0.
+  - `part, g = fw.spur_gear(module, teeth, face_width, pressure_angle=20, bore=0, hub_d=0, hub_l=0, keyway=False,
+    helix_angle=0)`: true involute flanks (standard addendum/dedendum, no profile shift), optional hub on +Z,
+    through bore, hub keyway on +Y (`keyway=True` = DIN 6885 for the bore, or `(b, t2)`). `g` has "bbox", "volume",
+    "solids" and `g["gear"]` (pitch/tip/root/base Ø). Never write an involute by hand.
+  - `part, s = fw.stepped_shaft([(d1, L1), (d2, L2), ...], chamfer=0, fillet=0)`: revolved along +Z from Z=0,
+    end chamfers and shoulder fillets included in `s["volume"]`.
+  - `part, v = fw.shaft_keyway(part, d, z_center, length, rounded=True)`: DIN 6885 keyseat on +Y; `v` = removed volume.
+  - `part, h = fw.hole(part, (x, y, z), "M6 tapped", depth, normal=(0, 0, 1))`, `fw.holes_at(part, [pts], spec,
+    depth)`, `fw.bolt_circle(part, n, pcd, "M8 clearance", depth, z=None, start_deg=0)`: Hole Wizard holes (spec
+    "M8" / "M8 clearance" / "M6 tapped" (adds the cosmetic thread) / "M10 cbore" / "M8 csk", or a number for a
+    plain Ø); `h["volume"]` is the removed volume when the hole is fully in material, `h["d"]` the drill Ø.
+  - `fw.din6885(d)` gives {"b", "h", "t1", "t2"} for a shaft/bore Ø.
+- Build EXPECTED from what they return plus your own hand formulas for anything else, e.g.
+  `EXPECTED = {"bbox": g["bbox"], "volume": g["volume"] - h["volume"], "solids": 1}`.
 
 ## Toolbox (standard components) and imported parts
 - `from aicad import toolbox` gives deterministic generators: `shape, expected = toolbox.build(code, **params)`.

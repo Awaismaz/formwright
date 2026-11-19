@@ -1,0 +1,361 @@
+"""High-level standard features for model scripts (PS-03): one call instead of 50-150 hand-written lines.
+
+The design agent's time is dominated by writing the script, so a 125-line involute gear costs about a minute of model
+output before anything is built. These helpers build the common heavy features with clean B-rep (true involute
+flanks as splines, revolved shafts, Hole Wizard holes) and return their EXPECTED values from hand formulas that do
+not use the CAD kernel, so CHK-04/05 still catch modelling mistakes. Re-exported by ``aicad.fw``:
+
+    part, exp = fw.spur_gear(module=2, teeth=60, face_width=20, bore=20, hub_d=40, hub_l=30, keyway=True)
+    part, exp = fw.stepped_shaft([(20, 30), (25, 60), (20, 30)], chamfer=1, fillet=1)
+    part, v = fw.shaft_keyway(part, d=25, z_center=60, length=40)
+    part, h = fw.bolt_circle(part, n=6, pcd=80, spec="M8 clearance", depth=10)
+    part, h = fw.hole(part, (0, 0, 10), "M6 tapped", depth=12)
+
+Every helper records its features with ``fw.feature`` (feature tree, suppression) and returns plain numbers in
+millimetres. Standards values come from the tables in ``holes.py`` / ``toolbox.py`` or the DIN 6885-1 table below.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+# DIN 6885-1 (1968) parallel keys, form A: shaft Ø over..up to -> (b width, h height, t1 shaft depth, t2 hub depth), mm.
+# Same ranges and b/t1 as toolbox.KEYS; t2 is the hub keyway depth above the bore (verify against the standard).
+DIN6885 = [((6, 8), (2, 2, 1.2, 1.0)), ((8, 10), (3, 3, 1.8, 1.4)), ((10, 12), (4, 4, 2.5, 1.8)),
+           ((12, 17), (5, 5, 3.0, 2.3)), ((17, 22), (6, 6, 3.5, 2.8)), ((22, 30), (8, 7, 4.0, 3.3)),
+           ((30, 38), (10, 8, 5.0, 3.3)), ((38, 44), (12, 8, 5.0, 3.3)), ((44, 50), (14, 9, 5.5, 3.8)),
+           ((50, 58), (16, 10, 6.0, 4.3)), ((58, 65), (18, 11, 7.0, 4.4)), ((65, 75), (20, 12, 7.5, 4.9))]
+DIN6885_SOURCE = "DIN 6885-1 parallel keys, form A (verify against the standard before release)"
+
+
+def din6885(d: float) -> dict[str, float]:
+    """Key and keyway sizes for shaft/bore diameter d: {"b", "h", "t1" (shaft depth), "t2" (hub depth)}."""
+    for (lo, hi), (b, h, t1, t2) in DIN6885:
+        if lo < d <= hi:
+            return {"b": b, "h": h, "t1": t1, "t2": t2}
+    raise ValueError(f"Ø{d:g} mm is outside the DIN 6885-1 table (over 6 up to 75 mm)")
+
+
+# ------------------------------------------------------------------ hand formulas (no CAD kernel)
+def _simpson(f: Any, a: float, b: float, n: int = 400) -> float:
+    if b <= a:
+        return 0.0
+    n += n % 2
+    h = (b - a) / n
+    s = f(a) + f(b) + sum((4 if i % 2 else 2) * f(a + i * h) for i in range(1, n))
+    return s * h / 3
+
+
+def _inv(x: float) -> float:
+    return math.tan(x) - x
+
+
+class _Involute:
+    """Standard (x = 0) spur gear tooth geometry, ISO 53 basic rack: addendum m, dedendum 1.25 m."""
+
+    def __init__(self, m: float, z: int, alpha_deg: float) -> None:
+        self.m, self.z, self.a = m, z, math.radians(alpha_deg)
+        self.rp = m * z / 2
+        self.rb = self.rp * math.cos(self.a)
+        self.ra = self.rp + m
+        self.rf = self.rp - 1.25 * m
+        self.r0 = max(self.rb, self.rf)  # where the involute starts (radial flank below the base circle)
+
+    def psi(self, r: float) -> float:
+        """Half the tooth's angular thickness at radius r (involute part)."""
+        r = max(r, self.rb)
+        return math.pi / (2 * self.z) + _inv(self.a) - _inv(math.acos(min(1.0, self.rb / r)))
+
+    def area(self) -> float:
+        """Profile area: root disc + z teeth, a tooth being 2 psi(r) r dr above r0 and radial flanks below."""
+        tooth = _simpson(lambda r: 2 * self.psi(r) * r, self.r0, self.ra) + self.psi(self.r0) * (self.r0 ** 2 - self.rf ** 2)
+        return math.pi * self.rf ** 2 + self.z * tooth
+
+    def samples(self, flank: int = 60) -> list[tuple[float, float]]:
+        """Dense points of the exact profile (for the expected bounding box)."""
+        pts: list[tuple[float, float]] = []
+        pitch = 2 * math.pi / self.z
+        for k in range(self.z):
+            c = k * pitch
+            for i in range(flank + 1):
+                r = self.r0 + (self.ra - self.r0) * i / flank
+                for s in (-1, 1):
+                    t = c + s * self.psi(r)
+                    pts.append((r * math.cos(t), r * math.sin(t)))
+            pa = self.psi(self.ra)
+            for j in range(flank + 1):
+                t = c - pa + 2 * pa * j / flank
+                pts.append((self.ra * math.cos(t), self.ra * math.sin(t)))
+        return pts
+
+
+def _xy_extent(pts: list[tuple[float, float]], twist_rad: float = 0.0, steps: int = 90) -> tuple[float, float]:
+    """X and Y size of the profile, swept through a rotation of twist_rad (helical gears)."""
+    angs = [twist_rad * i / steps for i in range(steps + 1)] if twist_rad else [0.0]
+    xs_min = ys_min = math.inf
+    xs_max = ys_max = -math.inf
+    for a in angs:
+        ca, sa = math.cos(a), math.sin(a)
+        for x, y in pts:
+            u, v = x * ca - y * sa, x * sa + y * ca
+            xs_min, xs_max = min(xs_min, u), max(xs_max, u)
+            ys_min, ys_max = min(ys_min, v), max(ys_max, v)
+    return xs_max - xs_min, ys_max - ys_min
+
+
+def _keyway_segment(radius: float, b: float) -> float:
+    """Area of the bore disc inside the strip |x| <= b/2, y >= 0 (half of the chord region)."""
+    hw = b / 2
+    return hw * math.sqrt(radius ** 2 - hw ** 2) + radius ** 2 * math.asin(hw / radius)
+
+
+# ------------------------------------------------------------------ gears
+def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle: float = 20.0, bore: float = 0.0,
+              hub_d: float = 0.0, hub_l: float = 0.0, keyway: bool | tuple[float, float] = False,
+              helix_angle: float = 0.0, name: str = "Gear teeth") -> tuple[Any, dict[str, Any]]:
+    """Spur (or helical) gear on Z = 0, axis Z, true involute flanks (no root fillet), standard addendum m and
+    dedendum 1.25 m, profile shift 0. Optional hub (Ø hub_d, length hub_l on the +Z face), through bore, and a hub
+    keyway on +Y (keyway=True: DIN 6885-1 for the bore; or (b, t2)). helix_angle (deg, at the pitch circle) twists
+    the teeth over the face width. Returns (part, expected) with expected = {"bbox", "volume", "solids", "gear"}."""
+    from build123d import Align, Box, Cylinder, Edge, Face, Pos, Solid, Vector, Wire, extrude
+
+    from aicad import fw
+
+    z = round(float(teeth))
+    if z != teeth or not 8 <= z <= 400:
+        raise ValueError("teeth must be a whole number from 8 to 400")
+    if module <= 0 or face_width <= 0:
+        raise ValueError("module and face width must be positive")
+    g = _Involute(float(module), z, float(pressure_angle))
+    if bore and bore / 2 >= g.rf - 0.5 * module:
+        raise ValueError(f"bore Ø{bore:g} leaves no rim: keep it below Ø{2 * (g.rf - 0.5 * module):.1f}")
+    if hub_d and (hub_l <= 0 or hub_d <= bore):
+        raise ValueError("a hub needs hub_l > 0 and hub_d larger than the bore")
+
+    edges: list[Any] = []
+    pitch = 2 * math.pi / z
+    nflank = 9
+
+    def pol(r: float, t: float) -> Any:
+        return Vector(r * math.cos(t), r * math.sin(t), 0)
+
+    ps0, pa = g.psi(g.r0), g.psi(g.ra)
+    for k in range(z):
+        c = k * pitch
+        if g.rf < g.r0:
+            edges.append(Edge.make_line(pol(g.rf, c - ps0), pol(g.r0, c - ps0)))
+        rs = [g.r0 + (g.ra - g.r0) * (i / nflank) ** 1.5 for i in range(nflank + 1)]  # denser near the base
+        edges.append(Edge.make_spline([pol(r, c - g.psi(r)) for r in rs]))
+        edges.append(Edge.make_three_point_arc(pol(g.ra, c - pa), pol(g.ra, c), pol(g.ra, c + pa)))
+        edges.append(Edge.make_spline([pol(r, c + g.psi(r)) for r in reversed(rs)]))
+        if g.rf < g.r0:
+            edges.append(Edge.make_line(pol(g.r0, c + ps0), pol(g.rf, c + ps0)))
+        a0, a1 = c + ps0, c + pitch - ps0
+        edges.append(Edge.make_three_point_arc(pol(g.rf, a0), pol(g.rf, (a0 + a1) / 2), pol(g.rf, a1)))
+    face = Face(Wire(edges))
+    twist = 0.0
+    if helix_angle:
+        twist = math.degrees(face_width * math.tan(math.radians(helix_angle)) / g.rp)
+        body = Solid.extrude_linear_with_rotation(face, Vector(0, 0, 0), Vector(0, 0, face_width), twist)
+    else:
+        body = extrude(face, face_width)
+    label = f"{name} (m{module:g}, z{z}, α{pressure_angle:g}°{f', β{helix_angle:g}°' if helix_angle else ''})"
+    part = fw.feature(label, body, module=module, teeth=z, face_width=face_width)
+    area = g.area()
+    vol = area * face_width
+    top = face_width
+    if hub_d:
+        part = fw.feature("Hub", part + Pos(0, 0, face_width) * Cylinder(hub_d / 2, hub_l,
+                                                                         align=(Align.CENTER, Align.CENTER, Align.MIN)),
+                          d=hub_d, length=hub_l)
+        vol += math.pi * hub_d ** 2 / 4 * hub_l
+        top += hub_l
+    if bore:
+        part = fw.feature(f"Bore Ø{bore:g}", part - Pos(0, 0, -0.5) * Cylinder(
+            bore / 2, top + 1, align=(Align.CENTER, Align.CENTER, Align.MIN)), d=bore)
+        vol -= math.pi * bore ** 2 / 4 * top
+    if keyway:
+        if not bore:
+            raise ValueError("a keyway needs a bore")
+        if keyway is True:
+            k = din6885(bore)
+            kb, kt2, src = k["b"], k["t2"], "DIN 6885"
+        else:
+            kb, kt2, src = float(keyway[0]), float(keyway[1]), "custom"
+        depth = bore / 2 + kt2  # keyway floor measured from the bore axis
+        part = fw.feature(f"Keyway {kb:g}×{kt2:g} ({src})", part - Pos(0, 0, -0.5) * Box(
+            kb, depth, top + 1, align=(Align.CENTER, Align.MIN, Align.MIN)), b=kb, t2=kt2)
+        vol -= (kb * depth - _keyway_segment(bore / 2, kb)) * top
+    sx, sy = _xy_extent(g.samples(), math.radians(twist))
+    gear = {"pitch_d": 2 * g.rp, "tip_d": 2 * g.ra, "root_d": 2 * g.rf, "base_d": 2 * g.rb,
+            "profile_area": area, "twist_deg": twist}
+    return part, {"bbox": [sx, sy, top], "volume": vol, "solids": 1, "gear": gear}
+
+
+# ------------------------------------------------------------------ shafts
+def stepped_shaft(segments: list[tuple[float, float]], *, chamfer: float = 0.0, fillet: float = 0.0,
+                  name: str = "Shaft") -> tuple[Any, dict[str, Any]]:
+    """A revolved shaft along +Z from Z = 0: segments = [(diameter, length), ...] bottom to top. chamfer: 45° on
+    both end faces' outer edges; fillet: radius in every concave shoulder corner. Returns (part, expected)."""
+    from build123d import Axis, Plane, Polyline, make_face, revolve
+
+    from aicad import fw
+
+    if not segments or any(d <= 0 or L <= 0 for d, L in segments):
+        raise ValueError("segments are (diameter, length) pairs, both positive")
+    r = [d / 2 for d, _ in segments]
+    c = float(chamfer)
+    if c and (c >= min(r[0], r[-1]) or c >= min(segments[0][1], segments[-1][1])):
+        raise ValueError("chamfer is larger than an end segment")
+    pts: list[tuple[float, float]] = [(0.0, 0.0), (r[0] - c, 0.0), (r[0], c)] if c else [(0.0, 0.0), (r[0], 0.0)]
+    z = 0.0
+    for i, (_d, L) in enumerate(segments):
+        z += L
+        if i + 1 < len(segments):
+            pts += [(r[i], z), (r[i + 1], z)]
+    pts += [(r[-1], z - c), (r[-1] - c, z)] if c else [(r[-1], z)]
+    pts.append((0.0, z))
+    clean = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    prof = make_face(Plane.XZ * Polyline(*clean, close=True))
+    part = revolve(prof, Axis.Z, 360)
+    vol = sum(math.pi * (d / 2) ** 2 * L for d, L in segments)
+    if c:  # each 45° end chamfer removes a triangle (c x c) revolved about its centroid at radius r - c/3
+        for rr in (r[0], r[-1]):
+            vol -= c * c / 2 * 2 * math.pi * (rr - c / 3)
+    part = fw.feature(name + (f" (chamfers {c:g})" if c else ""), part, segments=len(segments))
+    if fillet:
+        pts_f, z = [], 0.0
+        for i in range(len(segments) - 1):
+            z += segments[i][1]
+            small = min(r[i], r[i + 1])
+            if abs(r[i] - r[i + 1]) <= fillet:
+                raise ValueError("shoulder fillet must be smaller than the step height")
+            pts_f.append((small, 0.0, z))
+            # Pappus: spandrel area (1 - pi/4) f^2 at a centroid 0.2234 f from each leg, outside the small radius
+            vol += (1 - math.pi / 4) * fillet ** 2 * 2 * math.pi * (small + (10 - 3 * math.pi) / (12 - 3 * math.pi) * fillet)
+        if pts_f:
+            from build123d import fillet as _fillet
+
+            part = fw.feature(f"Shoulder fillets R{fillet:g}", _fillet(fw.edges_near(part, pts_f), fillet), r=fillet)
+    dmax = max(d for d, _ in segments)
+    return part, {"bbox": [dmax, dmax, sum(L for _, L in segments)], "volume": vol, "solids": 1}
+
+
+def shaft_keyway(part: Any, d: float, z_center: float, length: float, *, b: float | None = None,
+                 t1: float | None = None, rounded: bool = True, name: str | None = None) -> tuple[Any, float]:
+    """Keyseat on the +Y side of a Ø d shaft whose axis is Z: DIN 6885-1 width and depth unless b/t1 are given,
+    `length` overall along Z centred on z_center, rounded (end-milled, form A) or square ends. Returns (part, removed
+    volume from the hand formula)."""
+    from build123d import Align, Box, Plane, Pos, SlotOverall, extrude
+
+    from aicad import fw
+
+    k = din6885(d)
+    b, t1 = float(b or k["b"]), float(t1 or k["t1"])
+    R = d / 2
+    if length <= b:
+        raise ValueError("keyway length must exceed its width")
+    floor = R - t1
+    if rounded:
+        sk = Plane(origin=(0, floor, z_center), x_dir=(0, 0, 1), z_dir=(0, 1, 0)) * SlotOverall(length, b)
+        tool = extrude(sk, t1 + 1)
+    else:
+        tool = Pos(0, floor, z_center) * Box(b, t1 + 1, length, align=(Align.CENTER, Align.MIN, Align.CENTER))
+    label = name or f"Keyway {b:g}×{t1:g} (DIN 6885)"
+    part = fw.feature(label, part - tool, b=b, t1=t1, length=length)
+
+    def depth(x: float) -> float:  # material removed at offset x across the key: cylinder surface down to the floor
+        return max(0.0, math.sqrt(max(R * R - x * x, 0.0)) - floor)
+
+    hw = b / 2
+    straight = (length - b if rounded else length) * _simpson(depth, -hw, hw)
+    # the two half-disc ends make one disc of radius hw: x = hw sin(t) keeps the integrand smooth at the rim
+    ends = _simpson(lambda t: 2 * hw * hw * math.cos(t) ** 2 * depth(hw * math.sin(t)), -math.pi / 2, math.pi / 2) \
+        if rounded else 0.0
+    return part, straight + ends
+
+
+# ------------------------------------------------------------------ holes
+def hole_spec(spec: Any, fit: str = "medium") -> dict[str, Any]:
+    """'M8', 'M8 clearance', 'M6 tapped', 'M10 cbore', 'M8 csk' (Hole Wizard tables) or a plain diameter."""
+    from aicad import holes
+
+    if isinstance(spec, (int, float)):
+        return {"d": float(spec), "spec": {"label": f"Ø{spec:g}"}}
+    words = str(spec).replace("×", "x").split()
+    size = words[0].upper().lstrip("M").split("X")[0]
+    kind = (words[1] if len(words) > 1 else "clearance").lower()
+    kind = {"counterbore": "cbore", "countersink": "csk", "tap": "tapped", "thread": "tapped"}.get(kind, kind)
+    return holes.resolve({"type": kind, "size": size, "fit": fit})
+
+
+def _hole_volume(f: dict[str, Any], depth: float) -> float:
+    d = float(f["d"])
+    v = math.pi * d * d / 4 * depth
+    if f.get("cbore"):
+        D, h = float(f["cbore"]["d"]), float(f["cbore"]["depth"])
+        v += math.pi * (D * D - d * d) / 4 * h
+    elif f.get("csk"):
+        dk, ang = float(f["csk"]["d"]), math.radians(float(f["csk"].get("angle", 90)))
+        h = (dk - d) / 2 / math.tan(ang / 2)
+        v += math.pi * h / 12 * (dk * dk + dk * d + d * d) - math.pi * d * d / 4 * h
+    return v
+
+
+def hole(part: Any, point: Any, spec: Any, depth: float, *, normal: Any = (0, 0, 1), fit: str = "medium",
+         thread_depth: float | None = None, name: str | None = None) -> tuple[Any, dict[str, Any]]:
+    """One Hole Wizard hole whose top centre is `point` on a face with outward `normal`, drilled `depth` into the
+    part. Tapped holes also get the cosmetic thread. Returns (part, {"d", "label", "volume"}); the volume is the hand
+    formula for a hole fully in material."""
+    return holes_at(part, [point], spec, depth, normal=normal, fit=fit, thread_depth=thread_depth, name=name)
+
+
+def holes_at(part: Any, points: list[Any], spec: Any, depth: float, *, normal: Any = (0, 0, 1),
+             fit: str = "medium", thread_depth: float | None = None, name: str | None = None) -> tuple[Any, dict[str, Any]]:
+    """The same hole at several points (one feature). See hole()."""
+    from build123d import Vector
+
+    from aicad import fw
+
+    f = hole_spec(spec, fit)
+    n = Vector(*normal).normalized()
+    tools = [fw._hole_tool(Vector(*p), n, f, depth) for p in points]
+    tool = tools[0]
+    for t in tools[1:]:
+        tool = tool + t
+    lab = f.get("spec", {}).get("label") or f"Ø{f['d']:g}"
+    part = fw.feature(name or (f"{len(points)}× {lab}" if len(points) > 1 else lab), part - tool, d=f["d"])
+    if f.get("spec", {}).get("type") == "tapped":
+        size = f["spec"]["size"]
+        for p in points:
+            q = Vector(*p) - n * 0.5  # a point on the drilled cylinder just below the entry
+            part = fw.thread(part, (q.X + f["d"] / 2 * _perp(n).X, q.Y + f["d"] / 2 * _perp(n).Y,
+                                    q.Z + f["d"] / 2 * _perp(n).Z), f"M{size:g}x{f['spec']['pitch']:g}",
+                             depth=thread_depth or depth)
+    return part, {"d": f["d"], "label": lab, "count": len(points), "volume": len(points) * _hole_volume(f, depth)}
+
+
+def _perp(n: Any) -> Any:
+    from build123d import Vector
+
+    a = Vector(1, 0, 0) if abs(n.X) < 0.9 else Vector(0, 1, 0)
+    return n.cross(a).normalized()
+
+
+def bolt_circle(part: Any, n: int, pcd: float, spec: Any, depth: float, *, z: float | None = None,
+                center: tuple[float, float] = (0.0, 0.0), start_deg: float = 0.0, normal: Any = (0, 0, 1),
+                fit: str = "medium", name: str | None = None) -> tuple[Any, dict[str, Any]]:
+    """n equally spaced Hole Wizard holes on a pitch circle Ø pcd in a face normal to Z (top face at height z,
+    default the part's top). Returns (part, {"d", "label", "count", "volume", "points"})."""
+    if n < 1 or pcd <= 0:
+        raise ValueError("need n >= 1 holes on a positive pitch circle")
+    if z is None:
+        bb = part.bounding_box()
+        z = bb.max.Z if normal[2] >= 0 else bb.min.Z
+    pts = [(center[0] + pcd / 2 * math.cos(math.radians(start_deg) + 2 * math.pi * i / n),
+            center[1] + pcd / 2 * math.sin(math.radians(start_deg) + 2 * math.pi * i / n), z) for i in range(n)]
+    lab = hole_spec(spec, fit).get("spec", {}).get("label") or f"Ø{spec}"
+    part, info = holes_at(part, pts, spec, depth, normal=normal, fit=fit,
+                          name=name or f"{n}× {lab} on PCD {pcd:g}")
+    return part, {**info, "points": [list(p) for p in pts]}

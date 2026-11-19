@@ -29,14 +29,17 @@ _locks: dict[str, asyncio.Lock] = {}
 
 
 @router.get("/projects/{project_id}/handoff")
-def handoff_plan(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+async def handoff_plan(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """What the pack would contain now: model files, drawing, DFM report, change notice, with stale/missing flags."""
-    return handoff.plan(workspace_for(_project(ctx, project_id)))
+    p = _project(ctx, project_id)
+    await wait_finalized(p.id, full=True)  # judge the finished build, not one whose checks are still running (PS-01)
+    return handoff.plan(workspace_for(p))
 
 
 @router.get("/projects/{project_id}/handoff.zip")
-def handoff_zip(project_id: str, include_stale: bool = False, ctx: Ctx = Depends(verified_ctx)) -> Response:
+async def handoff_zip(project_id: str, include_stale: bool = False, ctx: Ctx = Depends(verified_ctx)) -> Response:
     p = _project(ctx, project_id)
+    await wait_finalized(p.id, full=True)  # never pack a STEP that is still being written (PS-01)
     try:
         data, manifest = handoff.build_pack(workspace_for(p), p.name, ctx.user.name, include_stale=include_stale)
     except ValueError as e:
@@ -94,7 +97,7 @@ async def issue(p: Any, *, by: str, by_id: str | None, note: str = "", leave_out
     ws = workspace_for(p)
     lock = _locks.setdefault(p.id, asyncio.Lock())
     async with lock:
-        await wait_finalized(p.id)
+        await wait_finalized(p.id, full=True)  # the gate needs every check, CHK-08 included (PS-01)
         g = handoff.gate(ws, has_drawings=has_drawings, leave_out=leave_out)
         if not g["ready"]:
             latest = handoff.latest_release(ws)

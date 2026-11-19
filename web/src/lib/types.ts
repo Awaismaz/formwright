@@ -66,6 +66,8 @@ export interface BuildStatus {
   /** parameters a user may change without the AI (declared, plain literal) and their current values */
   editable_params?: Record<string, number>;
   timings_s?: Record<string, number>; traceback?: string;
+  /** PS-01: exports / checks still running in the background; `verified` = ok and nothing pending */
+  exports_pending?: boolean; pending_checks?: string[]; verified?: boolean;
   param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
   features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean; error?: string }[];

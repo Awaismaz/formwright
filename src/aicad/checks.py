@@ -10,7 +10,7 @@ from build123d import Edge, Shape
 from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.GeomAbs import GeomAbs_Cylinder
-from OCP.TopAbs import TopAbs_EDGE
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SOLID, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopoDS import TopoDS
 
@@ -60,15 +60,27 @@ def cylinder_radii(shape: Shape, ndigits: int = 4) -> Counter[float]:
     return radii
 
 
-def fingerprint(shape: Shape) -> dict[str, Any]:
+def _count(shape: Shape, kind: Any, skip_degenerated: bool = False) -> int:
+    """len(shape.faces()) etc. without building a Python wrapper per sub-shape (same identity: TopoDS hash)."""
+    seen: set[int] = set()
+    exp = TopExp_Explorer(shape.wrapped, kind)
+    while exp.More():
+        cur = exp.Current()
+        if not (skip_degenerated and BRep_Tool.Degenerated_s(TopoDS.Edge(cur))):
+            seen.add(hash(cur))
+        exp.Next()
+    return len(seen)
+
+
+def fingerprint(shape: Shape, volume: float | None = None) -> dict[str, Any]:
     sx, sy, sz = bbox_size(shape)
     return {
-        "volume": round(shape.volume, 6),
+        "volume": round(shape.volume if volume is None else volume, 6),
         "bbox": [round(sx, 6), round(sy, 6), round(sz, 6)],
-        "faces": len(shape.faces()),
-        "edges": len(shape.edges()),
-        "vertices": len(shape.vertices()),
-        "solids": len(shape.solids()),
+        "faces": _count(shape, TopAbs_FACE),
+        "edges": _count(shape, TopAbs_EDGE, skip_degenerated=True),  # build123d's edges() leaves out degenerate ones
+        "vertices": _count(shape, TopAbs_VERTEX),
+        "solids": _count(shape, TopAbs_SOLID),
     }
 
 
@@ -91,10 +103,11 @@ def check_bbox(shape: Shape, expected: tuple[float, float, float]) -> CheckResul
                                "tol_mm": BBOX_TOL_MM})
 
 
-def check_volume(shape: Shape, expected: float) -> CheckResult:
-    rel = _rel(shape.volume, expected)
+def check_volume(shape: Shape, expected: float, got: float | None = None) -> CheckResult:
+    vol = shape.volume if got is None else got
+    rel = _rel(vol, expected)
     return CheckResult("CHK-05", "volume vs analytic", rel <= VOLUME_REL_TOL,
-                       detail={"got_mm3": shape.volume, "expected_mm3": expected,
+                       detail={"got_mm3": vol, "expected_mm3": expected,
                                "rel_err": rel, "tol": VOLUME_REL_TOL})
 
 
@@ -106,9 +119,11 @@ def check_cylinders(shape: Shape, expected: dict[float, int]) -> CheckResult:
                                "expected": {str(k): v for k, v in expected.items()}})
 
 
-def check_roundtrip(original: Shape, reimported: Shape) -> CheckResult:
-    fo, fr = fingerprint(original), fingerprint(reimported)
-    vrel = _rel(reimported.volume, original.volume)
+def check_roundtrip(original: Shape, reimported: Shape, original_fp: dict[str, Any] | None = None) -> CheckResult:
+    """CHK-07. ``original_fp``: the original's fingerprint when the build already computed it (saves a pass)."""
+    rv, ov = reimported.volume, original.volume
+    fo, fr = original_fp or fingerprint(original, volume=ov), fingerprint(reimported, volume=rv)
+    vrel = _rel(rv, ov)
     berr = max(abs(a - b) for a, b in zip(fo["bbox"], fr["bbox"], strict=True))
     ok = vrel <= ROUNDTRIP_REL_TOL and berr <= 1e-6 and fo["solids"] == fr["solids"] \
         and fo["faces"] == fr["faces"]
