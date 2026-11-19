@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cx } from "@/lib/format";
 import LazyScene from "./LazyScene";
 import type { ScenePart } from "./PartScene";
@@ -66,7 +66,23 @@ function Poster() {
   );
 }
 
+/** Narrow (portrait) stages fit the tall exploded stack better with a closer camera. */
+function useNarrow() {
+  const q = "(max-width: 1023px)";
+  const [m, setM] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.(q);
+    if (!mq) return;
+    const f = () => setM(mq.matches);
+    mq.addEventListener("change", f);
+    return () => mq.removeEventListener("change", f);
+  }, []);
+  return m;
+}
+
 export default function ExplodeOnScroll() {
+  const narrow = useNarrow();
+  const z0 = narrow ? 1.3 : 1.05;
   const ref = useRef<HTMLElement>(null);
   const reduced = useReducedMotion();
   const p = useScrollProgress(ref, !reduced);
@@ -74,6 +90,7 @@ export default function ExplodeOnScroll() {
   const parts: ScenePart[] = useMemo(() => INST.map(i => ({
     id: i.id, url: `/landing/gearbox/${i.part}.glb`, at: i.at as [number, number, number], color: COLOR[i.part],
     explode: [0, 0, (EXPLODE_DZ[i.part] ?? 0) * (reduced ? 1 : lift(groupOf(i.part), a))] as [number, number, number],
+    fitExplode: [0, 0, EXPLODE_DZ[i.part] ?? 0] as [number, number, number],
   })), [a, reduced]);
   const seated = (row: (typeof BOM)[number]) => !reduced && row.groups.every(g => lift(g, a) < 0.02);
   const done = BOM.filter(seated).length;
@@ -113,7 +130,7 @@ export default function ExplodeOnScroll() {
           <Card3D className="min-h-0 flex-1" inner="relative h-full min-h-[360px] overflow-hidden">
             <div className="viewport-bg absolute inset-0" />
             <div className="absolute inset-0">
-              <LazyScene parts={parts} explode={1} still={reduced} turn={reduced ? undefined : -18 + a * 70} view={[1, -1.15, 0.42]} zoom={reduced ? 1.05 : 1.05 + 1.15 * ease(clamp((a - 0.6) / 0.4))}
+              <LazyScene parts={parts} explode={1} still={reduced} turn={reduced ? undefined : -18 + a * 70} view={[1, -1.15, 0.42]} zoom={reduced ? z0 : z0 + 0.4 * ease(clamp((a - 0.7) / 0.3))}
                 poster={<div className="h-full w-full p-6"><Poster /></div>}
                 label="The PG-5 planetary gearbox assembling along its axis as you scroll: motor flange, bearings, shafts, carrier, planets, sun, ring, covers and screws." />
             </div>
@@ -123,7 +140,7 @@ export default function ExplodeOnScroll() {
             <div className="pointer-events-none absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3 lg:hidden">
               <span className="bg-sheet/90 px-2 py-1 text-[13px] leading-snug text-ink ring-1 ring-rule">{BOM[Math.min(done, BOM.length - 1)]!.item}</span>
             </div>
-            <span className="s-anno pointer-events-none absolute bottom-3 right-3 hidden text-ink2 lg:block">Real Formwright geometry · drag to orbit</span>
+            <span className="s-anno pointer-events-none absolute bottom-3 right-3 hidden bg-slab/85 px-1.5 py-0.5 text-ink2 lg:block">Real Formwright geometry · drag to orbit</span>
           </Card3D>
         </div>
       </div>

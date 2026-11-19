@@ -19,6 +19,8 @@ export type ScenePart = {
   at?: V3;
   /** Offset at full explode (mm, CAD axes). */
   explode?: V3;
+  /** Offset used to frame the camera when it differs from `explode` (for example while a scroll story moves parts). */
+  fitExplode?: V3;
   color?: string;
   /** Fades the part in/out (default true). */
   show?: boolean;
@@ -175,7 +177,8 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
       for (const i of insts) {
         const b = new THREE.Box3().setFromObject(i.holder);
         box.union(b);
-        if (i.part.explode) box.union(b.clone().translate(cad(i.part.explode)));
+        const fx = i.part.fitExplode ?? i.part.explode;
+        if (fx) box.union(b.clone().translate(cad(fx)));
       }
       if (box.isEmpty()) return;
       const s = box.getBoundingSphere(new THREE.Sphere());
@@ -189,7 +192,8 @@ export default function PartScene({ parts, explode = 0, spin = 0, view = [1, -1,
     const step = (now: number) => {
       raf = 0;
       if (disposed) return;
-      const dt = Math.min(0.05, (now - last) / 1000);
+      // a kick can set `last` after this frame's timestamp: never let dt go negative (a negative step makes the easing diverge)
+      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
       last = now;
       const L = live.current;
       let moving = false;
