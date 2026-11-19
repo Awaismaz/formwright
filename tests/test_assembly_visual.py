@@ -374,8 +374,10 @@ def test_failure_and_level_messages() -> None:
     look = {"stop": True, "reason": "Nothing touches.", "line": "", "quick": [{"severity": "block",
                                                                               "text": "4 of 4 parts touch nothing."}]}
     text, acts = visual_office.level_message(t, look)
-    assert text.startswith("I stopped GP-7 Assemble Gear pair: Gear pair isn't assembled") and acts[0]["type"] == \
-        "retry_blocked"
+    # a measured placement stop: a retry would place the parts the same way, so the way out is a program revision
+    # (office/revision.py), never a retry of the same layout or a new program
+    assert text.startswith("I stopped GP-7 Assemble Gear pair: Gear pair isn't assembled") and acts == []
+    assert "A revision of the program fixes it at any stage" in text and "new program" not in text
     # a measured confirmation already carries the visual line: say it once (live run 2026-11-19 said it twice)
     vline = "Visual check (advisory): it looks wrong. Gear is keyed to Gear shaft: the key lies apart."
     look = {"stop": True, "reason": f"{vline} Measured: A and B overlap by 2.2 mm³.", "line": vline, "quick": []}

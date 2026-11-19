@@ -44,6 +44,10 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/supervisor/run           ask Archie to look at the program now
   POST   /api/office/programs/{pid}/supervisor/actions/{aid}/decide   yes / no to one of Archie's major proposals
   POST   /api/office/programs/{pid}/supervisor/actions/{aid}/undo     undo one of Archie's actions
+  POST   /api/office/programs/{pid}/revision/preview         what a program revision keeps, re-places, redesigns,
+                                                             adds and removes (nothing changes)
+  POST   /api/office/programs/{pid}/revision                 revise the program (ICD v+1) at any stage
+  POST   /api/office/programs/{pid}/revisions/{rid}/undo     undo the latest revision while nothing was rebuilt
 """
 
 from __future__ import annotations
@@ -189,6 +193,11 @@ class ArchieActIn(BaseModel):
     message: str
     action: str
     decision: str = "apply"  # "apply" | "dismiss"
+
+
+class RevisionIn(BaseModel):
+    changes: list[dict[str, Any]]
+    reason: str = ""
 
 
 class SupervisorDecideIn(BaseModel):
@@ -1522,6 +1531,8 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
     elif typ == "revise_plan":
         _mutate(ctx, pid, lambda root, d: service.revise_plan(root, d, a, _actor(ctx)))
+    elif typ == "revise_program":
+        await _revise(ctx, pid, a["changes"], a.get("reason") or "", "chat")
     elif typ == "retry_blocked":
         for t in archie_chat.blocked(_load(ctx, pid)):
             try:
@@ -1535,6 +1546,86 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await raise_ecn(pid, EcnIn(reason=a["reason"], items=items), ctx)
     else:
         raise HTTPException(409, "Unknown action")
+
+
+# ----------------------------------------------------------------------------- program revisions (PD-100, PD-150..)
+async def _revise(ctx: Ctx, pid: str, changes: list[dict[str, Any]], reason: str, source: str) -> dict[str, Any]:
+    """The engineer revises the program (their Apply is the approval): applied, logged, audited, the program
+    assembly laid out again and the office run on to completion."""
+    from aicad.office import revision
+
+    _editor(ctx)
+    root = _root(ctx)
+    actor = _actor(ctx)
+    with store.lock(pid):
+        doc = _load(ctx, pid)
+        o = doc.setdefault("orchestrator", {"state": "idle"})
+        o.setdefault("user_id", ctx.user.id)
+        try:
+            rev = supervisor.revise_now(root, doc, changes, actor, " ".join(reason.split())[:400] or
+                                        "the engineer's revision", source="engineer")
+        except OfficeInputError as e:
+            raise HTTPException(409, str(e)) from e
+        e = supervisor.log_revision(doc, rev, actor, source)
+        rev["log"] = e["id"]
+        store.save(root, doc)
+    audit(ctx.db, "office.revision", ctx.user, doc["org_id"], target=pid, revision=rev["id"],
+          icd_from=rev["icd_from"], icd_to=rev["icd_to"], counts=(rev.get("impact") or {}).get("counts"),
+          source=source)
+    ctx.db.commit()
+    revision.spawn_rebuild(root, pid, _sup_env(ctx, doc))
+    if (doc.get("orchestrator") or {}).get("state") == "running":
+        orchestrator.ensure(root, pid)
+    return rev
+
+
+@router.post("/programs/{pid}/revision/preview")
+def revision_preview(pid: str, body: RevisionIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """What a revision would do, per part and per level, with the estimate. Nothing changes."""
+    from aicad.office import revision
+
+    doc = _load(ctx, pid)
+    try:
+        cand = revision.candidate(doc, body.changes)
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
+    return {"revision": revision.view(cand), "title": revision.title(cand, doc)}
+
+
+@router.post("/programs/{pid}/revision")
+async def revise_program(pid: str, body: RevisionIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    rev = await _revise(ctx, pid, body.changes, body.reason, "api")
+    return {"revision": {k: v for k, v in rev.items() if k not in ("snapshot", "ops")}, "program": _view(_load(ctx, pid))}
+
+
+@router.post("/programs/{pid}/revisions/{rid}/undo")
+async def undo_revision(pid: str, rid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Undo the latest revision while none of the parts it reopened has been rebuilt (the Archie log entry of the
+    revision is marked undone too)."""
+    from aicad.office import revision
+
+    _editor(ctx)
+    root = _root(ctx)
+    with store.lock(pid):
+        doc = _load(ctx, pid)
+        e = next((x for x in (doc.get("supervisor") or {}).get("log") or []
+                  if (x.get("undo") or {}).get("kind") == "revision" and x["undo"].get("id") == rid
+                  and x.get("status") == "applied"), None)
+    if e is not None:  # one path: the Archie log's undo (it restores the program and marks the entry)
+        try:
+            supervisor.undo(root, pid, e["id"], _actor(ctx))
+        except OfficeInputError as ex:
+            raise HTTPException(409, str(ex)) from ex
+    else:
+        def fn(r: Path, d: dict[str, Any]) -> None:
+            revision.undo(r, d, rid, _actor(ctx))
+        _mutate(ctx, pid, fn)
+        revision.spawn_rebuild(root, pid)
+    doc = _load(ctx, pid)
+    audit(ctx.db, "office.revision_undo", ctx.user, doc["org_id"], target=pid, revision=rid)
+    ctx.db.commit()
+    orchestrator.poke(pid)
+    return {"program": _view(doc)}
 
 
 # ----------------------------------------------------------------------------- Archie supervises (WORKLIST 49)
@@ -1579,6 +1670,9 @@ async def supervisor_decide(pid: str, aid: str, body: SupervisorDecideIn,
         raise HTTPException(409, str(ex)) from ex
     audit(ctx.db, "office.supervisor_decision", ctx.user, doc["org_id"], target=pid, step=aid,
           choice=body.choice, status=e.get("status"), tool=e.get("tool"))
+    if e.get("tool") == "revise_program" and e.get("status") == "applied":
+        audit(ctx.db, "office.revision", ctx.user, doc["org_id"], target=pid, revision=(e.get("undo") or {}).get("id"),
+              source="archie", counts=((e.get("action") or {}).get("impact") or {}).get("counts"))
     ctx.db.commit()
     doc = _load(ctx, pid)
     if e.get("status") == "applied" and (doc.get("icd") or {}).get("status") == "draft":

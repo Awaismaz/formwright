@@ -206,6 +206,26 @@ export interface Program {
   deliverables_mode?: "auto" | "on" | "off"; deliverables_why?: string | null;
   /** WORKLIST 49: Archie supervising the program (his log, rule overrides, relaxed checks). */
   supervisor?: SupervisorView;
+  /** Program revisions (ICD v+1 at any stage, PD-100 / PD-150..), newest first. */
+  revisions?: RevisionRecord[];
+  retired_tickets?: { id: string; key: string; title: string; kind: string; column: string; retired: { revision: string; at: string; by: string; why: string } }[];
+}
+
+/** What a revision keeps, re-places, redesigns, adds and removes (``office/revision.py`` ``view``). */
+export interface RevisionImpact {
+  ok: boolean; why: string; changes: string[]; dropped: string[]; summary: string; lines: string[];
+  counts: Record<"unchanged" | "moved" | "redesign" | "added" | "removed", number>;
+  estimate: { tokens: number; minutes: number }; replace_only: boolean; major_why?: string[];
+  parts: { name: string; class: "unchanged" | "moved" | "redesign" | "added" | "removed"; why: string; ticket?: string | null;
+    column?: string | null; qty_before: number; qty_after: number; remove?: string[]; add?: string[] }[];
+  levels: { item: string; name: string; status: "kept" | "rerun" | "added" | "removed"; ticket?: string | null }[];
+  placement: { before: string[]; after: string[] }; problems: string[];
+}
+export interface RevisionRecord {
+  id: string; at: string; by: Actor; source: string; why: string; changes: string[]; icd_from: number; icd_to: number;
+  summary: string; lines: string[]; impact: RevisionImpact; reopened: { ticket: string; key: string }[]; added: string[];
+  reset: string[]; retired: string[]; status: "applied" | "undone"; undone?: { by: string; at: string } | null;
+  undoable: boolean; undo_why?: string | null;
 }
 
 export interface RelaxedCheck { rule: string; label: string; feature?: string | null; feature_text?: string | null; text: string; reason: string; override: string; at: string; undone?: boolean }
@@ -216,6 +236,8 @@ export interface SupervisorEntry {
   status: "applied" | "asking" | "declined" | "failed" | "lapsed" | "undone"; outcome?: string;
   decided?: { by: string; at: string; choice: string } | null; undone?: { by: string; at: string; outcome: string } | null;
   undoable: boolean; undo_why?: string | null; message?: string;
+  /** A program revision: what it keeps, re-places, redesigns, adds and removes. */
+  impact?: RevisionImpact | null;
 }
 export interface RuleOverride {
   id: string; rule: string; label: string; scope_text: string; feature?: string | null; feature_text?: string | null; reason: string; expiry_text: string;
@@ -254,6 +276,8 @@ export interface ArchieQuestion {
   /** Alternatives (one problem, several ways to clear it): one option per action, choosing one declines the others. */
   actions?: string[]; chosen?: string | null;
   answered?: "approve" | "decline"; by?: Actor; at?: string;
+  /** A program revision: the impact list shown with the choices. */
+  impact?: RevisionImpact | null;
 }
 /** "Fix with Archie" at the interfaces gate: the number fix, then Archie on what numbers can't fix. */
 export interface GateFix {

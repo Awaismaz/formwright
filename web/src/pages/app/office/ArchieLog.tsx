@@ -1,13 +1,87 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, MessageSquare, RotateCcw, ScanSearch, ShieldAlert, X } from "lucide-react";
+import { Check, GitBranch, MessageSquare, RotateCcw, ScanSearch, ShieldAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState } from "@/components/ui";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
-import type { ArchieChat as Chat, ArchieQuestion, Program, RuleOverride, SupervisorEntry } from "./types";
+import type { ArchieChat as Chat, ArchieQuestion, Program, RevisionImpact, RevisionRecord, RuleOverride, SupervisorEntry } from "./types";
+
+const CLASS: Record<RevisionImpact["parts"][number]["class"], { label: string; tone: "success" | "warning" | "neutral" | "danger" | "primary" }> = {
+  redesign: { label: "Redesigned", tone: "warning" }, added: { label: "Added", tone: "primary" }, removed: { label: "Removed", tone: "danger" },
+  moved: { label: "Kept, re-placed", tone: "neutral" }, unchanged: { label: "Kept as built", tone: "success" },
+};
+const ORDER = ["redesign", "added", "removed", "moved", "unchanged"] as const;
+
+/** A program revision's impact: per part what it keeps, re-places, redesigns, adds and removes, the levels that run
+ *  again, and the estimate (in the question, the Archie log and the revisions list). */
+export function RevisionImpactList({ imp, compact = false }: { imp: RevisionImpact; compact?: boolean }) {
+  const [open, setOpen] = useState(!compact);
+  const rerun = imp.levels.filter(l => l.status === "rerun" || l.status === "added").map(l => l.name);
+  const kept = imp.levels.filter(l => l.status === "kept").map(l => l.name);
+  return (
+    <div className="mt-1.5 rounded-md border border-border bg-panel p-2 text-[12px]" data-revision-impact>
+      <div className="flex flex-wrap gap-1">{ORDER.filter(c => imp.counts[c]).map(c =>
+        <Badge key={c} tone={CLASS[c].tone}>{imp.counts[c]} {CLASS[c].label.toLowerCase()}</Badge>)}
+        <span className="self-center text-[11px] text-muted">about {imp.estimate.tokens} tokens, {imp.estimate.minutes} min</span></div>
+      {imp.changes.length > 0 && <div className="mt-1 text-muted">Changes: {imp.changes.join("; ")}</div>}
+      <button className="mt-1 text-primary hover:underline" onClick={() => setOpen(!open)}>{open ? "Hide" : "Show"} what happens to each part</button>
+      {open && <div className="mt-1 space-y-1">
+        {ORDER.flatMap(c => imp.parts.filter(r => r.class === c)).map(r => (
+          <div key={r.name} className="flex flex-wrap items-start gap-1.5" data-impact-part={r.class}>
+            <Badge tone={CLASS[r.class].tone}>{CLASS[r.class].label}</Badge>
+            <span className="font-medium">{r.name}</span>{r.ticket && <span className="text-muted">{r.ticket}</span>}
+            {(r.class === "redesign" || r.class === "moved") && <span className="basis-full pl-1 text-muted">{r.why}</span>}
+          </div>))}
+        {rerun.length > 0 && <div className="text-muted">Assemblies run again: {rerun.join(", ")}</div>}
+        {kept.length > 0 && <div className="text-muted">Assemblies kept as integrated: {kept.join(", ")}</div>}
+        {imp.placement.before.length > 0 && <div className="text-muted">Floating now: {imp.placement.before.slice(0, 3).join("; ")}. After: {imp.placement.after.length ? imp.placement.after.join("; ") : "nothing floating"}.</div>}
+      </div>}
+    </div>
+  );
+}
+
+/** Program revisions (newest first), with undo while none of the reopened parts has been rebuilt. */
+function Revisions({ program, canEdit }: { program: Program; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
+  const revs = program.revisions ?? [];
+  if (!revs.length) return null;
+  const undo = async (r: RevisionRecord) => {
+    setBusy(r.id);
+    try {
+      const out = await api.post<{ program: Program }>(`${BASE}/programs/${program.id}/revisions/${r.id}/undo`);
+      qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...out.program, can_edit: old?.can_edit }));
+      void qc.invalidateQueries({ queryKey: ["office-archie", program.id] });
+      toast.success(`Undone: back to ICD v${r.icd_from}`);
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div>
+      <div className="label mb-1.5">Program revisions</div>
+      <Card className="divide-y divide-border" data-revisions>{revs.map(r => (
+        <div key={r.id} className="flex items-start gap-3 px-4 py-3" data-revision={r.id} data-revision-status={r.status}>
+          <GitBranch className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1 text-[13px]">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium">{r.id}: ICD v{r.icd_from} → v{r.icd_to}</span>
+              <Badge tone={r.status === "applied" ? "success" : "neutral"}>{r.status === "applied" ? "Applied" : "Undone"}</Badge>
+              <span className="text-[11.5px] text-muted">{r.by?.name} · {ago(r.at)}</span>
+            </div>
+            {r.why && <div className="text-muted">Why: {r.why}</div>}
+            <RevisionImpactList imp={r.impact} compact />
+            {r.undone && <div className="mt-1 text-[12px] text-muted">Undone by {r.undone.by} {ago(r.undone.at)}</div>}
+            {r.status === "applied" && !r.undoable && r.undo_why && <div className="mt-1 text-[11.5px] text-muted">Undo is no longer possible: {r.undo_why}.</div>}
+          </div>
+          {canEdit && r.undoable && <Button size="sm" variant="secondary" loading={busy === r.id} icon={<RotateCcw className="h-3.5 w-3.5" />}
+            onClick={() => void undo(r)} data-undo-revision={r.id}>Undo</Button>}
+        </div>))}</Card>
+    </div>
+  );
+}
 
 type Resp = Chat & { supervisor: Program["supervisor"]; program: Program; result?: { ran: boolean; why?: string; done?: string[]; asked?: string[] } };
 
@@ -47,6 +121,7 @@ export function SupervisorQuestion({ program, q, canEdit }: { program: Program; 
     <div className="mt-1.5 rounded-lg border border-primary/30 bg-primary-soft/40 px-3 py-2.5" data-archie-question={q.action}>
       <div className="mb-1 text-[12.5px] font-medium">{q.question}</div>
       {q.why && <div className="mb-1.5 text-[11.5px] text-muted">{q.why}</div>}
+      {q.impact && <div className="mb-1.5"><RevisionImpactList imp={q.impact} /></div>}
       <div className="flex flex-wrap gap-1.5">
         {q.options.map(o => {
           const key = `${o.id}:${o.action ?? q.action}`;
@@ -100,6 +175,7 @@ function Entry({ e, program, canEdit }: { e: SupervisorEntry; program: Program; 
         </div>
         <div className="mt-1 font-medium">{e.title}</div>
         {e.why && <div className="text-muted">Why: {e.why}</div>}
+        {e.impact && <RevisionImpactList imp={e.impact} compact={e.status !== "asking"} />}
         {e.outcome && e.status !== "asking" && <div>Outcome: {e.outcome}</div>}
         {e.decided && <div className="text-[12px] text-muted">{e.decided.choice === "approve" ? "Approved" : "Declined"} by {e.decided.by} {ago(e.decided.at)}</div>}
         {e.undone && <div className="text-[12px] text-muted">Undone by {e.undone.by} {ago(e.undone.at)}: {e.undone.outcome}</div>}
@@ -143,7 +219,8 @@ export default function ArchieLog({ program, onTalk }: { program: Program; onTal
             measurement, a gate that stays blocked, a stalled step, the budget and the visual checks. He diagnoses what is at fault (the part, the measurement,
             a rule, the plan or the interfaces) and acts. Minor steps (a retry, a reassignment, a better instruction, an approval when only advisory notes remain,
             a procedural rule) he does himself and tells you. Major ones (adding or removing parts, an approved interface, a bigger budget, relaxing a check
-            that measures geometry) wait for your yes. A relaxed check is never shown as passed.</p>
+            that measures geometry) wait for your yes. A relaxed check is never shown as passed. When the layout or the plan is at fault, even after parts are
+            done, he revises the program: he shows what it keeps, re-places, redesigns, adds and removes before you say yes, and the program carries on.</p>
           {s && <p className="mt-1 text-[11.5px] text-muted">AI looks this hour: {s.calls_hour} of {s.max_calls_hour}. When the limit is reached, or AI is off, he reads the known patterns without AI.</p>}
         </div>
         <div className="flex flex-col gap-2">
@@ -156,6 +233,8 @@ export default function ArchieLog({ program, onTalk }: { program: Program; onTal
         <div className="label mb-1.5">Waiting for your decision</div>
         <Card className="divide-y divide-border border-warning/40">{asking.map(e => <Entry key={e.id} e={e} program={program} canEdit={canEdit} />)}</Card>
       </div>}
+
+      <Revisions program={program} canEdit={canEdit} />
 
       {overrides.length > 0 && <div>
         <div className="label mb-1.5">Rules relaxed by Archie</div>

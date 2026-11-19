@@ -6,8 +6,8 @@ The engineer can ask the Chief Designer for a status report or ask for a change 
 * Archie never changes the program on his own. A request for a change comes back as one or more *proposed
   actions*; each one runs only when the engineer presses Apply, through the same code path as the matching
   button on the board (comment to a ticket, reopen, pause, priority, interface change request, budget, re-plan,
-  engineering change notice). Anything outside that list (adding or removing parts after the plan is approved)
-  is answered honestly with what to do instead (PD-65).
+  engineering change notice). Adding or removing parts, re-hosting them or changing the base part after the plan
+  is approved is a **program revision** (``office/revision.py``, ICD v+1 with the impact list): never a new program.
 
 With AI available (Archie-planned program, AI allowed for the account, tokens left) one short text-only turn reads
 the message against a compact view of the program and proposes actions in a fenced ``fw-office-actions`` block.
@@ -34,7 +34,7 @@ HISTORY_TURNS = 8
 
 ACTION_TYPES = ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority", "pause_program",
                 "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked",
-                "revise_plan", "keep_separate")
+                "revise_plan", "keep_separate", "revise_program")
 
 CHAT_INSTRUCTIONS = """You are Archie, the Chief Designer of a mechanical design office. The engineering manager \
 talks to you while a program is planned or in work. You see the program state below. Answer in plain engineering \
@@ -72,7 +72,17 @@ passes every measurable check is approved with Gage's open points recorded) and 
 work has started: send the plan back to the manager for review with this change ("add" is optional: one part to add, \
 e.g. a housing or base plate the other parts mount on).
 - {"type": "ecn", "reason": "why", "tickets": ["KEY", ...]}: only after the program is released.
-Parts can't be added to or removed from an approved plan: say so and suggest a new program or an ECN instead."""
+- {"type": "revise_program", "reason": "why", "changes": [change, ...]}: at any stage after the plan is approved, \
+also when parts are approved or integrated: the plan changes, the layout and the interfaces are derived again \
+(ICD v+1); parts whose interface features change are reopened with a precise instruction, kept parts are re-placed \
+and the assemblies that hold a change run again. The manager sees what is kept, re-placed, redesigned, added and \
+removed before Apply. Changes: {"op": "base", "part": "name"}, {"op": "mount", "part": "name", "on": "name"} \
+(each copy sits on its own copy of the host when the counts match), {"op": "size", "part": "name", "envelope": \
+[L, W, H]} (mm), {"op": "qty", "part": "name", "qty": n}, {"op": "add", "sub": "sub-assembly", "part": {"name", \
+"family", "qty", "description", "envelope", "mounts_on"}}, {"op": "remove", "part": "name"}, {"op": "describe", \
+"part": "name", "description": "..."}, {"op": "relayout"}. Use it when the layout leaves a part or a copy floating, \
+when parts must be added or removed after work started, or when the base part is wrong.
+Never tell the manager to start a new program: propose a revision of this one."""
 
 _BLOCK = re.compile(r"```fw-office-actions\s*\n(.*?)\n?```", re.DOTALL)
 _STATUS = re.compile(r"\b(status|progress|report|update|how(?:'s| is| are)? (?:it|things|we) going|where are we|"
@@ -274,9 +284,31 @@ def asks_status(text: str) -> bool:
         r"\b(change|make|add|increase|decrease|reduce|use|switch|set|instead|should|must)\b", text, re.IGNORECASE)
 
 
+def _placement_revision(doc: dict[str, Any]) -> dict[str, Any] | None:
+    """A revision that clears a measured placement block on an integration (``revision.propose``), or None."""
+    if not any(t["kind"] == "integration" for t in blocked(doc)):
+        return None
+    from aicad.office import revision
+
+    try:
+        return revision.propose(doc)
+    except Exception:  # noqa: BLE001 - the reader answers anyway, without the proposal
+        return None
+
+
 def offline_reply(doc: dict[str, Any], text: str, root: Path) -> tuple[str, list[dict[str, Any]], str]:
     """Deterministic answer: (text, proposed actions, kind)."""
     stuck = blocked(doc)
+    rev = _placement_revision(doc) if doc["status"] in ("active", "complete") else None
+    if rev is not None and re.search(r"\b(stuck|blocked|redo|revise|fix|correct|solve|floating|loose|wrong|retry|"
+                                     r"unblock|proceed|continue|what now|help)\w*", text, re.IGNORECASE):
+        from aicad.office import revision
+
+        msg = ("The parts are fine; the layout leaves some of them floating: " + "; ".join(rev["placement"]["before"][:3])
+               + ". I can revise the program (ICD v" + str(int(doc["icd"]["version"]) + 1) + "): "
+               + "; ".join(revision.describe_ops(rev["ops"])) + ". " + revision.summary_line(rev["impact"]) + ".")
+        return msg, [{"type": "revise_program", "changes": rev["ops"], "reason": "Every copy gets its own joints, so "
+                      "nothing is left floating.", "summary": revision.summary_line(rev["impact"])}], "office"
     if doc["status"] in ("active", "complete") and stuck and re.search(
             r"\b(stuck|blocked|review|sent back|retry|rejected|gage|strict|resolve|unblock)\w*", text, re.IGNORECASE):
         n = len(stuck)
@@ -325,8 +357,9 @@ def offline_reply(doc: dict[str, Any], text: str, root: Path) -> tuple[str, list
                 "gets it with its next step."), acts, "office")
     return ("I can give you a status report, pause or resume the office, or send an instruction to a part if you "
             "name it (its key, like " + (doc["tickets"][0]["key"] if doc["tickets"] else "AB-1") + ", or its title). "
-            "Shared numbers between parts change on the Interfaces tab. Parts can't be added to an approved plan."), \
-        [], "office"
+            "Shared numbers between parts change on the Interfaces tab. To add, remove or re-host a part, or change "
+            "the base part, I revise the program: tell me what should change and I list what it keeps and what it "
+            "redoes before anything happens."), [], "office"
 
 
 # --------------------------------------------------------------------------- the AI turn
@@ -366,6 +399,10 @@ def chat_prompt(root: Path, doc: dict[str, Any], hist: list[dict[str, Any]], tex
         for i in icd["interfaces"][:40]:
             vals = ", ".join(f"{k}={v}" for k, v in _editable(i).items())
             lines.append(f"- {i['id']} {i.get('name', '')}: {vals}")
+    if doc["status"] in ("active", "complete") and doc.get("skeleton"):
+        from aicad.office import revision
+
+        lines += revision.context_lines(doc)
     lines.append("Status: " + status_report(root, doc))
     trouble = [t for t in doc["tickets"] if (t.get("run") or {}).get("status") == "blocked"
                or int((t.get("run") or {}).get("review_round") or 0) > 0]
@@ -448,6 +485,19 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
         return {"type": typ, "items": want, "parts": [items[i]["name"] for i in want]} if want else None
     if typ == "revise_plan":
         return revise_ok(doc, a, txt)
+    if typ == "revise_program":
+        from aicad.office import OfficeInputError, revision
+
+        if st not in ("active", "complete") or not doc.get("icd"):
+            return None
+        try:
+            cand = revision.candidate(doc, a.get("changes") or [])
+        except OfficeInputError:
+            return None
+        if not cand["ok"]:
+            return None
+        return {"type": typ, "changes": cand["ops"], "reason": txt or "Archie's proposal",
+                "summary": revision.summary_line(cand["impact"]), "lines": revision.impact_lines(cand["impact"])}
     if typ == "resize_part":
         from aicad.office import interfaces
 
@@ -564,6 +614,12 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         return f"Send the plan back to you for review: {a['notes']}"
     if typ == "ecn":
         return f"Raise an engineering change on {', '.join(a['tickets'])}: {a['reason']}"
+    if typ == "revise_program":
+        from aicad.office import revision
+
+        return (f"Revise the program to ICD v{int((doc.get('icd') or {}).get('version') or 1) + 1}: "
+                + "; ".join(revision.describe_ops(a.get("changes") or [])) + (f" ({a['summary']})" if a.get("summary")
+                                                                              else ""))
     return typ
 
 
