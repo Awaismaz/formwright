@@ -1,0 +1,48 @@
+# (f) A manual linear stage: a carriage on two guide rods held in two end blocks on a base plate. Hand values:
+#   the rods are parallel and 60 mm apart (centre to centre), along the stage's long axis
+#   the carriage lies between the two end blocks, on the rods
+id = "linear-stage"
+title = "Linear stage on two guide rods"
+letter = "f"
+source = "Golden mechanism list (WORKLIST 46)"
+brief = "A manual linear stage: an 80 x 100 x 25 mm carriage that slides on two Ø12 guide rods 60 mm apart; the rods are held in two end blocks on a 300 x 100 x 12 mm base plate. Just these parts."
+
+[sim]
+plan = "f_linear_stage.plan.json"
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+complete = true
+light = true             # 4 part lines, 6 pieces
+parts = 4
+pieces = 6
+kinds = { plate = 1, support = 2 }  # the base plate, two end blocks
+no_extras = true
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.along]]
+name = "(?i)guide rod"           # the rods run along the stage (its long axis: the 300 mm plate)
+axis = "auto"
+
+[[expect.distance]]
+a = { name = "(?i)guide rod" }   # the two rods, centre to centre
+value = 60.0
+plane = "auto"                   # across the stage's long axis
+tol = 0.05
+
+[[expect.within]]
+inner = { name = "(?i)carriage" }
+outer = { name = "(?i)end block" }
+axis = "auto"            # along the rods
+hull = true              # between the two end blocks
+tol = 0.01

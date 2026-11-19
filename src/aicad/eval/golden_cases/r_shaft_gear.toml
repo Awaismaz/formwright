@@ -1,0 +1,61 @@
+# Regression: the founder's program "Shaft Gear" (2026-11-19). Archie's plan, replayed (r_shaft_gear.plan.json):
+# stepped shaft in two 6004 bearings with circlips, gear on a keyed Ø25 seat held by a circlip. What went wrong then:
+# "Gear circlip 25 mm touches nothing" blocked the gear group twice, the founder moved three tickets to Integrated by
+# hand, and the designed gear came from the Toolbox (no keyway, no material). Hand values:
+#   6004 (ISO 15): d 20, D 42, B 12; DIN 471 rings for Ø20 (two) and Ø25 (one)
+#   pieces: shaft 1 + bearings 2 + rings 2 + gear 1 + key 1 + ring 1 = 8 instances, nothing binned or loose
+#   gear seat Ø25 (the plan): DIN 6885 for 22 < d <= 30 is 8 x 7, t1 4.0, so the key's radial span is
+#   25 / 2 - 4.0 = 8.5 .. 8.5 + 7 = 15.5 from the shaft axis (the office cuts keyseats on +X)
+id = "r-shaft-gear"
+title = "Regression: Shaft Gear (circlips, bearings, keyed gear)"
+letter = "R2"
+source = "Founder's program Shaft Gear, 2026-11-19"
+brief = "Build a stepped shaft with a gear fitted on it with key"
+
+[sim]
+plan = "r_shaft_gear.plan.json"
+
+[limits]
+tokens = 60
+wall_simulated_s = 180
+wall_live_s = 600
+
+[expect]
+complete = true
+light = true             # 6 part lines, 8 pieces
+parts = 6
+pieces = 8
+kinds = { shaft = 1, bearing = 2, ring = 3, gear = 1, key = 1 }
+no_extras = true
+instances = 8
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0              # no ticket stops on a floating circlip
+icd_problems = 0
+conformance = true
+
+[[expect.count]]
+name = "(?i)circlip"
+n = 3                    # two bearing rings and the gear ring, all placed
+
+[[expect.touch]]
+a = { name = "(?i)bearing circlip" }   # each bearing circlip locates a bearing inner ring: it touches a bearing
+b = { kind = "bearing" }
+tol = 0.01
+modes = ["simulated"]
+
+[[expect.touch]]
+a = { name = "(?i)gear circlip" }      # the gear circlip holds the gear against the 30 mm shoulder
+b = { kind = "gear" }
+tol = 0.01
+modes = ["simulated"]
+
+[[expect.span]]
+kind = "key"             # the key sits in a keyseat of the Ø25 seat: X 8.5 .. 15.5
+axis = "x"
+min = 8.5
+max = 15.5
+tol = 0.01
+modes = ["simulated"]

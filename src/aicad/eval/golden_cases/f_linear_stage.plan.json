@@ -1,0 +1,13 @@
+{"source": "archie", "summary": "Manual linear stage: a carriage on two guide rods held in two end blocks on a base plate", "assumptions": [
+  "Rods 240 long, held 20 mm deep in each end block."],
+ "subassemblies": [
+  {"name": "Linear stage", "description": "Base plate, end blocks, guide rods and carriage.", "parts": [
+    {"name": "Base plate", "family": "machined", "complexity": 2, "qty": 1, "envelope": [300.0, 100.0, 12.0],
+     "description": "Aluminium base plate 300 x 100 x 12."},
+    {"name": "End block", "family": "machined", "complexity": 2, "qty": 2, "envelope": [30.0, 100.0, 40.0],
+     "mounts_on": "Base plate",
+     "description": "End block 30 x 100 x 40 with two Ø12 H7 bores 60 mm apart, 25 mm above the plate, for the guide rods."},
+    {"name": "Guide rod", "family": "turned", "complexity": 1, "qty": 2, "envelope": [12.0, 12.0, 240.0],
+     "description": "Ground steel guide rod Ø12 h6 x 240."},
+    {"name": "Carriage", "family": "machined", "complexity": 3, "qty": 1, "envelope": [80.0, 100.0, 25.0],
+     "description": "Carriage 80 x 100 x 25 with two Ø12 bores 60 mm apart that slide on the guide rods."}]}]}

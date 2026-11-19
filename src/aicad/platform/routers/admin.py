@@ -360,3 +360,28 @@ def agent_run(project_id: str, run_id: str, ctx: Ctx = Depends(superadmin_ctx)) 
     if rec is None:
         raise HTTPException(404)
     return rec
+
+
+# ------------------------------------------------------------------ WORKLIST 46 golden mechanism suite (God mode only)
+@router.get("/golden")
+def golden_suite(limit: int = 60, ctx: Ctx = Depends(superadmin_ctx)) -> dict[str, Any]:
+    """The golden suite's results history (``aicad golden``): the cases and, per case, its latest ``limit`` runs.
+    God mode only (404 otherwise, like the God-mode router). Numbers and plain labels only: no model names, prompts
+    or agent internals (``golden.public``)."""
+    from aicad.eval import golden
+
+    if not get_settings().god_mode_enabled:
+        raise HTTPException(404)
+    try:
+        cases = golden.load_cases()
+    except golden.CaseError:
+        cases = []
+    limit = max(1, min(int(limit), 500))
+    per: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in golden.read():
+        per[r["case"]].append(golden.public(r))
+    runs = [r for rs in per.values() for r in rs[-limit:]]
+    runs.sort(key=lambda r: r.get("at") or "")
+    return {"cases": [{"id": c["id"], "title": c["title"], "letter": c.get("letter"), "source": c.get("source"),
+                       "fast": bool(c.get("fast")), "tokens": c["limits"].get("tokens")} for c in cases],
+            "runs": runs}

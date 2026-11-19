@@ -1,0 +1,72 @@
+# (c) The founder's "Gear Reducer" program (2026-11-19): one cap placed and three on the floor, 8 clashes at the
+# input open cap, a nut and a washer read as hex bolts, 14 fasteners floating in the parts bin.
+# The simulated run replays Archie's live plan with the founder's gate edits (c_reducer.plan.json, the same plan as
+# tests/test_office_gearbox_caps.py). Hand values:
+#   centre distance a = m (z1 + z2) / 2 = 2 (20 + 60) / 2 = 80
+#   6204: d 20, D 47, B 14; 6205: d 25, D 52, B 15 (ISO 15)
+#   cap screws M6 (the plan's): ligament >= max(3, 0.5 x 6) = 3, PCD = D + tap drill 5.0 + 2 x 3:
+#   input 47 + 11 = 58, output 52 + 11 = 63; 4 screws a cap, 4 caps: 16 ISO 4762 M6 stacks
+#   cover joint: 4 x M8 hex bolts (tapped into the base, so the plan's 8 nuts are reported, not placed)
+id = "reducer"
+title = "Single-stage 3:1 spur reducer, split housing and caps"
+letter = "c"
+source = "Founder's Gear Reducer program, 2026-11-19 (docs/reports/gearbox-caps.md)"
+brief = "Build a Single stage 3:1 reducer with Spur Gears"
+
+[sim]
+plan = "c_reducer.plan.json"
+
+[limits]
+tokens = 400
+wall_simulated_s = 600
+wall_live_s = 1800
+
+[expect]
+complete = true
+light = false            # 18 part lines: the full path (plan gate, interfaces gate, run)
+parts = 18
+pieces = 58
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.count]]
+name = "(?i)\\b(open|blind) cap\\b"
+n = 4                    # every bearing seat gets its cap
+
+[[expect.stacks]]
+style = "shcs"
+size = 6
+n = 16                   # 4 caps x 4 M6 cap screws
+
+[[expect.stacks]]
+style = "hex_bolt"
+size = 8
+n = 4                    # the cover joint
+
+[[expect.reuse]]
+title = "Hex nut M8"
+code = "hex_nut"
+
+[[expect.reuse]]
+title = "Washer M8"
+code = "washer"
+
+[[expect.reuse]]
+title = "Cap screw M6x16"
+code = "shcs"
+
+[[expect.reuse]]
+title = "Oil plug M16"
+code = ""                # not stocked: never substituted by another Toolbox family
+
+[[expect.distance]]
+a = { kind = "gear", pick = "smallest" }
+b = { kind = "gear", pick = "largest" }
+value = 80.0
+plane = "xz"
+tol = 0.01

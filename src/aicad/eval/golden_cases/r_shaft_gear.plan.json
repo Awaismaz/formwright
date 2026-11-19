@@ -1,0 +1,83 @@
+{
+ "source": "archie",
+ "summary": "Stepped steel shaft with a module 2 spur gear fitted on a keyed 25 mm seat, located by a shoulder and circlip, running in two 6004 bearings.",
+ "assumptions": [
+  "No sizes given in the brief: gear seat 25 mm (h6), bearing journals 20 mm (k5), shoulder 30 mm, overall shaft length 160 mm",
+  "Gear is module 2, 40 teeth, 20 deg pressure angle, 80 mm pitch diameter, 20 mm face width, steel",
+  "Key is DIN 6885 form A 8 x 7 x 18 mm, matching the 25 mm seat",
+  "Shaft material 42CrMo4 (EN19) or C45, gear C45 or 42CrMo4",
+  "Bearings 6004 (20 x 42 x 12) added so the shaft can be supported; housing is outside this program",
+  "Gear is held axially by the 30 mm shoulder on one side and a DIN 471 circlip on the other"
+ ],
+ "subassemblies": [
+  {
+   "name": "Shaft group",
+   "description": "Stepped shaft with its two support bearings and the bearing retaining circlips, assembled as one unit before the gear is fitted.",
+   "parts": [
+    {
+     "name": "Stepped shaft",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "description": "42CrMo4 stepped shaft, 160 mm long (assumed): 20 mm k5 bearing journals at both ends, 25 mm h6 gear seat with an 8 mm wide x 4 mm deep keyway 20 mm long, 30 mm shoulder against the gear. Circlip grooves for 25 mm and 20 mm DIN 471 rings, 0.5 mm chamfers and relief grooves at the shoulders.",
+     "envelope": [
+      30.0,
+      30.0,
+      160.0
+     ]
+    },
+    {
+     "name": "Deep groove bearing 6004",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "6004-2RS deep groove ball bearing, 20 x 42 x 12 mm, pressed onto the 20 mm journals.",
+     "toolbox": "bearing"
+    },
+    {
+     "name": "Bearing circlip 20 mm",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "DIN 471 external retaining ring for 20 mm shaft, locating each bearing inner race on its journal.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "name": "Gear group",
+   "description": "Spur gear with its parallel key and axial retaining ring, slid onto the 25 mm keyed seat of the shaft against the shoulder.",
+   "parts": [
+    {
+     "name": "Spur gear",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "description": "C45 spur gear, module 2, 40 teeth, 20 deg pressure angle, 80 mm PCD, 84 mm tip diameter, 20 mm face. 25 mm H7 bore with an 8 mm JS9 keyway 3.3 mm deep, hub chamfered both sides.",
+     "envelope": [
+      84.0,
+      84.0,
+      20.0
+     ],
+     "mounts_on": "Stepped shaft",
+     "module": 2.0,
+     "teeth": 40
+    },
+    {
+     "name": "Parallel key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "DIN 6885 form A parallel key 8 x 7 x 18 mm, C45K, transmits torque from the shaft keyway to the gear bore keyway."
+    },
+    {
+     "name": "Gear circlip 25 mm",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "DIN 471 external retaining ring for 25 mm shaft, holding the gear against the 30 mm shoulder."
+    }
+   ]
+  }
+ ]
+}

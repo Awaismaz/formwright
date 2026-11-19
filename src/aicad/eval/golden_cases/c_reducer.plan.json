@@ -1,0 +1,222 @@
+{
+ "source": "archie",
+ "summary": "Single stage 3:1 spur reducer",
+ "assumptions": [
+  "Shaft extensions come out on opposite sides; blind caps close the other bores."
+ ],
+ "subassemblies": [
+  {
+   "name": "Housing",
+   "description": "Split housing that carries both bearing pairs.",
+   "parts": [
+    {
+     "name": "Housing base",
+     "family": "machined",
+     "complexity": 5,
+     "qty": 1,
+     "envelope": [
+      210.0,
+      110.0,
+      146.0
+     ],
+     "description": "Lower half of the split housing, cast-style aluminium, with mounting feet, a sump, two half-bores of 47 mm and two of 52 mm at an 80 mm centre distance. Size assumed."
+    },
+    {
+     "name": "Housing cover",
+     "family": "machined",
+     "complexity": 4,
+     "qty": 1,
+     "envelope": [
+      210.0,
+      110.0,
+      80.0
+     ],
+     "mounts_on": "Housing base",
+     "description": "Upper half of the split housing with M8 flange bolt holes."
+    },
+    {
+     "name": "Input open cap",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      72.0,
+      72.0,
+      18.0
+     ],
+     "mounts_on": "Housing base",
+     "description": "Flanged bearing cap for the 47 mm bore, with a 20x35x7 lip-seal recess and 4 x M6 holes."
+    },
+    {
+     "name": "Input blind cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "envelope": [
+      72.0,
+      72.0,
+      14.0
+     ],
+     "mounts_on": "Housing base",
+     "description": "Closed flanged cap for the 47 mm bore, with a spigot that locates the bearing outer ring."
+    },
+    {
+     "name": "Output open cap",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      78.0,
+      78.0,
+      18.0
+     ],
+     "mounts_on": "Housing base",
+     "description": "Flanged bearing cap for the 52 mm bore, with a 25x40x7 lip-seal recess and 4 x M6 holes."
+    },
+    {
+     "name": "Output blind cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "envelope": [
+      78.0,
+      78.0,
+      14.0
+     ],
+     "mounts_on": "Housing base",
+     "description": "Closed flanged cap for the 52 mm bore, with a spigot that locates the bearing outer ring."
+    },
+    {
+     "name": "Flange bolt M8x40",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "toolbox": "hex_bolt",
+     "description": "Hex bolt M8x40, class 8.8, joining the cover to the base."
+    },
+    {
+     "name": "Hex nut M8",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "toolbox": "hex_bolt",
+     "description": "Hex nut M8 for the flange bolts."
+    },
+    {
+     "name": "Washer M8",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "toolbox": "hex_bolt",
+     "description": "Plain washer M8 for the flange bolts."
+    },
+    {
+     "name": "Dowel pin 6x20",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "toolbox": "dowel",
+     "description": "Dowel pin 6 mm x 20 that locates the cover to the base so the bores stay aligned."
+    },
+    {
+     "name": "Cap screw M6x16",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 16,
+     "toolbox": "bearing",
+     "description": "Socket head cap screw M6x16 that fixes the four bearing caps."
+    },
+    {
+     "name": "Oil plug M16",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "toolbox": "washer",
+     "description": "M16x1.5 plug with sealing washer, one for filling or breathing and one for draining."
+    }
+   ]
+  },
+  {
+   "name": "Input shaft group",
+   "description": "High-speed pinion shaft.",
+   "parts": [
+    {
+     "name": "Input shaft",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      25.0,
+      25.0,
+      170.0
+     ],
+     "description": "Steel shaft (C45 or 42CrMo4) with 20 mm bearing seats and a 22 mm pinion seat. Length assumed."
+    },
+    {
+     "name": "Pinion",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      44.0,
+      44.0,
+      22.0
+     ],
+     "mounts_on": "Input shaft",
+     "module": 2.0,
+     "teeth": 20,
+     "description": "Spur pinion, 20T, module 2, PCD 40, 22 mm face, keyed, case-hardened steel."
+    },
+    {
+     "name": "Bearing 6204",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "toolbox": "bearing",
+     "description": "Deep-groove ball bearing 6204, 20x47x14, supporting the input shaft."
+    }
+   ]
+  },
+  {
+   "name": "Output shaft group",
+   "description": "Low-speed gear shaft.",
+   "parts": [
+    {
+     "name": "Output shaft",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      32.0,
+      32.0,
+      180.0
+     ],
+     "description": "Steel shaft (42CrMo4) with 25 mm bearing seats and a 30 mm gear seat. Length assumed."
+    },
+    {
+     "name": "Output gear",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "envelope": [
+      124.0,
+      124.0,
+      20.0
+     ],
+     "mounts_on": "Output shaft",
+     "module": 2.0,
+     "teeth": 60,
+     "description": "Spur gear, 60T, module 2, PCD 120, 20 mm face, keyed. Steel."
+    },
+    {
+     "name": "Bearing 6205",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "toolbox": "bearing",
+     "description": "Deep-groove ball bearing 6205, 25x52x15, supporting the output shaft."
+    }
+   ]
+  }
+ ]
+}

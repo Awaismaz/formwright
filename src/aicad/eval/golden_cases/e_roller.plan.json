@@ -1,0 +1,12 @@
+{"source": "archie", "summary": "Conveyor idler roller: a tube fixed on a shaft that turns in two 6204 bearings held in two side plates", "assumptions": [
+  "Shaft 260 long so it passes through both side plates."],
+ "subassemblies": [
+  {"name": "Roller", "description": "The roller with its shaft, bearings and side plates.", "parts": [
+    {"name": "Roller shaft", "family": "turned", "complexity": 2, "qty": 1, "envelope": [20.0, 20.0, 260.0],
+     "description": "Steel shaft Ø20 x 260 with 6204 bearing journals at both ends."},
+    {"name": "Roller tube", "family": "turned", "complexity": 2, "qty": 1, "envelope": [50.0, 50.0, 200.0],
+     "mounts_on": "Roller shaft", "description": "Steel roller tube Ø50 x 200, end discs bored Ø20, fixed on the shaft."},
+    {"name": "Side plate", "family": "machined", "complexity": 2, "qty": 2, "envelope": [100.0, 120.0, 15.0],
+     "description": "Steel side plate 100 x 120 x 15 with a Ø47 H7 bearing bore."},
+    {"name": "Bearing 6204", "family": "standard", "complexity": 1, "qty": 2, "toolbox": "bearing",
+     "description": "Deep-groove ball bearing 6204, one in each side plate."}]}]}
