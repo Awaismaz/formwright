@@ -502,13 +502,15 @@ def sync_studio(root: Path, doc: dict[str, Any], info: dict[str, dict[str, Any]]
             changed = True
             old_ms = before[0]
             t["progress"] = estimates.progress_of(t["milestones"])
+            # both can arrive in one sync (the build passed at once): say them in the order they happened (the
+            # first build was silently skipped before, a flaky test on main)
+            if "first_build" in ms and "first_build" not in old_ms:
+                emit(root, doc, "ticket.milestone", f"{_label(t)}: first build in the Design Studio "
+                     f"({t['progress']} %).", STUDIO_ACTOR, t["id"], milestone="first_build", reached=True,
+                     progress=t["progress"])
             if "gates_pass" in ms and "gates_pass" not in old_ms:
                 emit(root, doc, "ticket.milestone", f"{_label(t)}: the latest build passes the gating checks "
                      f"({t['progress']} %).", STUDIO_ACTOR, t["id"], milestone="gates_pass", reached=True,
-                     progress=t["progress"])
-            elif "first_build" in ms and "first_build" not in old_ms:
-                emit(root, doc, "ticket.milestone", f"{_label(t)}: first build in the Design Studio "
-                     f"({t['progress']} %).", STUDIO_ACTOR, t["id"], milestone="first_build", reached=True,
                      progress=t["progress"])
             elif "gates_pass" in old_ms and "gates_pass" not in ms:
                 emit(root, doc, "ticket.milestone", f"{_label(t)}: the latest build fails a gating check "

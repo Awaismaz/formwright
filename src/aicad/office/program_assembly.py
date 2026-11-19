@@ -384,6 +384,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                 keep = [c for c in clashes if _item_of(final, c["a"]) not in items and _item_of(final, c["b"]) not in items]
                 try:
                     fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
+                    fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)]
                     clashes = keep + [{**c, "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in fresh]
                 except aservice.WorkerError:
                     checked = False
@@ -471,6 +472,21 @@ def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None,
         s += f", {stacks} fastener stack{'s' if stacks != 1 else ''}"
     _ = clashes
     return s + "."
+
+
+def _envelope_mesh(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[str, Any]) -> bool:
+    """A real gear against the *placeholder* of the gear it meshes with: the placeholder is the tip-circle envelope,
+    so the real teeth always overlap it. That is not a clash (it says nothing about the real mesh, which the
+    whole-program check measures once both are real); reporting it sent a correct pinion back to its designer when
+    it happened to be swapped in before its gear."""
+    by = {i["id"]: i for i in adoc["instances"]}
+    a, b = by.get(c["a"]), by.get(c["b"])
+    if a is None or b is None:
+        return False
+    ia, ib = (a.get("office") or {}).get("item"), (b.get("office") or {}).get("item")
+    if not any(f["kind"] == "gear_mesh" and {f["a"]["item"], f["b"]["item"]} == {ia, ib} for f in ifaces):
+        return False
+    return str(a.get("part", "")).startswith("h_") != str(b.get("part", "")).startswith("h_")
 
 
 def _item_of(adoc: dict[str, Any] | None, iid: str) -> str | None:

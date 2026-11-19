@@ -327,7 +327,10 @@ def test_concurrency_cap_is_never_exceeded(office: Any) -> None:
     assert orchestrator._runners.get(pid) is None or orchestrator._runners[pid].max_seen <= 2
 
 
-def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
+def test_gage_sends_back_then_approves_and_caps_retries(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad.office import direct
+
+    monkeypatch.setenv(direct.ENV, "0")  # the design agent's path (shafts are otherwise built from the ICD, no AI)
     c = office
     plan = {"source": "standard", "summary": "", "assumptions": [], "subassemblies": [
         {"name": "Shafts", "description": "", "parts": [

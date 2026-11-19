@@ -39,9 +39,11 @@ could never be approved. `test_gage_sends_back_then_approves_and_caps_retries` (
   "Keep all N as separate parts" button. Kept parts are listed under Layout warnings ("Recorded by Founder, just
   now") with a "Connect it instead" link. "Fix with Archie" is hidden when only unconnected parts remain, because it
   can't fix those. The program page hint and Archie's "Needs you" line both mention the option.
-- **The Gage test passes through this path.** The only change to it is one line:
+- **The Gage test passes through this path.** The acknowledgement is one line:
   `_program(c, "gage@x.com", plan, separate=True)`. `_program` posts `/icd/separate` before approving. The gate is
-  not weakened.
+  not weakened. After the merge of `wip/office-direct`, the test also sets `FW_OFFICE_DIRECT=0`. Its two shafts would
+  otherwise be built from the ICD without AI, and Gage would never send them back. That is the agent path the test
+  is about.
 
 ## 2. Archie and office message honesty
 **(a) The heading follows the verdict.** Before: "It doesn't look right:" was used for every non-clean layout look,
@@ -133,6 +135,15 @@ that main (wip/agent-cost) has since fixed the meter: it now agrees with the age
   part"). The design turn then claims a slot like any other, so a lookup can never smuggle a design turn past the
   cap.
 - `Runner.slots_used()` counts only slot-taking work. `max_seen` now measures the slot cap.
+- Two races surfaced once the timing changed, and both are fixed:
+  1. `program_assembly._envelope_mesh`. A real gear swapped in before its mating gear was checked against that
+     gear's *placeholder*, the tip-circle envelope. The real teeth always overlap it (136 mm³), so a correct pinion
+     was sent back to its designer twice and cost 60 tokens in `test_founders_program_needs_no_ai`. Such pairs (real
+     against placeholder, joined by a `gear_mesh` interface) are no longer swap clashes. The whole-program check
+     measures the real mesh once both are real.
+  2. `service.sync_studio`. When the first build and "gates pass" arrived in one sync, only "gates pass" was
+     announced. Both are now said, in order. `test_program_runs_end_to_end` failed on pristine main about one run in
+     two (checked in a detached main worktree); it now passes 3 of 3.
 
 ## Tests
 - New `tests/test_office_polish.py` (12, pure): gate decision (per part, all, undo, history, view, freeze,
@@ -140,7 +151,7 @@ that main (wip/agent-cost) has since fixed the meter: it now agrees with the age
   heading per verdict, human names / `named()` / `plain_names` / user words untouched / card lines, `clash_status`,
   retry label and stale proposals, unplaced parts said plainly, stop advice, `default_budget`, budget failure note.
 - `tests/test_office_orchestrator.py`:
-  - the Gage test passes via `separate=True`;
+  - the Gage test passes via `separate=True` (plus `FW_OFFICE_DIRECT=0` after the office-direct merge);
   - concurrency test: "searching" is outside the slots, `max_seen <= 2`;
   - new `test_hex_lookups_run_outside_the_agent_slots`: concurrency 1 with the slot held, and the bolt is approved
     by Hex meanwhile;
@@ -149,7 +160,9 @@ that main (wip/agent-cost) has since fixed the meter: it now agrees with the age
     then finishes.
 - `tests/test_assembly_visual.py`: the names `Ball bearing 6204 #4` and `Pinion meshes with Gear` are updated, the
   row-layout proposal includes `keep_separate`, and the patched name function is updated.
-- Results after `git merge main` (111566f): see the final lines below. `ruff check src tests` is clean.
+- `tests/test_office_phase6_layout.py`: the summary no longer ends "0 clashes." That count had not been measured.
+  The test now checks that the summary carries no clash count; `clashes == []` is still asserted.
+- After `git merge main` (111566f): `tests/test_office*.py`, `test_assembly_visual.py` and `test_agent_cost.py` give **157 passed**. `ruff check src tests` is clean.
   `npx tsc --noEmit` is clean and `npx vite build` passes.
 
 ## Browser check (port 8799, simulated agents, no LLM)
@@ -164,6 +177,9 @@ Screenshots were read:
 - `3-history.png`: the history entry "Founder kept Input shaft and Output shaft as separate parts…".
 - `5-archie-stale-action.png`: Archie's first message still offers the housing / base plate re-plans. The
   keep-separate proposal shows **No longer needed**.
+- `6-archie-relook.png` (final code): Archie's second message reads "Input shaft and Output shaft are kept
+  separate as you decided, so there is nothing to assemble and no interface to check". The visual check asks about
+  no bearing relation for the kit.
 - API: `problems []` and two warnings; 0 console or page errors.
 - Seen and fixed from the shots:
   - Archie's re-look said "the parts are placed where they connect" for a kit. It now says they are kept separate,
