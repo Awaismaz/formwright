@@ -13,6 +13,7 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/replan                  plan again (optionally with review notes)
   POST   /api/office/programs/{pid}/gates/brief/approve     approve the (edited) plan: items and tickets open,
                                                             Archie drafts the skeleton and the ICD
+  POST   /api/office/programs/{pid}/gates/express           small program: plan + interfaces in one step, then Run
   PATCH  /api/office/programs/{pid}/icd/interfaces/{iid}    edit an interface's numbers (ICD draft, at the gate)
   POST   /api/office/programs/{pid}/icd/separate            keep unconnected parts separate (or connect them again)
   POST   /api/office/programs/{pid}/gates/icd/approve       approve the ICD: tickets released, placeholder assembly
@@ -92,7 +93,9 @@ class ProgramIn(BaseModel):
     concurrency: int = Field(default=3, ge=1, le=12)
     # None: the default, at most the workspace's remaining wallet (a trial wallet is smaller than 3,000)
     budget_tokens: int | None = Field(default=None, ge=0, le=1_000_000)
-    deliverables: bool = True  # Ortho and Smithy make the drawings, BOM and DFM summary after integration
+    # Ortho and Smithy make the drawings, BOM and DFM summary after integration: True always, False only when asked,
+    # None (default) automatic: on, except for a small program whose brief doesn't ask for them (PD-93)
+    deliverables: bool | None = None
     review_gate: bool = False  # every part waits for the engineer's approval after Gage passes it (CD-023)
     threads: dict[str, int] | None = None  # per-agent threads (CD-027); default one per designer (PD-66)
 
@@ -284,12 +287,16 @@ async def _plan_task(root: Path, pid: str, org_id: str, user_id: str, god_tokens
         doc["budget"]["planning_tokens"] = int(doc["budget"].get("planning_tokens", 0)) + (0 if god_tokens else tokens)
         archie = service.agent_actor("archie")
         if plan is not None:
-            service.set_plan(root, doc, plan, archie, narrative=planner.narrative(text))
+            plan, scope_note = planner.finish(plan, doc["name"], doc["brief"])
+            service.set_plan(root, doc, plan, archie, narrative=planner.narrative(text), note=scope_note)
         else:
             why = ("Archie stopped before finishing the plan" if failed else
                    "Archie's answer did not contain a plan that could be used")
-            service.set_plan(root, doc, planner.standard_plan(doc["name"], doc["brief"]), archie,
-                             note=f"{why}, so this is the standard breakdown. Edit it, or ask Archie again.")
+            std, scope_note = planner.finish(planner.standard_plan(doc["name"], doc["brief"]), doc["name"],
+                                             doc["brief"])
+            service.set_plan(root, doc, std, archie,
+                             note=f"{why}, so this is the standard breakdown. Edit it, or ask Archie again."
+                             + (f" {scope_note}" if scope_note else ""))
         store.save(root, doc)
 
 
@@ -307,7 +314,8 @@ def _start_planning(ctx: Ctx, root: Path, doc: dict[str, Any], kind: str, notes:
                      service.agent_actor("archie"))
     else:
         doc["planner"] = "standard"
-        service.set_plan(root, doc, planner.standard_plan(doc["name"], doc["brief"]), service.agent_actor("archie"))
+        std, scope_note = planner.finish(planner.standard_plan(doc["name"], doc["brief"]), doc["name"], doc["brief"])
+        service.set_plan(root, doc, std, service.agent_actor("archie"), note=scope_note)
 
 
 def _spawn(ctx: Ctx, root: Path, doc: dict[str, Any], notes: str = "") -> None:
@@ -349,7 +357,8 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     if budget is None:
         budget = service.default_budget(org.token_balance - metering.reserved(org.id), ctx.god_on("bypass_tokens"))
     doc = service.new_program(name, brief, org.id, ctx.user.id, body.concurrency, budget, kind)
-    doc["deliverables_auto"] = body.deliverables
+    doc["deliverables_auto"] = True if body.deliverables is None else body.deliverables
+    doc["deliverables_mode"] = "auto" if body.deliverables is None else ("on" if body.deliverables else "off")
     doc["review_gate"] = body.review_gate
     service.set_threads(doc, body.threads if body.threads is not None else service.default_threads())
     service.emit(root, doc, "program.created", f"{ctx.user.name or 'Someone'} opened the program {name}.",
@@ -391,6 +400,8 @@ def patch_program(pid: str, body: ProgramPatch, ctx: Ctx = Depends(verified_ctx)
             doc["concurrency"] = body.concurrency
         if body.deliverables is not None:
             doc["deliverables_auto"] = body.deliverables
+            doc["deliverables_mode"] = "on" if body.deliverables else "off"
+            doc["deliverables_why"] = None
         if body.review_gate is not None and bool(body.review_gate) != bool(doc.get("review_gate")):
             doc["review_gate"] = bool(body.review_gate)
             if not body.review_gate:  # switched off: parts waiting for review go on as Gage approved them
@@ -456,6 +467,68 @@ async def approve_brief(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_c
           edited=bool(doc["plan"].get("edited")))
     ctx.db.commit()
     _look_at_layout(ctx, pid, doc)
+    return _view(doc)
+
+
+@router.post("/programs/{pid}/gates/express")
+async def approve_express(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The light path for a small program (PD-93): one click approves the plan and, when Archie's interfaces have no
+    problem, the interfaces too, and the office starts building. With a problem it stops at the interfaces gate as
+    usual (nothing is skipped). What was approved is recorded on the program (``express``) and in the activity."""
+    from aicad.office import icd as icd_mod
+    from aicad.office import platform_env
+    from aicad.platform.routers.projects import can_run_agent
+
+    actor = _actor(ctx)
+
+    def fn(root: Path, d: dict[str, Any]) -> None:
+        if not service.express_ok(d):
+            raise OfficeInputError("One-step approval is for a small program whose plan waits for approval.")
+        service.approve_plan(root, d, body.plan, actor)
+        ic = d.get("icd") or {}
+        parts = [p["name"] for s in d["plan"]["subassemblies"] for p in s["parts"]]
+        rec: dict[str, Any] = {"at": store.now(), "by": actor.get("name"), "parts": parts,
+                               "tickets": len(d["tickets"]), "approved": False, "run": False}
+        if ic and service.gate(d, "icd")["status"] == "pending" and not ic.get("problems"):
+            interfaces.approve(root, d, actor, with_plan=True)
+            notes = icd_mod.warnings(d["skeleton"], ic["interfaces"])
+            rec.update(approved=True, icd_version=ic["version"], interfaces=len(ic["interfaces"]),
+                       kinds=sorted({icd_mod.KIND_LABEL.get(f["kind"], f["kind"]) for f in ic["interfaces"]}),
+                       warnings=notes)
+            service.emit(root, d, "gate.express", f"{actor.get('name', 'Someone')} approved the plan ({len(parts)} "
+                         f"parts: {', '.join(parts)}) and the interfaces (ICD v{ic['version']}, "
+                         f"{len(ic['interfaces'])} interfaces, 0 problems"
+                         + (f"; note: {notes[0]}" if notes else "") + ") in one step.", actor)
+        elif ic:
+            rec["problems"] = len(ic.get("problems") or [])
+        d["express"] = rec
+
+    doc = _mutate(ctx, pid, fn)
+    track(ctx.db, "office_express", ctx.user, doc["org_id"], tickets=len(doc["tickets"]),
+          approved=bool(doc["express"]["approved"]))
+    ctx.db.commit()
+    if not doc["express"]["approved"]:  # stops at the interfaces gate: Archie looks at the layout as usual
+        _look_at_layout(ctx, pid, doc)
+        return _view(doc)
+    root = _root(ctx)
+    _spawn_task(platform_env.build_program_assembly(root, pid, ctx.require_org().id, ctx.user.id,
+                                                    ctx.god_on("bypass_paywall")))
+    allowed, reason, _cta = can_run_agent(ctx)
+
+    def run(r: Path, d: dict[str, Any]) -> None:
+        if not allowed:
+            d["express"]["run_blocked"] = reason
+            return
+        try:
+            orchestrator.start(r, d, actor, user_id=ctx.user.id, god_tokens=ctx.god_on("bypass_tokens"),
+                               god_paywall=ctx.god_on("bypass_paywall"))
+            d["express"]["run"] = True
+        except OfficeInputError as e:  # e.g. the budget: approved, but Run waits for the engineer
+            d["express"]["run_blocked"] = str(e)
+
+    doc = _mutate(ctx, pid, run)
+    if doc["express"].get("run"):
+        orchestrator.ensure(root, pid)
     return _view(doc)
 
 
@@ -926,7 +999,7 @@ def program_deliverables(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str
 
 
 @router.post("/programs/{pid}/deliverables")
-def open_deliverables(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+async def open_deliverables(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
     """Open Ortho's and Smithy's tickets now (when the program runs without automatic deliverables), or reopen them
     to make the deliverables again after a change."""
     def fn(root: Path, d: dict[str, Any]) -> None:
@@ -943,7 +1016,15 @@ def open_deliverables(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, A
         o = orchestrator.orch(d)
         if o.get("state") == "complete":
             o["state"] = "idle"  # Run picks the deliverables up
+        if o.get("state") == "idle":  # asked for now: Ortho and Smithy start straight away (they cost no tokens)
+            try:
+                orchestrator.start(root, d, _actor(ctx), user_id=ctx.user.id, god_tokens=ctx.god_on("bypass_tokens"),
+                                   god_paywall=ctx.god_on("bypass_paywall"))
+            except OfficeInputError:
+                pass  # Run stays the engineer's (the budget): the tickets wait on the board
     doc = _mutate(ctx, pid, fn)
+    if (doc.get("orchestrator") or {}).get("state") == "running":
+        orchestrator.ensure(_root(ctx), pid)
     orchestrator.poke(pid)
     return _view(doc)
 

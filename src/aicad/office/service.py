@@ -156,10 +156,15 @@ def set_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any], actor: dict[
         doc["plan_history"] = doc["plan_history"][-5:]
     plan = {**plan, "narrative": narrative, "note": note}
     doc["plan"], doc["status"], doc["planning"] = plan, "plan_review", None
+    from aicad.office import scope
+
+    doc["light"] = scope.light_info(plan, doc.get("brief") or "")
     n_parts = sum(len(s["parts"]) for s in plan["subassemblies"])
     who = "Archie" if plan["source"] == "archie" else "The standard planner"
-    emit(root, doc, "plan.ready", f"{who} split {doc['name']} into {len(plan['subassemblies'])} sub-assemblies and "
-         f"{n_parts} parts. Review the plan before tickets are created.", actor, source=plan["source"])
+    n_subs = len(plan["subassemblies"])
+    emit(root, doc, "plan.ready", f"{who} split {doc['name']} into {n_subs} sub-assembl{'y' if n_subs == 1 else 'ies'} "
+         f"and {n_parts} part{'' if n_parts == 1 else 's'}. Review the plan before tickets are created.", actor,
+         source=plan["source"])
 
 
 def gate(doc: dict[str, Any], code: str) -> dict[str, Any]:
@@ -266,9 +271,36 @@ def approve_plan(root: Path, doc: dict[str, Any], plan: dict[str, Any] | None, a
     edited = " (edited)" if doc["plan"].get("edited") else ""
     emit(root, doc, "gate.approved", f"{actor.get('name', 'Someone')} approved the brief and plan{edited}. "
          f"{len(tickets)} tickets opened.", actor, gate="brief")
+    _light_deliverables(root, doc)
     from aicad.office import interfaces
 
     interfaces.create(root, doc, actor)
+
+
+def _light_deliverables(root: Path, doc: dict[str, Any]) -> None:
+    """The light path (PD-93) at plan approval: a small program makes its drawings and manufacturing review only when
+    the brief asks for them or the engineer adds them later (Deliverables tab), unless the engineer chose "always"
+    or "never" when creating it. Said in the activity, never a silent removal."""
+    from aicad.office import scope
+
+    doc["light"] = scope.light_info(doc.get("plan"), doc.get("brief") or "")
+    if doc.get("deliverables_mode", "auto") != "auto":
+        return
+    lt = doc["light"]
+    on = lt is None or bool(lt["deliverables_asked"])
+    doc["deliverables_auto"] = on
+    doc["deliverables_why"] = None if lt is None else (
+        "Small program: the brief asks for drawings, so Ortho and Smithy follow the final assembly." if on else
+        "Small program: drawings and the manufacturing review run only when you ask (Deliverables tab).")
+    if lt is not None and not on:
+        emit(root, doc, "program.light", f"{doc['name']} is a small program ({lt['parts']} parts, {lt['pieces']} "
+             "pieces): the office assembles it first; drawings and the manufacturing review wait until you ask for "
+             "them in the Deliverables tab.", agent_actor("archie"))
+
+
+def express_ok(doc: dict[str, Any]) -> bool:
+    """The plan and the interfaces may be approved in one step (light path, PD-93)."""
+    return doc.get("status") == "plan_review" and bool(doc.get("light"))
 
 
 def revise_plan(root: Path, doc: dict[str, Any], a: dict[str, Any], actor: dict[str, Any]) -> None:

@@ -26,7 +26,7 @@ export default function NewProgram() {
   const [brief, setBrief] = useState("");
   const [planner, setPlanner] = useState<"archie" | "standard">("archie");
   const [concurrency, setConcurrency] = useState(3);
-  const [deliverables, setDeliverables] = useState(true);
+  const [deliverables, setDeliverables] = useState<"auto" | "on" | "off">("auto");
   const [reviewGate, setReviewGate] = useState(false);
   const { me } = useSession();
   const unlimited = !!(me?.god?.enabled && me.god.bypass_tokens);
@@ -39,7 +39,8 @@ export default function NewProgram() {
   const submit = async () => {
     setBusy(true);
     try {
-      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: shown, deliverables, review_gate: reviewGate });
+      const p = await api.post<Program>(`${BASE}/programs`, { name, brief, planner, concurrency, budget_tokens: shown,
+        deliverables: deliverables === "auto" ? null : deliverables === "on", review_gate: reviewGate });
       qc.invalidateQueries({ queryKey: ["office-home"] });
       nav(`/app/office/programs/${p.id}`);
     } catch (e) {
@@ -96,8 +97,13 @@ export default function NewProgram() {
                   Above your wallet ({num(wallet)} tokens): the office stops when the wallet runs out, before this budget.</p>}
               </Field>
             </div>
-            <label className="mt-3 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={deliverables} onChange={e => setDeliverables(e.target.checked)} />
-              <span>After integration, Ortho draws every part and the assembly with its BOM, and Smithy reviews every part for manufacture (no tokens).</span></label>
+            <label className="mt-3 block text-[12.5px]"><span className="font-medium">Drawings and manufacturing review</span>
+              <select className="input mt-1 h-8 py-0" value={deliverables} onChange={e => setDeliverables(e.target.value as "auto" | "on" | "off")} data-deliverables-mode>
+                <option value="auto">Automatic: after integration, except for a small program whose brief doesn't ask</option>
+                <option value="on">Always, after integration</option>
+                <option value="off">Only when I ask (Deliverables tab)</option>
+              </select>
+              <span className="mt-1 block text-muted">Ortho draws every part and the assembly with its BOM; Smithy reviews every part for manufacture (no tokens). A small program (up to 6 parts) is assembled first and you can add them any time.</span></label>
             <label className="mt-2 flex items-start gap-2 text-[12.5px]"><input type="checkbox" className="mt-0.5" checked={reviewGate} onChange={e => setReviewGate(e.target.checked)} data-review-gate-option />
               <span>Review every part myself: after Gage passes a part it waits for your approval (or your requested changes) before it goes into the assembly.</span></label>
           </details>

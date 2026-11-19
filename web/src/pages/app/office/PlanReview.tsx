@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, LayoutTemplate, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LayoutTemplate, Plus, RotateCcw, Sparkles, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
@@ -63,6 +63,17 @@ export default function PlanReview({ program }: { program: Program }) {
     try {
       await api.post(`${BASE}/programs/${program.id}/gates/brief/approve`, { plan: dirty ? plan : null });
       toast.success("Plan approved. Tickets are open on the board.");
+      setDirty(false); refresh();
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not approve"); } finally { setBusy(null); }
+  };
+  const express = async () => {
+    setBusy("express");
+    try {
+      const v = await api.post<Program>(`${BASE}/programs/${program.id}/gates/express`, { plan: dirty ? plan : null });
+      const ex = v.express;
+      if (ex?.approved && ex.run) toast.success("Plan and interfaces approved: the office is building it");
+      else if (ex?.approved) toast.success(`Plan and interfaces approved. ${ex.run_blocked ?? "Press Run to build it."}`);
+      else toast.warning(`Plan approved. The interfaces have ${ex?.problems ?? 0} problem${ex?.problems === 1 ? "" : "s"}: review them on the Interfaces tab.`);
       setDirty(false); refresh();
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not approve"); } finally { setBusy(null); }
   };
@@ -174,8 +185,16 @@ export default function PlanReview({ program }: { program: Program }) {
                 <AgentAvatar code={c} size={22} still /> {AGENT[c]?.name} <span className="text-muted">{n}</span></span>))}</div>
           </div>
           {canEdit && <div className="mt-4 space-y-2">
-            <Button className="w-full" loading={busy === "approve"} disabled={!!busy || empty} icon={<CheckCircle2 className="h-4 w-4" />} onClick={approve}>
-              Approve plan{dirty ? " with edits" : ""}</Button>
+            {program.light && <div className="rounded-md border border-primary/30 bg-primary-soft/50 p-2.5" data-light-path>
+              <div className="mb-1 flex items-center gap-1.5 text-[12.5px] font-semibold text-primary"><Zap className="h-3.5 w-3.5" />
+                Small program · {program.light.parts} part{program.light.parts === 1 ? "" : "s"}</div>
+              <p className="mb-2 text-[11.5px] text-muted">{program.light.text}</p>
+              <Button className="w-full" loading={busy === "express"} disabled={!!busy || empty} icon={<Zap className="h-4 w-4" />} onClick={express} data-express
+                title="Approves the plan and, when they have no problems, the interfaces; then runs the office">
+                Approve and build</Button>
+            </div>}
+            <Button className="w-full" variant={program.light ? "secondary" : "primary"} loading={busy === "approve"} disabled={!!busy || empty} icon={<CheckCircle2 className="h-4 w-4" />} onClick={approve}>
+              {program.light ? "Approve the plan only" : `Approve plan${dirty ? " with edits" : ""}`}</Button>
             {empty && <p className="text-[11.5px] text-danger">Every sub-assembly needs a name and at least one part.</p>}
             <Button className="w-full" variant="secondary" disabled={!!busy} icon={<Sparkles className="h-4 w-4" />} onClick={() => setAskOpen(true)}>Ask Archie to revise</Button>
             <div className="flex gap-2">

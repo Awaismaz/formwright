@@ -155,8 +155,14 @@ def icd_mates(aroot: Path, adoc: dict[str, Any], skel: dict[str, Any], f: dict[s
             pairs.append(("concentric", "hole1", ha[0], hb[0]))
     elif f["kind"] == "shaft_bore":
         pairs.append(("concentric", "axis", fa[0], fb[0]))
-        if len(fa) > 1 and len(fb) > 1:
-            pairs.append(("flush", "end", fa[1], fb[1]))
+        ea = next((x for x in fa[1:] if "flush" in x["label"]), None)
+        eb = next((x for x in fb[1:] if "flush" in x["label"]), None)
+        if ea and eb:
+            pairs.append(("flush", "end", ea, eb))
+        sa = next((x for x in fa[1:] if "shoulder" in x["label"]), None)
+        sb = next((x for x in fb[1:] if "shoulder" in x["label"]), None)
+        if sa and sb:  # a hub against the shoulder of a stepped shaft
+            pairs.append(("coincident", "shoulder", sa, sb))
     elif f["kind"] == "bearing_seat":
         seat = next(x for x in fa if x["type"] == "seat")
         journal = next(x for x in fb if x["type"] == "boss")

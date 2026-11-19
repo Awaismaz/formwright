@@ -127,6 +127,9 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
         if k == "gear_mesh":
             mesh.append(f"{a} meshes with {b}: axes parallel, {_num(d.get('centre_distance', '?'))} mm apart "
                         "(m (z1 + z2) / 2), the two gears in one plane")
+        elif k == "shaft_bore" and d.get("shoulder_z") is not None:  # a stepped shaft: the hub against its shoulder
+            out.append(f"{a} sits on the seat of {b} (the shaft passes through its bore), its face against the "
+                       "shoulder of the larger step")
         elif k == "shaft_bore":
             out.append(f"{a} sits on {b} (the shaft passes through its bore)")
         elif k == "bearing_journal":  # side a: the shaft, side b: the bearing
@@ -160,9 +163,13 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
         if blocks:
             out.append(f"the other parts mount on {blocks[0]}")
     journals = [f for f in ifaces if f["kind"] in ("bearing_journal", "bearing_seat")]
-    if skel.get("layout") == "shaft_line" and len(shafts) > 1:
+    if skel.get("layout") == "shaft_line" and len(shafts) > 1 and journals:
         out.insert(0, "each shaft runs in two bearings, one either side of its gear; the shafts are parallel and "
                       "nothing holds them but their bearings (no housing)")
+    elif skel.get("layout") == "shaft_line" and shafts and not journals:  # the shaft and what it carries, no
+        # bearings or housing in the plan: a sub-assembly the customer fits into their own machine
+        out.insert(0, f"{shafts[0]} carries everything else on it; there are no bearings or housing (a shaft "
+                      "sub-assembly), so nothing else holds it")
     elif skel.get("layout") == "shaft_line" and shafts:  # one shaft's sub-assembly: no "parallel pair" to look for
         out.insert(0, f"{shafts[0]} runs in two bearings, one either side of its gear; nothing holds it but its "
                       "bearings (no housing)")
@@ -394,8 +401,9 @@ def merge_issues(findings: list[dict[str, Any]], skel: dict[str, Any], ifaces: l
         if x.get("acknowledged"):
             continue  # the engineer's recorded decision (a part kept separate): not a finding any more
         m = ISSUE_MAP.get(str(x.get("code")))
-        if m:
-            mapped.append({"code": m[0], "severity": m[1], "items": list(x.get("items") or []),
+        if m:  # a layout warning (a shaft delivered as a sub-assembly, unplaced bearings) is a note, never a block
+            mapped.append({"code": m[0], "severity": "note" if x.get("severity") == "warning" else m[1],
+                           "items": list(x.get("items") or []),
                            "text": str(x.get("text") or x.get("message") or "")})
     have = {f["code"] for f in mapped}
     return [f for f in findings if f["code"] not in have] + mapped

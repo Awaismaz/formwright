@@ -107,7 +107,13 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
     acts: list[dict[str, Any]] = []
     first_sub = next((s["name"] for s in (doc.get("plan") or {}).get("subassemblies") or []), None)
     ask = ""
-    if mountless and (row or block) and first_sub:
+    from aicad.office import scope
+
+    named, excluded = scope.mentions(str(doc.get("brief") or ""))
+    # the brief rules a housing out ("no housing", "just a gear, a shaft and a key"): never propose one
+    housing_ok = not ({"housing", "plate", "support"} & excluded) and not (
+        scope.exclusive(str(doc.get("brief") or "")) and not ({"housing", "plate", "support"} & named))
+    if mountless and (row or block) and first_sub and housing_ok:
         acts = [{"type": "revise_plan", "notes": "Add a housing that carries both shafts on their bearings.",
                  "add": {"sub": first_sub, "part": HOUSING_PART}},
                 {"type": "revise_plan", "notes": "Add a base plate with bearing supports for the shafts.",
