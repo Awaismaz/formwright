@@ -1,0 +1,267 @@
+/* Formwright public website: the "Sheet" design system (docs/design-system/MASTER.md).
+   Everything is scoped to .fw-site so the signed-in app keeps its own tokens. The site maps the app's tokens
+   (--bg, --panel, --text ...) onto its own, so shared components (inputs, plan cards) follow the sheet. */
+
+/* Self-hosted fonts (SIL Open Font License 1.1, see public/fonts/README.txt); latin subsets only. */
+@font-face { font-family: "Archivo"; font-style: normal; font-weight: 500 900; font-stretch: 100% 125%; font-display: swap; src: url(/fonts/archivo-var-latin.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400 700; font-display: swap; src: url(/fonts/plex-sans-var-latin.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url(/fonts/plex-mono-400-latin.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(/fonts/plex-mono-500-latin.woff2) format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url(/fonts/plex-mono-600-latin.woff2) format("woff2"); }
+
+.fw-site {
+  /* Paper: cool drafting paper, ink, drafting blue, safety yellow */
+  --s-sheet: 243 245 247;
+  --s-sheet-2: 232 236 241;
+  --s-slab: 251 252 253;
+  --s-ink: 12 16 22;
+  --s-ink-2: 71 82 96;
+  --s-rule: 203 211 220;
+  --s-rule-2: 123 136 152;
+  --s-bp: 22 66 196;
+  --s-bp-soft: 222 230 250;
+  --s-hi: 255 196 0;
+  --s-on-hi: 12 16 22;
+  --s-red: 200 36 36;
+  --s-print: 9 24 51;
+  --s-pass: 22 128 74;
+
+  --bg: var(--s-sheet); --panel: var(--s-slab); --panel-2: var(--s-sheet-2); --border: var(--s-rule);
+  --text: var(--s-ink); --muted: var(--s-ink-2); --primary: var(--s-bp); --primary-fg: 255 255 255;
+  --primary-soft: var(--s-bp-soft); --accent: var(--s-red); --success: var(--s-pass); --warning: 168 108 0; --danger: 200 36 36;
+  --chrome: var(--s-print); --chrome-2: 16 36 72; --chrome-fg: 232 238 248; --chrome-muted: 160 178 204;
+  --viewport-top: 220 228 240; --viewport-bottom: 250 251 253;
+
+  background: rgb(var(--s-sheet));
+  color: rgb(var(--s-ink));
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: normal;
+  color-scheme: light;
+}
+
+.fw-site[data-theme="dark"] {
+  /* Blueprint: white linework on cyanotype blue */
+  --s-sheet: 8 22 46;
+  --s-sheet-2: 12 30 60;
+  --s-slab: 13 34 68;
+  --s-ink: 236 242 250;
+  --s-ink-2: 164 182 208;
+  --s-rule: 36 62 104;
+  --s-rule-2: 86 116 164;
+  --s-bp: 126 178 255;
+  --s-bp-soft: 22 50 98;
+  --s-hi: 255 204 26;
+  --s-on-hi: 8 22 46;
+  --s-red: 255 112 98;
+  --s-print: 4 14 30;
+  --s-pass: 92 214 146;
+
+  --primary-fg: 8 22 46; --warning: 240 180 60; --danger: 255 112 98;
+  --chrome-2: 10 28 56; --chrome-fg: 232 238 248; --chrome-muted: 164 182 208;
+  --viewport-top: 20 46 88; --viewport-bottom: 8 22 46;
+  color-scheme: dark;
+}
+
+html:has(.fw-site[data-theme="dark"]), html:has(.fw-site[data-theme="dark"]) body, html:has(.fw-site[data-theme="dark"]) #root { background-color: rgb(8 22 46); }
+html:has(.fw-site[data-theme="light"]), html:has(.fw-site[data-theme="light"]) body, html:has(.fw-site[data-theme="light"]) #root { background-color: rgb(243 245 247); }
+
+.fw-site ::selection { background: rgb(var(--s-hi) / .55); color: rgb(var(--s-on-hi)); }
+.fw-site .font-mono, .fw-site code, .fw-site kbd, .fw-site samp { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; }
+.fw-site h1, .fw-site h2 { font-family: Archivo, "Arial Narrow", "Segoe UI", sans-serif; font-stretch: 108%; letter-spacing: -0.015em; }
+.fw-site .card { border-radius: 3px; box-shadow: none; }
+.fw-site .label { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; letter-spacing: .14em; font-size: 11px; }
+.fw-site .input { border-radius: 2px; }
+.fw-site :focus-visible { outline: 2px solid rgb(var(--s-bp)); outline-offset: 3px; }
+.fw-site a, .fw-site button, .fw-site summary { touch-action: manipulation; }
+
+/* ---- type ---- */
+.s-display { font-family: Archivo, "Arial Narrow", "Segoe UI", sans-serif; font-stretch: 118%; font-weight: 800; text-transform: uppercase; letter-spacing: -0.01em; line-height: .9; }
+.s-h2 { font-family: Archivo, "Arial Narrow", "Segoe UI", sans-serif; font-stretch: 110%; font-weight: 750; letter-spacing: -0.02em; line-height: 1.02; }
+.s-anno { font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
+
+/* ---- surfaces ---- */
+.s-grid {
+  background-image:
+    linear-gradient(rgb(var(--s-bp) / .085) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--s-bp) / .085) 1px, transparent 1px),
+    linear-gradient(rgb(var(--s-bp) / .035) 1px, transparent 1px), linear-gradient(90deg, rgb(var(--s-bp) / .035) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+  background-position: -1px -1px;
+}
+.s-hatch { background-image: repeating-linear-gradient(135deg, rgb(var(--s-ink) / .55) 0 1px, transparent 1px 7px); }
+.s-hatch-bp { background-image: repeating-linear-gradient(135deg, rgb(var(--s-bp) / .5) 0 1px, transparent 1px 7px); }
+/* a section-cut "shadow": hard offset hatch instead of a soft glow */
+.s-cut { position: relative; isolation: isolate; }
+.s-cut::after { content: ""; position: absolute; inset: 0; transform: translate(12px, 12px); z-index: -1;
+  background-image: repeating-linear-gradient(135deg, rgb(var(--s-ink) / .5) 0 1px, transparent 1px 7px); border: 1px solid rgb(var(--s-ink) / .5); }
+.s-print { background-color: rgb(var(--s-print)); color: rgb(232 238 248); }
+.s-print .s-grid, .s-print.s-grid {
+  background-image:
+    linear-gradient(rgb(126 178 255 / .10) 1px, transparent 1px), linear-gradient(90deg, rgb(126 178 255 / .10) 1px, transparent 1px),
+    linear-gradient(rgb(126 178 255 / .04) 1px, transparent 1px), linear-gradient(90deg, rgb(126 178 255 / .04) 1px, transparent 1px);
+}
+
+/* ---- solid-modelled controls ----
+   Every control is a machined block: a chamfered face over a visible side face (real depth, no glow).
+   Keys lift on hover and travel down on press like a machine push-button. Transforms only, so nothing reflows. */
+.fw-site { --k-edge: 12 16 22; }
+.fw-site[data-theme="dark"] { --k-edge: 2 8 20; }
+
+.s-key {
+  --dz: 5px; --c: 7px; --h: 48px;
+  --ch: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c));
+  --ci: calc(var(--c) - .6px);
+  --ch-in: polygon(var(--ci) 0, calc(100% - var(--ci)) 0, 100% var(--ci), 100% calc(100% - var(--ci)), calc(100% - var(--ci)) 100%, var(--ci) 100%, 0 calc(100% - var(--ci)), 0 var(--ci));
+  position: relative; display: inline-flex; flex-direction: column; vertical-align: top; padding: 0 0 var(--dz); border: 0; margin: 0;
+  background: none; cursor: pointer; user-select: none; text-decoration: none; -webkit-tap-highlight-color: transparent;
+  font: 600 15px/1 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; letter-spacing: .005em;
+}
+.s-key > .k-side { position: absolute; left: 0; right: 0; top: var(--dz); bottom: 0; clip-path: var(--ch); background: rgb(var(--k-edge)); }
+.s-key > .k-side::after { content: ""; position: absolute; inset: 1.5px; clip-path: var(--ch-in); background: var(--k-side); }
+.s-key > .k-face { position: relative; display: block; clip-path: var(--ch); background: rgb(var(--k-edge)); padding: 1.5px;
+  transition: transform .13s cubic-bezier(.3, .7, .2, 1); }
+.s-key .k-top { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: calc(var(--h) - 3px); padding: 0 1.15rem;
+  clip-path: var(--ch-in); background: var(--k-face); color: var(--k-ink); text-shadow: var(--k-engrave); white-space: nowrap; }
+.s-key:hover > .k-face { transform: translateY(-1.5px); }
+.s-key:active > .k-face, .s-key.is-down > .k-face { transform: translateY(calc(var(--dz) - 1px)); }
+.s-key:active .k-top, .s-key.is-down .k-top { background: var(--k-face-down, var(--k-face)); }
+.s-key:focus-visible { outline: 2px solid rgb(var(--s-bp)); outline-offset: 4px; }
+.s-key[disabled], .s-key[aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
+.s-key[disabled] > .k-face, .s-key[aria-disabled="true"] > .k-face { transform: none; }
+.s-key.is-block { display: flex; width: 100%; }
+
+/* sizes */
+.s-key.k-sm { --h: 40px; --dz: 4px; --c: 6px; font-size: 14px; }
+.s-key.k-sm .k-top { padding: 0 .9rem; }
+.s-key.k-lg { --h: 56px; --dz: 6px; --c: 9px; font-size: 16px; }
+.s-key.k-lg .k-top { padding: 0 1.5rem; }
+.s-key.k-xs { --h: 32px; --dz: 3px; --c: 4px; font: 500 11px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+.s-key.k-xs .k-top { padding: 0 .65rem; }
+
+/* finishes: safety-yellow anodised, bead-blasted steel, blueprint steel */
+.s-key.k-hi {
+  --k-ink: rgb(12 16 22);
+  --k-face: repeating-linear-gradient(90deg, rgb(255 255 255 / .06) 0 1px, transparent 1px 3px), linear-gradient(180deg, #ffd955 0%, #ffc61a 46%, #f3b500 100%);
+  --k-face-down: linear-gradient(180deg, #f2b800 0%, #ffc61a 100%);
+  --k-side: linear-gradient(180deg, #a87c00, #7d5c00);
+  --k-engrave: 0 1px 0 rgb(255 240 190 / .65);
+}
+.s-key.k-steel {
+  --k-ink: rgb(var(--s-ink));
+  --k-face: repeating-linear-gradient(90deg, rgb(255 255 255 / .35) 0 1px, transparent 1px 3px), linear-gradient(180deg, #ffffff 0%, #eef1f5 55%, #dde3ea 100%);
+  --k-face-down: linear-gradient(180deg, #dde3ea, #eef1f5);
+  --k-side: linear-gradient(180deg, #a2adbb, #7c8899);
+  --k-engrave: 0 1px 0 rgb(255 255 255 / .9);
+}
+.fw-site[data-theme="dark"] .s-key.k-steel, .s-print .s-key.k-steel {
+  --k-ink: rgb(236 242 250);
+  --k-face: repeating-linear-gradient(90deg, rgb(255 255 255 / .035) 0 1px, transparent 1px 3px), linear-gradient(180deg, #24427a 0%, #1a3566 55%, #142c57 100%);
+  --k-face-down: linear-gradient(180deg, #132a52, #1a3566);
+  --k-side: linear-gradient(180deg, #0c1d3d, #07142c);
+  --k-engrave: 0 -1px 0 rgb(0 0 0 / .45);
+}
+.s-print .s-key { --k-edge: 2 8 20; }
+
+/* ---- machined plate (Card3D): two chamfered corners, a hatched cut face for its thickness ---- */
+.s-plate {
+  --dz: 7px; --c: 16px;
+  --ch: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+  --ci: calc(var(--c) - .4px);
+  --ch-in: polygon(var(--ci) 0, 100% 0, 100% calc(100% - var(--ci)), calc(100% - var(--ci)) 100%, 0 100%, 0 var(--ci));
+  position: relative; display: flex; flex-direction: column; padding: 0 var(--dz) var(--dz) 0; min-width: 0;
+}
+.s-plate > .p-side { position: absolute; left: var(--dz); top: var(--dz); right: 0; bottom: 0; clip-path: var(--ch); background: rgb(var(--s-rule-2)); }
+.s-plate > .p-side::after { content: ""; position: absolute; inset: 1px; clip-path: var(--ch-in); background-color: rgb(var(--s-sheet-2));
+  background-image: repeating-linear-gradient(135deg, rgb(var(--s-rule-2) / .9) 0 1px, transparent 1px 6px); }
+.s-plate > .p-face { position: relative; flex: 1 1 auto; display: flex; flex-direction: column; clip-path: var(--ch); background: rgb(var(--s-rule-2)); padding: 1px;
+  transition: transform .2s cubic-bezier(.3, .7, .2, 1); }
+.s-plate .p-top { position: relative; flex: 1 1 auto; min-width: 0; clip-path: var(--ch-in); background-color: rgb(var(--s-slab));
+  background-image: radial-gradient(120% 90% at 0% 0%, rgb(255 255 255 / .55), transparent 60%), repeating-linear-gradient(90deg, rgb(var(--s-ink) / .014) 0 1px, transparent 1px 3px); }
+.fw-site[data-theme="dark"] .s-plate .p-top { background-image: radial-gradient(120% 90% at 0% 0%, rgb(126 178 255 / .07), transparent 60%), repeating-linear-gradient(90deg, rgb(255 255 255 / .012) 0 1px, transparent 1px 3px); }
+a.s-plate:hover > .p-face, .s-plate.p-lift:hover > .p-face { transform: translate(-2px, -2px); }
+a.s-plate:focus-visible { outline: 2px solid rgb(var(--s-bp)); outline-offset: 4px; }
+.s-plate.p-hi > .p-face, .s-plate.p-hi > .p-side { background: rgb(var(--s-ink)); }
+.s-plate.p-flat { --dz: 0px; }
+.s-print .s-plate > .p-face, .s-print .s-plate > .p-side { background: rgb(126 178 255 / .45); }
+.s-print .s-plate > .p-side::after { background-color: rgb(6 18 40); background-image: repeating-linear-gradient(135deg, rgb(126 178 255 / .35) 0 1px, transparent 1px 6px); }
+.s-print .s-plate .p-top { background-color: rgb(12 30 62); background-image: radial-gradient(120% 90% at 0% 0%, rgb(126 178 255 / .10), transparent 60%); }
+
+/* screw head detail: used sparingly on plates */
+.s-screw { position: absolute; width: 9px; height: 9px; border-radius: 999px; pointer-events: none;
+  background: radial-gradient(circle at 35% 30%, rgb(255 255 255 / .9), rgb(var(--s-rule-2)) 55%, rgb(var(--s-ink) / .6) 100%);
+  box-shadow: 0 0 0 1px rgb(var(--s-ink) / .35); }
+.s-screw::after { content: ""; position: absolute; left: 1.5px; right: 1.5px; top: 4px; height: 1px; background: rgb(var(--s-ink) / .55); transform: rotate(var(--r, 35deg)); }
+
+/* ---- stamped tag (Badge3D) ---- */
+.s-tag { --c: 5px; display: inline-flex; align-items: center; gap: .4rem; height: 24px; padding: 0 .55rem 0 .45rem; white-space: nowrap;
+  clip-path: polygon(var(--c) 0, 100% 0, 100% 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c));
+  font: 600 10.5px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase;
+  background: linear-gradient(180deg, rgb(var(--s-sheet-2)), rgb(var(--s-sheet))); color: rgb(var(--s-ink));
+  box-shadow: inset 0 0 0 1px rgb(var(--s-rule-2) / .8), inset 0 -2px 0 rgb(var(--s-ink) / .08); }
+.s-tag > .t-hole { width: 6px; height: 6px; border-radius: 999px; background: rgb(var(--s-sheet)); box-shadow: inset 0 1px 1px rgb(0 0 0 / .35), 0 0 0 1px rgb(var(--s-rule-2)); }
+.s-tag.t-live > .t-hole { background: rgb(var(--s-pass)); box-shadow: 0 0 0 1px rgb(var(--s-pass) / .5); }
+.s-tag.t-hi { background: linear-gradient(180deg, #ffd955, #ffc400); color: #0c1016; box-shadow: inset 0 0 0 1px rgb(12 16 22 / .7), inset 0 -2px 0 rgb(0 0 0 / .12); }
+.s-tag.t-hi > .t-hole { background: #b88a00; box-shadow: inset 0 1px 1px rgb(0 0 0 / .4); }
+.s-print .s-tag { background: rgb(255 255 255 / .06); color: #eaf0fa; box-shadow: inset 0 0 0 1px rgb(126 178 255 / .45); }
+
+/* ---- milled pocket inputs ---- */
+.fw-site .input { border-radius: 2px; height: 44px; background: rgb(var(--s-slab)); border-color: rgb(var(--s-rule-2) / .9);
+  box-shadow: inset 0 2px 2px rgb(0 0 0 / .07), inset 0 0 0 1px rgb(255 255 255 / .02); }
+.fw-site .input:focus { border-color: rgb(var(--s-bp)); box-shadow: inset 0 2px 2px rgb(0 0 0 / .07), 0 0 0 3px rgb(var(--s-bp) / .25); }
+
+.s-link { color: rgb(var(--s-bp)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.s-link:hover { text-decoration-thickness: 2px; }
+
+/* machine-guard hazard stripe: one per page at most */
+.s-hazard { background: repeating-linear-gradient(135deg, #ffc400 0 12px, #0c1016 12px 24px); }
+
+/* ---- dimension line ---- */
+.s-dim { display: flex; align-items: center; color: rgb(var(--s-bp)); }
+.s-dim > .s-dim-ext { width: 1px; height: 18px; background: currentColor; flex: none; }
+.s-dim > .s-dim-line { height: 1px; flex: 1 1 0; background: currentColor; transform-origin: var(--o, left); }
+.s-dim > .s-dim-label { padding: 0 .6rem; white-space: nowrap; }
+.s-dim svg { flex: none; }
+
+/* ---- GD&T feature control frame ---- */
+.s-fcf { display: inline-flex; align-items: stretch; border: 1.5px solid rgb(var(--s-ink)); background: rgb(var(--s-slab)); }
+.s-fcf > * { display: flex; align-items: center; padding: 0 .55rem; min-height: 28px; }
+.s-fcf > * + * { border-left: 1.5px solid rgb(var(--s-ink)); }
+
+/* ---- balloon (BOM item number) ---- */
+.s-balloon { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; border-radius: 999px;
+  border: 1.5px solid currentColor; font: 600 12px/1 "IBM Plex Mono", ui-monospace, monospace; }
+
+/* ---- title block ---- */
+.s-tb { display: grid; border: 1.5px solid rgb(var(--s-ink)); background: rgb(var(--s-slab)); }
+.s-tb > * { border-right: 1px solid rgb(var(--s-ink) / .8); border-bottom: 1px solid rgb(var(--s-ink) / .8); padding: .5rem .75rem; min-width: 0; }
+.s-tb-k { display: block; font: 500 10px/1.2 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: rgb(var(--s-ink-2)); }
+
+/* ---- zone ruler along the sheet border ---- */
+.s-zones { background-image: repeating-linear-gradient(90deg, rgb(var(--s-rule-2) / .7) 0 1px, transparent 1px 16px); background-size: 100% 4px; background-repeat: no-repeat; }
+
+/* ---- the drafting cursor (hero): pointer devices only, off under reduced motion ---- */
+.s-xhair { position: absolute; inset: 0; pointer-events: none; overflow: hidden; opacity: 0; transition: opacity .25s ease; }
+.s-xhair.is-on { opacity: 1; }
+.s-xhair > i { position: absolute; left: 0; top: 0; background: rgb(var(--s-bp) / .28); will-change: transform; }
+.s-xhair > .x { width: 100%; height: 1px; }
+.s-xhair > .y { height: 100%; width: 1px; }
+.s-xhair > b { position: absolute; left: 0; top: 0; font: 500 10.5px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .06em;
+  color: rgb(var(--s-bp)); background: rgb(var(--s-sheet) / .9); padding: 3px 5px; border: 1px solid rgb(var(--s-bp) / .4); white-space: nowrap; will-change: transform; }
+
+/* ---- motion: lines draw, words rise; all settle to the final state under reduced motion ---- */
+.s-rise { display: block; overflow: hidden; padding-bottom: .04em; }
+.s-rise > span { display: block; transform: translateY(105%); animation: s-rise .8s cubic-bezier(.2, .7, .1, 1) forwards; animation-delay: var(--d, 0s); }
+@keyframes s-rise { to { transform: none; } }
+.fw-reveal .s-dim-line, .s-draw-x { transform: scaleX(0); transition: transform .9s cubic-bezier(.4, 0, .2, 1) .15s; }
+.fw-reveal.is-in .s-dim-line, .is-in .s-draw-x, .s-draw-x.is-in { transform: scaleX(1); }
+.s-load .s-dim-line { transform: scaleX(0); animation: s-grow .9s cubic-bezier(.4, 0, .2, 1) forwards; animation-delay: var(--d, .5s); }
+@keyframes s-grow { to { transform: scaleX(1); } }
+.s-tick { animation: s-tick 1.2s steps(2, jump-none) infinite; }
+@keyframes s-tick { 50% { opacity: .25; } }
+@keyframes s-march { to { stroke-dashoffset: -24; } }
+.s-march { stroke-dasharray: 6 6; animation: s-march 1.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .s-rise > span { transform: none; animation: none; }
+  .fw-reveal .s-dim-line, .s-draw-x, .s-load .s-dim-line { transform: none; transition: none; animation: none; }
+  .s-tick, .s-march { animation: none; }
+  .s-key > .k-face, .s-plate > .p-face { transition: none; }
+}

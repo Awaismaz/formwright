@@ -44,7 +44,7 @@ function Layer({ on, children, className }: { on: boolean; children: ReactNode; 
   return <div className={cx("absolute inset-0 transition-all duration-500 ease-out", on ? "opacity-100" : "pointer-events-none opacity-0", className)}>{children}</div>;
 }
 
-const glass = "rounded-xl border border-white/10 bg-[#121821]/85 shadow-[0_20px_50px_-20px_rgb(0_0_0/.6)] backdrop-blur-md";
+const glass = "rounded-[3px] border border-[#7eb2ff]/25 bg-[#0a1a36]/90 shadow-[0_20px_50px_-20px_rgb(0_0_0/.6)]";
 const shown = (on: boolean) => cx("transition-all duration-500 ease-out", on ? "translate-y-0 opacity-100" : "translate-y-1.5 opacity-0");
 
 // ------------------------------------------------------------------ a. brief
@@ -410,11 +410,10 @@ export default function OfficeHero() {
 
   return (
     <div ref={ref} className="relative" data-hero="office">
-      <div className="pointer-events-none absolute -inset-x-10 -bottom-12 top-16 -z-10 rounded-[48px] bg-[radial-gradient(closest-side,rgb(var(--primary)/.28),transparent)] blur-2xl" />
-      <div className="relative overflow-hidden rounded-2xl border border-black/20 bg-[#0c1016] text-left shadow-[0_40px_100px_-30px_rgb(16_24_40/.65)] ring-1 ring-white/5">
+      <div className="relative overflow-hidden bg-[#071328] text-left">
         {/* title bar */}
-        <div className="flex h-10 items-center gap-2 border-b border-white/[.06] bg-[#161b22] px-3">
-          <span className="h-2.5 w-2.5 rounded-full bg-[#ff5f57]" /><span className="h-2.5 w-2.5 rounded-full bg-[#febc2e]" /><span className="h-2.5 w-2.5 rounded-full bg-[#28c840]" />
+        <div className="flex h-10 items-center gap-2 border-b border-white/[.06] bg-[#0b1d3d] px-3">
+          <span className="font-anno text-[10.5px] font-medium uppercase tracking-[.14em] text-[#9cc3ff]">Iso</span>
           <LogoMark size={16} className="ml-3" />
           <span className="truncate text-[11.5px] text-white/60">Formwright · Design Office · <span className="text-white/85">PG-5 Planetary gearbox 5:1</span></span>
           <span className="ml-auto hidden shrink-0 items-center gap-1.5 text-[11px] text-white/50 sm:inline-flex">
@@ -424,8 +423,8 @@ export default function OfficeHero() {
 
         {/* stage */}
         <div className={cx("relative overflow-hidden", compact ? "h-[560px]" : "h-[600px]")}>
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,#1d2736_0%,#0f141c_55%,#0a0d12_100%)]" />
-          <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(rgb(255_255_255/.045)_1px,transparent_1px),linear-gradient(90deg,rgb(255_255_255/.045)_1px,transparent_1px)] [background-size:28px_28px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,#163061_0%,#0b1a37_55%,#06112a_100%)]" />
+          <div className="absolute inset-0 opacity-40 [background-image:linear-gradient(rgb(126_178_255/.07)_1px,transparent_1px),linear-gradient(90deg,rgb(126_178_255/.07)_1px,transparent_1px)] [background-size:28px_28px] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]" />
 
           {/* 3D: mounted from the start so the parts load during the brief */}
           <div className={cx("absolute inset-0 transition-opacity duration-700", threeOn || reduced ? "opacity-100" : "opacity-0")}>
@@ -462,7 +461,7 @@ export default function OfficeHero() {
 
         {/* transport: play/pause, replay, chapters (click to jump) */}
         {!reduced && (
-          <div className="flex items-center gap-2 border-t border-white/[.06] bg-[#11161d] px-2 py-2 sm:px-3">
+          <div className="flex items-center gap-2 border-t border-white/[.06] bg-[#0a1834] px-2 py-2 sm:px-3">
             <button type="button" onClick={() => setPlaying(p => !p)} aria-label={playing ? "Pause" : "Play"}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20">
               {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}

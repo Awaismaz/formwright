@@ -3,51 +3,55 @@ import {
   AlertTriangle, Boxes, Check, CheckCircle2, CircleDashed, Cog, Factory, FileUp, Gauge, Info, Layers, MousePointer2,
   PenLine, Ruler, ScanSearch, Spline, SquareDashed, Wrench,
 } from "lucide-react";
-import { Badge } from "@/components/ui";
 import { cx } from "@/lib/format";
 import LazyScene from "./LazyScene";
 import type { ScenePart } from "./PartScene";
 import { Reveal, useInView, useReducedMotion, useTicker } from "./motion";
 import OfficeBoard from "./OfficeBoard";
+import { Badge3D, Card3D, SectionHead } from "./site";
 
 export function LiveBadge({ label = "Live" }: { label?: string }) {
-  return (
-    <Badge tone="live">
-      <span className="relative flex h-1.5 w-1.5"><span className="fw-ping absolute inset-0 rounded-full bg-success" /><span className="relative h-1.5 w-1.5 rounded-full bg-success" /></span>
-      {label}
-    </Badge>
-  );
+  return <Badge3D tone="live">{label}</Badge3D>;
 }
 
-const RealGeometry = () => <span className="rounded-full bg-panel/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary ring-1 ring-primary/25">Real Formwright geometry</span>;
+const RealGeometry = () => <Badge3D>Real Formwright geometry</Badge3D>;
 
-function Feature({ id, icon: I, eyebrow, badge, title, body, bullets, visual, flip }: {
-  id?: string; icon: typeof Cog; eyebrow: string; badge: ReactNode; title: string; body: string; bullets: string[]; visual: ReactNode; flip?: boolean;
+const VIEWS = ["A", "B", "C", "D", "E", "F"];
+
+function Feature({ id, n, icon: I, eyebrow, badge, title, body, bullets, visual, flip }: {
+  id?: string; n: number; icon: typeof Cog; eyebrow: string; badge: ReactNode; title: string; body: string; bullets: string[]; visual: ReactNode; flip?: boolean;
 }) {
   return (
-    <div id={id} className="grid scroll-mt-24 items-center gap-8 lg:grid-cols-2 lg:gap-14">
+    <div id={id} className="grid scroll-mt-24 items-center gap-8 lg:grid-cols-2 lg:gap-16">
       <Reveal className={cx(flip && "lg:order-2")}>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-soft text-primary"><I className="h-4 w-4" /></span>
-          <span className="label">{eyebrow}</span>{badge}
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center border border-ink/70 bg-slab text-bp"><I className="h-[18px] w-[18px]" strokeWidth={1.6} aria-hidden="true" /></span>
+          <span className="s-anno text-ink">{eyebrow}</span>{badge}
         </div>
-        <h3 className="mt-4 text-2xl font-semibold tracking-tight sm:text-[28px] sm:leading-tight">{title}</h3>
-        <p className="mt-3 leading-relaxed text-muted">{body}</p>
-        <ul className="mt-5 space-y-2 text-[14px]">
-          {bullets.map((b, i) => <li key={b} className="fw-pop flex items-start gap-2" style={{ ["--d" as string]: `${0.25 + i * 0.1}s` }}><Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />{b}</li>)}
+        <h3 className="s-h2 mt-5 text-[28px] text-ink sm:text-[34px]">{title}</h3>
+        <p className="mt-3 text-[16px] leading-relaxed text-ink2">{body}</p>
+        <ul className="mt-6 border-t border-rule">
+          {bullets.map((b, i) => (
+            <li key={b} className="fw-pop flex items-start gap-3 border-b border-rule py-2.5 text-[15px] text-ink" style={{ ["--d" as string]: `${0.25 + i * 0.1}s` }}>
+              <Check className="mt-0.5 h-4 w-4 shrink-0 text-pass" aria-hidden="true" />{b}
+            </li>
+          ))}
         </ul>
       </Reveal>
-      <Reveal className={cx("min-w-0", flip && "lg:order-1")} delay={0.1}>{visual}</Reveal>
+      <Reveal className={cx("min-w-0", flip && "lg:order-1")} delay={0.1}>
+        <div className="mb-2 flex items-center gap-3 text-ink2"><span className="s-anno">View {VIEWS[n]}</span><span className="h-px flex-1 bg-rule2/50" aria-hidden="true" /><span className="s-anno">{eyebrow}</span></div>
+        {visual}
+      </Reveal>
     </div>
   );
 }
 
 function Stage({ children, tag, className }: { children: ReactNode; tag?: ReactNode; className?: string }) {
   return (
-    <div className={cx("relative overflow-hidden rounded-xl border border-border bg-panel shadow-[0_24px_60px_-28px_rgb(16_24_40/.35)]", className)}>
+    <Card3D inner={cx("relative overflow-hidden", className)}>
       {tag && <div className="pointer-events-none absolute right-3 top-3 z-10">{tag}</div>}
       {children}
-    </div>
+    </Card3D>
   );
 }
 
@@ -216,7 +220,7 @@ function AssemblyVisual() {
                 <tr key={k}><td className="py-1 pr-2 text-muted">{k}</td><td className="whitespace-nowrap py-1 text-right font-medium">{v}</td></tr>))}
             </tbody></table>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted"><Badge tone="warning">VERIFY</Badge>ISO tables and a stated rule, not a joint calculation.</div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted"><Badge3D tone="hi">Verify</Badge3D>ISO tables and a stated rule, not a joint calculation.</div>
         </div>
       </div>
     </Stage>
@@ -306,7 +310,7 @@ function AdvisorsVisual() {
           ))}
         </div>
         <div className="fw-pop mt-3 flex items-start gap-2 rounded-md border border-border px-2.5 py-2 text-[12px]" style={{ ["--d" as string]: "1.2s" }}>
-          <Badge tone="success">OK</Badge><span>6 × Ø14 holes: stock drill size, 8 mm wall to the outside edge.</span>
+          <Badge3D tone="live">OK</Badge3D><span>6 × Ø14 holes: stock drill size, 8 mm wall to the outside edge.</span>
         </div>
       </Stage>
       <Stage className="p-4">
@@ -316,7 +320,7 @@ function AdvisorsVisual() {
             <li key={t} className="fw-pop flex items-start gap-2.5 rounded-md border border-border px-2.5 py-2" style={{ ["--d" as string]: `${0.4 + i * 0.25}s` }}>
               <I className={cx("mt-0.5 h-4 w-4 shrink-0", c)} />
               <div className="min-w-0 flex-1"><div className="font-medium">{t}</div><div className="text-[11px] text-muted">{dsc}</div></div>
-              <Badge className="hidden shrink-0 sm:inline-flex">{lvl}</Badge>
+              <Badge3D className="hidden shrink-0 sm:inline-flex">{lvl}</Badge3D>
             </li>
           ))}
         </ul>
@@ -329,40 +333,37 @@ function AdvisorsVisual() {
 
 export default function Showcase() {
   return (
-    <section id="tour" className="relative scroll-mt-20 overflow-hidden border-b border-border">
-      <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-        <Reveal className="mx-auto max-w-2xl text-center">
-          <div className="label">A tour of the platform</div>
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight">See what it actually does.</h2>
-          <p className="mt-3 text-muted">The 3D stages below are real parts made by Formwright, rendered live in your browser. Drag any of them to orbit.</p>
-        </Reveal>
+    <section id="tour" className="relative scroll-mt-20 overflow-hidden border-b border-ink/80">
+      <div className="mx-auto max-w-[1240px] px-4 py-20 sm:px-6 sm:py-24">
+        <Reveal><SectionHead n="05" kicker="Product tour" title="See what it actually does."
+          body="The 3D stages below are real parts made by Formwright, rendered live in your browser. Drag any of them to orbit." /></Reveal>
         <div className="mt-16 space-y-24">
-          <Feature id="studio" icon={PenLine} eyebrow="Design Studio" badge={<LiveBadge />}
+          <Feature n={0} id="studio" icon={PenLine} eyebrow="Design Studio" badge={<LiveBadge />}
             title="Talk to it, or drive it by hand."
             body="Brief the design agent in plain language and watch the exact B-rep model build in the viewer. Or work the way you always have: a feature tree, a constrained 2D sketcher and a CommandManager ribbon for extrude, revolve, fillet, holes and patterns."
             bullets={["Parametric feature tree: edit, suppress, reorder, restore", "2D sketcher with dimensions and constraints", "Manual edits are free and deterministic"]}
             visual={<StudioVisual />} />
-          <Feature id="toolbox" icon={Cog} eyebrow="Toolbox" badge={<LiveBadge label="Included" />} flip
+          <Feature n={1} id="toolbox" icon={Cog} eyebrow="Toolbox" badge={<LiveBadge label="Included" />} flip
             title="Standard parts, to the standard."
             body="Bolts, nuts, washers, bearings, gears, shafts, dowels, flanges and brackets, generated from the ISO tables at the size you ask for. Drop them into a part or an assembly without spending a token."
             bullets={["ISO 4017, 4032, 4762, 7089 fasteners; ISO 53 involute gears", "Every part passes the same gating checks as agent work", "Offered automatically when your brief matches a standard part"]}
             visual={<ToolboxVisual />} />
-          <Feature id="import" icon={ScanSearch} eyebrow="STEP import + feature recognition" badge={<LiveBadge />}
+          <Feature n={2} id="import" icon={ScanSearch} eyebrow="STEP import + feature recognition" badge={<LiveBadge />}
             title="Bring your own parts. It reads them."
             body="Import a STEP file as an exact solid, then let recognition find the stock, holes, patterns, bosses, fillets, chamfers and gear teeth on it. Recognised holes and patterns become editable features on the exact body."
             bullets={["Exact-geometry pass, then an AI pass that names the part", "Recognised faces highlight in the viewer", "Edit hole patterns on a part you didn't model"]}
             visual={<RecognitionVisual />} />
-          <Feature id="assembly" icon={Boxes} eyebrow="Assembly Studio" badge={<LiveBadge />} flip
+          <Feature n={3} id="assembly" icon={Boxes} eyebrow="Assembly Studio" badge={<LiveBadge />} flip
             title="Mate it, check it, explode it."
             body="Assemble verified parts and Toolbox components with mates that report what is still free. Interference is computed on the exact B-rep, and Fastener auto-fit sizes the bolt stack from the measured grip."
             bullets={["Coincident, concentric, distance and angle mates with DOF analysis", "Exact interference volumes and minimum clearances", "Exploded view, BOM and assembly STEP"]}
             visual={<AssemblyVisual />} />
-          <Feature id="drawings" icon={Ruler} eyebrow="Drawing Studio" badge={<LiveBadge />}
+          <Feature n={4} id="drawings" icon={Ruler} eyebrow="Drawing Studio" badge={<LiveBadge />}
             title="A drawing sheet from the model, not from scratch."
             body="Hidden-line views, a hatched section, hole callouts and a title block, with every dimension tagged as specified or inferred. Sheets regenerate when the model changes and stay marked not approved for manufacture until your engineer signs."
             bullets={["Front, top, right and isometric; first or third angle", "SVG, PDF and DXF export", "Consistency-checked against the model"]}
             visual={<DrawingVisual />} />
-          <Feature id="advisors" icon={Factory} eyebrow="Manufacturing & Engineering Advisors" badge={<LiveBadge />} flip
+          <Feature n={5} id="advisors" icon={Factory} eyebrow="Manufacturing & Engineering Advisors" badge={<LiveBadge />} flip
             title="Ask the shop and the stress engineer early."
             body="Advisory DFM checks on the exact model with a ranked process shortlist and a relative cost (not a quote), plus hand-calculation checks for beams, bolted joints, shafts, fits and springs with the working shown."
             bullets={["Every result carries its advice level", "Inputs pre-filled from the model", "Never labelled validated: sign-off stays with your engineers"]}
