@@ -504,8 +504,9 @@ class Env:
         return None, None
 
     async def design(self, project_id: str, prompt: str, shown: str, budget: int | None,
-                     on_event: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
-        """One agent turn. Returns {ok_run, rate_limited, interrupted, tokens, error}."""
+                     on_event: Callable[[dict[str, Any]], None], job: dict[str, Any] | None = None) -> dict[str, Any]:
+        """One agent turn. Returns {ok_run, rate_limited, interrupted, tokens, error}. ``job``: hints for model
+        routing (PD-82), e.g. {"program_parts": 4}."""
         raise NotImplementedError
 
     async def interrupt(self, project_id: str) -> None:
@@ -970,7 +971,8 @@ class Runner:
             except Stop:
                 pass
 
-        res = await self.env.design(project_id, text, shown, budget, on_event)
+        job = {"program_parts": sum(1 for x in self.load()["tickets"] if x.get("kind") == "part")}
+        res = await self.env.design(project_id, text, shown, budget, on_event, job=job)  # PD-82: program size
         state = await self.env.part_state(project_id)
         await self._change_request(tid, "\n".join(said))
 

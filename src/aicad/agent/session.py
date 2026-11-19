@@ -29,6 +29,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 
+from aicad.agent import speed
 from aicad.agent.blocks import extract_brief, extract_review
 from aicad.agent.deferred import DeferredChecks, failure_note, has_pending
 from aicad.agent.edits import extract_edit
@@ -193,7 +194,8 @@ _SCRUB = [
     (_re.compile(r"`?\brefs/[\w.-]+`?"), "the reference image"),
     (_re.compile(r"\bbuild123d\b", _re.IGNORECASE), "the CAD kernel"),
     (_re.compile(r"`?\bfw\.(feature|edges_near|faces_near|apply_manual|thread|base_flange|edge_flange|hem|jog|sheet|"
-                 r"spur_gear|stepped_shaft|shaft_keyway|bolt_circle|holes_at|hole_spec|hole|din6885)\b`?"),
+                 r"spur_gear|stepped_shaft|shaft_keyway|bolt_circle|holes_at|hole_spec|hole|din6885|plate|gusset|"
+                 r"cross_hole_volume|cross_hole|meta)\b`?"),
      "the design tools"),
     (_re.compile(r"`?\bSUPPRESSED_FEATURES\b`?"), "the suppressed-features list"),
     (_re.compile(r"`?\bMANUAL_FEATURES\b`?"), "the manual features"),
@@ -335,6 +337,11 @@ class AgentSession:
         self._last_run_cost: float | None = None
         self.last_run_record: dict[str, Any] | None = None
         self._state_dir = self.workspace / ".fw"
+        self.design_seen: str | None = None  # sha of the design the agent last saw in this conversation (agent-latency)
+        self._effort_applied: str | None = None  # the agent process's current effort (None = the harness default)
+        self._model_applied: str | None = model
+        self.turn_settings: dict[str, Any] = {}
+        self.job_hint: dict[str, Any] | None = None  # set by the Design Office for one turn (program size)
         self._load()
 
     # ------------------------------------------------------------- persistence
@@ -346,6 +353,7 @@ class AgentSession:
             st = json.loads((self._state_dir / "agent.json").read_text(encoding="utf-8"))
             self.session_id = st.get("session_id")
             self.brief_approved = bool(st.get("brief_approved"))
+            self.design_seen = st.get("design_seen") if self.session_id else None
         except (OSError, ValueError):
             pass
         try:
@@ -373,7 +381,9 @@ class AgentSession:
         try:
             self._state_dir.mkdir(parents=True, exist_ok=True)
             (self._state_dir / "agent.json").write_text(json.dumps({"session_id": self.session_id,
-                                                                          "brief_approved": self.brief_approved}), encoding="utf-8")
+                                                                          "brief_approved": self.brief_approved,
+                                                                          "design_seen": self.design_seen}),
+                                                              encoding="utf-8")
         except OSError:
             pass
 
@@ -414,10 +424,12 @@ class AgentSession:
         async with self._connect_lock:  # a pre-connect may still be starting the agent when the first message arrives
             if self.client is None:
                 self.workspace.mkdir(parents=True, exist_ok=True)
-                client = self.client_factory(self.options())
+                opts = self.options()
+                client = self.client_factory(opts)
                 await client.connect()
                 self.client = client
                 self._cost_base = 0.0  # a new agent process reports cost from zero
+                self._effort_applied, self._model_applied = getattr(opts, "effort", None), self.model
         return self.client
 
     async def preconnect(self, idle_s: float = PRECONNECT_IDLE_S) -> None:
@@ -478,8 +490,9 @@ class AgentSession:
             shown, prompt = shown or prompt, (DISCUSS_PREFIX if self.mode == "discuss" else BRIEF_PREFIX) + prompt
         self.publish({"type": "user", "text": shown or prompt, "mode": self.mode})
         self.last_prompt = re.split(r"\n\n\[(?:Selected|Reference image|Recognition data|Design state|Project context|"
-                                    r"Designer preferences)",
+                                    r"Designer preferences|Project folder|Current design)",
                                     shown or prompt)[0].strip()[:600]
+        full, folder = self._with_folder_note(prompt)  # the run record keeps the caller's prompt
         self.publish({"type": "busy", "value": True})
         self._run_costs, self._budget_hit, self._result_seen = {}, False, False
         self._calls = CallLog()
@@ -502,7 +515,8 @@ class AgentSession:
                 client = await self.ensure_connected()
             if self._rec is not None:
                 self._rec.mark("connected")
-            await client.query(prompt)
+            await self._apply_turn_settings(client, full, folder)
+            await client.query(full)
             stopping = False
             builds_before, followups = self.deferred.started, 0
             while True:
@@ -542,9 +556,69 @@ class AgentSession:
                               "duration_s": round(time.time() - started, 1), "cost_est_usd": self.run_spent_usd,
                               "budget_stopped": self._budget_hit, **self.turn_meta})
                 self.turn_meta = {}
+            self._remember_design()
             self._write_run_record(failed, build_before)
             self.busy = False
             self.publish({"type": "busy", "value": False})
+
+    # ------------------------------------------------------------- agent-latency: context and turn settings
+    def _with_folder_note(self, prompt: str) -> tuple[str, str]:
+        """Append the project folder's state (and the design's text when the agent hasn't seen this version), so the
+        agent never spends a call listing the folder or reading a design it is given. Never shown in the chat."""
+        try:
+            note, h = speed.folder_note(self.workspace, self.design_seen if self.session_id else None, self.mode)
+        except Exception:  # noqa: BLE001 - context is an optimisation, never a reason to fail a turn
+            return prompt, "none"
+        kind = ("new" if h is None else "unchanged" if "unchanged since" in note else
+                "inlined" if "[Current design" in note else "read")
+        return prompt + "\n\n" + note, kind
+
+    def _remember_design(self) -> None:
+        """After a turn the agent has seen the design as it is now (it wrote, edited or was given it)."""
+        if self.mode != "build":
+            return
+        src = speed.design_text(self.workspace)
+        self.design_seen = speed.sha(src) if src else None
+        if self.session_id:
+            self._persist_session()
+
+    async def _apply_turn_settings(self, client: Any, prompt: str, folder: str) -> None:
+        """Adaptive effort (and, opt-in, model routing) for this turn, switched on the running agent process with a
+        control request (no model call, no reconnect). Clients without it (replays, fakes) keep their settings."""
+        has_design = folder not in ("new", "none")
+        forced = effort_setting()
+        if self.mode == "build":
+            effort, why = speed.choose_effort(prompt, has_design, forced)
+            try:
+                model, job, mwhy = speed.route_model(prompt, has_design, self.model, self.job_hint)
+            except Exception:  # noqa: BLE001 - routing is an optimisation: fall back to the session's model
+                model, job, mwhy = self.model, "complex", "routing unavailable"
+        else:
+            effort, why, model, job, mwhy = forced, f"{self.mode} mode", self.model, "complex", f"{self.mode} mode"
+        self.job_hint = None
+        q = getattr(client, "_query", None)
+        applied_effort = effort
+        if effort != self._effort_applied:
+            if q is not None and hasattr(q, "_send_control_request"):
+                try:
+                    await q._send_control_request({"subtype": "apply_flag_settings",
+                                                   "settings": {"effortLevel": effort}})
+                    self._effort_applied = effort
+                except Exception:  # noqa: BLE001 - an older agent CLI: keep its effort
+                    applied_effort = self._effort_applied
+            else:
+                applied_effort = self._effort_applied
+        applied_model = model
+        if model != self._model_applied:
+            try:
+                await client.set_model(model)
+                self._model_applied = model
+            except Exception:  # noqa: BLE001 - replay/fake clients: keep the model
+                applied_model = self._model_applied
+        self.turn_settings = {"effort": applied_effort or "default", "effort_reason": why, "job": job,
+                              "model": applied_model or "default", "model_reason": mwhy, "folder": folder}
+        if self._rec is not None:
+            self._rec.rec["turn"] = dict(self.turn_settings)
 
     async def _settle_builds(self, followups: int, stopping: bool) -> str | None:
         """End of a turn that built: wait until the latest build's deferred checks (exports, CHK-07 round trip, CHK-08
@@ -729,6 +803,7 @@ class AgentSession:
         self.history.clear()
         self.session_id = None
         self.brief_approved = False
+        self.design_seen = None
         for f in ("chat.jsonl", "agent.json"):
             try:
                 (self._state_dir / f).unlink()
