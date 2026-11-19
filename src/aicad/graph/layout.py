@@ -459,6 +459,9 @@ class _Layout:
             mounted = all(x.host in roots for x in self.pin_x) and len(self.pin_x) == 1
             self.kind, self.sub_line, self.ctx = ("pin" if mounted else "mount"), False, {}
             return
+        if not self.shafts and self._mount_shape():
+            self.kind, self.sub_line, self.ctx = "mount", False, {}
+            return
         if not self.shafts and self.designed and all(self.role(c) == "block" for c in self.designed) and self.joints:
             self.kind, self.sub_line, self.ctx = "blocks", False, {}
             return
@@ -1442,18 +1445,59 @@ class _Layout:
         place(self.base)
 
     # ------------------------------------------------------------------ 5g. parts mounted on a base, members pivoting
+    def _mount_shape(self) -> bool:
+        """A base, connectors bolted to it and members joined to the connectors (a pin joint, or a bolted joint as an
+        intent step wrote a folding table's legs before pin joints existed): every designed part is one of them."""
+        guests = {x.guest for x in self.joints} | {x.guest for x in self.pin_x}
+        roots = [b for b in self.designed if b not in guests]
+        if len(roots) != 1 or self.role(roots[0]) != "block":
+            return False
+        conns = {x.guest for x in self.joints if x.host == roots[0] and self.role(x.guest) == "block"}
+        membs = {x.guest for x in list(self.joints) + list(self.pin_x) if x.host in conns and x.guest not in conns
+                 and self.role(x.guest) == "block"}
+        return bool(conns and membs) and set(self.designed) == {roots[0]} | conns | membs
+
+    def _role_sizes(self, base: str, conns: list[str], membs: list[str]) -> None:
+        """Sizes nobody stated (not in the graph, not in the plan; a size frozen at approval was only an assumption
+        then) take the role sizes ``graph/roles.py`` states: a table top 1200 x 700 x 18, legs 700 long and 40 x 20,
+        brackets 60 x 30 x 60, other bases 600 x 400 x 15, other members 300 x 30 x 15 (said in the notes)."""
+        from aicad.graph import roles
+
+        words = " ".join([self.brief] + [self.name(c) for c in self.designed])
+        table = bool(re.search(r"\btable\b", words, re.IGNORECASE))
+        said = []
+        for cid, dims in ([(base, roles.BASE_TABLE if table else roles.BASE_OTHER)]
+                          + [(c, roles.CONNECTOR) for c in conns]
+                          + [(m, roles.LEG if re.search(r"\blegs?\b", self.name(m), re.IGNORECASE) else roles.MEMBER)
+                             for m in membs]):
+            c, s = self.comp[cid], self.spec[cid]
+            keys = ("L", "W", "T") if c.kind == "plate" else ("L", "W", "H")
+            if any(c.v(k) is not None for k in keys) or icd._planned(self.p(cid), s, {}) or self.p(cid).get("envelope"):
+                continue
+            s["L"], s["W"], s["H"] = (float(x) for x in dims)
+            s["given"] = set()
+            s.pop("planned", None)
+            said.append(f"{self.name(cid)} {' x '.join(f'{x:g}' for x in dims)}")
+        if said:
+            self.notes.append("Sizes the design leaves open, assumed by role: " + "; ".join(said) + ".")
+
     def _mount(self) -> None:
         """A base (a table top, a frame, a plate: by its role, never just the largest box) with connectors bolted to
         it (under it when it is a top) and members pivoting on the connectors. Connector copies sit at the base's
         corners (4), its ends (2) or its centre (1), CORNER mm in from its edges; member copy i pivots on connector
         copy i (a pivot bolt along Y through both: the member flush against the connector's inboard face, its pivot
         bore half its width from its upper end, hanging straight down). Every copy gets its own interfaces."""
-        pins = self.pin_x
-        guests = {x.guest for x in self.joints} | {x.guest for x in pins}
+        guests = {x.guest for x in self.joints} | {x.guest for x in self.pin_x}
         roots = [b for b in self.designed if b not in guests]
         if len(roots) != 1:
             raise Unsupported("parts mounted on more than one base")
         self.base = roots[0]
+        conn_ids = {x.guest for x in self.joints if x.host == self.base and self.role(x.guest) == "block"}
+        # members bolted to a connector pivot on it when the design folds (a folding table's legs)
+        pins = list(self.pin_x) + [x for x in self.joints if x.host in conn_ids and x.guest not in conn_ids
+                                   and self.role(x.guest) == "block"]
+        self._role_sizes(self.base, [c for c in self.designed if c in conn_ids],
+                         [m for m in self.designed if any(x.guest == m for x in pins)])
         self.under = bool(_TOPPY.search(self.name(self.base)))
         parent: dict[str, tuple[str, Connection]] = {}
         for x in self.joints:
@@ -1931,22 +1975,31 @@ class _Layout:
         m = m if m in CLEARANCE else icd.fastener_for(span)
         d = float(o.get("d") or CLEARANCE[m])
         inset_pref = max(2 * d, 6.0)
-        inset = float(o.get("inset") or inset_pref)
         wod = WASHER_OD.get(max(m, icd.bolt_for_hole(d)), 2 * d)
-        count = int(o.get("count") or (4 if min(Lp, Wp) - 2 * inset >= wod and max(Lp, Wp) - 2 * inset >= wod else 2))
         bolts = next((self.comp[v] for v in (x.via if x else []) if self.comp.get(v) is not None
                       and self.comp[v].kind == "fastener"), None)
-        if not o.get("count") and bolts is not None and int(bolts.qty) in (2, 3):  # no more holes than planned bolts
-            count = 2
         per = int(bolts.qty) // max(1, self.ncopies(child)) if bolts is not None else 0
-        if not o.get("count") and not o.get("inset") and count == 2 and per >= 4:
-            in4 = _r2(min(inset_pref, (min(Lp, Wp) - wod) / 2))  # four planned per joint: the holes move in
-            if in4 >= d / 2 + 1.0:
-                count, inset = 4, in4
-        pts = _grid(pos, Lp, Wp, count, inset)
-        if count == 2 and not o.get("inset"):
-            inset = _r2(max(min(inset_pref, (max(Lp, Wp) - wod) / 2), d / 2 + 1.0))
+
+        def pattern(o_count: Any, o_inset: Any) -> tuple[int, float, list[list[float]]]:
+            inset = float(o_inset or inset_pref)
+            count = int(o_count or (4 if min(Lp, Wp) - 2 * inset >= wod and max(Lp, Wp) - 2 * inset >= wod else 2))
+            if not o_count and bolts is not None and int(bolts.qty) in (2, 3):  # no more holes than planned bolts
+                count = 2
+            if not o_count and not o_inset and count == 2 and per >= 4:
+                in4 = _r2(min(inset_pref, (min(Lp, Wp) - wod) / 2))  # four planned per joint: the holes move in
+                if in4 >= d / 2 + 1.0:
+                    count, inset = 4, in4
             pts = _grid(pos, Lp, Wp, count, inset)
+            if count == 2 and not o_inset:
+                inset = _r2(max(min(inset_pref, (max(Lp, Wp) - wod) / 2), d / 2 + 1.0))
+                pts = _grid(pos, Lp, Wp, count, inset)
+            return count, inset, pts
+
+        _count, inset, pts = pattern(o.get("count"), o.get("inset"))
+        gap = min((math.dist(a, b) for k, a in enumerate(pts) for b in pts[k + 1:]), default=math.inf)
+        if (o.get("count") or o.get("inset")) and (gap < wod - 1e-6 or inset < d / 2 + 1.0 - 1e-6):
+            # a pattern frozen for another layout of this joint (a revision moved or resized the part): the rule again
+            _count, inset, pts = pattern(None, None)
         tap = {"d": TAP_DRILL[m], "depth": icd.tap_depth(m), "thread": f"M{m}"} if tapped else None
         self.add("hole_pattern", (self.item[host], hc), (self.item[child], cc), {
             "fastener": f"M{m}", "fastener_size": m, "fastener_item": self._fastener_item(x),

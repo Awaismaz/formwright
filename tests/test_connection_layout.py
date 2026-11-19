@@ -462,3 +462,36 @@ def test_an_unconnected_copy_blocks_the_gate() -> None:
     ifs = [{"kind": "hole_pattern", "a": {"item": "top", "copy": 0}, "b": {"item": "leg", "copy": 0}}]
     codes = [(x["code"], x.get("copy")) for x in icd._layout_issues(sk, ifs)]
     assert codes == [("no_interface", 1)]
+
+
+def test_the_founders_own_table_graph_revised_with_old_frozen_sizes() -> None:
+    """The graph the live intent step wrote for "Design a foldable Table" (before pin joints existed): legs bolted to
+    the brackets, no sizes. A revision re-lays it out carrying the old ICD's frozen sizes (top 100 x 70 x 16, the
+    template's assumption) and hole patterns: role sizes win over assumed ones, each leg pivots on its own bracket
+    under a corner, and a frozen pattern that no longer fits its joint yields to the rule (no washer overlap)."""
+    reply = {"components": [
+        {"id": "table_top", "kind": "plate", "name": "Table top"},
+        {"id": "leg", "kind": "other", "name": "Folding leg", "qty": 4},
+        {"id": "hinge_bracket", "kind": "bracket", "name": "Leg hinge bracket", "qty": 4},
+        {"id": "bracket_screw", "kind": "fastener", "name": "Bracket wood screw", "qty": 16, "params": {"style": "shcs"}},
+        {"id": "pivot_bolt", "kind": "fastener", "name": "Leg pivot bolt", "qty": 4, "params": {"style": "hex_bolt"}},
+        {"id": "pivot_washer", "kind": "washer", "name": "Pivot washer", "qty": 8},
+        {"id": "pivot_nut", "kind": "nut", "name": "Pivot lock nut", "qty": 4}],
+        "connections": [{"kind": "bolted_joint", "host": "table_top", "guest": "hinge_bracket", "via": ["bracket_screw"]},
+                        {"kind": "bolted_joint", "host": "hinge_bracket", "guest": "leg",
+                         "via": ["pivot_bolt", "pivot_washer", "pivot_nut"]}]}
+    g, _iss, _qs = intent.compile_reply(reply, "TEST Project", "Design a foldable Table")
+    plan = gc.to_plan(g, resolved=True)
+    parts = gc.plan_parts(plan)
+    ids = {p["name"]: p["id"] for p in parts}
+    frozen = {"items": {ids["Table top"]: {"L": 100, "W": 70, "H": 16, "rot": 0},
+                        ids["Leg hinge bracket"]: {"L": 100, "W": 70, "H": 16, "rot": 0},
+                        ids["Folding leg"]: {"L": 568, "W": 90, "H": 20, "rot": 0}},
+              "interfaces": {f"IF-0{k}": {"count": 4, "fastener": 5, "inset": 11.0} for k in range(1, 5)}}
+    sk, ifs = layout.build(g, parts, g.brief, frozen, resolved=True)
+    it = _it(sk)
+    assert icd.problems(sk, ifs) == [] and it["Table top"]["size"] == [1200, 700, 18]
+    assert min(it["Leg hinge bracket"]["copies"]) == [-540, -305, -48]
+    assert min(it["Folding leg"]["copies"]) == [-540, -305 + 25, -378]
+    assert len([f for f in ifs if f["data"].get("pivot")]) == 4
+    assert any("assumed by role" in n for n in sk["notes"])

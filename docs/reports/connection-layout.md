@@ -76,6 +76,39 @@ loop is solved and said. Freeze then rebuild gives the same layout on all five.
 | F6 M4 hex bolts for M6 cap screws | PD-114 sizes in `resolve`; Fitz stacks each joint with the fastener the ICD names, at every level | c PASS (graph) |
 | Founder's table (R3) | base by role, never the largest box; copies paired with their host's copies (leg i on bracket i), each with its own interfaces; pivot bolt joint (bolt, two washers, lock nut stacked); per-copy `no_interface`; believable assumed sizes (top 1200 x 700 x 18, legs 700, brackets 60 x 30 x 60, said in the notes); plans without a graph read by role | R3 PASS on both paths; tests `foldable_table`, `role path`, `unconnected copy` |
 
+## The founder's TEST Project, revised (master's last request)
+
+`office/revision.py` (merged from main) derives every revised layout through `interfaces._rebuild`, so revisions use
+the connection solver (graph plans) or the role layout (role plans) with no change on its side. Three fixes made it
+right for the founder's own program:
+
+* **His graph's shape.** The live intent step (before `pin_joint` existed) wrote the legs as *bolted* to the brackets
+  and gave no sizes. The solver now recognises the shape itself (a base, connectors bolted to it, members joined to
+  the connectors; every designed part one of them) and lays it out as a mount: brackets under the four corners
+  (30 mm in), leg i on bracket i, each on a pivot bolt with its washers and nut, legs deployed straight down under
+  the top (PD-140).
+* **Sizes nobody stated.** Sizes absent from both the graph and the plan take the role sizes (table top 1200 x 700 x
+  18, legs 40 x 20 x 700, brackets 60 x 30 x 60), even where his first approval froze the template's assumptions
+  (100 x 70 x 16): a frozen assumption is still an assumption (said in the notes, PD-141).
+* **Frozen hole patterns.** A revision carries the old ICD's frozen bolt patterns by joint; one that no longer fits
+  its joint (washers overlapping on the new 60 x 30 bracket) yields to the layout rule instead of refusing the
+  revision.
+
+Live check on port 8809 (throwaway data; a temp copy of his program read for its intent graph, replayed; simulated
+agents; 0 console errors): phase 1 with `FW_GRAPH_LAYOUT=0` reproduces his state (brackets and legs flat in a row along
+the top, bolted face to face, every check "Looks assembled": `4-table-before-revision.png`); phase 2 with the solver,
+`POST /revision {"op": "relayout"}`: preview ok, ICD v2, the program runs on to complete, 52 mates, 0 clashes over 24
+pairs, every level "Looks assembled". Read by eye (`5-table-after-revision.png`): a table, the top as the base, a
+bracket under each corner, each leg hanging straight down from its own bracket, nothing in a row or floating. The
+pivot hardware is stacked (4 bolts, 8 washers, 4 nuts through bracket and leg). Two leftovers, reported by Fitz (not
+silent), outside the layout: the 16 "Bracket wood screws" are not stocked by Hex from the Toolbox (the plan says
+"wood screw"), so they are not fitted; the plan's separate "Pivot lock nut" line is reported unplaced because each
+pivot stack brings its own ISO 4032 nut. Test: `test_the_founders_own_table_graph_revised_with_old_frozen_sizes`.
+
+The folded state (c): the layout gives the deployed state, legs perpendicular under the top, which is what a folding
+table's brief means by default; a folded state would be a second configuration of the same joints (a pivot angle),
+not built here (PD-142).
+
 ## Parity on the existing layout tests
 
 Method (`docs/reports/connection-layout/parity.py`, a pytest plugin, one test file per pytest call): every
@@ -161,6 +194,13 @@ before the PD-114 fastener sizes (caps then M4).
   leg-and-bracket pairs in "Legs", each bolted to the top in "Top"). Alternative: regroup the plan.
 - **PD-139 Hand-written graph replies for golden cases without a recording** (d, e, f, g, R1, R2, R3), labelled as
   such. Alternative: one live intent call per case (about 10 platform tokens).
+- **PD-140 A base with connectors and members is a mount** whatever joint the reply wrote between connector and member:
+  the member pivots on a bolt along Y (a folding table's legs). Alternative: a flat bolted face unless the reply says
+  pin joint.
+- **PD-141 Role sizes replace frozen assumptions** when neither the graph nor the plan states a size. Alternative: keep
+  the frozen size and report the conflict.
+- **PD-142 Deployed state only.** Legs perpendicular under the top; no folded configuration yet. Alternative: a
+  second skeleton state per pivot angle.
 
 ## Gate
 

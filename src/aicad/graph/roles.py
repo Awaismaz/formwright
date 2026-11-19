@@ -30,6 +30,11 @@ _CONN = re.compile(r"bracket|hinge|\bmount\b|clamp|\blug\b|clevis", re.IGNORECAS
 _MEMB = re.compile(r"\blegs?\b|\barms?\b|\blinks?\b|strut|lever", re.IGNORECASE)
 _PIVOT = re.compile(r"fold|pivot|hinge|swing|tilt", re.IGNORECASE)
 _M = re.compile(r"\bM(\d{1,2})\b")
+BASE_TABLE = (1200.0, 700.0, 18.0)   # a four-seat folding table's top
+BASE_OTHER = (600.0, 400.0, 15.0)
+CONNECTOR = (60.0, 30.0, 60.0)      # a leg bracket
+LEG = (40.0, 20.0, 700.0)           # a table leg: about 730 to the floor with the top and the bracket
+MEMBER = (300.0, 30.0, 15.0)
 
 
 def _p(v: Any, note: str = "assumed by the role layout") -> Param:
@@ -70,10 +75,10 @@ def from_roles(parts: list[dict[str, Any]], brief: str = "") -> DesignGraph | No
         g.components.append(c)
         return c
 
-    b = comp(base, "plate", (1200.0, 700.0, 18.0) if table else (600.0, 400.0, 15.0), ("L", "W", "T"))
-    cs = [comp(p, "bracket", (60.0, 30.0, 60.0), ("L", "W", "H")) for p in conns]
-    ms = [comp(p, "other", (40.0, 20.0, 700.0) if re.search(r"\blegs?\b", p["name"], re.IGNORECASE) else
-               (300.0, 30.0, 15.0), ("L", "W", "H")) for p in membs]
+    b = comp(base, "plate", BASE_TABLE if table else BASE_OTHER, ("L", "W", "T"))
+    cs = [comp(p, "bracket", CONNECTOR, ("L", "W", "H")) for p in conns]
+    ms = [comp(p, "other", LEG if re.search(r"\blegs?\b", p["name"], re.IGNORECASE) else MEMBER, ("L", "W", "H"))
+          for p in membs]
     pivot_f: list[str] = []
     other_f: list[str] = []
     for p in std:
