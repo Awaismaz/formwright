@@ -39,4 +39,5 @@ land. Parallel agents work in git worktrees on disjoint files; the main session 
 | 32 | Layout builder respects planned envelopes and sizes parts for their own features | CD-029 | Done (merged; PD-69) |
 | 34 | Assembly speed: pair cache, fasteners from the ICD, advisory background final check, layout placement instead of solving | ASM-023, CD-035..038 | Done (merged; PD-70, PD-71) |
 | 33 | Review that converges: Gage against the ICD, AI points advisory, retry stuck parts from chat; office self-heals, Archie understands questions | CD-030, CD-031 | Done (PD-68) |
+| 35 | Follow-ups from F1: Archie's `mounts_on` layout tree stacks parts (146 advisory clashes on an F1 copy, e.g. tyres on the floor); advisory final check is not re-run after a restart mid-run; programs approved before CD-029 keep oversized ICD envelopes; F1's stored summary predates the honest '0 clashes' fix | CD-029, CD-038, ASM-023 | Open |
 | — | Native CAD bridge (SOLIDWORKS pilot) | NCB-* | Backlog by founder decision |

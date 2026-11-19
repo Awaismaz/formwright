@@ -114,6 +114,12 @@ under load and pass alone. Run the full suite on a quiet machine before deciding
 
 When the founder reports a problem in the app, never fix the instance (their program or data). Find what generated the state and which workflow has no way out, fix that in the product, and make sure a user can recover inside the app on their own: the system corrects itself, or they tell Archie (in-program chat) and Archie proposes the fix. Claude is not available to users in production. Reproduce on temp copies only.
 
+## Founder rule: fast iterations, no full gate per ship (2026-11-19)
+
+Pre-production: don't run the full suite (pytest, npm test, vite build) before every commit/push. Run only quick,
+targeted tests for touched code; build web/dist only when the served SPA must change. This overrides the
+"run pytest… before the final commit" step in CLAUDE.md until the founder says otherwise.
+
 ## Founder rule: parts are checked, assemblies are placed (2026-11-19, PD-71)
 
 Assembling must be quicker than modelling. Parts are quality-checked (Gage, swap-in); Design Office assembly steps place
@@ -121,6 +127,10 @@ fasteners straight from the ICD and do no geometry checking; the whole-program c
 final assembly in the background and never blocks. Assembly checks go through the pair cache (ASM-023, PD-70).
 
 ## Where things stand (handoff, updated 2026-11-18 evening)
+
+**Latest (2026-11-19 close):** main at the assembly solver patch (ASM-023) after CD-026…CD-039. Founder's F1 program
+is complete to the release gate (final assembly, 29 part sheets + assembly drawing, manufacturing review); 2 sheets
+flagged for a Drawing Studio touch-up (FC-14, FC-20). Open follow-ups are WORKLIST row 35.
 
 **Read first on a new machine:** this section, `docs/plans/WORKLIST.md` (ordered work list with status),
 the newest entries of `docs/SESSION_LOG.md`, and the parked decisions table in `docs/DECISIONS.md` (PD-35…PD-72).
