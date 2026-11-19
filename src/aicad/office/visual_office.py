@@ -79,12 +79,20 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
         lines.append(f"There's no housing or base in this plan, so the parts can't be mounted: the layout puts them "
                      f"side by side on the floor, touching nothing ({len(sk['items'])} parts, "
                      f"{len(ic.get('interfaces') or [])} interfaces).")
+    loose = [f for f in found if f["code"] == "no_interface"]
+    names = [str(f["text"]).split(":")[0] for f in loose]
     for f in found:
-        if f["code"] == "row" and row and mountless:
+        if (f["code"] == "row" and row and mountless) or f["code"] == "no_interface":
             continue
         lines.append(f["text"])
+    if loose:  # one sentence for every part the layout can't connect (icd.issues "no_interface")
+        who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        lines.insert(1 if row and mountless else 0, f"{who}: no interface connects "
+                     f"{'it' if len(names) == 1 else 'them'} to the rest of the program, so "
+                     f"{'it' if len(names) == 1 else 'they'} would be placed beside it.")
+    said = {f["text"] for f in found}
     for p in probs[:4]:
-        if p not in lines:
+        if p not in lines and p not in said:
             lines.append(p)
     if verdict is not None and verdict["overall"] != "looks_assembled" and vline:
         lines.append(vline)
