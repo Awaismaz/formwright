@@ -205,7 +205,7 @@ def default_dowel_length(d: float) -> float:
 # kind of a stocked noun (a lock washer is not an ISO 7089 plain washer, a taper roller bearing not a ball bearing),
 # is never read as some other part (live gear reducer run 2026-11-19: "Hex nut M8" and "Washer M8" became hex bolts,
 # "Oil plug M16" a washer).
-LEAD_SPLIT = re.compile(r"[,.;:(]|\b(?:with|for|on|onto|to|in|of|from|that|which|held|holds?|located|against|by|and|"
+LEAD_SPLIT = re.compile(r"[,.;:(]|\b(?:without|with|plus|including|for|on|onto|to|in|of|from|that|which|held|holds?|located|against|by|and|"
                         r"fixes|fixing|joining|joins|clamping|clamps|supporting|supports|used|fitted|between)\b")
 HEAD = re.compile(r"\b(keys?|circlips?|seeger|(?:retaining|snap) rings?|471|bearings?|gears?|pinions?|shafts?|axles?|"
                   r"bolts?|screws?|nuts?|washers?|dowels?|pins?|standoffs?|spacers?|"

@@ -784,7 +784,10 @@ class PlatformEnv(orchestrator.Env):
                             + (f" and {len(ph) - 1} more" if len(ph) > 1 else "") + " in for the placeholders"}
                 return {"blocked": f"Fitz is still waiting for the real {ph[0]}: it has not been swapped in for its "
                                    "placeholder. Retry once it is approved."}
-            std = [k for k in kids if k["kind"] == "standard"]
+            # bought-out parts (and the ones a designer modelled because Hex didn't stock them: a plug, a seal, which
+            # have no place in the skeleton) are Fitz's to place or to report
+            std = [k for k in kids if k["kind"] == "standard"
+                   or (k["kind"] == "part" and k["item_id"] not in (doc.get("skeleton") or {}).get("items", {}))]
             # a sub-assembly of bought-out parts only (a fastener kit) has no layout of its own: its parts are fitted
             # where the joints are, as every other level is integrated (CD-034)
             designed = {s["id"] for s in program_assembly.subs_of(doc)}

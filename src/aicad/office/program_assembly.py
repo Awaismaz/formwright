@@ -689,7 +689,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
             for t in sorted(standard, key=_integration_order):
                 r = t.get("reuse") or {}
                 if r.get("source") != "toolbox":
-                    if t["kind"] == "standard" and not t.get("_kit") and t["item_id"] not in sk["items"]:
+                    if t["kind"] in ("standard", "part") and not t.get("_kit") and t["item_id"] not in sk["items"]:
                         # a bought-out part Hex didn't stock (a plug, a seal): modelled by a designer, but the ICD has
                         # no place for it, so it is reported, never left lying beside the program
                         stats["unplaced"] += int(t.get("qty") or 1)
