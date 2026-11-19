@@ -245,6 +245,11 @@ def make_mate(root: Path, doc: dict[str, Any], body: dict[str, Any]) -> dict[str
         raise AssemblyInputError("Angle must be between 0° and 180°.")
     if t == "distance" and value < 0:
         raise AssemblyInputError("Distance must be zero or positive (use Flip to change sides).")
+    if t == "gear":
+        if value <= 0:
+            value = gear_centre_distance(root, doc, a["inst"], b["inst"]) or 0.0
+        if value <= 0:
+            raise AssemblyInputError("Enter the centre distance: no module and teeth found on both parts.")
     m = {"id": store.next_id(doc, "m"), "type": t, "a": a, "b": b, "value": value, "flip": bool(body.get("flip")),
          "suppressed": False, "broken": False, "group": body.get("group")}
     doc["mates"].append(m)
@@ -272,7 +277,9 @@ def edit_mate(root: Path, doc: dict[str, Any], m: dict[str, Any], body: dict[str
         raise AssemblyInputError("Angle must be between 0° and 180°.")
     if t == "distance" and not 0 <= value <= 10000:
         raise AssemblyInputError("Distance must be between 0 and 10000 mm.")
-    if t not in ("angle", "distance"):
+    if t == "gear" and not 0 < value <= 10000:
+        raise AssemblyInputError("The centre distance must be positive.")
+    if t not in ("angle", "distance", "gear"):
         value = 0.0
     flip = bool(body["flip"]) if body.get("flip") is not None else bool(m.get("flip"))
     geometric = (t != m["type"] or value != float(m.get("value") or 0.0) or bool(body.get("a")) or bool(body.get("b"))
@@ -540,8 +547,8 @@ def explode(root: Path, doc: dict[str, Any]) -> dict[str, list[float]]:
                     other = m["b"]["inst"] if m["a"]["inst"] == iid else m["a"]["inst"]
                     if other not in off:
                         continue
-                    if (m["type"] in solver.PLANE_MATES) != plane_pass:
-                        continue
+                    if (m["type"] in solver.PLANE_MATES) != plane_pass or m["type"] == "gear":
+                        continue  # a meshing gear sits beside its partner, not on it
                     so = m["a"] if other == m["a"]["inst"] else m["b"]
                     v = xform.unit(xform.vec(poses[other], so["ref"]["v"]))
                     if m["type"] in solver.PLANE_MATES:
@@ -1221,6 +1228,26 @@ def _axis_world(root: Path, doc: dict[str, Any], body: dict[str, Any]) -> tuple[
         T = xform.from12(_inst(doc, ref["inst"])["T"])
         return [float(x) for x in xform.pt(T, r["p"])], [float(x) for x in xform.unit(xform.vec(T, r["v"]))]
     return list(body.get("p") or [0, 0, 0]), list(body.get("dir") or [0, 0, 1])
+
+
+def gear_of(part: dict[str, Any]) -> dict[str, Any] | None:
+    """Module and teeth of a gear part: a Toolbox spur gear, or a part recognised as one. None otherwise."""
+    if part.get("kind") == "toolbox" and part.get("code") == "spur_gear" and (part.get("params") or {}).get("Z"):
+        return {"module": float(part["params"]["M"]), "teeth": int(part["params"]["Z"])}
+    comp = (part.get("info") or {}).get("component") or {}
+    cp = comp.get("params") or {}
+    if comp.get("kind") == "spur_gear" and cp.get("teeth") and cp.get("module"):
+        return {"module": float(cp["module"]), "teeth": int(cp["teeth"])}
+    return None
+
+
+def gear_centre_distance(root: Path, doc: dict[str, Any], a: str, b: str) -> float | None:
+    """m (z1 + z2) / 2 for two gear instances of the same module, else None."""
+    parts = _parts(root, doc)
+    ga, gb = (gear_of(parts[_inst(doc, x)["part"]]) for x in (a, b))
+    if not ga or not gb or abs(ga["module"] - gb["module"]) > 1e-9:
+        return None
+    return ga["module"] * (ga["teeth"] + gb["teeth"]) / 2
 
 
 def _gear_teeth(root: Path, doc: dict[str, Any], j: dict[str, Any]) -> int | None:

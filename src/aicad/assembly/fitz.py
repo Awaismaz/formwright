@@ -11,15 +11,21 @@ Interfaces Fitz understands (all deterministic):
 - **seat** a bearing or gear on a shaft seat of the same diameter (a convex cylinder of the part): concentric with
   the seat, against its shoulder (coincident) or flush with the free end of the shaft;
 - **dowel** pins into holes of the same diameter: concentric, half the pin length in the hole (distance mate);
+- **train**: shafts, gears, pulleys and bearings with no block to mount on form shaft lines and a gear train
+  (``trains``): the first shaft is the base, gears mesh at the centre distance with their teeth phased, the next
+  shaft goes through its gear, two bearings per shaft either side of the hubs;
 - otherwise **place** the part beside the assembly and say so.
 
-After inserting, Fitz runs the exact interference check and reports clashes. Nothing here claims a fit is
-manufacturable: fits, tolerances and press forces are not modelled.
+Every part Fitz could not place, and every other shortfall, is reported as an outcome with a machine-readable code
+(``CODES``) besides the plain sentence, so a reviewer (or another agent) can act on it. After inserting, Fitz runs
+the exact interference check and reports clashes. Nothing here claims a fit is manufacturable: fits, tolerances and
+press forces are not modelled.
 """
 
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -27,10 +33,45 @@ from typing import Any
 import numpy as np
 
 from aicad import toolbox
-from aicad.assembly import AssemblyInputError, fasteners, librarian, service, store, xform
+from aicad.assembly import AssemblyInputError, fasteners, librarian, service, store, trains, xform
 
 TOL = 0.02            # mm: hole centres must coincide this closely for a pattern match
-ORDER = {"base": 0, "mount": 1, "seat": 2, "dowel": 3, "fasten": 4, "place": 5, "design": 6}
+ORDER = {"base": 0, "train": 1, "mount": 2, "seat": 3, "dowel": 4, "fasten": 5, "place": 6, "design": 7}
+
+# Outcome codes (machine-readable, stable): what Fitz could not do, or did with a caveat. "warn" outcomes leave a part
+# beside the assembly or a joint unfitted; "info" ones are notes (the part is placed).
+CODES = {
+    "no_interface": "warn: no interface named or found; the part is placed beside the assembly",
+    "no_mount_pattern": "warn: no hole pattern of the part lines up with the target's; placed beside",
+    "no_shaft_seat": "warn: no free shaft seat of the bearing / gear bore; placed beside",
+    "no_free_hole": "warn: no free hole of the dowel diameter; placed beside",
+    "no_clearance_holes": "warn: no free clearance holes for the fasteners; nothing inserted",
+    "fastener_failed": "warn: the fastener auto-fit refused the joint",
+    "hole_skipped": "warn: one hole of a fastener pattern was skipped",
+    "part_unavailable": "warn: the part could not be prepared (missing build, bad parameters)",
+    "needs_design": "info: not found in the Toolbox or your parts; left for the Design Studio",
+    "already_fixed": "info: the target is fixed; parts are mounted onto it instead",
+    "clash": "warn: the exact interference check found an overlap between two parts",
+    # shaft lines and gear trains (trains.py)
+    "no_part_to_mount_shaft": "warn: a shaft with no meshing gear on it has nothing to locate it (no housing); placed beside",
+    "module_mismatch": "warn: a gear's module differs from the gear it should mesh with; it and its shaft are beside",
+    "no_gear_to_mesh": "warn: a second shaft's gear has no gear to mesh with; placed beside",
+    "gear_without_shaft": "info: more gears than shafts; the gear is meshed without a shaft",
+    "gear_bore_too_large": "info: the shaft is too thick for the gear's bore; the gear is meshed without a shaft",
+    "gear_not_recognised": "info: a part named like a gear has no recognised teeth; it goes on its shaft unmeshed",
+    "tooth_phase_unchecked": "info: a gear from your parts has no known tooth phase; check the mesh for a clash",
+    "bore_mismatch": "warn: a hub's bore fits no seat of its shaft; placed beside",
+    "no_bore": "warn: no bore recognised on the part's axis; placed beside",
+    "no_shaft_geometry": "warn: no round seat recognised on a part named like a shaft; placed beside",
+    "no_shaft_for_hub": "warn: a pulley / hub has no shaft to go on; placed beside",
+    "no_journal_for_bearing": "warn: no journal of the bearing bore on that side of the hubs; placed beside",
+    "no_room_for_bearing": "warn: the journal leaves no room for the bearing clear of the hubs; placed beside",
+    "bearing_spare": "warn: more bearings than two per shaft; placed beside",
+    "bearings_short": "info: a shaft has fewer than two bearings",
+    "hub_overhangs_seat": "info: the hubs on a shaft are wider than its seat",
+    "train_not_attached": "warn: nothing in the assembly carries the shaft line; it is assembled beside the rest",
+    "shafts_not_held": "info: no housing: gear mesh mates keep the centre distances, the shafts can still swing",
+}
 
 
 # ----------------------------------------------------------------------------- geometry helpers (pure)
@@ -109,6 +150,7 @@ def seats(root: Path, key: str) -> list[dict[str, Any]]:
             continue  # a partial cylinder (fillet, rounded edge), not a seat
         lo, hi = float(t.min()), float(t.max())
         ends: dict[str, dict[str, Any] | None] = {"lo": None, "hi": None}
+        near: dict[str, tuple[float, dict[str, Any]] | None] = {"lo": None, "hi": None}
         for fid, f in sorted(refs["faces"].items(), key=lambda kv: int(kv[0])):
             if f["kind"] != "plane":
                 continue
@@ -124,6 +166,14 @@ def seats(root: Path, key: str) -> list[dict[str, Any]]:
             for end, tt, into in (("lo", lo, 1.0), ("hi", hi, -1.0)):
                 if abs(tq - tt) < 1e-3 and ends[end] is None:
                     ends[end] = {"face": int(fid), "shoulder": c * into > 0, "t": tq}
+                # a chamfered end or a filleted shoulder: the closing face lies just beyond the cylinder, at most
+                # half the radius away (Toolbox shafts have 45° end chamfers)
+                gap = (tt - tq) * into
+                if 1e-3 <= gap <= 0.5 * g["r"] + 1e-9 and (near[end] is None or gap < near[end][0]):  # type: ignore[index]
+                    near[end] = (gap, {"face": int(fid), "shoulder": c * into > 0, "t": tq, "chamfer": gap})
+        for end in ("lo", "hi"):
+            if ends[end] is None and near[end] is not None:
+                ends[end] = near[end][1]  # type: ignore[index]
         out.append({"faces": sorted(g["faces"]), "r": g["r"], "d": round(2 * g["r"], 4), "p": [float(x) for x in foot],
                     "v": [float(x) for x in v], "lo": lo, "hi": hi, "length": hi - lo, "ends": ends})
     out.sort(key=lambda s: (-s["length"], s["d"]))
@@ -230,6 +280,7 @@ def plan(root: Path, doc: dict[str, Any], text: str, candidates: list[dict[str, 
     # actions and intended mates
     for it in items:
         _intend(root, doc, it, items, names)
+    train_plan(root, doc, items)
     order = sorted(items, key=lambda x: (ORDER[x["action"]], items.index(x)))
     for n, it in enumerate(order, start=1):
         it["order"] = n
@@ -329,6 +380,113 @@ def _intend(root: Path, doc: dict[str, Any], it: dict[str, Any], items: list[dic
         it["plan"] = "Fixed at the origin" if not doc["instances"] else "Inserted; parts are mounted on it"
     else:
         it["plan"] = "Placed beside the assembly (no interface named): mate it by hand"
+
+
+def train_plan(root: Path, doc: dict[str, Any], items: list[dict[str, Any]]) -> bool:
+    """Plan-stage view of a shaft line / gear train (``trains``): actions, plan sentences and expected outcome codes
+    for the items that form one; Toolbox gears get the shaft's bore and size-less bearings the shaft's journal size.
+    Placement itself happens at run time from the real geometry. Returns whether a train was found."""
+    tr = trains.select(root, doc, [it for it in items if it.get("action") != "design"])
+    if tr is None:
+        return False
+    names = service.display_names(doc)
+    shafts = tr.of("shaft")
+    D = None   # the journal diameter: the first Toolbox shaft's, else a shaft already in the assembly
+    for u in shafts:
+        if u.inst:
+            ss = seats(root, service._inst(doc, u.inst)["part"])
+            D = ss[0]["d"] if ss else None
+        elif u.code == "shaft" and u.params:
+            D = float(u.params["D"])
+        if D:
+            break
+    by_id = {it["id"]: it for it in tr.items}
+    notes: dict[str, list[str]] = {i: [] for i in by_id}
+    codes: dict[str, list[str]] = {i: [] for i in by_id}
+    gears, hubs, bearings = tr.of("gear"), tr.of("hub"), tr.of("bearing")
+    for it in tr.items:
+        role = trains.item_role(it)
+        it["action"] = "seat" if role in ("bearing", "hub") else "train"
+        it["target"], it["target_name"] = None, None
+        if role == "bearing" and D and (not it.get("params") or it.get("confidence") == "low"):
+            series = bearing_for(D)
+            if series:
+                it["params"] = toolbox.normalize("bearing", {"SERIES": series})
+                it["title"] = toolbox.spec("bearing").title(it["params"])
+                it["found"] = f"Hex picked a {series} bearing in the Toolbox (bore Ø{D:g} = the shaft journals)"
+                it["confidence"] = "high"
+    for k, u in enumerate(shafts):
+        if not u.item:
+            continue
+        if k == 0:
+            notes[u.item].append("Input shaft: the base, fixed at the origin with its axis along +Y" if not doc["instances"]
+                                 else "Input shaft: beside the assembly (nothing in it carries the shaft)")
+        elif k < len(gears):
+            notes[u.item].append(f"shaft {k + 1} parallel to the input shaft, through its gear in mesh")
+        else:
+            notes[u.item].append(f"shaft {k + 1}: no gear goes on it, so nothing locates it: placed beside")
+            codes[u.item].append("no_part_to_mount_shaft")
+    prev = None
+    for k, u in enumerate(gears):
+        if not u.item:
+            continue
+        it = by_id[u.item]
+        prm = u.params or {}
+        if u.code == "spur_gear" and k < len(shafts) and D and gear_bore_ok_plan(prm, D):
+            it["params"] = toolbox.normalize("spur_gear", {**it["params"], "BORE": D})
+            it["title"] = toolbox.spec("spur_gear").title(it["params"])
+        where = ("on the input shaft" if k == 0 else f"on shaft {k + 1}") if k < len(shafts) else "without a shaft"
+        if prev is None:
+            notes[u.item].append(f"{where}{', on the keyway' if shafts and k < len(shafts) else ''}"
+                                 + (f", bore Ø{D:g} to suit" if D and k < len(shafts) and u.code == "spur_gear" else ""))
+        elif u.code == "spur_gear" and prev.code == "spur_gear" and prev.params and u.params:
+            m0, m1 = float(prev.params["M"]), float(prm["M"])
+            if abs(m0 - m1) > 1e-9:
+                notes[u.item].append(f"module {m1:g} doesn't mesh with module {m0:g} of {prev.title}: placed beside")
+                codes[u.item].append("module_mismatch")
+            else:
+                a = m1 * (int(prev.params["Z"]) + int(prm["Z"])) / 2
+                notes[u.item].append(f"in mesh with {prev.title} at {a:g} mm = m(z1+z2)/2, coplanar, teeth phased, "
+                                     f"{where}")
+        else:
+            notes[u.item].append(f"in mesh with {prev.title} (centre distance from the recognised teeth), {where}")
+        if k >= len(shafts) and shafts:
+            codes[u.item].append("gear_without_shaft")
+        prev = u
+    for u in hubs:
+        if u.item:
+            notes[u.item].append("on a shaft without a gear (else the input shaft), centred on its seat"
+                                 if shafts else "no shaft to put it on: placed beside")
+            if not shafts:
+                codes[u.item].append("no_shaft_for_hub")
+    if bearings and bearings[0].item:
+        item = bearings[0].item
+        n_sh = len(shafts)
+        jd = f"Ø{D:g} " if D else ""
+        notes[item].append(f"two per shaft on the {jd}journals, one either side of the "
+                           f"{'gear' if gears else 'hubs' if hubs else 'shaft middle'}: against a shoulder, else flush "
+                           "with the shaft end")
+        if len(bearings) > 2 * n_sh:
+            notes[item].append(f"{len(bearings) - 2 * n_sh} more than two per shaft: placed beside")
+            codes[item].append("bearing_spare")
+        elif len(bearings) < 2 * n_sh:
+            notes[item].append(f"{2 * n_sh - len(bearings)} short of two per shaft")
+            codes[item].append("bearings_short")
+    for i, it in by_id.items():
+        if notes[i]:
+            s = "; ".join(dict.fromkeys(notes[i]))
+            it["plan"] = s[:1].upper() + s[1:]
+        it["codes"] = sorted(set(codes[i]))
+        it["train"] = True
+    del names
+    return True
+
+
+def gear_bore_ok_plan(prm: dict[str, Any], d: float) -> bool:
+    try:
+        return trains.gear_bore_ok(float(prm["M"]), int(prm["Z"]), d)
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 # ----------------------------------------------------------------------------- execution
@@ -661,15 +819,26 @@ def fasten_targets(root: Path, doc: dict[str, Any], size: int | None, only: str 
 
 async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict[str, Any]],
                   project_part: ProjectPart) -> dict[str, Any]:
-    """Insert, place and mate the approved items in order, then run the exact interference check."""
+    """Insert, place and mate the approved items in order, then run the exact interference check.
+
+    Returns {log, summary, clashes, outcomes: [{code, severity, item, inst, name, text}], timings, stats...}."""
+    t_start = time.perf_counter()
     log: list[dict[str, str]] = []
+    outcomes: list[dict[str, Any]] = []
     made: dict[str, list[str]] = {}
     used_ends: set[tuple[str, str]] = set()
     taken: set[tuple[str, int]] = set()
-    stats = {"inserted": 0, "mated": 0, "placed_loose": 0, "fastener_stacks": 0, "fastener_asked": 0, "base": 0}
+    stats = {"inserted": 0, "mated": 0, "placed_loose": 0, "fastener_stacks": 0, "fastener_asked": 0, "base": 0,
+             "joints": 0}
 
-    def say(who: str, text: str, tone: str = "ok") -> None:
-        log.append({"agent": who, "text": text, "tone": tone})
+    def say(who: str, text: str, tone: str = "ok", code: str | None = None, it: dict[str, Any] | None = None,
+            inst: str | None = None) -> None:
+        log.append({"agent": who, "text": text, "tone": tone, **({"code": code} if code else {})})
+        if code:
+            outcomes.append({"code": code, "severity": "warn" if tone == "warn" else "info",
+                             "item": it["id"] if it else None, "inst": inst,
+                             "name": service.display_names(doc).get(inst) if inst else (it or {}).get("title"),
+                             "text": text})
 
     def target_inst(it: dict[str, Any]) -> str | None:
         t = it.get("target") or {}
@@ -680,13 +849,54 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
             return made[t["item"]][0]
         return None
 
+    async def key_for(it: dict[str, Any]) -> str:
+        return await _toolbox_key(root, org_id, it) if it["source"] == "toolbox" else await project_part(it["project_id"])
+
+    # shaft lines and gear trains first: they are built by construction around their own base
+    t_train = time.perf_counter()
+    in_train: set[str] = set()
+    tr = trains.select(root, doc, [it for it in items if it.get("enabled", True)])
+    if tr is not None:
+        by_id = {it["id"]: it for it in tr.items}
+        keys: dict[str, str] = {}
+        bad: set[str] = set()
+        for u in tr.units:
+            if u.inst or u.item is None or u.role == "gear" and u.code == "spur_gear":
+                continue
+            if u.item not in keys and u.item not in bad:
+                try:
+                    keys[u.item] = await key_for(by_id[u.item])
+                except (AssemblyInputError, toolbox.ToolboxError) as e:
+                    bad.add(u.item)
+                    say("Hex", f"{by_id[u.item]['title']}: {e}", "warn", "part_unavailable", by_id[u.item])
+            u.key = keys.get(u.item)
+        tr.units = [u for u in tr.units if u.item not in bad]
+        lay = trains.prepare(root, doc, tr)
+        for u in tr.units:
+            if u.role == "gear" and u.code == "spur_gear" and u.params:
+                u.key = await service.ensure_toolbox_part(root, org_id, "spur_gear", u.params)
+        out = trains.build(root, doc, tr, lay)
+        for ln in out["log"]:
+            log.append({"agent": "Fitz", **ln})
+        outcomes.extend(out["outcomes"])
+        for k, v in out["made"].items():
+            made.setdefault(k, []).extend(v)
+        stats["inserted"] += sum(len(v) for v in out["made"].values())
+        stats["mated"] += out["mated"]
+        stats["placed_loose"] += out["loose"]
+        stats["base"] += out["base"]
+        stats["joints"] += out["joints"]
+        in_train = set(by_id)
+        service.run_solve(root, doc)
+    t_train = time.perf_counter() - t_train
+
     for it in sorted(items, key=lambda x: x.get("order", 0)):
-        if not it.get("enabled", True):
+        if not it.get("enabled", True) or it["id"] in in_train:
             continue
         act = it["action"]
         names = service.display_names(doc)
         if act == "design":
-            say("Hex", f"“{it['title']}” is left for the Design Studio", "muted")
+            say("Hex", f"“{it['title']}” is left for the Design Studio", "muted", "needs_design", it)
             continue
         qty = max(1, min(librarian.MAX_QTY, int(it.get("qty") or 1)))
         if act == "fasten":
@@ -696,13 +906,13 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
             stats["fastener_asked"] += qty if it.get("qty_explicit") else len(targets)
             if not targets:
                 say("Fitz", f"Fitz found no free {f"M{f['size']} " if f.get('size') else ''}clearance holes"
-                            f"{' in ' + names[only] if only else ''} for {it['title']}", "warn")
+                            f"{' in ' + names[only] if only else ''} for {it['title']}", "warn", "no_clearance_holes", it)
                 continue
             try:
                 res = await service.accept(root, org_id, doc, targets, f.get("style") or it["code"],
                                            f.get("washers") or "both", False)
             except AssemblyInputError as e:
-                say("Fitz", f"Fitz couldn't fit {it['title']}: {e}", "warn")
+                say("Fitz", f"Fitz couldn't fit {it['title']}: {e}", "warn", "fastener_failed", it)
                 continue
             n = res["inserted"]
             stats["fastener_stacks"] += n
@@ -717,12 +927,12 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
                             f"{', '.join(f'{x:g}' for x in sorted(got))} mm was used", "warn")
             for h in res["plan"]["holes"]:
                 if not h["proposal"]["ok"]:
-                    say("Fitz", f"Hole skipped: {h['proposal'].get('error')}", "warn")
+                    say("Fitz", f"Hole skipped: {h['proposal'].get('error')}", "warn", "hole_skipped", it)
             continue
         try:
-            key = await _toolbox_key(root, org_id, it) if it["source"] == "toolbox" else await project_part(it["project_id"])
+            key = await key_for(it)
         except (AssemblyInputError, toolbox.ToolboxError) as e:
-            say("Hex", f"{it['title']}: {e}", "warn")
+            say("Hex", f"{it['title']}: {e}", "warn", "part_unavailable", it)
             continue
         if act == "seat":
             p = toolbox.normalize(it["code"], it["params"])
@@ -748,7 +958,7 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
                     inst = service.add_instance(root, doc, key)
                     stats["placed_loose"] += 1
                     say("Fitz", f"Fitz found no free Ø{d:g} shaft seat: {service.display_names(doc)[inst['id']]} "
-                                "placed beside the assembly", "warn")
+                                "placed beside the assembly", "warn", "no_shaft_seat", it, inst["id"])
                 else:
                     placed += 1
                 made.setdefault(it["id"], []).append(new or inst["id"])
@@ -771,6 +981,9 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
                     inst = service.add_instance(root, doc, key)
                     new = inst["id"]
                     stats["placed_loose"] += 1
+                    outcomes.append({"code": "no_free_hole", "severity": "warn", "item": it["id"], "inst": new,
+                                     "name": service.display_names(doc)[new],
+                                     "text": f"No free Ø{p['D']:g} hole: placed beside the assembly"})
                 else:
                     n_ok += 1
                 made.setdefault(it["id"], []).append(new)
@@ -795,11 +1008,12 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
             tgt = target_inst(it)
             if act == "mount" and tgt and tgt != iid:
                 if service._inst(doc, iid)["fixed"]:
-                    say("Fitz", f"{names[iid]} is fixed; Fitz mounts parts onto it instead", "muted")
+                    say("Fitz", f"{names[iid]} is fixed; Fitz mounts parts onto it instead", "muted", "already_fixed",
+                        it, iid)
                     continue
                 ok, text = mount(root, doc, tgt, iid)
                 stats["mated" if ok else "placed_loose"] += 1
-                say("Fitz", text, "ok" if ok else "warn")
+                say("Fitz", text, "ok" if ok else "warn", None if ok else "no_mount_pattern", it, iid)
             elif it.get("inst"):
                 say("Fitz", f"{names[iid]} is already in the assembly", "muted")
             elif service._inst(doc, iid)["fixed"]:
@@ -808,15 +1022,23 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
             else:
                 stats["placed_loose"] += 1
                 say("Fitz", f"Fitz placed {names[iid]} beside the assembly: no interface was named, mate it by hand",
-                    "warn")
+                    "warn", "no_interface", it, iid)
         service.run_solve(root, doc)
+    t0 = time.perf_counter()
     service.run_solve(root, doc)
+    t_solve = time.perf_counter() - t0
     clashes: list[dict[str, Any]] = []
     checked = False
+    t0 = time.perf_counter()
     if doc["instances"]:
         an = await service.analyse(root, org_id, doc)
         checked = True
         clashes = [p for p in an["interference"]["pairs"] if p["kind"] == "interference"]
+        for c in clashes:
+            outcomes.append({"code": "clash", "severity": "warn", "item": None, "inst": c["a"], "name": c.get("a_name"),
+                             "other": c["b"], "text": f"{c.get('a_name')} and {c.get('b_name')} overlap by "
+                                                      f"{c['volume_mm3']:.3g} mm³"})
+    t_check = time.perf_counter() - t0
     bits = []
     if stats["base"]:
         bits.append(f"fixed {stats['base']} base part{'s' if stats['base'] != 1 else ''}")
@@ -830,6 +1052,8 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
     summary = "Fitz " + (", ".join(bits) if bits else "made no changes") + \
         (f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}" if checked else "")
     say("Fitz", summary, "warn" if clashes or stats["placed_loose"] else "ok")
-    return {"log": log, "summary": summary, "clashes": [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"),
-                                                          "b_name": c.get("b_name"), "volume_mm3": c["volume_mm3"]}
-                                                         for c in clashes], **stats}
+    timings = {"total_s": round(time.perf_counter() - t_start, 3), "train_s": round(t_train, 3),
+               "solve_s": round(t_solve, 3), "interference_s": round(t_check, 3)}
+    return {"log": log, "summary": summary, "outcomes": outcomes, "timings": timings,
+            "clashes": [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
+                         "volume_mm3": c["volume_mm3"]} for c in clashes], **stats}

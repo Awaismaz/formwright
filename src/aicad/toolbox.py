@@ -483,7 +483,10 @@ def match(prompt: str) -> list[dict[str, Any]]:
                 vals["SERIES"] = float(b.group(1))
                 score += 2
         if c.code == "spur_gear":
-            for pat, key in ((r"module\s*(?:of\s*)?" + _NUM, "M"), (r"\bm\s?=\s?" + _NUM, "M"), (_NUM + r"\s*teeth", "Z"),
+            # "m2 z60" / "m2 20T" (the usual gear shorthand) first; the spelled-out forms override them
+            for pat, key in ((r"\bm\s?" + _NUM + r"(?![\d.]|\s*[x×])", "M"), (r"\bz\s?(\d{2,3})\b", "Z"),
+                             (r"\b(\d{2,3})\s?t\b", "Z"),
+                             (r"module\s*(?:of\s*)?" + _NUM, "M"), (r"\bm\s?=\s?" + _NUM, "M"), (_NUM + r"\s*teeth", "Z"),
                              (r"(?:z|teeth)\s*=\s*" + _NUM, "Z"), (r"face\s*width\s*(?:of\s*)?" + _NUM, "B"), (r"bore\s*(?:of\s*)?ø?\s*" + _NUM, "BORE")):
                 g = re.search(pat, t)
                 if g:

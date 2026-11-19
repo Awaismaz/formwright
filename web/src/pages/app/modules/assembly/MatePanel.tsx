@@ -14,6 +14,7 @@ const CHOICES: { value: MateChoice; label: string; help: string }[] = [
   { value: "concentric", label: "Concentric", help: "Axes of cylinders, circular or straight edges in line." },
   { value: "distance", label: "Distance", help: "Flat faces facing each other with a gap." },
   { value: "angle", label: "Angle", help: "Angle between the face normals (0° = parallel, same direction)." },
+  { value: "gear", label: "Gear mesh", help: "Two gear bores (or their shafts): axes parallel at the centre distance. Leave it blank for m(z1+z2)/2 from the gears." },
 ];
 
 /** Plain description of a pick: "Flat face", "Cylinder Ø6.6", "Circular edge Ø12". */
@@ -38,6 +39,7 @@ export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, o
 }) {
   const help = CHOICES.find(c => c.value === choice)!.help;
   const needsValue = choice === "distance" || choice === "angle";
+  const showValue = needsValue || choice === "gear";
   const ready = picks.length === 2 && (!needsValue || value.trim() !== "");
   return (
     <div data-testid="mate-panel">
@@ -80,19 +82,20 @@ export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, o
       </Section>
       {(needsValue || choice !== "auto") && (
         <Section title="Options">
-          {needsValue && (
+          {showValue && (
             <label className="mb-2.5 flex items-center gap-2 text-[12.5px]">
-              <span className="w-20 text-muted">{choice === "distance" ? "Distance" : "Angle"}</span>
+              <span className="w-20 text-muted">{choice === "distance" ? "Distance" : choice === "gear" ? "Centre dist." : "Angle"}</span>
               <Input type="number" value={value} onChange={e => onValue(e.target.value)} step={choice === "angle" ? 5 : 0.5}
-                min={0} max={choice === "angle" ? 180 : 10000} className="h-8 w-28" data-testid="mate-value" />
-              <span className="text-muted">{choice === "distance" ? "mm" : "°"}</span>
+                min={0} max={choice === "angle" ? 180 : 10000} className="h-8 w-28" data-testid="mate-value"
+                placeholder={choice === "gear" ? "auto" : undefined} />
+              <span className="text-muted">{choice === "angle" ? "°" : "mm"}</span>
             </label>
           )}
-          <label className="flex items-center gap-2 text-[12.5px]">
+          {choice !== "gear" && <label className="flex items-center gap-2 text-[12.5px]">
             <Toggle checked={flip} onChange={onFlip} label="Flip" />
             <ArrowDownUp className="h-3.5 w-3.5 text-muted" />
             <span>{choice === "concentric" ? "Reverse axis direction" : "Flip alignment"}</span>
-          </label>
+          </label>}
         </Section>
       )}
       <div className="px-4 py-3.5">
