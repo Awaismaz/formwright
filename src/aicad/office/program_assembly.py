@@ -305,9 +305,10 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
     summary = (f"Fitz assembled {prog['name']} from {n_ph} placeholder{'s' if n_ph != 1 else ''}"
                + (f" and {len(parts) - n_ph} real part{'s' if len(parts) - n_ph != 1 else ''}" if n_ph < len(parts) else "")
-               + f": {n_mates} mates by interface name, {len(clashes)} clash{'es' if len(clashes) != 1 else ''}.")
+               + f": {n_mates} mates by interface name.")
     return {"status": "ready", "final": final["id"], "subs": {k: v["id"] for k, v in sub_docs.items()},
             "parts": parts, "at": astore.now(), "summary": summary, "clashes": clashes, "mates": n_mates,
+            "check": {"status": "done", "scope": "placeholders", "count": len(clashes), "at": astore.now()},
             "problems": problems[:20], "solve": (final.get("solve") or {}).get("status"),
             "icd_version": prog["icd"]["version"]}
 
@@ -361,6 +362,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             await _placed(aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
+    checked = False  # the swapped parts' clash check ran (only then may anyone say "0 clashes")
     async with locks.hold(state["final"], locks.OFFICE):
         final = astore.load(aroot, state["final"])
         if final is not None:
@@ -377,12 +379,15 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             if analyse:
                 # only the swapped parts against everything else (CD-035): the whole-program check grows with every
                 # real part and runs at the final assembly; here it timed out once ten parts went in together
+                checked = True
                 ids = [i["id"] for i in final["instances"] if (i.get("office") or {}).get("item") in items]
                 keep = [c for c in clashes if _item_of(final, c["a"]) not in items and _item_of(final, c["b"]) not in items]
                 try:
                     fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
+                    fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)]
                     clashes = keep + [{**c, "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in fresh]
                 except aservice.WorkerError:
+                    checked = False
                     problems.append("Fitz's clash check on these parts didn't finish in time; the final assembly's "
                                     "check covers them.")
             astore.save(aroot, final)
@@ -390,14 +395,17 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     for i, key in updates.items():
         parts[i] = {"key": key, "kind": "placeholder" if key.startswith("h_") else "real",
                     "icd_version": prog["icd"]["version"]}
-    state["summary"] = summarize(parts, final, clashes)
+    state["summary"] = summarize(parts, final)
     state.update(parts=parts, clashes=clashes, at=astore.now(), problems=problems[:20],
                  solve=((final or {}).get("solve") or {}).get("status"), mates=len((final or {}).get("mates") or []))
     names = {i: sk["items"][i]["name"] for i in sk["items"]}
     mine = [c for c in clashes if _item_of(final, c["a"]) in items or _item_of(final, c["b"]) in items]
     by_item = {i: [c for c in mine if i in (_item_of(final, c["a"]), _item_of(final, c["b"]))] for i in items}
     state["last"] = {"items": sorted(items), "clashes": mine, "by_item": by_item, "problems": problems,
-                     "text": ", ".join(names.get(i, i) for i in sorted(items))}
+                     "text": ", ".join(names.get(i, i) for i in sorted(items)), "checked": checked}
+    if checked:
+        state["check"] = {**(state.get("check") or {}), "status": "done", "scope": "swap", "count": len(clashes),
+                          "at": astore.now()}
     return state
 
 
@@ -430,8 +438,30 @@ async def prewarm_swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: 
     return int(res["stats"]["computed"])
 
 
-def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, clashes: list[dict[str, Any]]) -> str:
-    """One line for the program page: real parts / placeholders, mates, fastener stacks, clashes."""
+def clash_status(state: dict[str, Any]) -> dict[str, Any]:
+    """The program assembly's clash count, from ONE place (``state["clashes"]`` with ``state["check"]``): every
+    page, comment and chat line takes it from here (live run 2026-11-19 showed "0 clashes" next to "2 clashes").
+    ``count`` is None while no finished check covers the assembly."""
+    chk = state.get("check") or {}
+    n = len(state.get("clashes") or [])
+    word = f"{n} clash{'es' if n != 1 else ''}"
+    if chk.get("status") == "running":
+        return {"count": None, "status": "running", "text": "the whole-program clash check is running (advisory)"}
+    if chk.get("status") == "failed":
+        return {"count": None, "status": "failed", "text": "the whole-program clash check didn't finish (check "
+                "clashes in Assembly Studio)"}
+    if chk.get("status") == "done" and chk.get("scope") in (None, "program"):
+        return {"count": n, "status": "done", "text": f"{word} in the whole-program check (advisory)"}
+    if chk.get("status") == "done":
+        return {"count": n, "status": "partial", "text": f"{word} at the last check ("
+                + ("placeholders" if chk.get("scope") == "placeholders" else "the parts swapped in so far") + ")"}
+    return {"count": None, "status": "none", "text": "no clash check yet"}
+
+
+def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None,
+              clashes: list[dict[str, Any]] | None = None) -> str:
+    """One line for the program page: real parts / placeholders, mates, fastener stacks. The clash count is not in
+    it (``clash_status`` is the one source); ``clashes`` is accepted for older callers and ignored."""
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
     n_real = len(parts) - n_ph
     mates = len((final or {}).get("mates") or [])
@@ -440,7 +470,23 @@ def summarize(parts: dict[str, dict[str, Any]], final: dict[str, Any] | None, cl
          f"{mates} mates (interfaces mated by name)")
     if stacks:
         s += f", {stacks} fastener stack{'s' if stacks != 1 else ''}"
-    return s + f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}."
+    _ = clashes
+    return s + "."
+
+
+def _envelope_mesh(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[str, Any]) -> bool:
+    """A real gear against the *placeholder* of the gear it meshes with: the placeholder is the tip-circle envelope,
+    so the real teeth always overlap it. That is not a clash (it says nothing about the real mesh, which the
+    whole-program check measures once both are real); reporting it sent a correct pinion back to its designer when
+    it happened to be swapped in before its gear."""
+    by = {i["id"]: i for i in adoc["instances"]}
+    a, b = by.get(c["a"]), by.get(c["b"])
+    if a is None or b is None:
+        return False
+    ia, ib = (a.get("office") or {}).get("item"), (b.get("office") or {}).get("item")
+    if not any(f["kind"] == "gear_mesh" and {f["a"]["item"], f["b"]["item"]} == {ia, ib} for f in ifaces):
+        return False
+    return str(a.get("part", "")).startswith("h_") != str(b.get("part", "")).startswith("h_")
 
 
 def _item_of(adoc: dict[str, Any] | None, iid: str) -> str | None:
@@ -752,15 +798,14 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
     if stats["binned"]:
         bits.append(f"{stats['binned']} part{'s' if stats['binned'] != 1 else ''} in the parts bin")
     name = "the program" if level == "root" else next((x["name"] for x in prog["items"] if x["id"] == level), level)
-    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + (
-        ", clash check didn't finish (check clashes in Assembly Studio)" if unchecked else
-        f", {len(clashes)} clash{'es' if len(clashes) != 1 else ''}")
-    say(summary, "warn" if clashes else "ok")
+    # PD-71: integration measures no clashes, so it never states a count ("0 clashes" was said under "2 clashes"
+    # in the live run 2026-11-19); the final assembly's whole-program check reports them (``clash_status``)
+    tail = (". Fitz's whole-program clash check runs now (advisory)" if level == "root" and not unchecked else
+            ", clash check didn't finish (check clashes in Assembly Studio)" if unchecked else "")
+    summary = f"Fitz integrated {name}" + (": " + ", ".join(bits) if bits else "") + tail + "."
+    say(summary, "ok")
     return {"summary": summary, "clashes": clashes, "log": log, "assembly_id": aid_out, "inserted": stats["stacks"],
-            "program_summary": summarize(state.get("parts") or {}, final, clashes if level == "root" else
-                                         state.get("clashes") or [])
-            .replace(", 0 clashes.", ", clash check didn't finish.") if unchecked else
-            summarize(state.get("parts") or {}, final, clashes if level == "root" else state.get("clashes") or [])}
+            "program_summary": summarize(state.get("parts") or {}, final)}
 
 
 # ----------------------------------------------------------------------------- advisory whole-program check (PD-71)
@@ -789,7 +834,7 @@ async def advisory_check(aroot: Path, org_id: str, prog: dict[str, Any]) -> dict
     else:
         text = (f"Fitz's whole-program clash check (advisory): no clashes across "
                 f"{an['interference']['checked_pairs']} candidate pairs in the final assembly.")
-    return {"status": "done", "clashes": clashes, "text": text, "at": astore.now(),
+    return {"status": "done", "scope": "program", "clashes": clashes, "text": text, "at": astore.now(),
             "checked_pairs": an["interference"]["checked_pairs"], "seconds": round(time.perf_counter() - t0, 1),
             "computed": an["pairs"]["computed"], "cached": an["pairs"]["cached"]}
 

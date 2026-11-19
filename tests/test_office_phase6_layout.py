@@ -172,7 +172,8 @@ def test_gearbox_program_assembles_with_no_clash(office: Any) -> None:  # noqa: 
     assert v["status"] == "complete", [(t["title"], t["column"], (t.get("run") or {}).get("status")) for t in v["tickets"]]
     st = v["assembly"]
     assert st["clashes"] == [] and not any(p["kind"] == "placeholder" for p in st["parts"].values()), st.get("summary")
-    assert st["summary"].startswith("7 real parts and 0 placeholders") and st["summary"].endswith("0 clashes.")
+    # the clash count has one source (program_assembly.clash_status), never the integration summary
+    assert st["summary"].startswith("7 real parts and 0 placeholders") and "clash" not in st["summary"]
     aroot = _aroot(c)
     final = astore.load(aroot, st["final"])
     # every instance of the final assembly, its own sub-assemblies' included, in the program frame

@@ -684,6 +684,21 @@ def display_names(doc: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def human_names(doc: dict[str, Any]) -> dict[str, str]:
+    """Instance names for sentences people read (chat, comments, visual-check lines): the part's own name, and
+    ``Name #2`` only where one name has several instances. ``display_names`` keeps the SOLIDWORKS ``<1>`` style for
+    the Assembly Studio tree."""
+    total: dict[str, int] = {}
+    for i in doc["instances"]:
+        total[i["name"]] = total.get(i["name"], 0) + 1
+    seen: dict[str, int] = {}
+    out = {}
+    for i in doc["instances"]:
+        seen[i["name"]] = seen.get(i["name"], 0) + 1
+        out[i["id"]] = i["name"] if total[i["name"]] == 1 else f"{i['name']} #{seen[i['name']]}"
+    return out
+
+
 def _pair_caller(org_id: str) -> pairs.Call:
     async def call(req: dict[str, Any], timeout: float) -> Any:
         return await _call(org_id, req, timeout)

@@ -110,7 +110,7 @@ function RunBar({ p, onSpeed }: { p: Program; onSpeed: () => void }) {
           : o?.state === "stopped"
             ? <>{o.reason === "balance" ? "The workspace ran out of tokens." : `The program reached its ${num(p.budget.tokens)}-token budget.`} Work already running finished; nothing new starts until you {o.reason === "balance" ? "top up" : "raise the budget (program menu)"} and press Resume.</>
             : p.icd?.status === "draft" ? (p.icd.problems.length > 0
-              ? <><b>Next: the Interfaces tab.</b> {p.icd.problems.length} interface problem{p.icd.problems.length === 1 ? "" : "s"} must be cleared (press <b>Fix with Archie</b> there), then approve the ICD and press Run.</>
+              ? <><b>Next: the Interfaces tab.</b> {p.icd.problems.length} interface problem{p.icd.problems.length === 1 ? "" : "s"} must be cleared (press <b>Fix with Archie</b> there, or <b>Keep as a separate part</b> for a part that is meant to have no interface), then approve the ICD and press Run.</>
               : <><b>Next: approve the interfaces (ICD)</b> on the Interfaces tab. Part work starts at that gate, against the numbers you approved; then press Run.</>)
               : <>Press <b>Run</b> and the office works the tickets: up to {p.concurrency} agents at a time, by critical path, inside the program's token budget. Each part is built to its interfaces and swapped into the program assembly when Gage approves it. You can still move tickets and open parts by hand.</>}
       </p>

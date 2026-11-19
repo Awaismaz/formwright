@@ -210,7 +210,8 @@ PLAN = {"source": "standard", "summary": "Test rig", "assumptions": [], "subasse
         {"name": "Spacer", "family": "turned", "complexity": 1, "qty": 1, "description": "Spacer Ø20 x 15 mm."}]}]}
 
 
-def _program(c: Any, email: str, plan: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
+def _program(c: Any, email: str, plan: dict[str, Any] | None = None, *, separate: bool = False,
+             **kw: Any) -> dict[str, Any]:
     from test_platform import signup
 
     signup(c, email)
@@ -223,6 +224,8 @@ def _program(c: Any, email: str, plan: dict[str, Any] | None = None, **kw: Any) 
     r = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": plan or PLAN})
     assert r.status_code == 200, r.text
     assert c.post(f"/api/office/programs/{pid}/run").status_code == 409  # parts wait for the ICD gate
+    if separate:  # the engineer's decision at the gate: the unconnected parts are meant to be separate
+        assert c.post(f"/api/office/programs/{pid}/icd/separate", json={}).status_code == 200
     r = c.post(f"/api/office/programs/{pid}/gates/icd/approve")
     assert r.status_code == 200, r.text
     return _wait(c, pid, lambda v: (v.get("assembly") or {}).get("status") not in (None, "building"))
@@ -312,18 +315,22 @@ def test_concurrency_cap_is_never_exceeded(office: Any) -> None:
     while time.time() - t0 < 90:
         v = c.get(f"/api/office/programs/{pid}").json()
         st = [(t.get("run") or {}).get("status") for t in v["tickets"]]
-        # CD-032: Fitz's swap-in is one shared step outside the agent slots (at most one at a time)
-        seen = max(seen, sum(1 for x in st if x in orchestrator.ACTIVE and x != "fitting"))
+        # CD-032: Fitz's swap-in is one shared step outside the agent slots (at most one at a time), and Hex's
+        # deterministic lookups ("searching") take no slot either
+        seen = max(seen, sum(1 for x in st if x in orchestrator.ACTIVE and x not in ("fitting", "searching")))
         fits = max(fits, sum(1 for x in st if x == "fitting"))
         if v["status"] == "complete":
             break
         time.sleep(0.03)
     assert v["status"] == "complete"
     assert seen <= 2 and fits <= 1 and fake_agents.STATS["max_active"] <= 2
-    assert orchestrator._runners.get(pid) is None or orchestrator._runners[pid].max_seen <= 3
+    assert orchestrator._runners.get(pid) is None or orchestrator._runners[pid].max_seen <= 2
 
 
-def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
+def test_gage_sends_back_then_approves_and_caps_retries(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad.office import direct
+
+    monkeypatch.setenv(direct.ENV, "0")  # the design agent's path (shafts are otherwise built from the ICD, no AI)
     c = office
     plan = {"source": "standard", "summary": "", "assumptions": [], "subassemblies": [
         {"name": "Shafts", "description": "", "parts": [
@@ -332,7 +339,7 @@ def test_gage_sends_back_then_approves_and_caps_retries(office: Any) -> None:
              "description": "Shaft Ø32 x 125 mm."}]}]}
     fake_agents.SCRIPT += [(r"Good shaft", {"icd_grow": 2.0, "omit_turns": 1}),
                            (r"Bad shaft", {"icd_grow": 3.0, "omit_turns": 99})]
-    v = _program(c, "gage@x.com", plan)
+    v = _program(c, "gage@x.com", plan, separate=True)  # two shafts made on their own: kept separate at the gate
     pid = v["id"]
     c.post(f"/api/office/programs/{pid}/run")
     v = _wait(c, pid, lambda v: _tk(v, "Good shaft")["column"] == "approved"
@@ -586,3 +593,50 @@ def test_integration_retries_after_a_worker_timeout(office: Any, monkeypatch: py
     assert v["status"] == "complete" and all(t["column"] == "integrated" for t in v["tickets"])
     subs = [x for x in seen if x != "root"]
     assert subs and all(subs.count(x) == 2 for x in set(subs))  # each level: one timeout, one retry that passed
+
+
+def test_hex_lookups_run_outside_the_agent_slots(office: Any) -> None:
+    """Live run 2026-11-19: bearings (a Toolbox lookup: no model, no tokens) waited 87 s for an agent slot. With one
+    slot held by a designer, Hex still finds the bolts at once."""
+    c = office
+    gate_ev = threading.Event()
+    fake_agents.SCRIPT.append((r"Base plate|Spacer", {"gate": gate_ev}))
+    v = _program(c, "hexslot@x.com", concurrency=1)
+    pid = v["id"]
+    c.post(f"/api/office/programs/{pid}/run")
+    v = _wait(c, pid, lambda v: _tk(v, "Cover bolt")["column"] == "approved")
+    busy = [t for t in v["tickets"] if (t.get("run") or {}).get("status") == "designing"]
+    assert len(busy) == 1 and not gate_ev.is_set()  # the one slot is still held by a design turn
+    assert "Toolbox" in _tk(v, "Cover bolt")["run"]["line"] or _tk(v, "Cover bolt")["reuse"]
+    gate_ev.set()
+    v = _wait(c, pid, lambda v: v["status"] == "complete")
+    r = orchestrator._runners.get(pid)
+    assert r is None or r.max_seen <= 1
+
+
+def test_a_run_stopped_at_its_budget_is_never_approved(office: Any) -> None:
+    """Live run 2026-11-19: a design turn's live meter (list prices) passed its 138-token run budget, the session
+    stopped it, the agent's own report charged 19 tokens, and the part went on to Gage and was approved."""
+    c = office
+    fake_agents.SCRIPT.append((r"Design the Spacer", {"meter_overshoot": True}))
+    v = _program(c, "stopped@x.com")
+    pid = v["id"]
+    c.post(f"/api/office/programs/{pid}/run")
+    v = _wait(c, pid, lambda v: (_tk(v, "Spacer").get("run") or {}).get("status") == "blocked")
+    sp = _tk(v, "Spacer")
+    assert sp["column"] not in ("approved", "integrated", "in_review")
+    assert "stopped at its run budget" in sp["run"]["line"] and "not sent for review" in sp["run"]["line"]
+    assert not any(cm["by"].get("code") == "gage" for cm in sp["comments"])
+    chat = c.get(f"/api/office/programs/{pid}/archie").json()["messages"]
+    assert any("run budget" in m["text"] and "carries on from where it stopped" in m["text"] for m in chat)
+    # Retry: the designer carries on (resumed), and this time it finishes and is reviewed
+    a = next(x for m in chat for x in m.get("actions", []) if x["type"] == "retry_blocked")
+    assert a["label"].startswith("Retry the 1 blocked part")
+    m = next(m for m in chat if a in m.get("actions", []))
+    r = c.post(f"/api/office/programs/{pid}/archie/actions", json={"message": m["id"], "action": a["id"],
+                                                                 "decision": "apply"})
+    assert r.status_code == 200, r.text
+    done = next(x for mm in r.json()["messages"] for x in mm.get("actions", []) if x["id"] == a["id"]
+                and mm["id"] == m["id"])
+    assert done["label"].startswith("Retried 1 blocked part") and "0 blocked" not in done["label"]
+    v = _wait(c, pid, lambda v: _tk(v, "Spacer")["column"] in ("approved", "integrated"))

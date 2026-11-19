@@ -129,6 +129,9 @@ export default function AssemblyView({ program, recent }: { program: Program; re
   const hovered = tip ? byId.get(tip.id) : null;
   const item = hovered?.item ? data.items[hovered.item] : null;
   const clashIds = new Set(view.clashes.flatMap(c => [c.a, c.b]));
+  // one count for the chip, the badge and the list (live run 2026-11-19: "0 clashes" beside "2 clashes")
+  const nClash = data.clash ? data.clash.count : data.clashes.length;
+  const clashList = data.clashes.length ? data.clashes : view.clashes;
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]" data-live-asm>
       <Card className="relative overflow-hidden">
@@ -148,7 +151,7 @@ export default function AssemblyView({ program, recent }: { program: Program; re
           <span className="inline-flex items-center gap-1 rounded-full border border-border bg-panel/90 px-2 py-0.5"><span className="h-2.5 w-2.5 rounded-sm border border-[#f08c2e] bg-[#f08c2e]/40" />{counts.placeholders} placeholders</span>
           <span className="inline-flex items-center gap-1 rounded-full border border-border bg-panel/90 px-2 py-0.5"><span className="h-2.5 w-2.5 rounded-sm bg-text/50" />{counts.real} real parts</span>
           {counts.standard > 0 && <span className="inline-flex items-center gap-1 rounded-full border border-border bg-panel/90 px-2 py-0.5"><span className="h-2.5 w-2.5 rounded-sm bg-[#8f99a8]" />{counts.standard} standard</span>}
-          {view.clashes.length > 0 && <span className="inline-flex items-center gap-1 rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-danger"><span className="h-2.5 w-2.5 rounded-sm bg-danger" />{view.clashes.length} clash{view.clashes.length > 1 ? "es" : ""}</span>}
+          {(nClash ?? 0) > 0 && <span className="inline-flex items-center gap-1 rounded-full border border-danger/40 bg-danger/10 px-2 py-0.5 text-danger" data-clash-chip><span className="h-2.5 w-2.5 rounded-sm bg-danger" />{nClash} clash{nClash! > 1 ? "es" : ""}</span>}
         </div>
         <div className="absolute bottom-2 left-2 right-2 flex flex-wrap items-center gap-2 rounded-md border border-border bg-panel/90 px-2 py-1.5 text-[12px]">
           <label className="flex items-center gap-2">Explode<input type="range" min={0} max={100} value={Math.round(explode * 100)} onChange={e => setExplode(Number(e.target.value) / 100)} aria-label="Exploded view" className="w-36" data-explode /></label>
@@ -158,7 +161,9 @@ export default function AssemblyView({ program, recent }: { program: Program; re
       <div className="space-y-3">
         <Card className="p-3 text-[12.5px]">
           <div className="mb-1 flex items-center gap-2 font-semibold"><Box className="h-4 w-4 text-primary" />Program assembly
-            {view.clashes.length === 0 ? <Badge tone="success" className="ml-auto">0 clashes</Badge> : <Badge tone="danger" className="ml-auto">{view.clashes.length} clashes</Badge>}</div>
+            {nClash === null ? <Badge tone="neutral" className="ml-auto" data-clash-badge>{data.clash?.status === "running" ? "Checking clashes…" : "Clashes not checked"}</Badge>
+              : nClash === 0 ? <Badge tone="success" className="ml-auto" data-clash-badge>0 clashes</Badge>
+                : <Badge tone="danger" className="ml-auto" data-clash-badge>{nClash} clash{nClash > 1 ? "es" : ""}</Badge>}</div>
           <p className="text-muted">{data.summary}</p>
           {data.check && <p className="mt-1.5 text-[11.5px] text-muted" data-advisory-check>
             {data.check.status === "running" ? "Whole-program clash check running (advisory: nothing waits for it)…" : data.check.text}</p>}
@@ -175,9 +180,9 @@ export default function AssemblyView({ program, recent }: { program: Program; re
           {!motion && <p className="text-muted">Turns every shaft in its bearings through one turn of the input (gear meshes by their ratios) and checks for collisions at each step.</p>}
           {motion && <MotionScrubber m={motion} step={Math.min(mstep, motion.steps.length - 1)} onStep={setMstep} />}
         </Card>
-        {view.clashes.length > 0 && <Card className="p-3 text-[12px]">
+        {(nClash ?? 0) > 0 && clashList.length > 0 && <Card className="p-3 text-[12px]">
           <div className="mb-1 font-semibold text-danger">Clashes</div>
-          {view.clashes.slice(0, 8).map((c, i) => <div key={i}>{c.a_name} ↔ {c.b_name}: {c.volume_mm3.toFixed(1)} mm³</div>)}
+          {clashList.slice(0, 8).map((c, i) => <div key={i}>{c.a_name} ↔ {c.b_name}: {c.volume_mm3.toFixed(1)} mm³</div>)}
         </Card>}
         <Card className="max-h-[300px] overflow-y-auto p-3 text-[12px]">
           <div className="mb-1 font-semibold">Parts</div>

@@ -140,6 +140,64 @@ def resize(root: Path, doc: dict[str, Any], item: str, values: dict[str, Any], a
     service.emit(root, doc, "icd.edited", text + ".", actor)
 
 
+# ----------------------------------------------------------------------------- separate parts (an engineer decision)
+def unconnected(doc: dict[str, Any]) -> list[str]:
+    """Items the draft layout flags as ``no_interface`` and the engineer has not yet kept separate."""
+    if not has_icd(doc):
+        return []
+    return [i for x in icd.issues(doc["skeleton"], doc["icd"]["interfaces"])
+            if x["code"] == "no_interface" and x["severity"] == "error" for i in x["items"]]
+
+
+def keep_separate(root: Path, doc: dict[str, Any], items: list[str] | None, keep: bool, actor: dict[str, Any]
+                  ) -> list[str]:
+    """The engineer's recorded decision at the ICD gate: these parts are meant to have no interface (a kit, shafts
+    to be made on their own). ``items`` None = every part flagged ``no_interface`` now. ``keep`` False undoes it.
+    The gate still blocks every other problem; the decision is in the ICD history and the activity. Returns the
+    items changed."""
+    if not has_icd(doc):
+        raise OfficeInputError("This program has no interfaces document.")
+    ic = doc["icd"]
+    if ic["status"] != "draft":
+        raise OfficeInputError("The ICD is approved: the parts are already placed as it says.")
+    ov = copy.deepcopy(ic["overrides"])
+    sep: dict[str, Any] = dict(ov.get("separate") or {})
+    sk_items = doc["skeleton"]["items"]
+    if keep:
+        flagged = unconnected(doc)
+        want = flagged if items is None else [i for i in items if i in sk_items]
+        bad = [sk_items[i]["name"] for i in want if i not in flagged and i not in sep]
+        if bad:
+            raise OfficeInputError(f"{bad[0]} is connected to the program by an interface: only a part with no "
+                                   "interface can be kept separate.")
+        changed = [i for i in want if i not in sep]
+        for i in changed:
+            sep[i] = {"by": actor.get("name"), "at": store.now()}
+    else:
+        changed = list(sep) if items is None else [i for i in items if i in sep]
+        for i in changed:
+            sep.pop(i, None)
+    if not changed:
+        raise OfficeInputError("Nothing to change: " + ("no part is flagged as unconnected." if keep else
+                                                         "no part is kept separate."))
+    ov["separate"] = sep
+    sk2, ifs2 = _rebuild(doc, ov)
+    doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, icd.problems(sk2, ifs2)
+    names = [sk_items[i]["name"] for i in changed if i in sk_items]
+    who = actor.get("name", "Someone")
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    one = len(names) == 1
+    text = (f"{who} kept {listed} as {'a separate part' if one else 'separate parts'}: no interface is intended, so "
+            f"{'it is' if one else 'they are'} placed beside the assembly and no longer block the interfaces."
+            if keep else
+            f"{who} asked for {listed} to be connected again: {'it blocks' if one else 'they block'} the interfaces "
+            f"until an interface connects {'it' if one else 'them'} or {'it is' if one else 'they are'} kept separate.")
+    ic["history"].append({"version": ic["version"], "at": store.now(), "by": who,
+                          "kind": "separate" if keep else "connect", "items": changed, "text": text, "changes": []})
+    service.emit(root, doc, "icd.separate" if keep else "icd.connect", text, actor, items=changed)
+    return changed
+
+
 # ----------------------------------------------------------------------------- Archie fixes the draft (CD-028)
 FIX_MAX_STEPS = 24
 
@@ -560,6 +618,10 @@ def view(doc: dict[str, Any]) -> dict[str, Any] | None:
             "problems": probs, "warnings": icd.warnings(sk, ic["interfaces"]),
             # the problems with their codes and the items / interfaces they name (computed only when there are any)
             "issues": [x for x in icd.issues(sk, ic["interfaces"]) if x["severity"] == "error"] if probs else [],
+            # parts the engineer kept separate at the gate (an acknowledged warning, recorded in the history)
+            "separate": [{"item": i, "name": sk["items"][i]["name"],
+                          **((ic["overrides"].get("separate") or {}).get(i) or {})}
+                         for i in sk.get("separate") or [] if i in sk["items"]],
             "skeleton": {k: v for k, v in sk.items()},
             "fits": list(icd.FITS), "fasteners": [f"M{m}" for m in icd.CLEARANCE],
             "bearings": [str(k) for k in sorted(icd.BEARINGS)], "housing_fits": list(icd.HOUSING_FITS),

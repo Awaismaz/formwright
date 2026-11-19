@@ -116,7 +116,8 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
     (bearings on their journals or in their seats, gears on their shafts, bolted joints), or (no interfaces) the
     parts' roles: gears mesh in pairs on parallel shafts at m (z1 + z2) / 2, every gear sits on a shaft, shafts run in
     their bearings, parts mount on the block they hang from."""
-    items = skel.get("items") or {}
+    kept = set(skel.get("separate") or [])  # parts the engineer kept separate: nothing to relate them to
+    items = {i: it for i, it in (skel.get("items") or {}).items() if i not in kept}
     mesh: list[str] = []
     out: list[str] = []
     for f in ifaces:
@@ -170,7 +171,7 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
                 out.append(f"{st.get('qty', 1)} × {nm} carry the shafts (typically two per shaft, one either side of "
                            "its gear)")
     out = mesh + out
-    if not out and brief:
+    if not out and brief and not (kept and not items):  # a kit of separate parts: nothing is meant to be assembled
         out.append("the parts are assembled as the brief describes")
     return [{"id": f"R{k + 1}", "text": t} for k, t in enumerate(out[:12])]
 
@@ -179,7 +180,7 @@ def relations_from_doc(root: Path, doc: dict[str, Any]) -> list[dict[str, Any]]:
     """What an Assembly Studio document intends: its mates (pair by pair, in words) and its recognised gear pairs."""
     from aicad.assembly import service
 
-    names = service.display_names(doc)
+    names = service.human_names(doc)  # people read these lines
     by_pair: dict[tuple[str, str], set[str]] = {}
     for m in doc.get("mates") or []:
         a, b = m["a"]["inst"], m["b"]["inst"]
@@ -305,7 +306,7 @@ def quick_doc(root: Path, doc: dict[str, Any]) -> dict[str, Any]:
     from aicad.assembly import service
 
     t0 = time.perf_counter()
-    names = service.display_names(doc)
+    names = service.human_names(doc)  # people read these lines
     boxes = _world_boxes(root, doc)
     link = {}
     first: dict[str, str] = {}
@@ -343,7 +344,10 @@ def quick_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]]) -> dict[s
     sc = render.scene_from_skeleton(skel, "", ifaces)
     boxes: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     names: dict[str, str] = {}
+    apart = {f"item:{i}" for i in skel.get("separate") or []}  # kept separate by the engineer at the ICD gate
     for b in sc["bodies"]:
+        if b.get("group") in apart:
+            continue
         bb = render.bounds({"bodies": [b]})
         if bb:
             boxes[b["id"]] = (np.array(bb[0]), np.array(bb[1]))
@@ -385,6 +389,8 @@ def merge_issues(findings: list[dict[str, Any]], skel: dict[str, Any], ifaces: l
         raw = []
     mapped = []
     for x in raw:
+        if x.get("acknowledged"):
+            continue  # the engineer's recorded decision (a part kept separate): not a finding any more
         m = ISSUE_MAP.get(str(x.get("code")))
         if m:
             mapped.append({"code": m[0], "severity": m[1], "items": list(x.get("items") or []),
@@ -498,8 +504,10 @@ def parse_verdict(text: str, relations: list[dict[str, Any]], key: list[dict[str
         return {"overall": "unsure", "relations": [{"id": i, "status": "unsure", "reason": ""} for i in ids],
                 "problems": [], "summary": "The visual check gave no readable answer.", "readable": False}
 
+    nums = {k["n"]: k["label"] for k in key or []}
+
     def clean(s: Any, n: int = 240) -> str:
-        return scrub(" ".join(str(s or "").split()))[:n]
+        return named(scrub(" ".join(str(s or "").split())), nums)[:n]
 
     got = {str(r.get("id")): r for r in data.get("relations") or [] if isinstance(r, dict)}
     rels = []
@@ -507,7 +515,6 @@ def parse_verdict(text: str, relations: list[dict[str, Any]], key: list[dict[str
         g = got.get(r["id"]) or {}
         st = g.get("status") if g.get("status") in STATUS else "unsure"
         rels.append({"id": r["id"], "text": r["text"], "status": st, "reason": clean(g.get("reason"))})
-    nums = {k["n"]: k["label"] for k in key or []}
     probs = []
     for p in (data.get("problems") or [])[:8]:
         if not isinstance(p, dict) or not str(p.get("text") or "").strip():
@@ -521,6 +528,26 @@ def parse_verdict(text: str, relations: list[dict[str, Any]], key: list[dict[str
         overall = "looks_wrong" if any(r["status"] == "wrong" for r in rels) else "unsure"
     return {"overall": overall, "relations": rels, "problems": probs, "summary": clean(data.get("summary"), 300),
             "readable": True}
+
+
+_ITEM_REF = re.compile(r"\b(?:item|part|body|no\.?|number)\s*#?\s*(\d+)\b", re.IGNORECASE)
+_TAG_REF = re.compile(r"\s*[(\[]\s*#?(\d+)\s*[)\]]")
+_INST = re.compile(r"<(\d+)>")
+
+
+def named(text: str, nums: dict[int, str]) -> str:
+    """The picture's number tags in a sentence become the parts' names (live run 2026-11-19: "Item 3" and
+    "Key (3)" reached the chat), and SOLIDWORKS instance suffixes become plain words ("Gear shaft<1>" -> "Gear shaft",
+    "Bearing<2>" -> "Bearing #2")."""
+    if nums:
+        text = _ITEM_REF.sub(lambda m: nums.get(int(m.group(1)), m.group(0)), text)
+        text = _TAG_REF.sub(lambda m: "" if int(m.group(1)) in nums else m.group(0), text)
+    return plain_instances(text)
+
+
+def plain_instances(text: str) -> str:
+    """``Name<1>`` -> ``Name``, ``Name<k>`` -> ``Name #k`` (k > 1): the instance number only where it tells two apart."""
+    return _INST.sub(lambda m: "" if m.group(1) == "1" else f" #{m.group(1)}", text or "")
 
 
 def fake_verdict(relations: list[dict[str, Any]], quick: dict[str, Any], key: list[dict[str, Any]]) -> dict[str, Any]:
@@ -690,7 +717,7 @@ async def targeted(root: Path, org_id: str, doc: dict[str, Any], targets: list[s
     if not targets:
         return []
     res = await service.check_pairs(root, org_id, doc, only=targets)
-    names = service.display_names(doc)
+    names = service.human_names(doc)  # people read these lines
     mine = set(targets)
     return [{"a": p["a"], "b": p["b"], "a_name": names.get(p["a"]), "b_name": names.get(p["b"]),
              "volume_mm3": round(float(p["volume_mm3"]), 3)} for p in res["interference"]["pairs"]

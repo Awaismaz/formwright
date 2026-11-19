@@ -68,10 +68,18 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
     verdict = (rec or {}).get("verdict")
     vline = visual.summary_line(verdict) if verdict else ""
     name = doc["name"]
+    kept = [sk["items"][i]["name"] for i in sk.get("separate") or [] if i in (sk.get("items") or {})]
     if not probs and not found and (verdict is None or verdict["overall"] == "looks_assembled"):
         tail = f" {vline}" if vline else ""
+        if kept and len(kept) == len(sk.get("items") or {}):  # a kit: nothing is meant to be assembled
+            listed = ", ".join(kept[:-1]) + " and " + kept[-1] if len(kept) > 1 else kept[0]
+            return ((f"I looked at the layout of {name} before you approve the interfaces: {listed} "
+                     f"{'are' if len(kept) > 1 else 'is'} kept separate as you decided, so there is nothing to "
+                     "assemble and no interface to check. Approve the interfaces when you're happy."), [])
+        sep = (f" {', '.join(kept)} {'are' if len(kept) > 1 else 'is'} kept separate as you decided (placed beside "
+               "the assembly)." if kept else "")
         return ((f"I looked at the layout of {name} before you approve the interfaces: the parts are placed where they "
-                f"connect and the placement checks pass.{tail} Approve the interfaces when you're happy."), [])
+                f"connect and the placement checks pass.{sep}{tail} Approve the interfaces when you're happy."), [])
     lines: list[str] = []
     row = any(f["code"] == "row" for f in found) or bool(codes & {"row_layout", "no_mount", "no_host"})
     mountless = _mountless(sk)
@@ -116,8 +124,24 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
                "this note so the parts are planned to connect, then lay it out and look again.")
     else:
         ask = "Nothing measured is wrong, so this is your call: approve the interfaces, or tell me what to change."
-    text = (f"Before you approve the interfaces, I looked at the layout of {name}. It doesn't look right:\n"
-            + "\n".join(f"- {x}" for x in lines[:6]) + ("\n\n" + ask if ask else ""))
+    loose_ids = [i for f in loose for i in f.get("items") or []]
+    if loose_ids:  # a kit, or parts made on their own: the engineer may say so (recorded at the gate, PD-85)
+        one = len(loose_ids) == 1
+        acts.append({"type": "keep_separate", "items": loose_ids})
+        ask += (f" If {'it is' if one else 'they are'} meant to be {'a separate part' if one else 'separate parts'} "
+                f"(a kit, or parts made on their own), keep {'it' if one else 'them'} separate: your decision is "
+                "recorded in the interfaces history and no longer blocks approval.")
+    # the heading follows what was found: measured or seen wrong, unsure, or only notes (live run 2026-11-19: an
+    # unsure picture with every relation ok was headed "It doesn't look right")
+    overall = (verdict or {}).get("overall")
+    if probs or block or overall == "looks_wrong":
+        head = "It doesn't look right:"
+    elif overall == "unsure":
+        head = "I can't tell from the picture whether it is assembled as intended:"
+    else:
+        head = "It looks assembled, with notes:"
+    text = (f"Before you approve the interfaces, I looked at the layout of {name}. {head}\n"
+            + "\n".join(f"- {x}" for x in lines[:6]) + ("\n\n" + ask.strip() if ask.strip() else ""))
     return text, acts
 
 
@@ -199,15 +223,20 @@ async def level_look(root: Path, pid: str, tid: str, aroot: Path, aid: str, *, o
             _charge(root, pid, org_id, user_id, int(rec.get("tokens") or 0), god, f"visual check of {t['title']}")
         verdict = (rec or {}).get("verdict")
         d = visual.decide(verdict, q, None)
+        binned = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("bin")}
+        measured = False
         if d["exact"] == "targeted" and not d["stop"] and verdict:
-            targets = visual.targets_from(verdict, adoc, (rec or {}).get("key") or [])
+            # parts in the parts bin are not placed at all: measuring them can't confirm or clear anything
+            targets = [i for i in visual.targets_from(verdict, adoc, (rec or {}).get("key") or []) if i not in binned]
             try:
-                clashes = await visual.targeted(aroot, org_id, adoc, targets)
+                clashes = await visual.targeted(aroot, org_id, adoc, targets) if targets else []
+                measured = bool(targets)
             except Exception:  # noqa: BLE001 - a worker hiccup: the concern stays unconfirmed
                 clashes = []
             d = visual.confirm(d, verdict, clashes)
         out.update(stop=bool(d["stop"]), reason=d.get("reason") or "", verdict=verdict,
-                   line=(rec or {}).get("line") or "", unconfirmed=bool(d.get("unconfirmed")),
+                   line=(rec or {}).get("line") or "", unconfirmed=bool(d.get("unconfirmed")), measured=measured,
+                   unplaced=unplaced_names(adoc, binned),
                    image=f"/api/m/assembly/assemblies/{aid}/visual.png" if rec and rec.get("status") == "done"
                    else None, quick=q["findings"], tokens=int((rec or {}).get("tokens") or 0))
         return out
@@ -222,36 +251,82 @@ def known_loose(doc: dict[str, Any], adoc: dict[str, Any], findings: list[dict[s
     nothing (a row) still stops: nothing there is assembled."""
     ifs = (doc.get("icd") or {}).get("interfaces") or []
     linked = {f[s]["item"] for f in ifs for s in ("a", "b")}
-    items = (doc.get("skeleton") or {}).get("items") or {}
+    sk = doc.get("skeleton") or {}
+    items = sk.get("items") or {}
     loose_items = {i for i in items if i not in linked} if ifs else set()
+    separate = set(sk.get("separate") or [])  # the engineer kept these separate at the gate
+    loose_items |= separate
     loose = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in loose_items}
+    kept = {i["id"] for i in adoc["instances"] if (i.get("office") or {}).get("item") in separate}
     out = []
     for f in findings:
-        if f["code"] == "floating" and f["items"] and set(f["items"]) <= loose:
+        its = set(f.get("items") or [])
+        if f["code"] in ("floating", "row") and its and len(its - kept) <= 1 and kept & its:
+            continue  # only parts the engineer kept separate (and at most one other) touch nothing: as decided
+        if f["code"] == "floating" and its and its <= loose:
             f = {**f, "severity": "note", "text": f["text"] + " The approved layout gives it no interface."}
         out.append(f)
     return out
 
 
+def unplaced_names(adoc: dict[str, Any], binned: set[str]) -> list[str]:
+    """The parts of a level Fitz left in the parts bin (the interfaces give them no seat), as people name them:
+    "Pinion key", "2 × Gear circlip"."""
+    count: dict[str, int] = {}
+    for i in adoc["instances"]:
+        if i["id"] in binned:
+            count[i["name"]] = count.get(i["name"], 0) + 1
+    return [n if k == 1 else f"{k} × {n}" for n, k in count.items()]
+
+
+def _unplaced_line(names: list[str]) -> str:
+    """Said plainly, never as reassurance (live run 2026-11-19: "found nothing to confirm it" about a key that no
+    seat would ever take)."""
+    if not names:
+        return ""
+    one = len(names) == 1 and " × " not in names[0]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    it = "it" if one else "them"
+    return (f"{listed} {'is' if one else 'are'} not placed: the interfaces have no seat for {it}, so Fitz left {it} "
+            f"in the parts bin beside the assembly, not fitted. Fit {it} by hand in Assembly Studio, or change the "
+            f"plan or the interfaces so they say where {'it goes' if one else 'they go'}.")
+
+
 def level_message(t: dict[str, Any], look: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     """Archie's words after looking at an integrated level (pure)."""
     what = t["title"].removeprefix("Assemble ")
+    loose = _unplaced_line(list(look.get("unplaced") or []))
     if look.get("stop"):
         found = [f["text"] for f in look.get("quick") or [] if f["severity"] == "block"]
         bullets = "\n".join(f"- {x}" for x in (found or [look["reason"]])[:4])
         line = look.get("line") or ""  # the reason already carries the visual line when a measurement confirmed it
         extra = f"\n{line}" if line and line not in bullets else ""
-        return ((f"I stopped {t['key']} {t['title']}: {what} isn't assembled as the interfaces say.\n{bullets}{extra}\n\n"
-                "This usually comes from the layout, not from the parts: the interfaces place every part. I can "
-                "rebuild the program assembly from the approved interfaces and retry the step; if it stops again, "
-                "the layout needs a change (tell me what, or raise a change request on the Interfaces tab)."),
-                [{"type": "retry_blocked"}])
+        if found:  # a placement measurement: the interfaces placed it so
+            tip = ("The interfaces place every part, so this comes from the layout or the plan. I can rebuild the "
+                   "program assembly from the approved interfaces and retry the step; if it stops again, the layout "
+                   "needs a change (tell me what, or raise a change request on the Interfaces tab).")
+        else:  # the picture, confirmed by a measured clash between the flagged parts
+            tip = ("A measured clash between the flagged parts confirms what the picture shows. Look at the clash in "
+                   "the assembly view: if a part is wrong, reopen it with a note; if the interface is wrong, raise a "
+                   "change request on the Interfaces tab. I can retry the step once that is done.")
+        return ((f"I stopped {t['key']} {t['title']}: {what} isn't assembled as the interfaces say.\n{bullets}{extra}"
+                 + (f"\n- {loose}" if loose else "") + f"\n\n{tip}"), [{"type": "retry_blocked"}])
     if look.get("unconfirmed"):
-        return ((f"{what} is integrated. {look['line']} I measured the parts in question and found nothing to "
-                "confirm it, so the office carries on; have a look at the picture in the assembly view if you want to "
-                "be sure."), [])
-    if look.get("line"):
-        return f"{what} is integrated. {look['line']}", []
+        bits = [f"{what} is integrated. {look['line']}"]
+        if loose:
+            bits.append(loose)
+        if look.get("measured"):
+            bits.append("I checked the flagged parts that are placed for clashes and found none. A clash check can't "
+                        "show a part that is loose or in the wrong place, so this is not a confirmation either way: "
+                        "the office carries on, and the picture in the assembly view is worth a look.")
+        elif not loose:
+            bits.append("Nothing measured confirms it, so the office carries on; the picture in the assembly view is "
+                        "worth a look.")
+        else:
+            bits.append("The office carries on with the parts that are placed.")
+        return " ".join(bits), []
+    if look.get("line") or loose:
+        return " ".join(x for x in (f"{what} is integrated.", look.get("line") or "", loose) if x), []
     return "", []
 
 
@@ -281,7 +356,10 @@ def failure_message(doc: dict[str, Any], t: dict[str, Any], why: str, retrying: 
         return ((f"{t['key']} {who} hit a problem: {why} The office retries it shortly on its own; if it keeps "
                 "failing it will wait for you and I'll tell you what to do."), [])
     low = why.lower()
-    if "review" in low or "gage" in low or "rounds" in low:
+    if "run budget" in low:
+        tip = ("I can put it back to work: the designer carries on from where it stopped, with a new run budget "
+               "(more tokens). Or take it over in the Studio and finish it by hand.")
+    elif "review" in low or "gage" in low or "rounds" in low:
         tip = ("Gage kept sending it back. I can put the blocked parts back to work under the current review rules "
                "(a part that passes every measurable check is approved with the open points recorded).")
     elif "clash" in low:
