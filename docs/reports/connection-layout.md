@@ -109,6 +109,30 @@ The folded state (c): the layout gives the deployed state, legs perpendicular un
 table's brief means by default; a folded state would be a second configuration of the same joints (a pivot angle),
 not built here (PD-142).
 
+### Integration fix after the merge (branch `wip/layout-revision-fix`)
+
+`tests/test_program_revision.py` failed 7 tests on merged main. The causes, and what was changed:
+
+* **The pivot rule now sizes the bracket.** Before, the pivot sat at the bracket's centre and the solver refused a
+  bracket too shallow for the leg's upper end ("would hit the Table top"). Now the bore sits e + 2 mm under the top,
+  where e is half the member's width: the upper end stays 2 mm clear. The bracket grows only when it can't hold that
+  bore with 1 mm of wall; the depth is then re-planned and said in the notes. The revision's own sizes now lay out:
+  80 x 60 x 40 brackets need 27.5 mm, and a 100 x 70 x 16 bracket grows to 52.5.
+* **The fixture starts from the founder's stored v1.** It is built with the template and its old base choice, and
+  approved under the old per-item gate. Test 1 now asserts that today's per-copy check blocks legs #2 to #4, and that
+  a re-layout takes the top as the base.
+* **Proposals.** `revision.propose` and the chat reader now offer a plain re-layout: the connection layout pairs the
+  copies, so no base or mount ops are needed. The two "expected 1, got 0" tests were empty only because the proposal
+  failed on the old pivot conflict; they now get their one proposal, with 3 parts redesigned. The layout expectations
+  were rewritten with hand numbers: corners 30 mm in, pivot at Z -40, legs Z -720 .. -20.
+
+Green: `test_program_revision` + `test_connection_layout` 42, `test_design_graph` + `test_office_small` 38,
+`test_office_orchestrator` + `test_office_supervisor` 42, golden graph path 10 of 10.
+
+Replay on 8809: phase 1 on the template, then a revision via `POST /revision {"op": "relayout"}` with the solver.
+Result: ICD v2, complete, 0 clashes, 52 mates. The screenshot (`6-table-revised-pivot-rule.png`) shows the table with
+its brackets under the corners and each leg hanging from its own bracket.
+
 ## Parity on the existing layout tests
 
 Method (`docs/reports/connection-layout/parity.py`, a pytest plugin, one test file per pytest call): every
