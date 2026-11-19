@@ -24,6 +24,9 @@ DEFAULT_ROUTES: dict[str, str] = {
     "design_agent.simple": "sonnet",  # benchmark: same pass rate as Opus on the simple cases (agent-latency)
     "design_agent.edit": "sonnet",    # benchmark: same pass rate as Opus on the edit case (agent-latency)
     "planner": "opus",                # Archie: program planning and intent
+    "intent": "opus",                 # design graph from a brief (graph/intent.py): programs, mechanisms
+    "intent.complex": "opus",
+    "intent.simple": "sonnet",        # a shaft and what rides on it: docs/reports/design-graph.md (same graph)
     "change_review": "opus",          # Archie: ICD change requests
     "office_chat": "opus",            # Archie in the program chat (orchestration)
     "supervisor": "opus",             # Archie supervising a running program (office/supervisor, WORKLIST 49)

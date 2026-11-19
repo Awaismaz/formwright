@@ -1,0 +1,20 @@
+{
+  "case": "keyed_gear",
+  "name": "Keyed gear",
+  "brief": "Build a Spur Gear mounted on stepped Shaft and locked with a key",
+  "recorded": "hand-written reply in the intent schema (stub provider)",
+  "reply": {
+    "summary": "A spur gear keyed on a stepped shaft and located against its shoulder.",
+    "components": [
+      {"id": "shaft", "kind": "shaft", "name": "Stepped shaft", "qty": 1, "params": {"stepped": true}},
+      {"id": "gear", "kind": "spur_gear", "name": "Spur gear", "qty": 1},
+      {"id": "key", "kind": "key", "name": "Parallel key", "qty": 1}
+    ],
+    "connections": [
+      {"kind": "keyed_hub", "host": "shaft", "guest": "gear", "via": ["key"]},
+      {"kind": "shoulder_stop", "host": "shaft", "guest": "gear"}
+    ],
+    "assumptions": ["The brief gives no sizes, so they are sized from standards and stated defaults."],
+    "questions": []
+  }
+}

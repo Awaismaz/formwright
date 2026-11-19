@@ -1,0 +1,43 @@
+{
+  "case": "reducer",
+  "name": "Gear Reducer",
+  "brief": "Build a Single stage 3:1 reducer with Spur Gears",
+  "recorded": "hand-written reply in the intent schema (stub provider)",
+  "reply": {
+    "summary": "A single-stage 3:1 spur reducer in a split housing.",
+    "components": [
+      {"id": "housing_base", "kind": "housing", "name": "Housing base", "qty": 1, "group": "Housing", "params": {"style": "split"}},
+      {"id": "housing_cover", "kind": "cover", "name": "Housing cover", "qty": 1, "group": "Housing"},
+      {"id": "input_open_cap", "kind": "bearing_cap", "name": "Input open cap", "qty": 1, "group": "Housing", "params": {"style": "open"}},
+      {"id": "input_blind_cap", "kind": "bearing_cap", "name": "Input blind cap", "qty": 1, "group": "Housing", "params": {"style": "blind"}},
+      {"id": "output_open_cap", "kind": "bearing_cap", "name": "Output open cap", "qty": 1, "group": "Housing", "params": {"style": "open"}},
+      {"id": "output_blind_cap", "kind": "bearing_cap", "name": "Output blind cap", "qty": 1, "group": "Housing", "params": {"style": "blind"}},
+      {"id": "cap_screw", "kind": "fastener", "name": "Cap screw", "qty": 16, "group": "Housing", "params": {"style": "shcs"}},
+      {"id": "cover_bolt", "kind": "fastener", "name": "Cover bolt", "qty": 4, "group": "Housing", "params": {"style": "hex_bolt"}},
+      {"id": "input_shaft", "kind": "shaft", "name": "Input shaft", "qty": 1, "group": "Input shaft group", "params": {"role": "input"}},
+      {"id": "pinion", "kind": "spur_gear", "name": "Pinion", "qty": 1, "group": "Input shaft group"},
+      {"id": "pinion_key", "kind": "key", "name": "Pinion key", "qty": 1, "group": "Input shaft group"},
+      {"id": "input_bearing", "kind": "bearing", "name": "Input bearing", "qty": 2, "group": "Input shaft group"},
+      {"id": "output_shaft", "kind": "shaft", "name": "Output shaft", "qty": 1, "group": "Output shaft group", "params": {"role": "output"}},
+      {"id": "output_gear", "kind": "spur_gear", "name": "Output gear", "qty": 1, "group": "Output shaft group"},
+      {"id": "gear_key", "kind": "key", "name": "Gear key", "qty": 1, "group": "Output shaft group"},
+      {"id": "output_bearing", "kind": "bearing", "name": "Output bearing", "qty": 2, "group": "Output shaft group"}
+    ],
+    "connections": [
+      {"kind": "keyed_hub", "host": "input_shaft", "guest": "pinion", "via": ["pinion_key"]},
+      {"kind": "keyed_hub", "host": "output_shaft", "guest": "output_gear", "via": ["gear_key"]},
+      {"kind": "gear_mesh", "host": "pinion", "guest": "output_gear", "params": {"ratio": 3}},
+      {"kind": "bearing_journal", "host": "input_shaft", "guest": "input_bearing", "params": {"count": 2}},
+      {"kind": "bearing_journal", "host": "output_shaft", "guest": "output_bearing", "params": {"count": 2}},
+      {"kind": "bearing_seat", "host": "housing_base", "guest": "input_bearing", "params": {"count": 2}},
+      {"kind": "bearing_seat", "host": "housing_base", "guest": "output_bearing", "params": {"count": 2}},
+      {"kind": "bolted_joint", "host": "housing_base", "guest": "housing_cover", "via": ["cover_bolt"]},
+      {"kind": "bolted_joint", "host": "housing_base", "guest": "input_open_cap", "via": ["cap_screw"]},
+      {"kind": "bolted_joint", "host": "housing_base", "guest": "input_blind_cap", "via": ["cap_screw"]},
+      {"kind": "bolted_joint", "host": "housing_base", "guest": "output_open_cap", "via": ["cap_screw"]},
+      {"kind": "bolted_joint", "host": "housing_base", "guest": "output_blind_cap", "via": ["cap_screw"]}
+    ],
+    "assumptions": ["Gear sizes are not in the brief: module, teeth and shaft sizes follow the 3:1 ratio and standards."],
+    "questions": []
+  }
+}
