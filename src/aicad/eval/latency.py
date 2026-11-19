@@ -210,7 +210,8 @@ def metrics_from_record(rec: dict[str, Any] | None) -> dict[str, Any]:
             "tools": (rec.get("tools") or {}).get("by_name"), "models": (rec.get("model") or {}).get("used"),
             "effort": (rec.get("turn") or {}).get("effort"), "turn": rec.get("turn"),
             "calls": [{k: c.get(k) for k in ("n", "start_s", "duration_s", "output_tokens", "tools")} for c in calls],
-            "outcome": (rec.get("outcome") or {}).get("status")}
+            "outcome": (rec.get("outcome") or {}).get("status"),
+            "build_results": [b.get("result") for b in rec.get("builds") or []]}
 
 
 async def run_case(case: dict[str, Any], mode: str, root: Path, model: str | None = None,

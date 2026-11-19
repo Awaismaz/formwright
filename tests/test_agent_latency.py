@@ -226,3 +226,36 @@ def test_single_calls_get_their_routed_model(monkeypatch: pytest.MonkeyPatch) ->
         asyncio.run(llm.complete(llm.CallRequest(role="planner", system="s", prompt="p")))
         asyncio.run(llm.complete(llm.CallRequest(role="reviewer", system="s", prompt="p", model="claude-x")))
     assert seen == ["claude-haiku-5-5", None, "claude-x"]
+
+
+# ------------------------------------------------------------------ build worker pool (Design Office parallelism)
+def test_build_pool_spreads_projects_and_keeps_each_on_its_worker(tmp_path: Path,
+                                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from aicad.agent import worker
+
+    worker.kill_all()
+    worker._affinity.clear()
+    monkeypatch.setenv(worker.POOL_ENV, "1")
+    a, b, c = (tmp_path / n for n in ("a", "b", "c"))
+    assert worker.worker_for("org", {"op": "build", "out": str(b / "out")}) is worker.get_worker("org")  # default
+    monkeypatch.setenv(worker.POOL_ENV, "3")
+    monkeypatch.setattr(worker.os, "cpu_count", lambda: 12)
+    wa = worker.worker_for("org", {"op": "build", "script": str(a / "model.py"), "out": str(a / "out")})
+    assert wa is worker.get_worker("org")  # an idle pool starts on slot 0
+    wa.lock = SimpleNamespace(locked=lambda: True)  # project a is building
+    wb = worker.worker_for("org", {"op": "build", "out": str(b / "out")})
+    assert wb is worker.get_worker("org#1")  # b builds at the same time on another worker
+    wc = worker.worker_for("org", {"op": "build", "out": str(c / "out")})
+    assert wc is worker.get_worker("org#2")
+    # every later request of a project goes to the worker that holds its shape
+    assert worker.worker_for("org", {"op": "finalize", "out": str(a / "out"), "stage": "exports"}) is wa
+    assert worker.worker_for("org", {"op": "render", "stl": str(b / "out" / "preview.stl")}) is wb
+    assert worker.worker_for("org", {"op": "dims_base", "script": str(c / "model.py")}) is wc
+    # no project folder (a plain warm-up): slot 0
+    assert worker.worker_for("org", {"op": "warm"}) is wa
+    monkeypatch.setattr(worker.os, "cpu_count", lambda: 2)
+    assert worker.pool_size() == 1  # bounded by the machine
+    worker.kill_all()
+    worker._affinity.clear()

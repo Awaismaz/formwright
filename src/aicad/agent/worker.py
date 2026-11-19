@@ -261,6 +261,63 @@ def get_worker(key: str) -> Worker:
     return w
 
 
+# agent-latency: a small pool of build workers per key (organisation), so independent parts (Design Office tickets
+# claimed together) build at the same time instead of queueing on one process. Each project (its out folder) sticks
+# to one worker: a fast build's background CHK-07/08 need the shape that worker kept, and builds of one project stay
+# serialised as before. Default 1 (unchanged): each worker holds a CAD kernel, and the machine budget is shared.
+POOL_ENV = "FW_BUILD_WORKERS_PER_ORG"
+_affinity: dict[str, str] = {}  # "<key>|<out folder>" -> worker key
+
+
+def pool_size() -> int:
+    try:
+        n = int(os.environ.get(POOL_ENV, "1") or 1)
+    except ValueError:
+        n = 1
+    return max(1, min(n, MAX_LIVE, max(1, (os.cpu_count() or 2) // 3)))
+
+
+def _affinity_dir(req: dict[str, Any]) -> str | None:
+    """The project out folder a request belongs to (the same for its build, render, finalize and dims requests)."""
+    op = req.get("op")
+    if op in ("build", "finalize", "diff") and req.get("out"):
+        d = Path(req["out"])
+    elif op == "render" and req.get("stl"):
+        d = Path(req["stl"]).parent
+    elif op in ("recognize", "dims_base", "dims_step") and req.get("script"):
+        d = Path(req["script"]).parent / "out"
+    else:
+        return None
+    return os.path.normcase(str(d.resolve()))
+
+
+def worker_for(key: str, req: dict[str, Any]) -> Worker:
+    """The pool worker for ``req``: the project's own if it has one, else the least busy (slot 0 when idle)."""
+    n = pool_size()
+    aff = _affinity_dir(req) if n > 1 else None
+    if aff is None:
+        return get_worker(key)
+    slots = [key] + [f"{key}#{i}" for i in range(1, n)]
+    a = f"{key}|{aff}"
+    wk = _affinity.get(a)
+    if wk not in slots:
+        assigned = {k: 0 for k in slots}
+        for v in _affinity.values():
+            if v in assigned:
+                assigned[v] += 1
+        busy = {k: bool(_workers.get(k) and _workers[k].lock.locked()) for k in slots}
+        wk = min(slots, key=lambda k: (busy[k], assigned[k], slots.index(k)))
+        _affinity[a] = wk
+        if len(_affinity) > 4096:  # oldest assignments first; a lost one only costs a background rebuild
+            _affinity.pop(next(iter(_affinity)))
+    return get_worker(wk)
+
+
+async def warm_pool(key: str) -> None:
+    """Start every pool worker of ``key`` (the Design Office at ICD approval / Run)."""
+    await asyncio.gather(*(warm(k) for k in [key] + [f"{key}#{i}" for i in range(1, pool_size())]))
+
+
 def kill_all() -> None:
     """Kill every build worker of this process (no event loop needed: test teardown, interpreter exit)."""
     for w in list(_workers.values()):
@@ -272,37 +329,41 @@ def kill_all() -> None:
 atexit.register(kill_all)
 
 
+async def _req(key: str, req: dict[str, Any], timeout: float, weight: float = 1.0) -> dict[str, Any]:
+    return await worker_for(key, req).request(req, timeout, weight)
+
+
 async def build(key: str, script: Path, out: Path, determinism: bool = True, timeout: float = 180,
                 fast: bool = False) -> dict[str, Any]:
     out.mkdir(parents=True, exist_ok=True)
-    return await get_worker(key).request({"op": "build", "script": str(script), "out": str(out),
+    return await _req(key, {"op": "build", "script": str(script), "out": str(out),
                                           "determinism": determinism, "fast": fast}, timeout)
 
 
 async def recognize(key: str, script: Path, out: Path, timeout: float = 300) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "recognize", "script": str(script), "out": str(out)}, timeout)
+    return await _req(key, {"op": "recognize", "script": str(script), "out": str(out)}, timeout)
 
 
 async def finalize(key: str, out: Path, timeout: float = 180, stage: str = "all") -> dict[str, Any]:
     """Complete a fast build (runner.finalize): stage "exports" (files + CHK-07), "determinism" (CHK-08) or "all"."""
-    return await get_worker(key).request({"op": "finalize", "out": str(out), "stage": stage}, timeout)
+    return await _req(key, {"op": "finalize", "out": str(out), "stage": stage}, timeout)
 
 
 async def render(key: str, stl: Path, png: Path, title: str = "", timeout: float = 60) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "render", "stl": str(stl), "png": str(png), "title": title}, timeout)
+    return await _req(key, {"op": "render", "stl": str(stl), "png": str(png), "title": title}, timeout)
 
 
 async def diff(key: str, a_step: Path, b_step: Path, out: Path, timeout: float = 180) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "diff", "a": str(a_step), "b": str(b_step), "out": str(out)}, timeout)
+    return await _req(key, {"op": "diff", "a": str(a_step), "b": str(b_step), "out": str(out)}, timeout)
 
 
 async def dims_base(key: str, script: Path, prev: Path | None, timeout: float = 120) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "dims_base", "script": str(script),
+    return await _req(key, {"op": "dims_base", "script": str(script),
                                           "prev": str(prev) if prev else None}, timeout, weight=0.25)
 
 
 async def dims_step(key: str, script: Path, item: dict[str, Any], base_key: str, timeout: float = 60) -> dict[str, Any]:
-    return await get_worker(key).request({"op": "dims_step", "script": str(script), "key": base_key, **item}, timeout,
+    return await _req(key, {"op": "dims_step", "script": str(script), "key": base_key, **item}, timeout,
                                          weight=0.1)
 
 
@@ -325,6 +386,7 @@ async def shutdown_all() -> None:
                 pass
             w.proc = None
     _workers.clear()
+    _affinity.clear()
 
 
 if __name__ == "__main__":
