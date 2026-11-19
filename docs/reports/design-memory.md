@@ -93,7 +93,7 @@ parts made before it teach nothing). Private: rows are keyed by (person, workspa
 | PLT-020 | Projects hold related parts (container, membership, Design Office mapping, flows) | Done | `test_existing_database_gains_memory_tables_parts_stay_unsorted`, `test_project_scoping_permissions_and_private_parts`, `test_design_office_program_maps_onto_a_project`; walkthrough shots 01–04, 07, 09 |
 | AGT-020 | Project context in agent turns (sibling facts, decisions, notes; bounded; once per conversation) | Done | `test_three_part_project_brief_is_hand_checked_and_bounded` (hand values, ≤ 700-token bound with 27 siblings, replay prompt carries the facts, second turn doesn't resend); walkthrough replay matched |
 | AGT-021 | Personal design memory (learned + stated preferences, Memory panel, privacy) | Done | `test_preferences_learned_from_a_recorded_sequence_of_edits`, `test_share_a_preference_to_a_project_and_chat_decisions`; shot 08 |
-| AGT-022 | Project-level agent chat | Not done | Deferred (PD-79): notes + decisions + activity carry project context instead |
+| AGT-022 | Project-level agent chat | Not done | Deferred (PD-80): notes + decisions + activity carry project context instead |
 
 ## Tests
 `uv run pytest -q tests/test_design_memory.py` → 8 passed (≈ 90 s; builds the two demo parts for real). Covers:
@@ -151,7 +151,7 @@ tokens** (4 chars/token; Ø and × may tokenise a little worse: call it ≤ 450)
 - An AI summarisation step for chat → decisions would cost about 1.5 k input + 200 output tokens per message on a
   small model (≈ $0.002–0.003, the same as the whole brief, on *every* message) and adds a model call to every
   send. The deterministic extraction captured every statement in the tests and the walkthrough at 0 tokens, so the AI
-  step was not built (PD-78).
+  step was not built (PD-79).
 
 ## Known limits
 - Accepting an agent-proposed edit in the PropertyManager (fw-edit card → OK) is counted as a hand edit right after
@@ -162,17 +162,17 @@ tokens** (4 chars/token; Ø and × may tokenise a little worse: call it ≤ 450)
   and recognition lands for the next conversation.
 - The rest of the app still says "project" where it means a part (Studio menus, notifications, some module pages).
   Changed only where the two concepts meet.
-- No project-level agent chat (PD-79). No team-level memory (PD-77).
+- No project-level agent chat (PD-80). No team-level memory (PD-78).
 - God-mode seed-demo builds can exceed the 180 s worker timeout when the machine is saturated (seen during the
   walkthrough; not caused by this branch).
 
-## Parked decisions (defaults used; renumber if PD-73+ are taken)
+## Parked decisions (defaults used; renumber if PD-74+ are taken)
 | PD | Decision | Default used | Revisit when |
 |---|---|---|---|
-| PD-73 | Naming of the container | User-facing "Project" = group of related parts; the per-part object is "Part" in the UI; code/API keep `Project` = part, container = `DesignProject` at `/api/design-projects`, page `/app/p/<id>`. Existing parts stay unsorted (no auto "Unsorted" project). | Founder prefers another word (e.g. "Assembly", "Job") or wants an auto Unsorted bucket |
-| PD-74 | Project access | Workspace-wide object: members see, viewers read, engineers+ edit, creator or admin deletes (parts kept). Parts keep their own permissions; the agent brief and lists show only parts the person can read; private ones are counted, never named. Guests see no projects. | Teams want team-owned projects or project-level grants |
-| PD-75 | What is learned, retention | Materials, hand fillet/chamfer sizes, Hole Wizard type/size/fit, hand edits within 30 min after an agent build, part naming, "always/never/I prefer" statements; thresholds as in the table above; last 400 observations per person and workspace; no time expiry; deleted learned facts are tombstoned for good; admins impersonating never train it. | Founder wants more signals (drawing standards, accepted suggestions), expiry, or different thresholds |
-| PD-76 | Captured chat statements go live immediately | Project decisions and personal rules captured from chat are active at once, shown with their source, announced in a toast with Review, removable in one click (not a "proposed, approve first" queue). Only explicit wording is captured. | False captures show up in practice |
-| PD-77 | Sharing memory | Personal memory is private to (person, workspace). Sharing copies one fact into a project's decisions. No team-wide memory. | Teams ask for shared house style |
-| PD-78 | Prompt budget and AI summarising | Project brief ≤ 2 000 chars, preferences ≤ 700 chars (≈ ≤ 700 model tokens together), sent once per conversation and on change; deterministic extraction only, no AI summarisation step (measured: not worth its tokens, see Token cost). | Projects grow beyond ~15 built parts, or decisions need summarising from long chats |
-| PD-79 | Project-level chat | Deferred: project Notes (editable, first 240 chars go to the agent) + Decisions + Activity carry the running context; no separate project agent chat (it would spend tokens without a model to change). | Founder wants to plan a whole project in one conversation (Archie in Design Office already does this for programs) |
+| PD-74 | Naming of the container | User-facing "Project" = group of related parts; the per-part object is "Part" in the UI; code/API keep `Project` = part, container = `DesignProject` at `/api/design-projects`, page `/app/p/<id>`. Existing parts stay unsorted (no auto "Unsorted" project). | Founder prefers another word (e.g. "Assembly", "Job") or wants an auto Unsorted bucket |
+| PD-75 | Project access | Workspace-wide object: members see, viewers read, engineers+ edit, creator or admin deletes (parts kept). Parts keep their own permissions; the agent brief and lists show only parts the person can read; private ones are counted, never named. Guests see no projects. | Teams want team-owned projects or project-level grants |
+| PD-76 | What is learned, retention | Materials, hand fillet/chamfer sizes, Hole Wizard type/size/fit, hand edits within 30 min after an agent build, part naming, "always/never/I prefer" statements; thresholds as in the table above; last 400 observations per person and workspace; no time expiry; deleted learned facts are tombstoned for good; admins impersonating never train it. | Founder wants more signals (drawing standards, accepted suggestions), expiry, or different thresholds |
+| PD-77 | Captured chat statements go live immediately | Project decisions and personal rules captured from chat are active at once, shown with their source, announced in a toast with Review, removable in one click (not a "proposed, approve first" queue). Only explicit wording is captured. | False captures show up in practice |
+| PD-78 | Sharing memory | Personal memory is private to (person, workspace). Sharing copies one fact into a project's decisions. No team-wide memory. | Teams ask for shared house style |
+| PD-79 | Prompt budget and AI summarising | Project brief ≤ 2 000 chars, preferences ≤ 700 chars (≈ ≤ 700 model tokens together), sent once per conversation and on change; deterministic extraction only, no AI summarisation step (measured: not worth its tokens, see Token cost). | Projects grow beyond ~15 built parts, or decisions need summarising from long chats |
+| PD-80 | Project-level chat | Deferred: project Notes (editable, first 240 chars go to the agent) + Decisions + Activity carry the running context; no separate project agent chat (it would spend tokens without a model to change). | Founder wants to plan a whole project in one conversation (Archie in Design Office already does this for programs) |
