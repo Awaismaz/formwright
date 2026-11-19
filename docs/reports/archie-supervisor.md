@@ -265,8 +265,11 @@ offers (an existing behaviour) until Archie's next look.
     measured is relaxed; an interface change on an approved ICD is major.
 - Neighbours, one or two files per run, workers reaped: `test_office_orchestrator` + `test_office_polish` 33,
   `test_office_phase5` + `test_llm_providers` 44, `test_office` + `test_office_archie_chat` 33, after `git merge main`:
-  `test_office_supervisor` + `test_agent_latency` 27, `test_llm_providers` + `test_office_polish` 47, plus the batch in
-  the final message. `ruff check src tests` is clean, `tsc --noEmit` is clean and `vite build` is ok.
+  `test_office_supervisor` + `test_agent_latency` 27, `test_llm_providers` + `test_office_polish` 47,
+  `test_office_orchestrator` + `test_office_phase6_review_ecn` 26, `test_office_icd` + `test_office_small` 29,
+  `test_office` + `test_office_archie_chat` 33, `test_office_phase5` + `test_assembly_visual` 35, `test_office_direct` +
+  `test_office_shaft_line` 15, `test_office_orchestrator` + `test_office_polish` 33, `test_office_phase6_layout` +
+  `test_office_gearbox_caps` 21; web office vitest 29. `ruff check src tests` is clean, `tsc --noEmit` is clean and `vite build` is ok.
 
 ## Browser walkthrough (port 8806, simulated agents, screenshots read)
 Setup:
