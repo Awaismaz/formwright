@@ -1236,8 +1236,21 @@ class Runner:
                     return None
                 return None
             n = int(r.get("review_round") or 0) + 1
+            # No progress: the designer rebuilt the part and every measured finding came back word for word (same
+            # feature, same measured value). Another round cannot help: either the measurement is wrong or the ICD asks
+            # for something this part can't have. Say so now instead of spending more design turns (founder's Gear
+            # Reducer, 2026-11-19: three rounds on a correct blind hole a recognition bug read as through).
+            stuck = bool(hard) and n > 1 and list(r.get("last_findings") or []) == list(findings)
             service.comment(self.root, d, tid, "Changes requested:\n" + "\n".join(f"- {f}" for f in findings), g)
             tt["comments"][-1]["delivery"] = "stored"
+            if stuck:
+                _set_run(tt, review_round=n, last_findings=findings)
+                self._fail(d, tid, f"{sname} rebuilt {tt['title']}, but my measurement came back exactly the same: "
+                                   f"{findings[0]} When a redesign doesn't move the measurement, the measurement or the "
+                                   "interface spec is usually what's wrong, not the part. Look at the part: if the "
+                                   "feature is as specified, approve it yourself; if the spec asks for something the "
+                                   "part can't have, change the interface.")
+                return None
             if n > gage.MAX_SENDBACKS:
                 _set_run(tt, review_round=n)
                 self._fail(d, tid, f"Gage sent {tt['title']} back {n} times; a measurable check still fails: "
@@ -1245,7 +1258,7 @@ class Runner:
                 return None
             service.move(self.root, d, tid, "changes_requested", g)
             _set_run(tt, status="designing", next="design", review_round=n, feedback=findings,
-                     ai_findings=None if hard else findings,
+                     last_findings=findings if hard else None, ai_findings=None if hard else findings,
                      line=f"Gage sent {tt['title']} back: {findings[0]}")
             self.handoff(d, tt, "gage", spec, f"Gage → {sname}: {tt['title']} sent back. {findings[0]}")
             return "design"

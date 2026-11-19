@@ -128,7 +128,13 @@ def toolbox_key(code: str, params: dict[str, Any], version: int) -> str:
 
 def part_ready(root: Path, key: str) -> bool:
     d = part_dir(root, key)
-    return all((d / f).is_file() for f in ("part.step", "topo.json", "refs.json", "info.json", "meta.json"))
+    if not all((d / f).is_file() for f in ("part.step", "topo.json", "refs.json", "info.json", "meta.json")):
+        return False
+    # a snapshot recognised by an older recogniser is made again (its holes may be wrong: recognize.VERSION)
+    from aicad.recognize import VERSION
+
+    info = read_json(d / "info.json")
+    return isinstance(info, dict) and info.get("recognize_version") == VERSION
 
 
 def part(root: Path, key: str) -> dict[str, Any] | None:

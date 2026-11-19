@@ -351,8 +351,10 @@ def test_gage_sends_back_then_approves_and_caps_retries(office: Any, monkeypatch
     assert "27.00 × 27.00" in g_good[0] and "inside 25 × 25" in g_good[0], g_good[0]
     assert g_good[1].startswith("Approved") and good["run"]["review_round"] == 1
     g_bad = [cm["text"] for cm in bad["comments"] if cm["by"].get("code") == "gage"]
-    assert len(g_bad) == gage.MAX_SENDBACKS + 1 and bad["column"] == "changes_requested"
-    assert bad["agent_state"] == "blocked" and "sent Bad shaft back 3 times; a measurable check still fails" in bad["line"]
+    # every rebuild comes back 3 mm too big, word for word: no progress, so Gage stops after the second identical
+    # round (one design turn saved) and says the measurement or the spec is the likely culprit
+    assert len(g_bad) == 2 and bad["column"] == "changes_requested"
+    assert bad["agent_state"] == "blocked" and "my measurement came back exactly the same" in bad["line"]
     # the findings went back to the part agent as its next message
     assert any("This part was sent back" in p and "inside 32 × 32" in p for p in fake_agents.STATS["prompts"])
     inbox = c.get("/api/office/home").json()["inbox"]
