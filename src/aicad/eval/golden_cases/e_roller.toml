@@ -1,0 +1,57 @@
+# (e) A conveyor idler roller with its bearings in two side plates (a shaft line whose bearings sit in plates, not
+# in a housing). Hand values:
+#   6204 (ISO 15): d 20, D 47, B 14: the shaft's journals are Ø20, the plates' bores Ø47
+#   plates 15 thick >= B 14, so a seated bearing lies inside its plate along the shaft axis
+#   the tube is coaxial with the shaft and lies between the two side plates; each bearing lies in a side plate
+id = "roller"
+title = "Conveyor roller, bearings in side plates"
+letter = "e"
+source = "Golden mechanism list (WORKLIST 46)"
+brief = "A conveyor idler roller: a Ø50 x 200 mm steel roller tube fixed on a Ø20 shaft that turns in two 6204 bearings, one in each of two 15 mm thick steel side plates. No frame."
+
+[sim]
+plan = "e_roller.plan.json"
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+complete = true
+light = true             # 4 part lines, 6 pieces
+parts = 4
+pieces = 6
+kinds = { shaft = 1, plate = 2, bearing = 2 }
+no_extras = true         # no frame, housing or base
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.along]]
+kind = "shaft"           # the shaft is the long axis of the roller (260 long)
+axis = "auto"
+
+[[expect.distance]]
+a = { name = "(?i)tube" }
+b = { kind = "shaft" }
+value = 0.0              # coaxial: the same axis
+plane = "auto"           # across the shaft axis
+tol = 0.05
+
+[[expect.within]]
+inner = { kind = "bearing" }
+outer = { kind = "plate" }
+axis = "auto"            # along the shaft axis: each bearing inside a side plate (15 thick, B 14)
+tol = 0.01
+
+[[expect.within]]
+inner = { name = "(?i)tube" }
+outer = { kind = "plate" }
+axis = "auto"
+hull = true              # between the two plates
+tol = 0.01

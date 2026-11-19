@@ -1,0 +1,9 @@
+{"source": "archie", "summary": "Spur gear pair 1:3 on two shafts in four 6204 bearings, no housing", "assumptions": [
+  "Face width 10 m = 20 mm on both gears.", "Shafts 120 mm long."],
+ "subassemblies": [
+  {"name": "Gear pair", "description": "The two shafts with their gears and bearings.", "parts": [
+    {"name": "Pinion", "family": "gear", "complexity": 2, "qty": 1, "description": "spur pinion module 2, 20 teeth"},
+    {"name": "Gear", "family": "gear", "complexity": 2, "qty": 1, "description": "spur gear module 2, 60 teeth"},
+    {"name": "Input shaft", "family": "turned", "complexity": 2, "qty": 1, "description": "shaft 20 mm diameter, 120 long"},
+    {"name": "Output shaft", "family": "turned", "complexity": 2, "qty": 1, "description": "shaft 20 mm diameter, 120 long"},
+    {"name": "Deep groove ball bearing 6204", "family": "standard", "complexity": 1, "qty": 4, "description": "6204 ball bearing"}]}]}

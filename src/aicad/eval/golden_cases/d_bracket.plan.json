@@ -1,0 +1,15 @@
+{"source": "archie", "summary": "Aluminium angle bracket bolted to a base plate with two M6 through bolts", "assumptions": [
+  "Sizes from the brief; bolt grip = plate 10 + foot 8 = 18."],
+ "subassemblies": [
+  {"name": "Bracket assembly", "description": "The base plate with the bracket bolted on top.", "parts": [
+    {"name": "Base plate", "family": "machined", "complexity": 2, "qty": 1, "envelope": [120.0, 80.0, 10.0],
+     "description": "Aluminium base plate 120 x 80 x 10 mm with two Ø6.6 holes 40 mm apart for the bracket bolts and four Ø9 corner holes."},
+    {"name": "Angle bracket", "family": "machined", "complexity": 3, "qty": 1, "envelope": [60.0, 40.0, 58.0],
+     "mounts_on": "Base plate",
+     "description": "Aluminium angle bracket: foot 60 x 40 x 8 with two Ø6.6 holes 40 apart, upright 8 thick and 50 high with a Ø8.4 hole 40 mm up."},
+    {"name": "Hex bolt M6x30", "family": "standard", "complexity": 1, "qty": 2, "toolbox": "hex_bolt",
+     "description": "ISO 4017 hex bolt M6 x 30 through the bracket foot and the plate."},
+    {"name": "Washer M6", "family": "standard", "complexity": 1, "qty": 4, "toolbox": "washer",
+     "description": "ISO 7089 washer M6, one under each bolt head and one under each nut."},
+    {"name": "Hex nut M6", "family": "standard", "complexity": 1, "qty": 2, "toolbox": "hex_nut",
+     "description": "ISO 4032 hex nut M6 under the plate."}]}]}

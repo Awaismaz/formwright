@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Building2, Coins, CreditCard, DollarSign, FolderKanban, Hammer, Mail, MessageSquare, Package, ScrollText, Server, Users } from "lucide-react";
+import { Activity, Building2, Coins, CreditCard, DollarSign, FolderKanban, Hammer, Mail, MessageSquare, Package, ScrollText, Server, Target, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -11,6 +11,8 @@ import { Badge, Button, Card, Input, Modal, PageHeader, PageLoader, Stat, Toggle
 
 const TABS = [["", "Overview", Activity], ["users", "Users", Users], ["orgs", "Organizations", Building2], ["catalog", "Pricing catalog", Package],
   ["payments", "Payments", CreditCard], ["feedback", "Feedback", MessageSquare], ["audit", "Audit log", ScrollText], ["outbox", "Email outbox", Mail], ["system", "System", Server]] as const;
+const GOLDEN_TAB = ["golden", "Golden suite", Target] as const;  // God mode only (WORKLIST 46)
+const GoldenSuite = lazy(() => import("./GoldenSuite"));
 
 function useAdmin<T>(path: string) {
   return useQuery({ queryKey: ["admin", path], queryFn: () => api.get<T>(`/api/admin/${path}`) });
@@ -227,7 +229,7 @@ export default function Admin() {
       <PageHeader title="Admin console" subtitle="Platform-wide operations. Every action here is written to the audit log."
         eyebrow={<Badge tone="accent"><Hammer className="h-3 w-3" />Super-admin</Badge>} />
       <nav className="mb-6 flex flex-wrap gap-1 border-b border-border">
-        {TABS.map(([to, label, I]) => (
+        {[...TABS, ...(me?.system?.god_mode_enabled ? [GOLDEN_TAB] : [])].map(([to, label, I]) => (
           <NavLink key={to} to={`/app/admin${to ? "/" + to : ""}`} end
             className={({ isActive }) => cx("-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm", isActive ? "border-primary font-medium text-text" : "border-transparent text-muted hover:text-text")}>
             <I className="h-4 w-4" />{label}</NavLink>))}
@@ -250,6 +252,7 @@ export default function Admin() {
           head={["When", "To", "Subject", "Link", "Delivery"]}
           row={r => <tr key={r.id}><td className="whitespace-nowrap px-4 py-2.5 text-muted">{ago(r.created_at)}</td><td className="px-4 py-2.5 text-xs">{r.to}</td><td className="px-4 py-2.5">{r.subject}</td><td className="px-4 py-2.5">{r.link && <a className="link text-xs" href={new URL(r.link).pathname + new URL(r.link).search}>open</a>}</td><td className="px-4 py-2.5"><Badge>{r.delivered}</Badge></td></tr>} />} />
         <Route path="system" element={<SystemTab />} />
+        {me?.system?.god_mode_enabled && <Route path="golden" element={<Suspense fallback={<PageLoader />}><GoldenSuite /></Suspense>} />}
       </Routes>
     </div>
   );

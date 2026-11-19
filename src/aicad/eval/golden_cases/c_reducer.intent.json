@@ -1,0 +1,269 @@
+{
+  "case": "reducer",
+  "name": "Gear Reducer",
+  "brief": "Build a Single stage 3:1 reducer with Spur Gears",
+  "recorded": "live intent reply, 2026-11-20, tier opus",
+  "reply": {
+    "summary": "Single-stage spur gear reducer, 3:1. A pinion on the input shaft meshes with a wheel on the output shaft. Both gears are keyed and seated against shaft shoulders. Each shaft runs in two deep-groove ball bearings in a split housing (base and cover) with bolted bearing caps.",
+    "assumptions": [
+      "The 3:1 ratio is a single spur pinion/wheel pair. Module, teeth and widths are left for standard sizing.",
+      "Each shaft leaves the housing on one side only. That side gets an open cap and the opposite side a blind cap.",
+      "The input and output shafts may need different bearing sizes, so each shaft has its own bearing entry.",
+      "Each gear is keyed and sits against a shoulder on a stepped shaft.",
+      "There are no seals, couplings or shaft-end keys, because the brief does not ask for them.",
+      "Fastener counts are typical: 4 screws per cap and 6 bolts joining the cover to the base."
+    ],
+    "components": [
+      {
+        "id": "housing_base",
+        "kind": "housing",
+        "name": "Housing base",
+        "params": {
+          "style": "split"
+        },
+        "group": "Housing"
+      },
+      {
+        "id": "housing_cover",
+        "kind": "cover",
+        "name": "Housing cover",
+        "group": "Housing"
+      },
+      {
+        "id": "cover_bolts",
+        "kind": "fastener",
+        "name": "Cover bolts",
+        "qty": 6,
+        "params": {
+          "style": "hex_bolt"
+        },
+        "group": "Housing"
+      },
+      {
+        "id": "input_shaft",
+        "kind": "shaft",
+        "name": "Input shaft",
+        "params": {
+          "role": "input",
+          "stepped": true
+        },
+        "group": "Input"
+      },
+      {
+        "id": "pinion",
+        "kind": "spur_gear",
+        "name": "Pinion",
+        "params": {
+          "role": "pinion"
+        },
+        "group": "Input"
+      },
+      {
+        "id": "pinion_key",
+        "kind": "key",
+        "name": "Pinion key",
+        "group": "Input"
+      },
+      {
+        "id": "input_bearings",
+        "kind": "bearing",
+        "name": "Input shaft bearings",
+        "qty": 2,
+        "group": "Input"
+      },
+      {
+        "id": "input_open_cap",
+        "kind": "bearing_cap",
+        "name": "Input open cap",
+        "params": {
+          "style": "open"
+        },
+        "group": "Input"
+      },
+      {
+        "id": "input_blind_cap",
+        "kind": "bearing_cap",
+        "name": "Input blind cap",
+        "params": {
+          "style": "blind"
+        },
+        "group": "Input"
+      },
+      {
+        "id": "output_shaft",
+        "kind": "shaft",
+        "name": "Output shaft",
+        "params": {
+          "role": "output",
+          "stepped": true
+        },
+        "group": "Output"
+      },
+      {
+        "id": "output_gear",
+        "kind": "spur_gear",
+        "name": "Output gear",
+        "params": {
+          "role": "wheel"
+        },
+        "group": "Output"
+      },
+      {
+        "id": "output_gear_key",
+        "kind": "key",
+        "name": "Output gear key",
+        "group": "Output"
+      },
+      {
+        "id": "output_bearings",
+        "kind": "bearing",
+        "name": "Output shaft bearings",
+        "qty": 2,
+        "group": "Output"
+      },
+      {
+        "id": "output_open_cap",
+        "kind": "bearing_cap",
+        "name": "Output open cap",
+        "params": {
+          "style": "open"
+        },
+        "group": "Output"
+      },
+      {
+        "id": "output_blind_cap",
+        "kind": "bearing_cap",
+        "name": "Output blind cap",
+        "params": {
+          "style": "blind"
+        },
+        "group": "Output"
+      },
+      {
+        "id": "cap_screws",
+        "kind": "fastener",
+        "name": "Bearing cap screws",
+        "qty": 16,
+        "params": {
+          "style": "shcs"
+        },
+        "group": "Housing"
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "housing_base",
+        "guest": "housing_cover",
+        "via": [
+          "cover_bolts"
+        ]
+      },
+      {
+        "kind": "keyed_hub",
+        "host": "input_shaft",
+        "guest": "pinion",
+        "via": [
+          "pinion_key"
+        ]
+      },
+      {
+        "kind": "shoulder_stop",
+        "host": "input_shaft",
+        "guest": "pinion"
+      },
+      {
+        "kind": "keyed_hub",
+        "host": "output_shaft",
+        "guest": "output_gear",
+        "via": [
+          "output_gear_key"
+        ]
+      },
+      {
+        "kind": "shoulder_stop",
+        "host": "output_shaft",
+        "guest": "output_gear"
+      },
+      {
+        "kind": "gear_mesh",
+        "host": "pinion",
+        "guest": "output_gear",
+        "params": {
+          "ratio": 3
+        }
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "input_shaft",
+        "guest": "input_bearings",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "output_shaft",
+        "guest": "output_bearings",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_seat",
+        "host": "housing_base",
+        "guest": "input_bearings"
+      },
+      {
+        "kind": "bearing_seat",
+        "host": "housing_base",
+        "guest": "output_bearings"
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing_base",
+        "guest": "input_open_cap",
+        "via": [
+          "cap_screws"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing_base",
+        "guest": "input_blind_cap",
+        "via": [
+          "cap_screws"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing_base",
+        "guest": "output_open_cap",
+        "via": [
+          "cap_screws"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing_base",
+        "guest": "output_blind_cap",
+        "via": [
+          "cap_screws"
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "id": "gear_material",
+        "question": "What material should the gears be?",
+        "options": [
+          "Steel (e.g. 42CrMo4, hardened)",
+          "Carbon steel (C45)",
+          "Cast iron",
+          "Acetal / nylon"
+        ],
+        "default": "Steel (e.g. 42CrMo4, hardened)"
+      }
+    ]
+  }
+}

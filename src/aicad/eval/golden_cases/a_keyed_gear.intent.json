@@ -1,0 +1,49 @@
+{
+  "case": "keyed_gear",
+  "name": "Keyed gear",
+  "brief": "Build a Spur Gear mounted on stepped Shaft and locked with a key",
+  "recorded": "live intent reply, 2026-11-20, tier sonnet",
+  "reply": {
+    "summary": "A stepped shaft carrying a spur gear locked with a parallel key and seated against the shoulder.",
+    "components": [
+      {
+        "id": "shaft",
+        "kind": "shaft",
+        "name": "Stepped shaft",
+        "params": {
+          "stepped": true
+        }
+      },
+      {
+        "id": "gear",
+        "kind": "spur_gear",
+        "name": "Spur gear"
+      },
+      {
+        "id": "key",
+        "kind": "key",
+        "name": "Gear key"
+      }
+    ],
+    "connections": [
+      {
+        "kind": "keyed_hub",
+        "host": "shaft",
+        "guest": "gear",
+        "via": [
+          "key"
+        ]
+      },
+      {
+        "kind": "shoulder_stop",
+        "host": "shaft",
+        "guest": "gear"
+      }
+    ],
+    "assumptions": [
+      "No bearings, housing or retaining ring added, since the brief asks only for the gear, shaft and key.",
+      "The gear seats against the shaft shoulder because the shaft is stepped.",
+      "Sizes are left out; the key is sized from the shaft diameter by DIN 6885."
+    ]
+  }
+}

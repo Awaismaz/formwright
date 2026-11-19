@@ -1,0 +1,59 @@
+{
+ "source": "archie",
+ "summary": "A single keyed spur gear on a plain steel shaft, three parts in total: shaft, DIN 6885 parallel key and a module 2 spur gear.",
+ "assumptions": [
+  "No sizes given: module 2, 30 teeth, 20 deg pressure angle, pitch diameter 60 mm, face width 20 mm assumed.",
+  "Shaft diameter 20 mm h6 and length 80 mm assumed, with the gear seat centred on the length.",
+  "Key DIN 6885 A 6 x 6 x 18 chosen to suit a 20 mm shaft; shaft keyseat 3.5 mm deep, hub keyway 2.8 mm deep.",
+  "Gear bore 20 H7 with a sliding fit; the key carries the torque. No axial retention, per the brief (no extra items).",
+  "Materials: shaft C45 steel, gear 42CrMo4 steel, key C45 bright drawn."
+ ],
+ "subassemblies": [
+  {
+   "name": "Keyed shaft",
+   "description": "Plain shaft with a milled keyseat and the parallel key pressed into it, assembled as one unit before the gear goes on.",
+   "parts": [
+    {
+     "name": "Shaft",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "C45 steel shaft, 20 mm h6 diameter by 80 mm long (assumed), chamfered ends, with an 18 mm long, 6 mm wide, 3.5 mm deep closed keyseat at mid length for the gear seat.",
+     "envelope": [
+      20.0,
+      20.0,
+      80.0
+     ]
+    },
+    {
+     "name": "Parallel key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "DIN 6885 form A parallel key 6 x 6 x 18, C45, seated in the shaft keyseat and engaging the gear hub keyway."
+    }
+   ]
+  },
+  {
+   "name": "Spur gear",
+   "description": "The gear itself, slid over the keyed shaft so its hub keyway engages the key.",
+   "parts": [
+    {
+     "name": "Spur gear",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "description": "42CrMo4 involute spur gear, module 2, 30 teeth, 20 deg pressure angle, pitch diameter 60 mm, tip diameter 64 mm, face width 20 mm (assumed), with a 20 H7 bore and a 6 mm JS9 hub keyway 2.8 mm deep.",
+     "envelope": [
+      64.0,
+      64.0,
+      20.0
+     ],
+     "mounts_on": "Shaft",
+     "module": 2.0,
+     "teeth": 30
+    }
+   ]
+  }
+ ]
+}

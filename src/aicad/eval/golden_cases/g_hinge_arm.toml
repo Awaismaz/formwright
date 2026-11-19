@@ -1,0 +1,43 @@
+# (g) A hinged arm on a clevis base: the design intent and sizes of fixture FX-06 (src/aicad/fixtures/
+# fx06_hinged_arm.py), as a Design Office brief. Hand values:
+#   lugs 24 apart, arm 22 wide: the arm lies between the lugs with 1 mm each side
+#   the Ø8 pin passes through both lugs and the arm's pivot bore (pin 40 long = 24 + 2 x 8)
+id = "hinge-arm"
+title = "Hinged arm on a clevis base"
+letter = "g"
+source = "FX-06 hinged arm (ASM-012 fixture), as a Design Office brief"
+brief = "A hinged arm: a 100 x 22 x 12 mm arm pivots on a Ø8 x 40 pin between the two lugs of a clevis base (base plate 80 x 40 x 8 mm, lugs 8 mm thick and 24 mm apart, pivot 24 mm above the underside)."
+
+[sim]
+plan = "g_hinge_arm.plan.json"
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+complete = true
+light = true
+parts = 3
+pieces = 3
+kinds = { support = 1, pin = 1 }
+no_extras = true
+instances = 3            # base, arm and pin, every one placed
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.touch]]
+a = { kind = "pin" }     # the pin passes through the arm
+b = { name = "(?i)arm" }
+tol = 0.01
+
+[[expect.touch]]
+a = { kind = "pin" }     # and through the lugs
+b = { name = "(?i)clevis" }
+tol = 0.01
