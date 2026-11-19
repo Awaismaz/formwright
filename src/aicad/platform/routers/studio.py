@@ -609,6 +609,9 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
     rev = _snapshot(p, ws, cause=cause, kind="manual", by=ctx.user.name)
     notify_revision(ctx.db, p, rev, ctx.user, cause)
     schedule_finalize(p, ws, rev)
+    from aicad.memory import learn
+
+    learn.observe_revision(ctx.db, ctx, p, ws, rev)  # design memory: hand features (fillet, chamfer, Hole Wizard)
     audit(ctx.db, f"project.manual_{action}", ctx.user, p.org_id, target=p.id)
     ctx.db.commit()
     if s:

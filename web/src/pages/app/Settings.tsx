@@ -1,5 +1,7 @@
 import DesktopOnly from "@/components/DesktopOnly";
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import MemoryPanel from "@/components/memory/MemoryPanel";
 import { toast } from "sonner";
 import { KeyRound, Lock, Monitor, Moon, Sun } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -30,13 +32,15 @@ export default function Settings() {
     try { await fn(); await refresh(); toast.success(ok); } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(null); }
   };
   const prefs = user.preferences;
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") ?? "profile";
   const setPref = (p: Record<string, unknown>) => run("pref", () => api.patch("/api/auth/profile", { preferences: p }), "Preferences saved");
 
   return (
     <div className={PAGE}>
       <PageHeader title="Settings" />
-      <Tabs defaultValue="profile">
-        <TabList className="mb-6"><Tab value="profile">Profile</Tab><Tab value="prefs">Preferences</Tab><Tab value="security">Security</Tab>{org && <Tab value="workspace">Workspace</Tab>}<Tab value="api">API & integrations</Tab></TabList>
+      <Tabs value={tab} onValueChange={v => setParams(v === "profile" ? {} : { tab: v }, { replace: true })}>
+        <TabList className="mb-6"><Tab value="profile">Profile</Tab><Tab value="prefs">Preferences</Tab>{org && <Tab value="memory">Memory</Tab>}<Tab value="security">Security</Tab>{org && <Tab value="workspace">Workspace</Tab>}<Tab value="api">API & integrations</Tab></TabList>
         <TabPanel value="profile" className="space-y-6">
           <Section title="Profile" desc="How you appear to teammates.">
             <Field label="Full name"><Input value={name} onChange={e => setName(e.target.value)} /></Field>
@@ -64,6 +68,7 @@ export default function Settings() {
               <Toggle checked={prefs.notifications_email !== false} onChange={v => setPref({ notifications_email: v })} /></div>
           </Section>
         </TabPanel>
+        {org && <TabPanel value="memory"><MemoryPanel /></TabPanel>}
         <TabPanel value="security" className="space-y-6">
           <Section title="Password" desc="Changing your password signs you out on other devices.">
             <Field label="Current password"><Input type="password" value={pw.current} onChange={e => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /></Field>

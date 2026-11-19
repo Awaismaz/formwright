@@ -85,7 +85,7 @@ export default function Dashboard() {
           <h1 className="text-[24px] font-semibold tracking-tight sm:text-[26px]">{greeting()}, {me?.user?.name.split(" ")[0]}</h1>
           <p className="mt-1 text-sm text-muted">{org?.name} · {org?.plan_name}{org?.on_trial && !org.expired ? ` · ${org.days_left} days left in trial` : ""}</p>
         </div>
-        <Button variant="secondary" icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New project</Button>
+        <Button variant="secondary" icon={<Plus className="h-4 w-4" />} onClick={() => setNewOpen(true)}>New part</Button>
       </div>
 
       {intendedPlan && org?.plan_code === "trial" && (
@@ -104,10 +104,10 @@ export default function Dashboard() {
           {latestVerified && <NextSteps p={latestVerified} owned={owned} />}
 
           <section>
-            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Recent projects</h2>
+            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Recent parts</h2>
               {items.length > 0 && <Link to="/app/projects" className="text-sm text-primary hover:underline">View all</Link>}</div>
             {items.length === 0 ? (
-              <EmptyState icon={<FolderKanban className="h-6 w-6" />} title="No projects yet"
+              <EmptyState icon={<FolderKanban className="h-6 w-6" />} title="No parts yet"
                 body="Describe your first part above. The design agent models it, checks the geometry and shows it live; a first part takes about two minutes." />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{items.slice(0, 6).map(p => <ProjectCard key={p.id} p={p} units={me?.user?.preferences?.units} />)}</div>

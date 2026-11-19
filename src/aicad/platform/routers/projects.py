@@ -72,6 +72,7 @@ class ProjectIn(BaseModel):
     name: str
     description: str = ""
     template: str | None = None
+    design_project_id: str | None = None  # "New part in this project"
 
 
 class ProjectPatch(BaseModel):
@@ -406,7 +407,11 @@ def list_projects(archived: bool = False, ctx: Ctx = Depends(verified_ctx)) -> d
     acc = permissions.access_map(ctx.db, ctx.user, rows)  # only what you can read
     rows = [p for p in rows if acc[p.id].at_least("read")]
     names = {u.id: u.name for u in ctx.db.scalars(select(User).where(User.id.in_({r.created_by for r in rows})))}
-    return {"items": [{**project_dict(p, names.get(p.created_by or "")), "access": acc[p.id].as_dict()} for p in rows]}
+    from aicad.memory import service as dps
+
+    dpm = dps.project_map(ctx.db, [p.id for p in rows])
+    return {"items": [{**project_dict(p, names.get(p.created_by or "")), "access": acc[p.id].as_dict(),
+                       "design_project": dpm.get(p.id)} for p in rows]}
 
 
 @router.post("/projects")
@@ -418,15 +423,27 @@ def create_project(body: ProjectIn, ctx: Ctx = Depends(verified_ctx)) -> dict[st
     if not name or len(name) > 120:
         raise HTTPException(422, "Project name is required")
     tpl = next((t for t in TEMPLATES if t["code"] == body.template), None)
+    dp = None
+    if body.design_project_id:
+        from aicad.memory.tables import DesignProject
+
+        dp = ctx.db.get(DesignProject, body.design_project_id) if len(body.design_project_id) <= 64 else None
+        if dp is None or dp.org_id != org.id:
+            raise HTTPException(404, "Project not found")
     p = Project(org_id=org.id, name=name, description=body.description[:2000], template=tpl["code"] if tpl else None,
                 created_by=ctx.user.id)
     ctx.db.add(p)
     ctx.db.flush()
+    if dp is not None:
+        from aicad.memory import service as dps
+
+        dps.link(ctx.db, p, dp, ctx.user.id)
     workspace_for(p).mkdir(parents=True, exist_ok=True)
     audit(ctx.db, "project.created", ctx.user, org.id, target=p.id, name=name)
     track(ctx.db, "project_created", ctx.user, org.id, template=p.template or "")
     ctx.db.commit()
-    return {**project_dict(p, ctx.user.name), "starter_prompt": tpl["prompt"] if tpl else None}
+    return {**project_dict(p, ctx.user.name), "starter_prompt": tpl["prompt"] if tpl else None,
+            "design_project": {"id": dp.id, "name": dp.name} if dp else None}
 
 
 @router.get("/projects/{project_id}")
@@ -434,7 +451,10 @@ def get_project(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, 
     p = _project(ctx, project_id)
     allowed, reason, cta = permissions.agent_gate(ctx, p) or can_run_agent(ctx)
     s = _sessions.get(p.id)
+    from aicad.memory import service as dps
+
     return {**project_dict(p), "access": ctx.project_access.as_dict(), "branch": branches.active_branch(p.id),
+            "design_project": dps.project_map(ctx.db, [p.id]).get(p.id) if ctx.project_access.member_role else None,
             "agent": {"busy": bool(s and s.busy), "allowed": allowed, "reason": reason,
                       "cta": cta, "has_history": bool(s and s.history)}}
 
@@ -487,6 +507,12 @@ def duplicate_project(project_id: str, body: DuplicateIn | None = None,
                 created_by=ctx.user.id, last_status=dict(src.last_status or {}), builds=src.builds)
     ctx.db.add(p)
     ctx.db.flush()
+    from aicad.memory import service as dps
+    from aicad.memory.tables import DesignProject, DesignProjectPart
+
+    link = ctx.db.get(DesignProjectPart, src.id)  # "Save as" keeps the copy in the same project
+    if link is not None and (dp := ctx.db.get(DesignProject, link.project_id)) and dp.org_id == p.org_id:
+        dps.link(ctx.db, p, dp, ctx.user.id)
     a, b = workspace_for(src), workspace_for(p)
     if a.is_dir():
         shutil.copytree(a, b, ignore=shutil.ignore_patterns(".fw", ".out_backup"))
@@ -941,6 +967,9 @@ async def set_params(project_id: str, body: ParamsIn, ctx: Ctx = Depends(verifie
     notify_revision(ctx.db, p, rev, ctx.user, "Parameters changed")
     schedule_finalize(p, ws, rev)
     audit(ctx.db, "project.params_edited", ctx.user, p.org_id, target=p.id, changes=changes)
+    from aicad.memory import learn
+
+    learn.observe_revision(ctx.db, ctx, p, ws, rev)  # design memory: an edit right after the agent is a strong signal
     ctx.db.commit()
     meta_all = st.get("param_meta") or {}
     repairs = st.get("manual_errors") or []
@@ -1009,13 +1038,44 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
         state = design_state(ws)  # DS-035: a small edit can come back as a PropertyManager edit in one short turn
         if state:
             shown, text = text, text + "\n\n" + state
+    remembered, block = await _memory_for_turn(ctx, p, s, body.prompt)
+    if block:
+        shown, text = shown or text, text + "\n\n" + block
     t = asyncio.create_task(s.send(text, shown=shown, mode=mode))
     _tasks.add(t)
     t.add_done_callback(_tasks.discard)
     track(ctx.db, "prompt_sent", ctx.user, p.org_id, chars=len(text))
     p.updated_at = utcnow()
     ctx.db.commit()
-    return {"accepted": True}
+    return {"accepted": True, "remembered": remembered}
+
+
+async def _memory_for_turn(ctx: Ctx, p: Project, s: AgentSession, prompt: str) -> tuple[list[dict[str, str]], str]:
+    """Design memory for one agent turn: capture standing instructions from the message (project decisions,
+    personal rules), then the project brief + preferences block (``aicad.memory.context.turn_context``), sent once
+    per conversation and again only when it changes. Never blocks the turn."""
+    from aicad.memory import context as mctx
+    from aicad.memory import learn
+
+    try:
+        dp = mctx.design_project_of(ctx.db, p.id)
+        remembered = learn.observe_prompt(ctx.db, ctx, p, prompt, dp.id if dp else None)
+        if dp is not None:
+            from aicad.platform.routers.design_projects import refresh_recognition
+
+            sibs, _ = mctx.siblings(ctx.db, ctx.user, p, dp)
+            await refresh_recognition(sibs)
+        tc = mctx.turn_context(ctx.db, ctx.user, p, prompt)
+        if not mctx.should_send(s._state_dir, s.session_id, tc.digest):
+            return remembered, ""
+        mctx.mark_sent(s._state_dir, tc.digest)
+        s.turn_meta["context_tokens"] = tc.tokens_est
+        return remembered, tc.text
+    except Exception:
+        import logging
+
+        logging.getLogger("aicad.memory").warning("design memory skipped for this turn", exc_info=True)
+        return [], ""
 
 
 @router.post("/projects/{project_id}/agent/interrupt")

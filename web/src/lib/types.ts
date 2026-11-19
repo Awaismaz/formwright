@@ -134,6 +134,8 @@ export interface Project {
   agent?: { busy: boolean; allowed: boolean; reason: string | null; cta: string | null; has_history: boolean };
   starter_prompt?: string | null;
   access?: import("./collab").Access; branch?: string; workspace?: string | null;
+  /** the Project (group of related parts) this part belongs to */
+  design_project?: { id: string; name: string } | null;
 }
 
 export interface Template { code: string; name: string; icon: string; prompt: string }

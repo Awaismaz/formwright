@@ -15,8 +15,8 @@ export function useTemplates() {
   return useQuery({ queryKey: ["templates"], queryFn: () => api.get<{ items: Template[] }>("/api/templates"), staleTime: Infinity });
 }
 
-export async function createProject(name: string, template: string | null, description = ""): Promise<Project> {
-  const p = await api.post<Project>("/api/projects", { name, template, description });
+export async function createProject(name: string, template: string | null, description = "", designProjectId?: string | null): Promise<Project> {
+  const p = await api.post<Project>("/api/projects", { name, template, description, design_project_id: designProjectId ?? undefined });
   if (p.starter_prompt) try { sessionStorage.setItem(`fw_starter_${p.id}`, p.starter_prompt); } catch { /* ignore */ }
   if (template) track("template_used", { template });
   return p;
@@ -25,7 +25,11 @@ export async function createProject(name: string, template: string | null, descr
 const tile = (on: boolean) => cx("flex flex-col items-start gap-2 rounded-lg border p-3 text-left transition",
   on ? "border-primary bg-primary-soft ring-1 ring-primary" : "border-border hover:border-primary/50");
 
-export default function NewProjectDialog({ open, onOpenChange, initialTemplate }: { open: boolean; onOpenChange: (v: boolean) => void; initialTemplate?: string | null }) {
+export default function NewProjectDialog({ open, onOpenChange, initialTemplate, designProject }: {
+  open: boolean; onOpenChange: (v: boolean) => void; initialTemplate?: string | null;
+  /** "New part in this project" */
+  designProject?: { id: string; name: string } | null;
+}) {
   const tpl = useTemplates();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -59,20 +63,22 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
     setBusy("create");
     try {
       const finalName = typed ? name.trim() : uniqueName(name.trim(), (projects.data?.items ?? []).map(p => p.name));
-      const p = await createProject(finalName, template, desc);
+      const p = await createProject(finalName, template, desc, designProject?.id);
       await qc.invalidateQueries({ queryKey: ["projects"] });
+      if (designProject) await qc.invalidateQueries({ queryKey: ["design-project", designProject.id] });
       await qc.invalidateQueries({ queryKey: ["checklist"] });
       onOpenChange(false);
       nav(`/app/projects/${p.id}`);
-    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not create project"); }
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not create the part"); }
     finally { setBusy(null); }
   };
 
   return (
-    <Modal open={open} onOpenChange={onOpenChange} wide title="New project" description="Start from what you have: a brief, a template, a STEP file or a drawing."
-      footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={submit} loading={busy === "create"} disabled={!name.trim() || !!busy}>Create project</Button></>}>
+    <Modal open={open} onOpenChange={onOpenChange} wide title={designProject ? `New part in ${designProject.name}` : "New part"}
+      description={designProject ? "The design agent will know the project's other parts and decisions." : "Start from what you have: a brief, a template, a STEP file or a drawing."}
+      footer={<><Button variant="secondary" onClick={() => onOpenChange(false)}>Cancel</Button><Button onClick={submit} loading={busy === "create"} disabled={!name.trim() || !!busy}>Create part</Button></>}>
       <div className="grid gap-5">
-        <div className="grid gap-2 sm:grid-cols-2">
+        {!designProject && <div className="grid gap-2 sm:grid-cols-2">
           <input ref={stepRef} type="file" accept={`.step,.stp,${NATIVE_ACCEPT}`} hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <input ref={drawRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
           <button type="button" disabled={!!busy} onClick={() => stepRef.current?.click()} className={tile(false)}>
@@ -81,10 +87,10 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
           <button type="button" disabled={!!busy} onClick={() => drawRef.current?.click()} className={tile(false)}>
             <ScanLine className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">From a drawing, sketch or photo</div><div className="text-xs text-muted">PDF, PNG or JPEG; every value read is shown for review</div></div>
           </button>
-        </div>
+        </div>}
         <div className="grid gap-2 sm:grid-cols-3">
           <button type="button" onClick={() => setTemplate(null)} className={tile(template === null)}>
-            <FilePlus2 className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Blank project</div><div className="text-xs text-muted">Describe anything, or model by hand</div></div>
+            <FilePlus2 className="h-5 w-5 text-primary" /><div><div className="text-sm font-medium">Blank part</div><div className="text-xs text-muted">Describe anything, or model by hand</div></div>
           </button>
           {(tpl.data?.items ?? []).map(t => (
             <button key={t.code} type="button" onClick={() => setTemplate(t.code)} className={tile(template === t.code)}>
@@ -93,7 +99,7 @@ export default function NewProjectDialog({ open, onOpenChange, initialTemplate }
           ))}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Project name"><Input value={name} onChange={e => { setName(e.target.value); setTyped(e.target.value.length > 0); }} placeholder="e.g. Pump bracket rev A" onKeyDown={e => e.key === "Enter" && submit()} /></Field>
+          <Field label="Part name"><Input value={name} onChange={e => { setName(e.target.value); setTyped(e.target.value.length > 0); }} placeholder="e.g. Pump bracket rev A" onKeyDown={e => e.key === "Enter" && submit()} /></Field>
           <Field label="Description (optional)"><Input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Client, purpose, notes" /></Field>
         </div>
       </div>
