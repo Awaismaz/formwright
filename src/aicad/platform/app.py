@@ -37,8 +37,8 @@ from aicad.platform.security import hash_password
 WEB_DIST = ROOT / "web" / "dist"
 CSRF_HEADER = "x-fw-csrf"
 CSRF_EXEMPT = {"/api/billing/webhook"}
-CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
-       "connect-src 'self'; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; "
+CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' https://static.cloudflareinsights.com; "
+       "connect-src 'self' https://cloudflareinsights.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none'; "
        "base-uri 'self'; form-action 'self' https://checkout.stripe.com")
 
 # Installable web app (UX-022): explicit types (Windows' registry can map .js to text/plain), and caching that lets

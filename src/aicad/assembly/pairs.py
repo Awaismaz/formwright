@@ -18,6 +18,7 @@ snapshot is a miss.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -152,29 +153,21 @@ def _job_side(inst: dict[str, Any]) -> dict[str, Any]:
     return {k: inst[k] for k in ("step", "bbox", "thread", "envelope") if inst.get(k) is not None}
 
 
-async def run(root: Path, call: Call, insts: list[dict[str, Any]], want_int: list[tuple[int, int]],
-              want_clr: list[tuple[int, int]], vol_tol: float = 1e-6, use_cache: bool = True,
-              progress: Callable[[int, int], None] | None = None
-              ) -> tuple[dict[tuple[int, int], dict[str, Any]], dict[tuple[int, int], tuple[float, list[float], list[float]] | None],
-                         dict[str, int]]:
-    """Interference for ``want_int`` and clearance for ``want_clr`` (pairs of indices into ``insts``, which carry
-    ``key``). Returns (interference rows by pair for the overlapping ones, clearance by pair (None = overlapping, the
-    caller uses the overlap point), stats). ``call(req, timeout)`` sends one request to the assembly worker."""
+def _lookup(root: Path, insts: list[dict[str, Any]], want_int: list[tuple[int, int]],
+            want_clr: list[tuple[int, int]], tol_tag: str, use_cache: bool) -> dict[str, Any]:
+    """Canonical keys of every wanted pair and what the cache already holds (disk reads: run in a thread)."""
     sigs = {k: part_sig(root, insts[k]["key"]) for k in {x for p in [*want_int, *want_clr] for x in p}}
     Ts = {k: xform.from12(insts[k]["T"]) for k in sigs}
-    info: dict[tuple[int, int], tuple[bool, np.ndarray, str]] = {}
-    for p in {*want_int, *want_clr}:
-        info[p] = canon(sigs[p[0]], Ts[p[0]], sigs[p[1]], Ts[p[1]])
-    tol_tag = f"{vol_tol:g}"
+    info = {p: canon(sigs[p[0]], Ts[p[0]], sigs[p[1]], Ts[p[1]]) for p in {*want_int, *want_clr}}
     int_res: dict[tuple[int, int], dict[str, Any]] = {}
     clr_res: dict[tuple[int, int], dict[str, Any]] = {}
     ops: dict[tuple[int, int], list[str]] = {}
-    stats = {"computed": 0, "cached": 0}
-    clr_set = set(want_clr)
+    cached = 0
+    wint, clr_set = set(want_int), set(want_clr)
     for p in sorted({*want_int, *want_clr}):
         key = info[p][2]
         need: list[str] = []
-        if p in want_int or p in clr_set and _boxes_meet(insts[p[0]], insts[p[1]]):
+        if p in wint or p in clr_set and _boxes_meet(insts[p[0]], insts[p[1]]):
             r = get(root, f"int|{tol_tag}", key) if use_cache else None
             if r is None:
                 need.append("int")
@@ -191,7 +184,48 @@ async def run(root: Path, call: Call, insts: list[dict[str, Any]], want_int: lis
         if need:
             ops[p] = need
         else:
-            stats["cached"] += 1
+            cached += 1
+    return {"Ts": Ts, "info": info, "int": int_res, "clr": clr_res, "ops": ops, "cached": cached}
+
+
+def _store(root: Path, items: list[tuple[str, str, dict[str, Any]]]) -> None:
+    for op, key, result in items:
+        put(root, op, key, result)
+
+
+def _to_world(lk: dict[str, Any], want_clr: list[tuple[int, int]]) -> tuple[dict[tuple[int, int], dict[str, Any]], dict[
+        tuple[int, int], tuple[float, list[float], list[float]] | None]]:
+    Ts, info, int_res, clr_res = lk["Ts"], lk["info"], lk["int"], lk["clr"]
+    inter: dict[tuple[int, int], dict[str, Any]] = {}
+    for p, r in int_res.items():
+        if r.get("kind") is None:
+            continue
+        swapped = info[p][0]
+        inter[p] = _world_int(r, Ts[p[1]] if swapped else Ts[p[0]])
+    clear: dict[tuple[int, int], tuple[float, list[float], list[float]] | None] = {}
+    for p in want_clr:
+        ir = int_res.get(p)
+        if ir is not None and ir.get("kind") is not None:
+            clear[p] = None
+            continue
+        swapped = info[p][0]
+        clear[p] = _world_clr(clr_res[p], Ts[p[1]] if swapped else Ts[p[0]], swapped)
+    return inter, clear
+
+
+async def run(root: Path, call: Call, insts: list[dict[str, Any]], want_int: list[tuple[int, int]],
+              want_clr: list[tuple[int, int]], vol_tol: float = 1e-6, use_cache: bool = True,
+              progress: Callable[[int, int], None] | None = None
+              ) -> tuple[dict[tuple[int, int], dict[str, Any]], dict[tuple[int, int], tuple[float, list[float], list[float]] | None],
+                         dict[str, int]]:
+    """Interference for ``want_int`` and clearance for ``want_clr`` (pairs of indices into ``insts``, which carry
+    ``key``). Returns (interference rows by pair for the overlapping ones, clearance by pair (None = overlapping, the
+    caller uses the overlap point), stats). ``call(req, timeout)`` sends one request to the assembly worker. Disk and
+    numpy work runs in threads, so a large check never stalls the event loop (CD-037)."""
+    tol_tag = f"{vol_tol:g}"
+    lk = await asyncio.to_thread(_lookup, root, insts, want_int, want_clr, tol_tag, use_cache)
+    info, ops = lk["info"], lk["ops"]
+    stats = {"computed": 0, "cached": lk["cached"]}
     todo = sorted(ops)
     done = 0
     for k in range(0, len(todo), CHUNK):
@@ -205,39 +239,24 @@ async def run(root: Path, call: Call, insts: list[dict[str, Any]], want_int: lis
         STATS["calls"] += 1
         res = await call({"op": "pairs", "jobs": jobs, "vol_tol": vol_tol},
                          BASE_TIMEOUT_S + PER_PAIR_S * len(jobs))
+        new: list[tuple[str, str, dict[str, Any]]] = []
         for p, r in zip(chunk, res, strict=True):
             key = info[p][2]
             if r.get("int") is not None:
-                int_res[p] = r["int"]
-                if use_cache:
-                    put(root, f"int|{tol_tag}", key, r["int"])
+                lk["int"][p] = r["int"]
+                new.append((f"int|{tol_tag}", key, r["int"]))
             if r.get("clr") is not None:
-                clr_res[p] = r["clr"]
-                if use_cache:
-                    put(root, "clr", key, r["clr"])
+                lk["clr"][p] = r["clr"]
+                new.append(("clr", key, r["clr"]))
+        if use_cache:  # stored as each chunk returns: a later timeout keeps this chunk's work
+            await asyncio.to_thread(_store, root, new)
         stats["computed"] += len(chunk)
         STATS["computed"] += len(chunk)
         done += len(chunk)
         if progress:
             progress(done, len(todo))
     STATS["cached"] += stats["cached"]
-    # back to the world frame of the pair's own order
-    inter: dict[tuple[int, int], dict[str, Any]] = {}
-    for p, r in int_res.items():
-        if r.get("kind") is None:
-            continue
-        swapped, _rel, _key = info[p]
-        P = Ts[p[1]] if swapped else Ts[p[0]]
-        inter[p] = _world_int(r, P)
-    clear: dict[tuple[int, int], tuple[float, list[float], list[float]] | None] = {}
-    for p in want_clr:
-        ir = int_res.get(p)
-        if ir is not None and ir.get("kind") is not None:
-            clear[p] = None
-            continue
-        swapped, _rel, _key = info[p]
-        P = Ts[p[1]] if swapped else Ts[p[0]]
-        clear[p] = _world_clr(clr_res[p], P, swapped)
+    inter, clear = await asyncio.to_thread(_to_world, lk, want_clr)
     return inter, clear, stats
 
 

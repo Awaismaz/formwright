@@ -7,6 +7,7 @@ VERSION). Mates reference exact part-local geometry (``refs.json``) and are solv
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -616,12 +617,13 @@ def geometry_signature(doc: dict[str, Any]) -> str:
 
 def worker_instances(root: Path, doc: dict[str, Any], skip_groups: bool = False) -> list[dict[str, Any]]:
     parts = _parts(root, doc)
+    names = display_names(doc)
     out = []
     for i in doc["instances"]:
         if skip_groups and i.get("group"):
             continue
         p = parts[i["part"]]
-        row = {"id": i["id"], "key": i["part"], "name": display_names(doc)[i["id"]],
+        row = {"id": i["id"], "key": i["part"], "name": names[i["id"]],
                "step": str(store.part_dir(root, i["part"]) / "part.step"),
                "T": i["T"], "bbox": p["info"]["bbox"], "material": p.get("material"), "holes": p["info"].get("holes", [])}
         if p["kind"] == "toolbox" and p["code"] in THREADED:
@@ -661,20 +663,13 @@ def _pair_caller(org_id: str) -> pairs.Call:
     return call
 
 
-async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: list[str] | None = None,
-                      near_mm: float | None = None, vol_tol: float = 1e-6, use_cache: bool = True,
-                      skip_same_group: bool = False) -> dict[str, Any]:
-    """Exact interference (and, with ``near_mm``, clearance) through the pair cache (ASM-023). Same results as the
-    whole-assembly worker checks: interference for every pair whose boxes meet (``only``: pairs involving those
-    instances), clearance for mated pairs and pairs whose boxes come within ``near_mm`` (overlapping pairs: 0 at the
-    overlap). Only pairs not in the cache go to the worker."""
+def _candidates(root: Path, doc: dict[str, Any], only: list[str] | None, near_mm: float | None,
+                skip_same_group: bool) -> tuple[list[dict[str, Any]], list[tuple[int, int]], list[tuple[int, int]],
+                                                dict[tuple[int, int], set[str]]]:
+    """The pairs a check asks for (box screening, vectorised; runs in a thread, off the event loop)."""
     insts = worker_instances(root, doc)
     n = len(insts)
     ids = [i["id"] for i in insts]
-    focus = set(only) if only is not None else None
-    boxes = [pairs.world_box(i) for i in insts]
-    groups = [i.get("group") for i in doc["instances"]]
-    want_int, want_clr = [], []
     why: dict[tuple[int, int], set[str]] = {}
     if near_mm is not None:
         at = {iid: k for k, iid in enumerate(ids)}
@@ -682,18 +677,39 @@ async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: lis
             a, b = at.get(m["a"]["inst"]), at.get(m["b"]["inst"])
             if a is not None and b is not None and a != b:
                 why.setdefault((min(a, b), max(a, b)), set()).add("mate")
-    for a in range(n):
-        for b in range(a + 1, n):
-            if focus is not None and ids[a] not in focus and ids[b] not in focus:
-                continue
-            if skip_same_group and groups[a] and groups[a] == groups[b]:
-                continue  # the parts of one fastener stack touch by construction
-            gap = np.maximum(0, np.maximum(boxes[a][0] - boxes[b][1], boxes[b][0] - boxes[a][1]))
-            if not (np.any(boxes[a][0] > boxes[b][1] + 1e-6) or np.any(boxes[b][0] > boxes[a][1] + 1e-6)):
-                want_int.append((a, b))
-            if near_mm is not None and float(np.linalg.norm(gap)) <= near_mm:
-                why.setdefault((a, b), set()).add("near")
-    want_clr = sorted(why)
+    if n < 2:
+        return insts, [], sorted(why), why
+    bx = [pairs.world_box(i) for i in insts]
+    lo, hi = np.array([b[0] for b in bx]), np.array([b[1] for b in bx])
+    keep = np.triu(np.ones((n, n), dtype=bool), 1)
+    if only is not None:
+        focus = set(only)
+        f = np.array([iid in focus for iid in ids])
+        keep &= f[:, None] | f[None, :]
+    if skip_same_group:  # the parts of one fastener stack touch by construction
+        code = {gid: k + 1 for k, gid in enumerate(sorted({i["group"] for i in doc["instances"] if i.get("group")}))}
+        g = np.array([code.get(i.get("group"), 0) for i in doc["instances"]])
+        keep &= ~((g[:, None] == g[None, :]) & (g[:, None] > 0))
+    apart = np.any(lo[:, None, :] > hi[None, :, :] + 1e-6, axis=2) | np.any(lo[None, :, :] > hi[:, None, :] + 1e-6, axis=2)
+    want_int = [(int(a), int(b)) for a, b in zip(*np.nonzero(keep & ~apart), strict=True)]
+    if near_mm is not None:
+        gap = np.maximum(0, np.maximum(lo[:, None, :] - hi[None, :, :], lo[None, :, :] - hi[:, None, :]))
+        near = keep & (np.linalg.norm(gap, axis=2) <= near_mm)
+        for a, b in zip(*np.nonzero(near), strict=True):
+            why.setdefault((int(a), int(b)), set()).add("near")
+    return insts, want_int, sorted(why), why
+
+
+async def check_pairs(root: Path, org_id: str, doc: dict[str, Any], *, only: list[str] | None = None,
+                      near_mm: float | None = None, vol_tol: float = 1e-6, use_cache: bool = True,
+                      skip_same_group: bool = False) -> dict[str, Any]:
+    """Exact interference (and, with ``near_mm``, clearance) through the pair cache (ASM-023). Same results as the
+    whole-assembly worker checks: interference for every pair whose boxes meet (``only``: pairs involving those
+    instances), clearance for mated pairs and pairs whose boxes come within ``near_mm`` (overlapping pairs: 0 at the
+    overlap). Only pairs not in the cache go to the worker."""
+    insts, want_int, want_clr, why = await asyncio.to_thread(_candidates, root, doc, only, near_mm, skip_same_group)
+    ids = [i["id"] for i in insts]
+    n = len(insts)
     inter, clear, stats = await pairs.run(root, _pair_caller(org_id), insts, want_int, want_clr, vol_tol, use_cache)
     rows = []
     for (a, b), r in inter.items():
@@ -899,7 +915,7 @@ async def accept(root: Path, org_id: str, doc: dict[str, Any], targets: list[dic
     if not made:
         raise AssemblyInputError(next((h["proposal"].get("error") for h in plan["holes"] if h["proposal"].get("error")),
                                       "No fastener could be fitted."))
-    run_solve(root, doc)
+    await asyncio.to_thread(run_solve, root, doc)  # off the event loop: the app stays responsive (CD-037)
     new_ids = [i["id"] for i in doc["instances"] if i["id"] not in before]
     clashes = await stack_clashes(root, org_id, doc, new_ids)
     return {"inserted": made, "plan": plan, "clashes": clashes}
@@ -938,7 +954,7 @@ async def _place_stacks(root: Path, org_id: str, doc: dict[str, Any], holes: lis
                               "spec": {**{k: prop[k] for k in ("summary", "designation", "size", "kind", "grip", "rule",
                                                                "clearance", "length", "warnings", "sources")},
                                        "style": style, "washers": washers, "flip": flip}})
-        _insert_stack(root, doc, h, keys, gid)
+        await asyncio.to_thread(_insert_stack, root, doc, h, keys, gid)  # mates resolve exact references (CD-037)
     return made
 
 

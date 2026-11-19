@@ -43,6 +43,15 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f7) — The app stays responsive during assembly (CD-037); CSP allows Cloudflare analytics (PD-72)
+
+Founder: opening the completed Engine cover ticket hung the server; later the local server stopped answering.
+Cause: Fitz's assembly solve (Python, ~140 mates) and mate re-linking ran on the request loop: one request took
+44.8 s, then none answered. Fix: those steps run on worker threads; an approved part re-queues for Fitz's single
+swap step instead of swapping inside the review task. Also: Chrome showed the Cloudflare beacon blocked by the CSP
+on the hosted site; allowed exactly that script and its endpoint. The "Banner not shown: beforeinstallprompt" note
+is expected (the app shows its own Install button).
+
 ## 2026-11-19 (f6) — Assembly steps do only what matters (CD-035, CD-036)
 
 Founder: Centre body stuck; assembly slow and unreliable; assembling should be quicker than modelling. Causes: a

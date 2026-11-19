@@ -560,6 +560,7 @@ class Runner:
     def __init__(self, root: Path, pid: str, env: Env) -> None:
         self.root, self.pid, self.env = root, pid, env
         self.tasks: dict[str, asyncio.Task[None]] = {}
+        self.stages: dict[str, str] = {}  # the stage each running task is in now (fit runs outside the slots)
         self.labels: dict[str, tuple[str, int]] = {}
         self.wake = asyncio.Event()
         self.loop = asyncio.get_running_loop()
@@ -670,7 +671,7 @@ class Runner:
                 return not self.tasks
             if float(o.get("capacity_until") or 0) > now:
                 return False
-            fitting = {x["id"] for x in doc["tickets"] if x["id"] in self.tasks and run_of(x).get("status") == "fitting"}
+            fitting = {t for t in self.tasks if self.stages.get(t) == "fit"}
             # swapping a part into the program assembly is one shared step (it batches every part waiting): it
             # never takes an agent slot from design, review or integration work (CD-032)
             free = max(0, int(doc["concurrency"]) - (len(self.tasks) - len(fitting)))
@@ -700,6 +701,7 @@ class Runner:
                 service.emit(self.root, doc, "ticket.claimed", f"{lbl} picked up {service._label(t)}.",
                              service.agent_actor(code), t["id"], stage=stage, agent=code)
                 claims.append((t["id"], stage))
+                self.stages[t["id"]] = stage
                 if stage != "fit":
                     free -= 1
             return False
@@ -713,6 +715,7 @@ class Runner:
     async def work(self, tid: str, stage: str | None) -> None:
         try:
             while stage:
+                self.stages[tid] = stage
                 t0 = time.time()
                 code = STAGE_AGENT.get(stage) or service.ticket(self.load(), tid)["specialist"]
                 lbl = self.label(tid, code)
@@ -1070,9 +1073,10 @@ class Runner:
                     self.handoff(d, tt, "gage", "fitz", f"Gage → Fitz: {tt['title']} approved for assembly.")
                 if (d.get("assembly") or {}).get("status") in ("ready", "building") and \
                         tt["item_id"] in (d.get("skeleton") or {}).get("items", {}):
-                    _set_run(tt, status="fitting", next="fit", agent="fitz", agent_label="Fitz",
-                             line=f"Fitz is swapping {tt['title']} in for its placeholder")
-                    return "fit"
+                    # back to the queue: the review slot frees now and Fitz's one swap step takes it (CD-032)
+                    _set_run(tt, status="queued", next="fit", agent="fitz", agent_label="Fitz",
+                             line=f"Approved: Fitz swaps {tt['title']} in for its placeholder next")
+                    return None
                 return None
             n = int(r.get("review_round") or 0) + 1
             service.comment(self.root, d, tid, "Changes requested:\n" + "\n".join(f"- {f}" for f in findings), g)
