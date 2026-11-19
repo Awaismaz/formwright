@@ -94,10 +94,12 @@ def scene_from_doc(root: Path, doc: dict[str, Any], title: str = "") -> dict[str
     return {"title": title or doc.get("name") or "Assembly", "bodies": bodies, "key": key, "kind": "assembly"}
 
 
-def scene_from_skeleton(skel: dict[str, Any], title: str = "") -> dict[str, Any]:
+def scene_from_skeleton(skel: dict[str, Any], title: str = "", ifaces: list[dict[str, Any]] | None = None
+                        ) -> dict[str, Any]:
     """Every copy of every skeleton item as its envelope (no CAD): boxes for blocks, cylinders along the item's axis
-    for shafts, hubs and gears, at the layout position and turn the program assembly would use."""
-    from aicad.office import frames
+    for shafts, hubs and gears, at the layout position and turn the program assembly would use. With the ICD's
+    interfaces, bearings and dowel pins the ICD seats are drawn where Fitz would seat them."""
+    from aicad.office import frames, icd
 
     bodies: list[dict[str, Any]] = []
     for iid, it in (skel.get("items") or {}).items():
@@ -107,6 +109,22 @@ def scene_from_skeleton(skel: dict[str, Any], title: str = "") -> dict[str, Any]
             T = frames.placed(at, float(it.get("rot") or 0) + float(it.get("phase") or 0), None, it.get("ax") or "z")
             bodies.append({"id": f"{iid}#{c}", "group": f"item:{iid}", "label": _clean_label(it.get("name") or iid),
                            "prim": prim, "size": size, "T": [float(x) for x in T]})
+    for st in skel.get("standard") or []:
+        seat = icd.seated(ifaces or [], st["item"])
+        if not seat:
+            continue
+        if seat["code"] == "bearing":
+            from aicad.toolbox import BEARING
+
+            _d, D, B = BEARING[int(seat["params"]["SERIES"])]
+            size = [float(D), float(D), float(B)]
+        else:
+            size = [float(seat["params"]["D"])] * 2 + [float(seat["params"]["L"])]
+        R = seat.get("R") or frames.IDENT
+        for c, at in enumerate(seat["at"]):  # the part's base point; the body is centred: half its length along Z
+            mid = [float(at[k]) + R[k][2] * size[2] / 2 for k in range(3)]
+            bodies.append({"id": f"{st['item']}#{c}", "group": f"item:{st['item']}", "prim": "cyl", "size": size,
+                           "label": _clean_label(st.get("name") or seat["title"]), "T": frames.to12(R, mid)})
     key = _key_items(bodies)
     return {"title": title or "Layout", "bodies": bodies, "key": key, "kind": "skeleton"}
 

@@ -32,6 +32,8 @@ Viewers can open assemblies, the BOM and the last exported STEP; changes need th
   POST   /api/m/assembly/assemblies/{id}/fasteners/accept    insert the proposed stacks
   POST   /api/m/assembly/assemblies/{id}/smart/plan          Hex + Fitz: description -> components + placement plan
   POST   /api/m/assembly/assemblies/{id}/smart/run           Fitz inserts, places and mates the approved plan
+  GET|POST /api/m/assembly/assemblies/{id}/visual            last / run the visual check (advisory, PD-73)
+  GET    /api/m/assembly/assemblies/{id}/visual.png          its 4-view picture
   GET    /api/m/assembly/parts/{key}/topo                    exact topology of a part snapshot (viewer)
   POST   /api/m/assembly/impact/{project_id}                change impact preview of a pending Studio edit
 """
@@ -1244,11 +1246,23 @@ async def smart_run(aid: str, body: SmartRunIn, ctx: Ctx = Depends(asm_ctx)) -> 
     async def project_part(pid: str) -> str:
         return await _project_part(ctx, _project(ctx, pid))
 
+    acc = visual_access(ctx)
+    later: dict[str, Any] = {}
+
     async def fn(doc: dict[str, Any], root: Path) -> dict[str, Any]:
         items = _clean_items(ctx, doc, body.items)
-        return {"_extra": await fitz.execute(root, org_id, doc, items, project_part)}
+        res = await fitz.execute(root, org_id, doc, items, project_part, check=False)
+        if doc["instances"]:
+            later.update(await checks_by_policy(root, org_id, doc, res, acc))
+        return {"_extra": res}
 
     view = await _mutate(ctx, aid, fn, solve=False)
+    root = _root(ctx)
+    if later.get("exact") in ("background", "targeted"):
+        spawn(background_exact(root, org_id, aid))
+    if later.get("look_after") and acc is not None:
+        store_visual_state(root, aid, {"status": "running", "at": store.now()})
+        spawn(visual_job(root, aid, acc))
     r = view.get("result") or {}
     audit(ctx.db, "assembly.smart_assembled", ctx.user, org_id, target=aid, inserted=r.get("inserted"),
           stacks=r.get("fastener_stacks"))
@@ -1256,3 +1270,187 @@ async def smart_run(aid: str, body: SmartRunIn, ctx: Ctx = Depends(asm_ctx)) -> 
           clashes=len(r.get("clashes") or []))
     ctx.db.commit()
     return view
+
+
+# ----------------------------------------------------------------------------- visual check (PD-73)
+_bg: set[asyncio.Task[Any]] = set()
+
+
+def spawn(coro: Any) -> None:
+    t = asyncio.get_running_loop().create_task(coro)
+    _bg.add(t)
+    t.add_done_callback(_bg.discard)
+
+
+def visual_access(ctx: Ctx) -> dict[str, Any] | None:
+    """Whether this request may run a visual check, and on what terms. None: no look (setting off, AI off for the
+    account, a viewer, too few tokens). Simulated agents (development) look for free from the quick checks."""
+    from aicad.assembly import visual
+    from aicad.office import fake_agents
+    from aicad.platform import metering
+    from aicad.platform.routers.projects import can_run_agent
+
+    if not visual.enabled() or ctx.role == "viewer":
+        return None
+    org = ctx.require_org()
+    base = {"org_id": org.id, "user_id": ctx.user.id}
+    if fake_agents.enabled():
+        return {**base, "simulated": True, "budget": None, "god": True}
+    allowed, _, _ = can_run_agent(ctx)
+    if not allowed:
+        return None
+    god = ctx.god_on("bypass_tokens")
+    if not god and org.token_balance - metering.reserved(org.id) < visual.CHECK_MAX_TOKENS:
+        return None
+    return {**base, "simulated": False, "god": god, "budget": visual.CHECK_MAX_TOKENS * metering.USD_PER_TOKEN}
+
+
+def _visual_dir(root: Path, aid: str) -> Path:
+    return store.doc_dir(root, aid) / "visual"
+
+
+def store_visual_state(root: Path, aid: str, rec: dict[str, Any]) -> None:
+    from aicad.assembly import visual
+
+    visual.store_record(_visual_dir(root, aid), rec)
+
+
+def charge_visual(acc: dict[str, Any], tokens: int, ref: str, what: str) -> None:
+    """Debit a visual check like any other AI step (never for simulated agents or unlimited God-mode tokens)."""
+    from aicad.platform.db import session_factory
+    from aicad.platform.models import Organization, User
+
+    db = session_factory()()
+    try:
+        org, user = db.get(Organization, acc["org_id"]), db.get(User, acc["user_id"])
+        if tokens and org is not None and not acc.get("god") and not acc.get("simulated"):
+            debit(db, org, tokens, "usage", what, user, ref=ref)
+        track(db, "assembly_visual_check", user, acc["org_id"], tokens=tokens if not acc.get("god") else 0)
+        db.commit()
+    finally:
+        db.close()
+
+
+async def look_at(root: Path, doc: dict[str, Any], acc: dict[str, Any],
+                  relations: list[dict[str, Any]] | None = None, brief: str = "",
+                  quick: dict[str, Any] | None = None, what: str = "Assembly Studio · visual check") -> dict[str, Any]:
+    """Render the document, ask for the verdict, save it next to the document, charge it. Never raises."""
+    from aicad.assembly import render, visual
+
+    q = quick or await asyncio.to_thread(visual.quick_doc, root, doc)
+    rels = relations or await asyncio.to_thread(visual.relations_from_doc, root, doc)
+    scene = await asyncio.to_thread(render.scene_from_doc, root, doc, service.clean_name(doc["name"]))
+    rec = await visual.look(scene, rels, _visual_dir(root, doc["id"]), brief=brief, budget_usd=acc.get("budget"),
+                            simulated=bool(acc.get("simulated")), quick=q)
+    rec.update(quick=q["findings"], signature=service.geometry_signature(doc), simulated=bool(acc.get("simulated")))
+    visual.store_record(_visual_dir(root, doc["id"]), rec)
+    if rec.get("tokens"):
+        await asyncio.to_thread(charge_visual, acc, int(rec["tokens"]), doc["id"], what)
+    return rec
+
+
+async def visual_job(root: Path, aid: str, acc: dict[str, Any]) -> None:
+    """The visual check after a smart assembly (background: the result appears when it is ready)."""
+    try:
+        doc = store.load(root, aid)
+        if doc is not None:
+            await look_at(root, doc, acc)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("visual check failed", exc_info=True)
+        store_visual_state(root, aid, {"status": "failed", "at": store.now(),
+                                       "error": "The visual check couldn't run. Try Look again."})
+
+
+async def background_exact(root: Path, org_id: str, aid: str) -> None:
+    """The whole-assembly exact check after the response (advisory): saved as the document's analysis."""
+    try:
+        doc = store.load(root, aid)
+        if doc is not None and doc["instances"]:
+            await service.analyse(root, org_id, doc)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("background exact check failed", exc_info=True)
+
+
+async def checks_by_policy(root: Path, org_id: str, doc: dict[str, Any], res: dict[str, Any],
+                           acc: dict[str, Any] | None) -> dict[str, Any]:
+    """After Fitz placed the parts: quick placement checks (always), then the exact check where the policy puts it
+    (``visual.decide``). Updates Fitz's result (log, clashes, summary) and returns what to run after the response."""
+    import time
+
+    from aicad.assembly import visual
+
+    t0 = time.perf_counter()
+    q = await asyncio.to_thread(visual.quick_doc, root, doc)
+    for f in q["findings"]:
+        res["log"].append({"agent": "Fitz", "text": f"Fitz measured: {f['text']}", "tone": "warn"})
+    est = await asyncio.to_thread(visual.estimate_exact, root, doc)
+    rec = None
+    if acc is not None and est["seconds"] > visual.VISION_S and not q["findings"]:
+        rec = await look_at(root, doc, acc, quick=q)  # looking is quicker than measuring here: look first
+    verdict = (rec or {}).get("verdict")
+    d = visual.decide(verdict, q, est, (rec or {}).get("vision_s"))
+    clashes: list[dict[str, Any]] = []
+    if d["exact"] == "inline":
+        an = await service.analyse(root, org_id, doc)
+        clashes = visual.clash_rows(an)
+    elif d["exact"] == "targeted":
+        targets = d["targets"] or (visual.targets_from(verdict, doc, (rec or {}).get("key") or []) if verdict else [])
+        clashes = await visual.targeted(root, org_id, doc, targets)
+        d = visual.confirm(d, verdict, clashes)
+    res["clashes"] = clashes
+    n = len(clashes)
+    exact_txt = {"inline": f"{n} clash{'es' if n != 1 else ''}",
+                 "targeted": f"{n} clash{'es' if n != 1 else ''} among the parts in question; the whole clash check "
+                             "runs in the background",
+                 "background": "the whole clash check runs in the background (advisory)"}[d["exact"]]
+    res["summary"] = f"{res['summary']}, {exact_txt}"
+    if d.get("unconfirmed") or (d.get("stop") and d.get("reason") and not q["findings"]):
+        res["log"].append({"agent": "Fitz", "text": d["reason"], "tone": "warn"})
+    res["log"].append({"agent": "Fitz", "text": res["summary"], "tone": "warn" if clashes or q["findings"] else "ok"})
+    res["checks"] = {"quick": q["findings"], "estimate": est, "policy": {k: d[k] for k in ("exact", "stop", "why")},
+                     "reason": d.get("reason") or "", "quick_s": q["seconds"],
+                     "seconds": round(time.perf_counter() - t0, 2),
+                     "visual": "done" if rec else ("running" if acc is not None else "off")}
+    return {"exact": d["exact"], "look_after": rec is None and acc is not None}
+
+
+@router.get("/assemblies/{aid}/visual")
+def get_visual(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """The last visual check of this assembly (advisory) and whether the assembly changed since."""
+    from aicad.assembly import visual
+
+    doc = _doc(ctx, aid)
+    rec = visual.load_record(_visual_dir(_root(ctx), aid))
+    sig = (rec or {}).get("signature")
+    return {"visual": visual.public(rec), "stale": bool(sig and sig != service.geometry_signature(doc)),
+            "image": (f"/api/m/assembly/assemblies/{aid}/visual.png?t={(rec or {}).get('at', '')}"
+                      if rec and rec.get("status") == "done" else None),
+            "available": visual_access(ctx) is not None}
+
+
+@router.post("/assemblies/{aid}/visual")
+async def run_visual(aid: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Look at the assembly now: the 4-view picture and the visual verdict against its mates (advisory, metered)."""
+    _editor(ctx)
+    acc = visual_access(ctx)
+    if acc is None:
+        raise HTTPException(402, {"message": "The visual check needs AI and a few tokens. Top up, or use Check for "
+                                             "the exact clash check.", "cta": "/app/billing#tokens"})
+    doc = _doc(ctx, aid)
+    if not doc["instances"]:
+        raise HTTPException(409, "There is nothing to look at yet: insert some parts first.")
+    await look_at(_root(ctx), doc, acc)
+    return get_visual(aid, ctx)
+
+
+@router.get("/assemblies/{aid}/visual.png")
+def get_visual_png(aid: str, ctx: Ctx = Depends(asm_ctx)) -> FileResponse:
+    _doc(ctx, aid)
+    f = _visual_dir(_root(ctx), aid) / "assembly.png"
+    if not f.is_file():
+        raise HTTPException(404, "No picture yet")
+    return FileResponse(f, media_type="image/png", headers={"Cache-Control": "no-cache"})
