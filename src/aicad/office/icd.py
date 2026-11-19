@@ -50,6 +50,9 @@ WASHER_OD = {3: 7.0, 4: 9.0, 5: 10.0, 6: 12.0, 8: 16.0, 10: 20.0, 12: 24.0, 16: 
 GAP = 12.0          # mm between stations on a block's top face
 MARGIN = 10.0       # mm from a block's edge to its first station
 MAX_COPIES = 8      # copies of one part laid out in the skeleton (the rest are noted)
+PLAN_SLACK = 1.5    # a laid-out envelope may grow to this multiple of the planned one (its own features), no more
+PAD_GAP = 2.0       # mm between joint pads when a host's planned size can't take its children side by side
+SLENDER = 4.0       # a turned part at least this many diameters long (planned envelope) is a rod: a shaft role
 POS_TOL = 0.1       # mm: default position tolerance of interface features
 FLATNESS = 0.05     # mm: default flatness of a mounting face
 PRESSURE_ANGLE = 20.0
@@ -285,6 +288,9 @@ def _role(p: dict[str, Any], sub_has_shaft: bool) -> str:
     if fam == "turned":
         if _SHAFTY.search(p["name"]):
             return "shaft"
+        env = p.get("envelope") if isinstance(p.get("envelope"), list) and len(p["envelope"]) == 3 else None
+        if env and not _HUBBY.search(p["name"]) and float(env[2]) >= SLENDER * max(float(env[0]), float(env[1])):
+            return "shaft"  # a rod / pin / strut by its planned shape: it is carried, it doesn't carry a shaft
         if _HUBBY.search(p["name"]) or sub_has_shaft:
             return "hub"
         return "shaft"
@@ -360,6 +366,37 @@ def _initial(p: dict[str, Any], role: str, brief: str, ratio: float | None, gear
     return s
 
 
+SIZE_KEYS = {"block": ("L", "W", "H"), "shaft": ("d", "d", "length"), "hub": ("OD", "OD", "H")}
+
+
+def _planned(p: dict[str, Any], s: dict[str, Any], io: dict[str, Any]) -> list[float] | None:
+    """The envelope the plan gives a part, in the order of its skeleton ``size`` (box L, W, H; shaft Ø, Ø, length;
+    round part OD, OD, H), with the sizes an engineer set (a resize, an approved freeze) in place of the plan's.
+    Sizes Archie grew to make a part buildable (``grown``) don't count: they are measured against the plan."""
+    keys = SIZE_KEYS.get(s["role"])
+    env = p.get("envelope") if isinstance(p.get("envelope"), list) and len(p["envelope"]) == 3 else None
+    if not keys or not env:
+        return None
+    try:
+        e = [float(x) for x in env]
+    except (TypeError, ValueError):
+        return None
+    if min(e) <= 0:
+        return None
+    if s["role"] == "block":
+        out = e
+    elif s["role"] == "shaft":
+        out = [min(e[0], e[1])] * 2 + [e[2]]
+    else:
+        out = [max(e[0], e[1])] * 2 + [e[2]]
+    grown = set(io.get("grown") or [])
+    for n, k in enumerate(keys):
+        v = io.get(k)
+        if k not in grown and isinstance(v, int | float) and not isinstance(v, bool) and v > 0:
+            out[n] = float(v)
+    return [_r2(x) for x in out]
+
+
 # ----------------------------------------------------------------------------- the layout engine
 def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any] | None = None
           ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -382,6 +419,9 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         role = _role(p, p["sub"] in shaft_subs)
         spec[p["id"]] = _initial(p, role, brief, ratio, gear_n, iov.get(p["id"], {}))
         gear_n += role == "gear"
+        pl = _planned(p, spec[p["id"]], iov.get(p["id"]) or {})
+        if pl:
+            spec[p["id"]]["planned"] = pl
     # fastener size hints from standard parts of the same sub-assembly
     fast_hint: dict[str, int] = {}
     fast_item: dict[str, str] = {}
@@ -515,19 +555,33 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             notes.append(f"{by_id[i]['name']}: {q} off, {MAX_COPIES} laid out in the skeleton.")
         return min(q, MAX_COPIES)
 
-    # stacks on shafts: hubs / gears (every copy) in plan order
-    stack: dict[str, list[tuple[str, int]]] = {}
+    # which copy of its host each copy of a part sits on. On a host the plan sized: copy c on host copy c mod (host
+    # copies), so four stub axles on two uprights are two per upright, not four on the first.
+    hostc: dict[tuple[str, int], int] = {}
+    # stacks on shafts: hubs / gears (every copy) in plan order, per shaft copy
+    stk: dict[tuple[str, int], list[tuple[str, int]]] = {}
     for i, s in spec.items():
         if s["role"] == "shaft":
-            stack[i] = [(k, c) for k in kids[i] if spec[k]["role"] in ("hub", "gear") for c in range(ncopies(k))]
-    # hubs and gears on a shaft get its bore; a hub's OD must leave a rim
-    for sh, st in stack.items():
+            ns = ncopies_quiet(by_id[i]) if s.get("planned") else 1  # spread over copies when the plan sized it
+            for sc in range(ncopies_quiet(by_id[i])):
+                stk[(i, sc)] = []
+            for k in kids[i]:
+                if spec[k]["role"] not in ("hub", "gear"):
+                    continue
+                for c in range(ncopies(k)):
+                    stk[(i, c % ns)].append((k, c))
+                    hostc[(k, c)] = c % ns
+    stack: dict[str, list[tuple[str, int]]] = {i: stk[(i, 0)] for i, s in spec.items() if s["role"] == "shaft"}
+    # hubs and gears on a shaft get its bore; a hub's OD must leave a rim (1 mm at least when the plan sized it)
+    for (sh, _sc), st in stk.items():
         d = spec[sh]["d"]
         for k, _c in st:
             s = spec[k]
             s["bore"] = d
             if s["role"] == "hub" and not s.get("od_given"):
                 s["OD"] = max(s["OD"], d + 2 * max(8.0, 0.5 * d))
+            elif s["role"] == "hub" and "OD" not in (iov.get(k) or {}):
+                s["OD"] = max(s["OD"], _r2(d + 2.0))
     for i, s in spec.items():
         if s["role"] == "gear":
             s["pitch"] = s["module"] * s["teeth"]
@@ -540,15 +594,30 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         s = spec[i]
         return {"hub": s.get("H", 0.0), "gear": s.get("b", 0.0)}.get(s["role"], 0.0)
 
-    # stations on each block: [(item, copy)] for child blocks, shafts and hubs/gears bolted to the block
-    stations: dict[str, list[tuple[str, int]]] = {}
+    # stations on each block copy: [(item, copy)] for child blocks, shafts and hubs/gears bolted to the block. A
+    # host that may become a gearbox housing (shafts in bearings) keeps every child on its first copy.
+    rows_of: dict[tuple[str, int], list[tuple[str, int]]] = {}
     for i, s in spec.items():
         if s["role"] == "block":
-            stations[i] = [(k, c) for k in kids[i] for c in range(ncopies(k))]
+            nh = ncopies_quiet(by_id[i])
+            if not s.get("planned") or any(spec[k]["role"] == "shaft" and spec[k].get("bearing") for k in kids[i]):
+                nh_d = 1  # unplanned hosts and possible gearbox housings keep every child on their first copy
+            else:
+                nh_d = nh
+            for hc in range(nh):
+                rows_of[(i, hc)] = []
+            for k in kids[i]:
+                for c in range(ncopies(k)):
+                    rows_of[(i, c % nh_d)].append((k, c))
+                    hostc[(k, c)] = c % nh_d
+    stations: dict[str, list[tuple[str, int]]] = {i: rows_of[(i, 0)] for i, s in spec.items() if s["role"] == "block"}
+
+    def copy_rows(i: str) -> list[list[tuple[str, int]]]:
+        return [rows_of[(i, hc)] for hc in range(ncopies_quiet(by_id[i])) if (i, hc) in rows_of]
 
     def stack_w(sh: str) -> float:
-        """The widest thing on a shaft above its host (the shaft, its hubs and gears)."""
-        return max([spec[sh]["d"]] + [od(x) for x, _c in stack.get(sh, [])])
+        """The widest thing on a shaft above its host (the shaft, its hubs and gears), over its copies."""
+        return max([spec[sh]["d"]] + [od(x) for (k, _sc), st in stk.items() if k == sh for x, _c in st])
 
     def first_gear(sh: str) -> str | None:
         return next((k for k, _c in stack.get(sh, []) if spec[k]["role"] == "gear"), None)
@@ -596,7 +665,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             continue
         hm: dict[str, Any] = {"shafts": shafts_h, "rel": [], "r": [], "xs": [0.0]}
         for k, c in shafts_h:  # each stack along its shaft, about the mid-plane of its first gear (the mesh plane)
-            st = stack.get(k, []) if c == 0 else []
+            st = stk.get((k, c), [])
             pre, tot, found = 0.0, 0.0, False
             for x, _xc in st:
                 if not found and spec[x]["role"] == "gear":
@@ -650,11 +719,11 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         hm["lid"] = lid
         # the casing is open at the top: only the lid sits there; anything else (caps that don't fit, plates) goes
         # beside the program for the engineer to place (no interface in this layout)
-        stations[h] = []
+        rows_of[(h, 0)] = stations[h] = []
         spec[h]["rot"] = 0
         for k, c in shafts_h:
             spec[k]["ax"] = "y"
-            for x, _xc in (stack.get(k, []) if c == 0 else []):
+            for x, _xc in stk.get((k, c), []):
                 spec[x]["ax"] = "y"
         for (ci_, _cc), _n, _s in caps:
             spec[ci_]["ax"] = "y"
@@ -702,18 +771,42 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             if "L" not in lo_:
                 ls["L"], ls["W"] = s["L"], s["W"]
 
-    # sizes bottom-up (blocks grow to carry their row)
-    def size_block(i: str) -> None:
-        for k, _c in stations[i]:
-            if spec[k]["role"] == "block":
-                size_block(k)
-        if i in housing and housing[i]["lid"]:
-            size_block(housing[i]["lid"])
-        row = stations[i]
-        if not row:
-            if i in housing:
-                size_housing(i)
-            return
+    def joint_m(k: str) -> int:
+        """The bolt size of a part bolted to its host before any ICD edit (the same rule as the interfaces below)."""
+        if spec[k]["role"] == "block":
+            span = min(foot((k, 0)))
+            m = int(fast_hint.get(by_id[k]["sub"]) or fastener_for(span))
+            return m if m in CLEARANCE else fastener_for(span)
+        m = int(fast_hint.get(by_id[k]["sub"]) or fastener_for(od(k) * 0.6))
+        return m if m in CLEARANCE else 5
+
+    def pad(st: tuple[str, int], level: int, room: float) -> tuple[float, float]:
+        """(along, across) the joint needs on its host, not the child's whole footprint: level 1 a comfortable bolt
+        pad, level 2 the least that holds the joint (two bolts with their washers side by side, 1 mm of wall)."""
+        k = st[0]
+        s = spec[k]
+        ca, cw = foot(st)
+        if s["role"] == "block":
+            m = joint_m(k)
+            d, wod = CLEARANCE[m], WASHER_OD[m]
+            least = wod + d + 2.0
+            along = max(min(ca, 2 * max(2 * d, 6.0) + wod if level == 1 else least), least)
+            return _r2(along), _r2(max(min(cw, room), d + 2.0))
+        if s["role"] == "shaft":
+            if level == 1:
+                return ca, cw
+            w = (BEARINGS[s["bearing"]["designation"]][1] if s.get("bearing") else s["d"]) + 2.0
+            return _r2(w), _r2(w)
+        D = od(k)
+        if level == 1:
+            return D, D
+        m = joint_m(k)
+        d, wod = CLEARANCE[m], WASHER_OD[m]
+        pcd = max((s.get("bore") or 0) + 3 * d, wod / math.sin(math.pi / 4) + 0.01)
+        w = _r2(min(D, pcd + d + 2.0))
+        return w, w
+
+    def row_length(row: list[tuple[str, int]]) -> float:
         length = 2 * MARGIN
         for n, st in enumerate(row):
             w = foot(st)[0]
@@ -724,14 +817,89 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             mesh = meshes(prev, st)
             length += (od(mesh[0]) / 2 + od(mesh[1]) / 2 - foot(prev)[0] / 2 - w / 2 + w) if mesh else \
                 gap(foot(prev)[0], w) + w
-        width = max(foot(st)[1] for st in row) + 2 * MARGIN
+        return length
+
+    # sizes bottom-up. A block the plan didn't size grows to carry its row of children side by side. A block the
+    # plan sized keeps its size when it can't take them in a row: each child then needs only its joint's pad (the
+    # bolts and their washers), the children may overhang it and each other, and the block grows only as far as the
+    # pads need (CD-029; problems() flags anything beyond PLAN_SLACK x the plan).
+    slot_of: dict[tuple[str, int], tuple[str, int]] = {}  # station -> its slot on the host (shared by host copies)
+
+    def key_row(i: str) -> list[tuple[str, int]]:
+        """One station per slot on block i, in row order. The n-th copy of a part on any copy of i takes the same
+        slot, so every copy of the host carries the same holes (one design serves them all)."""
+        reps: dict[tuple[str, int], tuple[str, int]] = {}
+        for row in copy_rows(i):
+            seen: dict[str, int] = {}
+            for k, c in row:
+                j = seen.get(k, 0)
+                seen[k] = j + 1
+                slot_of[(k, c)] = (k, j)
+                reps.setdefault((k, j), (k, c))
+        return list(reps.values())
+
+    def size_block(i: str) -> None:
+        row = key_row(i)
+        for k, _c in row:
+            if spec[k]["role"] == "block":
+                size_block(k)
+        if i in housing and housing[i]["lid"]:
+            size_block(housing[i]["lid"])
+        if not row:
+            if i in housing:
+                size_housing(i)
+            return
         s = spec[i]
+        along, across = ("W", "L") if s.get("rot") in (90, 270) else ("L", "W")
         frozen = "L" in (iov.get(i) or {})
+        length = row_length(row)
+        width = max(foot(st)[1] for st in row) + 2 * MARGIN
+        meshy = any(meshes(row[n - 1], row[n]) for n in range(1, len(row)))
+        room_a, room_c = float(s[along]), float(s[across])
+        if s.get("planned") and not meshy and i not in housing and \
+                (length > room_a + 1e-6 or width > room_c + 1e-6):
+            pads: dict[tuple[str, int], tuple[float, float]] = {}
+            need_a = need_c = 0.0
+            for level in (1, 2):
+                pads = {slot_of[st]: pad(st, level, room_c) for st in row}
+                need_a = sum(v[0] for v in pads.values()) + PAD_GAP * (len(row) - 1)
+                need_c = max(v[1] for v in pads.values())
+                if need_a <= room_a + 1e-6:  # (the width a bolt needs grows the host at any level)
+                    break
+            if not frozen:
+                s[along] = _r2(max(room_a, need_a))
+                s[across] = _r2(max(room_c, need_c))
+            A = float(s[along])
+            w = [pads[slot_of[st]][0] for st in row]
+            n = len(w)
+            if n * (max(w) + PAD_GAP) <= A + 1e-6:  # spread evenly along the host
+                offs = [_r2(-A / 2 + A * (j + 0.5) / n) for j in range(n)]
+            else:
+                x = -(sum(w) + PAD_GAP * (n - 1)) / 2
+                offs = []
+                for wj in w:
+                    offs.append(_r2(x + wj / 2))
+                    x += wj + PAD_GAP
+            s["xoff"] = {slot_of[st]: off for st, off in zip(row, offs, strict=True)}
+            s["pads"] = pads
+            return
         if not frozen:
-            along, across = ("W", "L") if s.get("rot") in (90, 270) else ("L", "W")
             s[along] = max(s[along], length)
             s[across] = max(s[across], width)
         s["row_len"] = length
+        xoff: dict[tuple[str, int], float] = {}
+        x, prev_x = -length / 2 + MARGIN, None
+        for n, st in enumerate(row):
+            w0 = foot(st)[0]
+            mesh = meshes(row[n - 1], st) if n else None
+            if mesh and prev_x is not None:
+                cx_ = prev_x + od(mesh[0]) / 2 + od(mesh[1]) / 2
+            else:
+                cx_ = x + w0 / 2 if n == 0 else x + gap(foot(row[n - 1])[0], w0) + w0 / 2
+            x = cx_ + w0 / 2
+            prev_x = cx_
+            xoff[slot_of[st]] = cx_
+        s["xoff"] = xoff
         if i in housing:
             size_housing(i)
 
@@ -744,38 +912,24 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
     # positions top-down
     at: dict[str, list[list[float] | None]] = {i: [None] * ncopies_quiet(by_id[i]) for i in spec}
     under: dict[tuple[str, int], tuple[str, int]] = {}   # what a hub / gear copy rests on
+    eng: dict[tuple[str, int], float] = {}               # how far a shaft copy reaches into its host block
 
     def place_block(i: str, c: int, centre: list[float]) -> None:
         at[i][c] = centre
         s = spec[i]
-        if c != 0:
-            return
         top, bottom = centre[2] + s["H"] / 2, centre[2] - s["H"] / 2
-        if i in housing:
+        if c == 0 and i in housing:
             place_housing(i, centre)
-        row = stations[i]
-        if not row:
-            return
-        x = centre[0] - s["row_len"] / 2 + MARGIN
-        prev_x = None
-        for n, st in enumerate(row):
-            w = foot(st)[0]
-            mesh = meshes(row[n - 1], st) if n else None
-            if mesh and prev_x is not None:
-                cx_ = prev_x + od(mesh[0]) / 2 + od(mesh[1]) / 2
-            else:
-                cx_ = x + w / 2 if n == 0 else x + gap(foot(row[n - 1])[0], w) + w / 2
-            x = cx_ + w / 2
-            prev_x = cx_
-            k, kc = st
+        for k, kc in rows_of.get((i, c)) or []:
+            cx_ = centre[0] + s["xoff"][slot_of[(k, kc)]]
             ks = spec[k]
             if ks["role"] == "block":
                 place_block(k, kc, [cx_, centre[1], top + ks["H"] / 2])
             elif ks["role"] == "shaft":
-                place_shaft(k, kc, cx_, centre[1], top, bottom, (i, 0))
+                place_shaft(k, kc, cx_, centre[1], top, bottom, (i, c))
             else:
                 at[k][kc] = [cx_, centre[1], top + height(k) / 2]
-                under[(k, kc)] = (i, 0)
+                under[(k, kc)] = (i, c)
 
     def place_housing(h: str, centre: list[float]) -> None:
         """Shafts along +Y from the -Y outer wall face (flush) out through the +Y wall and its cap; each stack with
@@ -795,7 +949,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             at[k][c] = [_r2(x), _r2(y0 + ks["length"] / 2), _r2(za)]
             y = cy + hm["rel"][n][0]
             below: tuple[str, int] | None = None
-            for x_, xc in (stack.get(k, []) if c == 0 else []):
+            for x_, xc in stk.get((k, c), []):
                 at[x_][xc] = [_r2(x), _r2(y + height(x_) / 2), _r2(za)]
                 if below is not None:
                     under[(x_, xc)] = below
@@ -809,13 +963,22 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             place_block(hm["lid"], 0, [cx, cy, top + spec[hm["lid"]]["H"] / 2])
 
     def place_shaft(i: str, c: int, x: float, y: float, top: float, bottom: float, host: tuple[str, int]) -> None:
+        """A shaft copy standing in its host block with its stack above. Unplanned: through the block, 15 mm above
+        the stack (at least 40 long). Planned: its planned length, into the block as far as it reaches."""
         s = spec[i]
-        st = stack.get(i, []) if c == 0 else []
+        st = stk.get((i, c), [])
         h_stack = sum(height(k) for k, _c in st)
-        need = (top - bottom) + h_stack + 15.0
+        t = top - bottom
+        planned = bool(s.get("planned")) and not s.get("bearing")
         if "length" not in (iov.get(i) or {}):
-            s["length"] = max(s.get("length") or 0.0, need, 40.0)
-        at[i][c] = [x, y, bottom + s["length"] / 2]
+            h_max = max(sum(height(k) for k, _c in stk.get((i, cc), [])) for cc in range(len(at[i])))
+            if planned:
+                s["length"] = _r2(max(s["planned"][2], h_max + min(t, max(s["d"], 5.0))))
+            else:
+                s["length"] = max(s.get("length") or 0.0, t + h_max + 15.0, 40.0)
+        e = max(0.0, min(t, s["length"] - h_stack)) if planned else t
+        eng[(i, c)] = e
+        at[i][c] = [x, y, top - e + s["length"] / 2]
         z = top
         below = host
         for k, kc in st:
@@ -865,6 +1028,8 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
 
     def grid(cxy: list[float], L: float, W: float, d: float, count: int, inset: float) -> list[list[float]]:
         ex, ey = L / 2 - inset, W / 2 - inset
+        if count == 2 and W > L:  # two bolts along the longer side of the joint
+            return [[_r2(cxy[0]), _r2(cxy[1] - ey)], [_r2(cxy[0]), _r2(cxy[1] + ey)]]
         if count == 2:
             return [[_r2(cxy[0] - ex), _r2(cxy[1])], [_r2(cxy[0] + ex), _r2(cxy[1])]]
         if count >= 6:
@@ -877,22 +1042,21 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
 
     order: list[tuple[str, int]] = []
 
-    def walk(i: str) -> None:
-        hm = housing.get(i)
+    def walk(i: str, hc: int = 0) -> None:
+        hm = housing.get(i) if hc == 0 else None
         if hm and hm["lid"]:
             order.append((hm["lid"], 0))
             walk(hm["lid"])
-        for k, c in stations.get(i, []):
+        for k, c in rows_of.get((i, hc), []):
             order.append((k, c))
-            if spec[k]["role"] == "block" and c == 0:
-                walk(k)
-            if spec[k]["role"] == "shaft" and c == 0:
-                order.extend(stack.get(k, []))
+            if spec[k]["role"] == "block":
+                walk(k, c)
+            if spec[k]["role"] == "shaft":
+                order.extend(stk.get((k, c), []))
         if hm:
             for k, c in hm["shafts"]:
                 order.append((k, c))
-                if c == 0:
-                    order.extend(stack.get(k, []))
+                order.extend(stk.get((k, c), []))
             order.extend(st for st, _n, _s in hm["caps"])
 
     walk(prog_base)
@@ -916,6 +1080,54 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 return [[_r2(q[0]), _r2(q[1])] for q in cand]
         return None
 
+    # holes already in each part (Z axis, part frame up to the copy's turn): new bolt patterns keep 1 mm clear of
+    # them. Shaft bores and bearing seats in blocks are known from the placement, so they go in first.
+    holes_reg: dict[str, list[tuple[float, float, float]]] = {}
+
+    def reg(item: str, cp: int, pts: list[list[float]], d: float) -> None:
+        c0 = at[item][cp]
+        assert c0 is not None
+        holes_reg.setdefault(item, []).extend((x - c0[0], y - c0[1], d) for x, y in pts)
+
+    def clash(item: str, cp: int, pts: list[list[float]], d: float) -> bool:
+        c0 = at[item][cp]
+        assert c0 is not None
+        for x, y in pts:
+            lx, ly = x - c0[0], y - c0[1]
+            for rx, ry, rd in holes_reg.get(item, []):
+                if _near(lx, rx) and _near(ly, ry):
+                    continue  # concentric: one bolt through both
+                if math.hypot(lx - rx, ly - ry) - (d + rd) / 2 < 1.0:
+                    return True
+        return False
+
+    for k, c in order:
+        host = parent.get(k)
+        if host is None or spec[k]["role"] != "shaft" or host in housing or spec[host]["role"] != "block":
+            continue
+        pos0 = at[k][c]
+        assert pos0 is not None
+        br = spec[k].get("bearing")
+        reg(host, hostc.get((k, c), 0), [[pos0[0], pos0[1]]],
+            BEARINGS[br["designation"]][1] if br else spec[k]["d"])
+
+    def pattern2(cxy: list[float], Lp: float, Wp: float, inset: float, along_x: bool, off: float
+                 ) -> list[list[float]]:
+        """Two holes on a line along X (or Y), ``inset`` from the ends of the joint, ``off`` across it."""
+        if along_x:
+            ex = Lp / 2 - inset
+            return [[_r2(cxy[0] - ex), _r2(cxy[1] + off)], [_r2(cxy[0] + ex), _r2(cxy[1] + off)]]
+        ey = Wp / 2 - inset
+        return [[_r2(cxy[0] + off), _r2(cxy[1] - ey)], [_r2(cxy[0] + off), _r2(cxy[1] + ey)]]
+
+    def grow_foot(k: str, along: float, across: float) -> None:
+        """A block grows (program X / Y) to hold its own joint; sizes the engineer set or froze stay."""
+        s, o = spec[k], iov.get(k) or {}
+        kx, ky = ("W", "L") if s.get("rot") in (90, 270) else ("L", "W")
+        for key, need in ((kx, along), (ky, across)):
+            if key not in o and float(s[key]) < need - 1e-9:
+                s[key] = _r2(need)
+
     for k, c in order:
         ks = spec[k]
         p = by_id[k]
@@ -923,39 +1135,76 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         if host is None:
             continue
         hs = spec[host]
+        hc = hostc.get((k, c), 0)  # the copy of the host this copy sits on
         pos = at[k][c]
         assert pos is not None
         n_if = len(ifs) + 1
         o = fov.get(f"IF-{n_if:02d}") or {}
         if ks["role"] == "block":
             top = pos[2] - ks["H"] / 2
-            Lp, Wp = foot((k, c))
-            span = min(Lp, Wp)
-            m = bolt_size(p["sub"], span, o)
+            Lc, Wc = foot((k, c))
+            # the joint's pad on a crowded planned host, else the child's whole footprint
+            Lp, Wp = (hs.get("pads") or {}).get(slot_of.get((k, c), ("", -1))) or (Lc, Wc)
+            m = bolt_size(p["sub"], min(Lc, Wc), o)
             d = float(o.get("d") or CLEARANCE[m])
-            inset = float(o.get("inset") or max(2 * d, 6.0))
+            inset_pref = max(2 * d, 6.0)
+            inset = float(o.get("inset") or inset_pref)
             wod = WASHER_OD.get(max(m, bolt_for_hole(d)), 2 * d)
+            # the part holds its own joint: two bolts with their washers side by side along its longer side, 1 mm of
+            # wall around every hole. It grows that far for them (its own features), never to fit anything else.
+            lng, shr = wod + d + 2.0, d + 2.0
+            need_x, need_y = (lng, shr) if Lp >= Wp else (shr, lng)
+            grow_foot(k, need_x, need_y)
+            Lp, Wp = _r2(max(Lp, need_x)), _r2(max(Wp, need_y))
             # two rows only when the washers of neighbouring bolts fit side by side (the ICD's own rule)
             count = int(o.get("count") or (4 if min(Lp, Wp) - 2 * inset >= wod
                                            and max(Lp, Wp) - 2 * inset >= wod else 2))
             pts = grid(pos, Lp, Wp, d, count, inset)
+            if count == 2 and not o.get("inset"):  # a short joint: the bolts move in until the washers just clear
+                inset = _r2(max(min(inset_pref, (max(Lp, Wp) - wod) / 2), d / 2 + 1.0))
+                pts = grid(pos, Lp, Wp, d, count, inset)
+            if clash(host, hc, pts, d) or clash(k, c, pts, d):
+                # clear of the holes already in either part: two bolts, moved along and across the joint (the
+                # search is deterministic, so frozen count and inset find the same holes again)
+                cands: list[tuple[float, list[list[float]]]] = []
+                for along_x in ((Lp >= Wp, Lp < Wp) if not o.get("count") or count == 2 else ()):
+                    ln, wd = (Lp, Wp) if along_x else (Wp, Lp)
+                    if ln - wod < d + 2.0 - 1e-9:
+                        continue
+                    hi = min(inset_pref, (ln - wod) / 2)
+                    lo = d / 2 + 1.0
+                    ins = [float(o["inset"])] if o.get("inset") else \
+                        list(dict.fromkeys(_r2(hi - (hi - lo) * t / 4) for t in range(5)))
+                    om = max(0.0, wd / 2 - d / 2 - 1.0)
+                    for off in dict.fromkeys((0.0, _r2(om / 2), _r2(-om / 2), _r2(om), _r2(-om))):
+                        cands += [(x, pattern2(pos, Lp, Wp, x, along_x, off)) for x in ins]
+                for x, q in cands:
+                    if not clash(host, hc, q, d) and not clash(k, c, q, d):
+                        count, inset, pts = 2, x, q
+                        break
             tapped = {"d": TAP_DRILL[m], "depth": tap_depth(m), "thread": f"M{m}"} if host in housing else None
-            joint = add("hole_pattern", (host, 0), (k, c), {
+            joint = add("hole_pattern", (host, hc), (k, c), {
                 "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
                 "count": len(pts), "d": d, "pattern": "grid" if len(pts) > 2 else "linear", "inset": inset,
                 "plane_z": _r2(top), "normal": [0, 0, 1], "positions": pts, "through": tapped is None,
                 **({"tapped": tapped} if tapped else {}),
                 "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
                 ["A", "B", "C"])
+            reg(host, hc, pts, d)
+            reg(k, c, pts, d)
             hsub = by_id[host]["sub"]
             dsub = p["sub"] if dowels_left.get(p["sub"]) else hsub if dowels_left.get(hsub) else None
             if dsub:
                 o2 = fov.get(f"IF-{len(ifs) + 1:02d}") or {}
                 dd = float(o2.get("d") or max(3, min(m, 16)))
                 dp = dowel_points(pos, Lp, Wp, pts, d, dd, inset)
+                if dp and (clash(host, hc, dp, dd) or clash(k, c, dp, dd)):
+                    dp = None
                 if dp:
                     dowels_left[dsub] -= 1
-                    add("dowel", (host, 0), (k, c), {
+                    reg(host, hc, dp, dd)
+                    reg(k, c, dp, dd)
+                    add("dowel", (host, hc), (k, c), {
                         "d": dd, "fit": "H7/m6", "count": 2, "positions": dp, "plane_z": _r2(top),
                         "length": dowel_length(min(3 * dd, ks["H"] + hs["H"] - 2)), "pin_item": dowel_item[dsub]["id"],
                         "joint": joint["id"], "standard": "ISO 8734", "position_tol": POS_TOL}, ["A", "B", "C"],
@@ -972,7 +1221,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             seats = [{"face": "+Y wall", "open": 1, "z": [_r2(y1 - bB), _r2(y1)]}] if br["seats"] >= 2 else []
             seats.append({"face": "-Y wall", "open": -1, "z": [_r2(y0), _r2(y0 + bB)]})
             n_s = len(seats)
-            add("bearing_seat", (host, 0), (k, c), {
+            add("bearing_seat", (host, hc), (k, c), {
                 "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
                 "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
                 "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(y0), _r2(y1)], "seats": seats,
@@ -980,7 +1229,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 "count": n_s, "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
                 ["A", "B", "C"], f"shaft in {n_s} bearing{'s' if n_s != 1 else ''} {des} (side walls)")
         elif ks["role"] == "shaft":
-            top, bottom = at[host][0][2] + hs["H"] / 2, at[host][0][2] - hs["H"] / 2  # type: ignore[index]
+            top, bottom = at[host][hc][2] + hs["H"] / 2, at[host][hc][2] - hs["H"] / 2  # type: ignore[index]
             br = ks.get("bearing")
             if br and hs["role"] == "block":
                 des = br["designation"]
@@ -990,7 +1239,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 if br["seats"] >= 2:
                     seats.append({"face": "bottom", "z": [_r2(bottom), _r2(bottom + bB)]})
                 n_s = len(seats)
-                add("bearing_seat", (host, 0), (k, c), {
+                add("bearing_seat", (host, hc), (k, c), {
                     "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
                     "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING,
                     "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(bottom), _r2(top)], "seats": seats,
@@ -999,15 +1248,18 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     ["A", "B", "C"], f"shaft in {n_s} bearing{'s' if n_s != 1 else ''} {des}")
             else:
                 fit = str(o.get("fit") or "H7/h6")
-                add("shaft_bore", (host, 0), (k, c), {
-                    "d": ks["d"], "fit": fit if fit in FITS else "H7/h6", "length": _r2(top - bottom),
-                    "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(bottom), _r2(top)], "flush_z": _r2(bottom),
-                    "position_tol": POS_TOL}, ["A", "B", "C"], "shaft through bore")
+                e = eng.get((k, c), top - bottom)
+                through = e >= top - bottom - 1e-9  # a planned short shaft reaches only part way in
+                add("shaft_bore", (host, hc), (k, c), {
+                    "d": ks["d"], "fit": fit if fit in FITS else "H7/h6", "length": _r2(e),
+                    "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(top - e), _r2(top)],
+                    "flush_z": _r2(bottom) if through else None,
+                    "position_tol": POS_TOL}, ["A", "B", "C"], "shaft through bore" if through else "shaft in bore")
         elif hs["role"] == "shaft" and hs.get("ax") == "y":  # hub / gear on a shaft along +Y (gearbox housing)
             bottom = pos[1] - height(k) / 2
             fit = str(o.get("fit") or "H7/k6")
             a2 = [_r2(pos[0]), _r2(pos[2])]
-            add("shaft_bore", (k, c), (host, 0), {
+            add("shaft_bore", (k, c), (host, hc), {
                 "d": hs["d"], "fit": fit if fit in FITS else "H7/k6", "length": _r2(height(k)), "ax": "y",
                 "axis": a2, "z": [_r2(bottom), _r2(bottom + height(k))], "flush_z": None,
                 "position_tol": POS_TOL}, ["A", "B", "C"], "bore on shaft")
@@ -1019,7 +1271,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 kl = float(o2.get("length") or math.floor(max(kb + 2, height(k) - 2)))
                 kl = min(kl, float(math.floor(height(k))))
                 z0 = bottom + (height(k) - kl) / 2
-                add("key", (k, c), (host, 0), {
+                add("key", (k, c), (host, hc), {
                     "d": hs["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl, "ax": "y",
                     "axis": a2, "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
                     "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
@@ -1052,7 +1304,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             bottom = pos[2] - height(k) / 2
             if hs["role"] == "shaft":
                 fit = str(o.get("fit") or "H7/k6")
-                add("shaft_bore", (k, c), (host, 0), {
+                add("shaft_bore", (k, c), (host, hc), {
                     "d": hs["d"], "fit": fit if fit in FITS else "H7/k6", "length": _r2(height(k)),
                     "axis": [_r2(pos[0]), _r2(pos[1])], "z": [_r2(bottom), _r2(bottom + height(k))], "flush_z": None,
                     "position_tol": POS_TOL}, ["A", "B", "C"], "bore on shaft")
@@ -1064,7 +1316,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                     kl = float(o2.get("length") or math.floor(max(kb + 2, height(k) - 2)))
                     kl = min(kl, float(math.floor(height(k))))
                     z0 = bottom + (height(k) - kl) / 2
-                    add("key", (k, c), (host, 0), {
+                    add("key", (k, c), (host, hc), {
                         "d": hs["d"], "b": kb, "h": kh, "t1": t1, "t2": t2, "length": kl,
                         "axis": [_r2(pos[0]), _r2(pos[1])], "dir": [1, 0], "z": [_r2(z0), _r2(z0 + kl)],
                         "hub_z": [_r2(bottom), _r2(bottom + height(k))], "key_item": key_item.get(p["sub"]),
@@ -1083,8 +1335,10 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 d = float(o.get("d") or CLEARANCE[m])
                 count = int(o.get("count") or 4)
                 wod = WASHER_OD.get(max(m, bolt_for_hole(d)), 2 * d)
-                pcd = _r2(max(0.65 * D, (ks.get("bore") or 0) + 3 * d, wod / math.sin(math.pi / count) + 0.01))
-                add("hole_pattern", (host, 0), (k, c), {
+                pd = (hs.get("pads") or {}).get(slot_of.get((k, c), ("", -1)))
+                pcd = _r2(max(min(0.65 * D, pd[0] - d - 2.0) if pd else 0.65 * D, (ks.get("bore") or 0) + 3 * d,
+                              wod / math.sin(math.pi / count) + 0.01))
+                add("hole_pattern", (host, hc), (k, c), {
                     "fastener": f"M{m}", "fastener_size": m, "fastener_item": fast_item.get(p["sub"]),
                     "count": count, "d": d, "pattern": "circular", "pcd": pcd, "centre": [_r2(pos[0]), _r2(pos[1])],
                     "plane_z": _r2(bottom), "normal": [0, 0, 1], "positions": circle(pos, pcd, count), "through": True,
@@ -1164,6 +1418,7 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                         "size": [_r2(x) for x in size], "sub": p["sub"], "parent": parent.get(i),
                         "copies": [[_r2(x) for x in c] for c in at[i]],  # type: ignore[union-attr]
                         "qty": p["qty"], "source": s["source"], **({"rot": s["rot"]} if s.get("rot") else {}),
+                        **({"planned": s["planned"]} if s.get("planned") else {}),
                         **({"ax": s["ax"]} if s.get("ax") and s["ax"] != "z" else {}),
                         **({"cavity": _cavity(i)} if i in housing else {}),
                         **({"phase": phase[i]} if phase.get(i) else {}),
@@ -1489,11 +1744,36 @@ def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
 
 
 # ----------------------------------------------------------------------------- validation
+def _dims_text(shape: str, size: list[float]) -> str:
+    if shape == "cylinder":
+        return f"Ø{size[0]:g} × {size[2]:g}"
+    return " × ".join(f"{x:g}" for x in size)
+
+
+def outgrown(it: dict[str, Any]) -> str | None:
+    """The plain-language problem when a part is laid out more than PLAN_SLACK times its planned envelope in any
+    direction (CD-029), else None. The designer must build to the laid-out envelope, so it can't pass silently."""
+    pl = it.get("planned")
+    if not pl:
+        return None
+    size = it["size"]
+    worst = max(range(3), key=lambda k: size[k] / pl[k] if pl[k] else 0.0)
+    if not pl[worst] or size[worst] <= PLAN_SLACK * pl[worst] + 1e-6:
+        return None
+    return (f"{it['name']}: laid out at {_dims_text(it['shape'], size)} mm, {size[worst] / pl[worst]:.1f} times its "
+            f"planned {_dims_text(it['shape'], pl)} mm in one direction (at most {PLAN_SLACK:g} times). What it "
+            "carries or the bolts it needs don't fit the planned size: use smaller or fewer bolts, mount the parts "
+            "elsewhere, or resize it on purpose.")
+
+
 def problems(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[str]:
     """Geometry that can't be made: holes outside or too close to the edge of their part, overlapping holes, a bore
-    that leaves no rim, a gear bore or keyway through the teeth."""
+    that leaves no rim, a gear bore or keyway through the teeth; a part laid out far beyond its planned envelope."""
     out: list[str] = []
     for i, it in skel["items"].items():
+        big = outgrown(it)
+        if big:
+            out.append(big)
         L, _W, _H = it["size"]
         feats = item_features(skel, ifs, i)
         holes = [f for f in feats if f["type"] in ("hole", "seat")]
