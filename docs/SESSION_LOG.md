@@ -4,6 +4,64 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-19 (h) — Assembly fast and dependable: pair cache, fasteners from the ICD, advisory final check (ASM-023, PD-70, PD-71)
+
+Founder: "Assembly seems so slow and unreliable" and then "Why do assemblies take most of the time? ... If the modelled
+parts are quality-checked, assemblies may just be checked by a render."
+
+**Measured first (temp copy of the F1 program, never committed).** Full final-assembly check (55 instances, 1485 pairs):
+interference 54 candidate pairs, 9.5 s; clearance 369 rows, 296 s; through the worker it hit the 300 s timeout. The
+clearance "near" band was 5 % of the assembly size = 260 mm (the 3.5 m tub envelope), so parts 100-200 mm apart got an
+exact distance (rear wing main plane x wishbone 27 s, front rim x tyre 20 s); mated parts in contact walked every
+face pair at box gap 0 (rear wing plane x endplate 7.6 s at distance 0). Sub-assembly integration (CD-036 code + cache)
+was still running after 8 minutes: one kernel probe + a stack clash check per hole (28 holes in the Centre body).
+After switching to ICD stacks the remaining cost was the solver: its DOF analysis took a dense SVD over every
+instance (600+ with all stacks), ~6 s per solve, several solves per step.
+
+**Done.**
+- Pair cache (`assembly/pairs.py`, `geometry.pair_jobs`, worker op `pairs`): a result per (snapshot a, snapshot b,
+  relative placement rounded 1e-6, op, tolerance), computed in the first part's frame so cached == uncached exactly,
+  canonical order (a,b)=(b,a), on disk under `<org assemblies>/_pairs/`, LRU-pruned at 40 000 entries / 400 MB. Worker
+  is asked only for uncached pairs, in chunks of 24 with timeout 60 s + 20 s per pair; each chunk is stored when it
+  returns (a timeout keeps finished chunks). Used by `analyse`, `stack_clashes` (swap, Studio auto-fit) and the change
+  impact check. Clearance band capped at 25 mm; contact pairs stop at the first face pair within 1e-7 mm.
+- PD-71: office integration places fastener stacks straight from the ICD (`program_assembly.icd_stack` ->
+  `service.insert_planned`): the ICD joint, the parts' recognised holes (lookup), clamped thickness along the joint axis,
+  ISO stack from `fasteners.propose`, same groups and mates as Studio auto-fit; no probe, no clash check. `accept` kept
+  for Assembly Studio. No interference work in sub-assembly steps. The whole-program clash check runs after the final
+  assembly as an advisory background job (`platform_env.advisory_check`), outside the program lock: result in
+  `assembly.check`, on the Assembly tab (line under the summary + clash volumes in the 3D view) and as a Fitz note on
+  the final-assembly ticket; a failure is a note too, never a block. Rendered view: the existing Assembly tab 3D view
+  is the engineer's view (no new image renderer).
+- Solver: fastener stacks are analysed as leaf blocks (`solver._null_blocks`, exact, same states as the whole-J SVD,
+  tested); `insert_planned` doesn't solve, the step solves once. Instance cap 200 -> 1000, mate cap -> 3000 (an F1 with
+  every joint fitted has ~650 instances). Candidate screening vectorised; cache reads/writes, stack insert, planning
+  and solves run in threads (CD-037). Swap pre-fills the cache outside the program lock.
+- Integration retry on a worker error (CD-036 on main) kept; new test.
+
+**Numbers (F1 copy, real worker).** Full check: before > 300 s (timeout; 305 s in process), now 65.5 s cold, 1.0 s
+warm (106 pairs all cached). Swap of 3 Centre-body parts: 8.5 s cold, 1.1 s warm. Integration, before: Centre body
+> 8 min and still running (CD-036 + cache) / > 6 min founder report; now Centre body 4.0 s (incl. preparing the M3
+stack parts the first time), Nose 4.2 s, Rear wing 3.3 s, Suspension 3.8 s, Wheels 7.1 s, final assembly (48 stacks
+between sub-assemblies, ~650 instances) 12.4 s. Advisory whole-program check: 102 s cold in the background (950 candidate pairs), 5.9 s warm; on this F1 copy it reports 146 clashes, fastener nut sides running into a third part the layout put on the joint axis (tyres stacked over the floor: the kernel probe refuses those holes too), so real layout findings for the engineer, not placement errors.
+
+**Tests.** `tests/test_assembly_pairs.py` (new, 6): cached == uncached exactly and agrees with the old whole-assembly
+check (pairs, volumes, distances, hand-computed pin-in-bore overlap); only changed pairs recomputed (counted
+evaluations); rigid move of the whole assembly = all hits; new snapshot / moved instance = miss; failed chunk keeps
+finished ones and timeouts scale; prune bound; block DOF analysis == whole SVD. `test_office_icd`: the ICD stacks equal
+the kernel probe's (summary, grip, screw on the hole axis). `test_office_orchestrator`: integration retries after a
+worker timeout and completes.
+
+**Not done / open.** Motion sweep not cached (it already memoises within a sweep; its worst-step meshes need live
+shapes). The advisory check isn't re-run after a restart while it was running (the tab says "running"; Check in
+Assembly Studio re-runs it). Assembly Studio edits on a 650-instance office document still solve the whole document
+per edit (faster with the block analysis, not instant). ICD stacks assume the bolt goes from the mounted part (side b)
+into the host (side a), as the ICD writes them.
+
+**Decisions parked.** PD-70 (cache defaults, near cap), PD-71 (assembly rule: ICD fasteners, advisory final check).
+
+---
+
 ## 2026-11-19 (g) — Design Office: the layout respects Archie's planned envelopes (CD-029)
 
 Founder report: on a 1:8 F1 display-model program the skeleton gave a 3492 mm tub (plan 380), a 4878 mm floor (plan

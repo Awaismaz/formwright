@@ -98,3 +98,17 @@ returns an empty Part). Chain wire edges by matching endpoints (`_wire_points`):
 plus `Edge.position_at` double-reverses edges on revolved faces. Make 2D faces counter-clockwise before extruding
 (a clockwise polygon face extrudes downwards). Jogs reuse `flange()` with `child_region` / `child_solid`.
 
+
+## Assembly checks at scale (ASM-023, PD-70, PD-71)
+- Interference / clearance go through `assembly.pairs` (`service.check_pairs`): one result per (snapshot, snapshot,
+  relative placement rounded 1e-6), computed in the first part's frame (`geometry.pair_jobs`), cached on disk under
+  `<org assemblies>/_pairs/`. Never add a whole-assembly kernel loop; ask for the pairs you need. Bump
+  `pairs.VERSION` when `overlap`, `min_distance_near` or `_pair_row` change their numbers.
+- Measured on the 1:8 F1 copy: ~90 % of a full check was clearance of pairs 100-200 mm apart, because the "near" band
+  was 5 % of the assembly size (260 mm). It is capped at `NEAR_CAP_MM` (25). Mated parts in contact stop at the first
+  face pair within `CONTACT_MM`.
+- The Design Office places fastener stacks from the ICD (`program_assembly.icd_stack` -> `service.insert_planned`):
+  no probe, no clash check. `accept` (probe + stack clash check) stays for Assembly Studio's manual auto-fit.
+- With hundreds of instances the solver's DOF analysis was the cost (a dense SVD over every instance): leaf blocks
+  (fastener stacks) are analysed on their own (`solver._null_blocks`, exact). Keep solves, relinks and syncs off the
+  event loop (`asyncio.to_thread`, CD-037), one solve per document per step.
