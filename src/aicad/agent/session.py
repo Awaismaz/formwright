@@ -8,6 +8,7 @@ Claude Code login when no ANTHROPIC_API_KEY is present. Production must switch t
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 from collections.abc import Callable
@@ -20,6 +21,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     HookMatcher,
     ResultMessage,
+    StreamEvent,
     SystemMessage,
     TextBlock,
     ToolResultBlock,
@@ -33,7 +35,7 @@ from aicad.agent.edits import extract_edit
 from aicad.agent.pricing import usage_cost_usd
 from aicad.agent.prompt import CAD_AGENT_INSTRUCTIONS
 from aicad.agent.runner import is_verified
-from aicad.agent.runrecord import RunRecorder
+from aicad.agent.runrecord import CallLog, RunRecorder
 from aicad.agent.tools import make_cad_server
 
 BUILTIN_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "WebFetch"]
@@ -46,6 +48,43 @@ MAX_VERIFY_FOLLOWUPS = 1  # automatic follow-ups per turn when a background chec
 # The agent stream carries attached images (base64) inside single JSON messages; the SDK default of 1 MB
 # rejected ordinary photos and drawings. Uploads are capped well below this.
 AGENT_BUFFER_BYTES = 32 * 1024 * 1024
+# Cost controls (docs/reports/agent-cost.md). A hard ceiling per turn on top of the user's run budget, so a turn can
+# never run away even where no budget applies (God mode). 0 turns it off.
+TURN_CAP_ENV, CACHE_TTL_ENV, EFFORT_ENV = "FW_AGENT_TURN_CAP_USD", "FW_AGENT_CACHE_TTL", "FW_AGENT_EFFORT"
+DEFAULT_TURN_CAP_USD = 2.50
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+BUDGET_STOP_NOTE = ("I stopped here because this request reached its cost limit. Everything built so far stays in the "
+                    "design, and the checks panel shows where it stands. Ask me to continue if you want me to carry on.")
+
+
+def turn_cap_usd() -> float | None:
+    try:
+        v = float(os.environ.get(TURN_CAP_ENV, DEFAULT_TURN_CAP_USD))
+    except ValueError:
+        v = DEFAULT_TURN_CAP_USD
+    return v if v > 0 else None
+
+
+def harness_env() -> dict[str, str]:
+    """Environment for the agent harness process (agent-cost report).
+
+    - ``ENABLE_CLAUDEAI_MCP_SERVERS=false``: the harness otherwise loads the claude.ai connectors of whoever is logged
+      in (in development: the founder's Atlassian, Microsoft 365, Vanta, ... tools). Their schemas were about 311k
+      tokens of every call after the first, the whole cost of a $3 cold turn, and the in-app agent must never see them.
+    - ``CLAUDE_CODE_PROMPT_CACHE_TTL=5m``: a subscription login writes 1-hour cache entries (2x the input price);
+      5-minute entries cost 1.25x and cover a design turn, whose calls are seconds apart. API-key auth (production,
+      PD-09) already defaults to 5 minutes. ``FW_AGENT_CACHE_TTL=1h`` restores the long entries."""
+    env = {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"}
+    ttl = (os.environ.get(CACHE_TTL_ENV) or "5m").strip().lower()
+    if ttl in ("5m", "1h"):
+        env["CLAUDE_CODE_PROMPT_CACHE_TTL"] = ttl
+    return env
+
+
+def effort_setting() -> str | None:
+    """Opt-in reasoning effort (``FW_AGENT_EFFORT``). Unset: the harness default (``medium`` on the default model)."""
+    e = (os.environ.get(EFFORT_ENV) or "").strip().lower()
+    return e if e in EFFORTS else None
 
 
 def _inside(p: str, root: Path) -> bool:
@@ -245,8 +284,6 @@ def system_prompt() -> Any:
     """The agent's system prompt. Default: the Claude Code preset + the CAD instructions (unchanged behaviour).
     ``FW_AGENT_SYSTEM_PROMPT=compact`` switches to the compact prompt (measured in docs/reports/pipeline-speed.md;
     parked as a founder decision before it becomes the default)."""
-    import os
-
     if os.environ.get("FW_AGENT_SYSTEM_PROMPT", "").strip().lower() == "compact":
         return compact_system_prompt()
     return {"type": "preset", "preset": "claude_code", "append": CAD_AGENT_INSTRUCTIONS}
@@ -288,6 +325,7 @@ class AgentSession:
         self._run_costs: dict[str, float] = {}  # response id -> estimated cost, this run
         self._budget_hit = False
         self._result_seen = False
+        self._calls = CallLog()  # per model call of the current turn: the live meter's source (agent-cost)
         self._connect_lock: asyncio.Lock | None = None
         self._sends = 0  # messages sent (an idle pre-connected agent process is dropped)
         self._idle: asyncio.Task[None] | None = None
@@ -354,6 +392,10 @@ class AgentSession:
             max_buffer_size=AGENT_BUFFER_BYTES,
             model=self.model,
             resume=self.session_id,  # continue the same agent conversation after a restart
+            strict_mcp_config=True,  # only the CAD server: no project, user or plugin MCP servers
+            env=harness_env(),  # no claude.ai connectors; 5-minute prompt cache
+            include_partial_messages=True,  # per-call usage (input, cache, final output) for the meter and run record
+            effort=effort_setting(),
         )
 
     def publish(self, ev: dict[str, Any]) -> None:
@@ -440,6 +482,7 @@ class AgentSession:
                                     shown or prompt)[0].strip()[:600]
         self.publish({"type": "busy", "value": True})
         self._run_costs, self._budget_hit, self._result_seen = {}, False, False
+        self._calls = CallLog()
         self._last_run_cost = None
         started, failed = time.time(), False
         build_before = (self._status() or {}).get("build_id")
@@ -471,6 +514,7 @@ class AgentSession:
                     self._handle(msg)
                     if self._budget_hit and not stopping:
                         stopping = True
+                        self.publish({"type": "text", "text": BUDGET_STOP_NOTE})
                         await client.interrupt()
                 if held is None:
                     break
@@ -549,6 +593,12 @@ class AgentSession:
     def _handle(self, msg: Any) -> None:
         if self._rec is not None:
             self._rec.observe(msg)
+        if isinstance(msg, StreamEvent):
+            if msg.parent_tool_use_id is None and isinstance(msg.event, dict):
+                mid = self._calls.stream(msg.event)
+                if mid is not None:
+                    self._charge(mid, self._calls.cost(mid))
+            return
         if isinstance(msg, SystemMessage) and msg.subtype == "init":
             self.auth = msg.data.get("apiKeySource")
             self.publish({"type": "system", "model": "Formwright design agent"})
@@ -619,18 +669,27 @@ class AgentSession:
         return max(run, 0.0)
 
     def _meter(self, msg: AssistantMessage) -> None:
-        """Live cost meter: one entry per model response (a response arrives as several messages)."""
-        if not msg.usage:
+        """Live cost meter from a response's usage snapshot, for clients without stream events (replay, fakes). With
+        stream events the meter follows each call's final usage instead (``_handle``), output included."""
+        if not msg.usage or self._calls.streamed:
             return
-        key = msg.message_id or f"m{len(self._run_costs)}"
-        cost = usage_cost_usd(msg.model, msg.usage)
+        self._charge(msg.message_id or f"m{len(self._run_costs)}", usage_cost_usd(msg.model, msg.usage))
+
+    def limit_usd(self) -> float | None:
+        """The turn stops at the lower of the run budget and the hard per-turn cap."""
+        caps = [c for c in (self.run_budget_usd, turn_cap_usd()) if c is not None]
+        return min(caps) if caps else None
+
+    def _charge(self, key: str, cost: float) -> None:
+        """One entry per model call (a call arrives as several messages and stream events)."""
         if cost <= self._run_costs.get(key, 0.0):
             return
         self._run_costs[key] = cost
         spent = self.run_spent_usd
         self.publish({"type": "meter", "spent_usd": round(spent, 4),
                       "budget_usd": self.run_budget_usd})
-        if self.run_budget_usd is not None and spent >= self.run_budget_usd and not self._budget_hit:
+        limit = self.limit_usd()
+        if limit is not None and spent >= limit and not self._budget_hit:
             self._budget_hit = True
 
     def _status(self) -> dict[str, Any] | None:

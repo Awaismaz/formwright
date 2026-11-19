@@ -54,7 +54,7 @@ class ClaudeAgentSDKProvider(LLMProvider):
         """The ``ClaudeAgentOptions`` of a single call (public so tests can pin the option set)."""
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
-        from aicad.agent.session import AGENT_BUFFER_BYTES, make_guard
+        from aicad.agent.session import AGENT_BUFFER_BYTES, harness_env, make_guard
 
         system = req.system + (schema_instruction(req.schema) if req.schema is not None else "")
         tools = ["Read"] if req.images else []
@@ -66,7 +66,7 @@ class ClaudeAgentSDKProvider(LLMProvider):
             system_prompt=system if req.standalone_system else
             {"type": "preset", "preset": "claude_code", "append": system},
             setting_sources=[], max_turns=max(req.max_turns, 2 if req.images else 1),
-            max_buffer_size=AGENT_BUFFER_BYTES, **kw)
+            max_buffer_size=AGENT_BUFFER_BYTES, strict_mcp_config=True, env=harness_env(), **kw)
         if req.budget_usd is not None:
             opts.max_budget_usd = max(0.01, req.budget_usd)
         if req.model:
