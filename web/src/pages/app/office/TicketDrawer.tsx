@@ -104,6 +104,12 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
             <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
           {t.direct && !t.reuse && <DesignPathNote d={t.direct} />}
+          {(t.relaxed ?? []).length > 0 && <div className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-[12.5px]" data-relaxed>
+            <div className="font-medium text-warning">Checks relaxed by Archie: relaxed, not passed</div>
+            <ul className="mt-1 space-y-1">{(t.relaxed ?? []).map((r, i) => <li key={i}>
+              <span className="font-medium first-letter:uppercase">{r.label}{r.feature_text ? ` for ${r.feature_text}` : ""}</span>{r.undone ? " · the relaxation was undone after integration: reopen the part so Gage measures it again" : ""}
+              <div className="text-muted">{r.text}</div><div>Relaxed by Archie: {r.reason}</div></li>)}</ul>
+          </div>}
           {t.icd_check && <div className={cx("rounded-md border p-2.5 text-[12.5px]", t.icd_check.ok ? "border-success/30 bg-success/5" : "border-danger/30 bg-danger/5")} data-icd-check>
             <div className="font-medium">{t.icd_check.ok ? `Interfaces conform to ICD v${t.icd_check.version}` : `Interfaces off ICD v${t.icd_check.version}`}{t.fitted ? " · swapped into the program assembly" : ""}</div>
             <ul className="mt-1 space-y-0.5 text-[11.5px]">

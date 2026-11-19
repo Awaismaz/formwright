@@ -7,8 +7,8 @@ import { ago, cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Input, Modal } from "@/components/ui";
 import { VisualCheck } from "@/components/VisualCheck";
 import { BASE } from "./api";
-import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, axisChip, axisLabel, ifaceAxis, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
-import type { ChangeRequest, CheckRow, Icd, IcdSide, Interface, Program } from "./types";
+import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, fixLines, axisChip, axisLabel, ifaceAxis, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
+import type { ChangeRequest, CheckRow, GateFix, Icd, IcdSide, Interface, Program } from "./types";
 
 const STATUS: Record<SideStatus, { icon: JSX.Element; label: string }> = {
   pass: { icon: <CheckCircle2 className="h-3.5 w-3.5 text-success" />, label: "Measured: conforms" },
@@ -221,6 +221,7 @@ export default function Interfaces({ program }: { program: Program }) {
   const [approving, setApproving] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [fixing, setFixing] = useState(false);
+  const [lastFix, setLastFix] = useState<ReturnType<typeof fixLines> | null>(null);
   const [separating, setSeparating] = useState(false);
   const crs = useMemo(() => program.change_requests ?? [], [program.change_requests]);
   if (!icd) return <EmptyState icon={<FileDiff />} title="No interfaces document" body="This program was planned before the Design Office named interfaces. New programs get a skeleton and an ICD at the brief gate." />;
@@ -238,12 +239,12 @@ export default function Interfaces({ program }: { program: Program }) {
   const fix = async () => {
     setFixing(true);
     try {
-      const v = await api.post<Program & { fix: { steps: { name: string }[]; problems: string[] } }>(`${BASE}/programs/${program.id}/icd/fix`);
+      const v = await api.post<Program & { fix: GateFix }>(`${BASE}/programs/${program.id}/icd/fix`);
       qc.setQueryData(["office-program", program.id], (old: Program | undefined) => ({ ...v, can_edit: old?.can_edit }));
-      const n = v.fix.steps.length, left = v.fix.problems.length;
-      if (!n) toast.warning("Archie found no safe change for these. Edit the interface named in the problem, or ask Archie in the chat.");
-      else if (left) toast.info(`Archie made ${n} change${n === 1 ? "" : "s"}; ${left} problem${left === 1 ? "" : "s"} still need you.`);
-      else toast.success(`Archie made ${n} change${n === 1 ? "" : "s"}: every part can be made. Review the history, then approve.`);
+      void qc.invalidateQueries({ queryKey: ["office-archie", program.id] });
+      const r = fixLines(v.fix);
+      setLastFix(r);
+      (r.open.length || r.asked.length ? toast.info : toast.success)(r.headline);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setFixing(false); }
   };
   const probIface = (p: string) => icd.interfaces.find(x => p.startsWith(`${x.id}:`))?.id;
@@ -283,12 +284,18 @@ export default function Interfaces({ program }: { program: Program }) {
             })}</ul>
           </div>
           <div className="flex flex-col items-stretch gap-1.5">
-            {canEdit && icd.status === "draft" && loose.length < icd.problems.length && <Button loading={fixing} icon={<Wand2 className="h-4 w-4" />} onClick={fix} data-testid="fix-icd">Fix with Archie</Button>}
+            {canEdit && icd.status === "draft" && <Button loading={fixing} icon={<Wand2 className="h-4 w-4" />} onClick={fix} data-testid="fix-icd">Fix with Archie</Button>}
             {canEdit && icd.status === "draft" && loose.length > 1 && <Button variant="secondary" loading={separating} onClick={() => void separate(null)} data-testid="keep-all-separate">Keep all {loose.length} as separate parts</Button>}
           </div>
         </div>
         {loose.length > 0 && <p className="mt-2 text-[11.5px] text-muted">A part with no interface would be placed beside the assembly. If that is what you want (a kit, or parts made on their own), keep it as a separate part: your decision is recorded in the history below and it no longer blocks approval.</p>}
-        {loose.length < icd.problems.length && <p className="mt-2 text-[11.5px] text-muted">Archie tries the smallest safe changes (bolt spacing, a smaller fastener, a thicker part) and lists each one in the history below. No AI, no tokens. Or edit an interface yourself: one problem at a time is fine.</p>}
+        <p className="mt-2 text-[11.5px] text-muted"><b>Fix with Archie</b> first makes the smallest safe number changes (bolt spacing, a smaller fastener, a thicker part; no AI, no tokens) and lists each one in the history below. What numbers can't fix (a part with no interface, a shaft without enough support, parts with nothing to mount on) Archie diagnoses and fixes himself when it is a minor step, or proposes as a plan change in the chat for your yes. Or edit an interface yourself.</p>
+        {lastFix && <div className="mt-2 rounded-md border border-border bg-panel p-2.5 text-[12.5px]" data-fix-result>
+          <div className="font-medium">{lastFix.headline}</div>
+          {lastFix.lines.map((x, i) => <div key={i} className="mt-0.5">{x}</div>)}
+          {lastFix.open.length > 0 && <ul className="mt-1 list-disc pl-5 text-muted">{lastFix.open.map((x, i) => <li key={i}>Still open: {x}</li>)}</ul>}
+          {lastFix.asked.length > 0 && <Button size="sm" variant="secondary" className="mt-1.5" onClick={() => window.dispatchEvent(new Event("fw-open-archie"))} data-open-archie>Answer Archie in the chat</Button>}
+        </div>}
       </Card>}
       {(icd.look || icd.status === "draft") && <LayoutLook program={program} icd={icd} canEdit={!!canEdit} />}
       {(icd.warnings?.length ?? 0) > 0 && <Card className="border-warning/40 bg-warning/5 p-3 text-[12.5px]" data-icd-warnings>

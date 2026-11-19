@@ -55,6 +55,7 @@ from aicad.office import (
     service,
     specialists,
     store,
+    supervisor,
     timeline,
     visual_office,
 )
@@ -359,6 +360,74 @@ def review_decision(root: Path, doc: dict[str, Any], tid: str, decision: str, no
     service.emit(root, doc, "ticket.review_changes", f"{who} requested changes on {service._label(t)}: {body}",
                  actor, tid, note=body)
     return t
+
+
+def approve_with_notes(root: Path, doc: dict[str, Any], tid: str, notes: list[str], actor: dict[str, Any]
+                       ) -> dict[str, Any]:
+    """Archie's approval of a part that waits only on the review rules (office/supervisor, a minor action): every
+    measurable check passes (the supervisor checked) and only advisory points remain; they are recorded for the
+    engineer, exactly as the review-round settlement does (CD-030). Relaxed checks stay listed as relaxed. The
+    program's per-part review gate still applies: the part then waits for the engineer."""
+    t = service.ticket(doc, tid)
+    r = run_of(t)
+    if r.get("status") != "blocked" or t["kind"] != "part":
+        raise OfficeInputError("Only a part that waits on the review rules can be approved with notes.")
+    close_wait(t)
+    who = actor.get("name", "Archie")
+    n = int(r.get("review_round") or 0)
+    relaxed = list(t.get("relaxed") or [])
+    note = (f"Approved by {who} after {n} review round{'s' if n != 1 else ''}: every measurable check passes"
+            + (" except the checks relaxed below (relaxed, not passed)" if relaxed else "") + ".")
+    if notes:
+        note += ("\nGage's remaining points are advisory and recorded for you here (reopen the ticket if one "
+                 "matters):\n" + "\n".join(f"- {x}" for x in notes))
+    if relaxed:
+        note += "\nRelaxed by Archie, not passed:\n" + "\n".join(
+            f"- {x['label']}{' for ' + supervisor.feature_text(x['feature']) if x.get('feature') else ''}: "
+            f"{x['reason']}" for x in relaxed)
+    service.comment(root, doc, tid, note, actor)
+    t["comments"][-1]["delivery"] = "stored"
+    t["review_notes"] = list(notes)
+    if gated(doc, t):
+        _set_run(t, status="awaiting_review", next=None, agent="gage", blocked=None, feedback=None,
+                 line=f"{who} cleared {t['title']} on the review rules: waiting for your review")
+        open_wait(t, "blocked")
+        return t
+    service.move(root, doc, tid, "approved", actor)
+    k = len(notes)
+    line = f"Approved by Archie with {k} open review note{'s' if k != 1 else ''}"
+    if (doc.get("assembly") or {}).get("status") in ("ready", "building") and \
+            t["item_id"] in (doc.get("skeleton") or {}).get("items", {}):
+        _set_run(t, status="queued", next="fit", agent="fitz", agent_label="Fitz", blocked=None, feedback=None,
+                 ai_findings=None, line=f"{line}: Fitz swaps {t['title']} in next")
+    else:
+        _set_run(t, status="done", next=None, agent="gage", blocked=None, feedback=None, ai_findings=None, line=line)
+    service.emit(root, doc, "ticket.approved_with_notes", f"{who} approved {service._label(t)} with {k} advisory "
+                 f"note{'s' if k != 1 else ''} recorded: every measurable check passes.", actor, tid)
+    return t
+
+
+def archie_instruction(root: Path, doc: dict[str, Any], tid: str, text: str, actor: dict[str, Any]) -> None:
+    """Archie sends a part back to its designer with a precise instruction (office/supervisor). A part in work gets
+    it with its next turn, like an engineer's comment; a waiting or approved (not yet integrated) part goes back to
+    design with it as the next instruction."""
+    t = service.ticket(doc, tid)
+    r = run_of(t)
+    c = service.comment(root, doc, tid, f"Archie: {text}", actor)
+    name = roster.agent(t["specialist"])["name"]
+    if r.get("status") in ACTIVE:
+        c["delivery"] = "queued"
+        t.setdefault("inbox", []).append(c["id"])
+        return
+    c["delivery"] = "stored"
+    if t["column"] == "approved":
+        control(root, doc, tid, "reopen", actor)
+    close_wait(t)
+    t["paused"] = False
+    if t["column"] != "changes_requested":
+        service.move(root, doc, tid, "changes_requested", actor)
+    _set_run(t, status="queued", next="design", attempt=0, review_round=0, blocked=None, next_try_at=None,
+             feedback=[f"Archie (Chief Designer): {text}"], line=f"Archie sent it back to {name} with an instruction")
 
 
 def set_priority(root: Path, doc: dict[str, Any], tid: str, prio: str, actor: dict[str, Any]) -> None:
@@ -686,9 +755,13 @@ class Runner:
                             g.update(status="pending", note="Drawings, BOM and the manufacturing review are ready: "
                                                             "release the program.")
                             ecn.mark_ready(self.root, doc)
+                    relaxed = supervisor.relaxed_summary(doc)
                     service.emit(self.root, doc, "program.done", f"{doc['name']}: every ticket is integrated"
                                  + (", the drawings, BOM and manufacturing review are done. Ready to release."
-                                    if deliv else ". The office has stopped."), service.agent_actor("archie"))
+                                    if deliv else ". The office has stopped.")
+                                 + (f" {len(relaxed)} check{'s were' if len(relaxed) != 1 else ' was'} relaxed by "
+                                    "Archie and not passed: " + "; ".join(relaxed) if relaxed else ""),
+                                 service.agent_actor("archie"), relaxed=relaxed)
                     return True
             b = budget_state(doc)
             if not b["bypass"] and b["level"] in ("warn", "stop") and not o.get("warned"):
@@ -696,6 +769,7 @@ class Runner:
                 service.emit(self.root, doc, "budget.warn", f"{doc['name']} has used {b['pct']:g} % of its "
                              f"{b['tokens']} token budget.", service.agent_actor("archie"), pct=b["pct"])
             if not b["bypass"] and b["level"] == "stop":
+                supervisor.notify(doc, "budget", None, f"{b['spent']} of {b['tokens']} tokens used: the office stopped")
                 o.update(state="stopped", reason="budget")
                 left = f"reached its token budget ({b['spent']} of {b['tokens']})" if b["remaining"] == 0 else \
                     f"has {b['remaining']} of its {b['tokens']} budget tokens left, too few for another run"
@@ -743,6 +817,7 @@ class Runner:
         for tid, stage in claims:
             self.tasks[tid] = asyncio.create_task(self.work(tid, stage))
         self.max_seen = max(self.max_seen, self.slots_used())
+        supervisor.tick(self.root, self.pid, self.env, now)  # Archie watches: a pass on a trigger, or a heartbeat
         return bool(stop)
 
     def slots_used(self) -> int:
@@ -846,7 +921,10 @@ class Runner:
             service.move(self.root, doc, tid, "changes_requested", service.agent_actor("archie"))
         service.emit(self.root, doc, "ticket.blocked", f"{service._label(t)} needs you: {why}",
                      service.agent_actor(t["specialist"]), tid)
-        if tell:  # founder 2026-11-19: Archie tells the engineer what failed and what he proposes
+        supervisor.notify(doc, "blocked", t, why)  # Archie diagnoses it (office/supervisor)
+        # founder 2026-11-19: Archie tells the engineer what failed and what he proposes. With the supervisor on, his
+        # diagnosis is that message (one message, not a generic retry offer next to a different proposal)
+        if tell and not supervisor.enabled():
             visual_office.on_failure(self.root, doc, t, why)
 
     # ------------------------------------------------------------------ stage: Hex
@@ -1006,7 +1084,7 @@ class Runner:
                 self.handoff(d, tt, code, "gage", f"{lbl} → Gage: {tt['title']} for inspection.")
                 return "review"
             n = int(r.get("attempt") or 0) + 1
-            if n > MAX_ATTEMPTS:
+            if n > MAX_ATTEMPTS + supervisor.cap_extra(d, tt, "design_attempts"):
                 self._fail(d, tid, f"{lbl} stopped {n} times without a build that passes the gating checks. Open "
                                    "it in the Design Studio, comment, or retry.")
                 return None
@@ -1150,12 +1228,17 @@ class Runner:
             return None
         state = await self.env.part_state(t["project_id"])
         use_icd = interfaces.has_icd(doc) and t["item_id"] in doc["skeleton"]["items"]
-        findings = gage.deterministic(t, state, sizes=not use_icd)
+        items = [{"rule": "gate" if f.startswith(gage.GATING_PREFIXES) else "brief_size", "key": None, "text": f}
+                 for f in gage.deterministic(t, state, sizes=not use_icd)]
         icd_res: dict[str, Any] | None = None
         if use_icd and state.get("builds") and state.get("ok") is True:
             icd_res = await self.env.conformance(doc, t)
             if icd_res is not None:
-                findings += conformance.findings(icd_res)
+                items += conformance.finding_items(icd_res)
+        # a check Archie relaxed (office/supervisor: named rule, scope, reason, expiry) no longer blocks; it is
+        # recorded on the ticket as relaxed, never as passed. Gating build checks are never relaxed.
+        findings, relaxed_pre = supervisor.split(doc, t, items, state.get("builds"))
+        hard_items = [x for x in items if x["text"] in findings]
         ai: dict[str, Any] | None = None
         hard = bool(findings)  # measurable failures (checks, ICD conformance): only these can block a part
         # a part built from its interfaces, unchanged since and conforming: the AI note has nothing to judge that the
@@ -1175,6 +1258,7 @@ class Runner:
             tt["review_tokens"] = int(tt.get("review_tokens") or 0) + int((ai or {}).get("tokens") or 0)
             if icd_res is not None:
                 tt["icd_check"] = {**icd_res, "at": store.now()}
+            relaxed = supervisor.consume(self.root, d, tt, relaxed_pre, state.get("builds"))
             r = run_of(tt)
             spec = tt["specialist"]
             sname = roster.agent(spec)["name"]
@@ -1192,10 +1276,18 @@ class Runner:
                 note = "Approved: the latest build passes every gating check and carries the sizes the brief gives."
                 if icd_res is not None:
                     n = sum(len(x["rows"]) for x in icd_res["interfaces"])
-                    note = (f"Approved: the latest build passes every gating check, and {n} interface feature"
-                            f"{'s' if n != 1 else ''} measured on the part match ICD v{icd_res['version']} "
-                            f"({len(icd_res['interfaces'])} interface{'s' if len(icd_res['interfaces']) != 1 else ''}"
-                            ", inside the envelope).")
+                    bad = sum(1 for x in icd_res["interfaces"] for row in x["rows"] if not row["ok"])
+                    ni = len(icd_res["interfaces"])
+                    if bad or not icd_res["envelope"]["ok"]:  # only reachable through Archie's relaxation
+                        note = (f"Approved: the latest build passes every gating check; {n - bad} of {n} interface "
+                                f"feature{'s' if n != 1 else ''} measured on the part match ICD v{icd_res['version']} "
+                                f"({ni} interface{'s' if ni != 1 else ''}) and the rest are relaxed, not passed"
+                                + ("" if icd_res["envelope"]["ok"] else "; the envelope check is relaxed, not passed")
+                                + ".")
+                    else:
+                        note = (f"Approved: the latest build passes every gating check, and {n} interface feature"
+                                f"{'s' if n != 1 else ''} measured on the part match ICD v{icd_res['version']} "
+                                f"({ni} interface{'s' if ni != 1 else ''}, inside the envelope).")
                     fr = icd_res.get("frame") or {}
                     if fr and not fr.get("identity"):
                         note += (f" The part is modelled in its own frame ({fr['label']} from the ICD part frame): "
@@ -1215,6 +1307,10 @@ class Runner:
                     note += " (No AI review note this time: approved on the deterministic checks.)"
                 if ai and ai.get("notes") and not settled:
                     note += "\nNotes (not blocking):\n" + "\n".join(f"- {x}" for x in ai["notes"])
+                if relaxed:
+                    note = note.replace("Approved:", "Approved with checks relaxed by Archie (not passed):", 1)
+                    note += "\nRelaxed by Archie, not passed:\n" + "\n".join(
+                        f"- {x['text']} Relaxed by Archie: {x['reason']}" for x in relaxed)
                 service.comment(self.root, d, tid, note, g)
                 tt["comments"][-1]["delivery"] = "stored"
                 if gated(d, tt):  # the program's per-part review gate: the engineer approves before assembly
@@ -1227,14 +1323,18 @@ class Runner:
                 service.move(self.root, d, tid, "approved", g)
                 _set_run(tt, status="done", agent="gage", feedback=None, ai_findings=None,
                          line=(f"Approved by Archie with {len(settled)} open review note"
-                               f"{'s' if len(settled) != 1 else ''}" if settled else f"Gage approved {tt['title']}"))
+                               f"{'s' if len(settled) != 1 else ''}" if settled else f"Gage approved {tt['title']}")
+                         + (f", {len(relaxed)} check{'s' if len(relaxed) != 1 else ''} relaxed by Archie (not passed)"
+                            if relaxed else ""))
                 if parent:
                     self.handoff(d, tt, "gage", "fitz", f"Gage → Fitz: {tt['title']} approved for assembly.")
                 if (d.get("assembly") or {}).get("status") in ("ready", "building") and \
                         tt["item_id"] in (d.get("skeleton") or {}).get("items", {}):
                     # back to the queue: the review slot frees now and Fitz's one swap step takes it (CD-032)
                     _set_run(tt, status="queued", next="fit", agent="fitz", agent_label="Fitz",
-                             line=f"Approved: Fitz swaps {tt['title']} in for its placeholder next")
+                             line=(f"Approved with {len(relaxed)} check{'s' if len(relaxed) != 1 else ''} relaxed "
+                                   "by Archie (not passed)" if relaxed else "Approved")
+                             + f": Fitz swaps {tt['title']} in for its placeholder next")
                     return None
                 return None
             n = int(r.get("review_round") or 0) + 1
@@ -1243,23 +1343,26 @@ class Runner:
             # for something this part can't have. Say so now instead of spending more design turns (founder's Gear
             # Reducer, 2026-11-19: three rounds on a correct blind hole a recognition bug read as through).
             stuck = bool(hard) and n > 1 and list(r.get("last_findings") or []) == list(findings)
+            if stuck and supervisor.use_rule(d, tt, "no_progress") is not None:
+                stuck = False  # Archie relaxed the guard (a procedural rule): one more round with the findings
             service.comment(self.root, d, tid, "Changes requested:\n" + "\n".join(f"- {f}" for f in findings), g)
             tt["comments"][-1]["delivery"] = "stored"
+            keyed = [{k: x[k] for k in ("rule", "key", "text")} for x in hard_items] if hard else None
             if stuck:
-                _set_run(tt, review_round=n, last_findings=findings)
+                _set_run(tt, review_round=n, last_findings=findings, last_items=keyed)
                 self._fail(d, tid, f"{sname} rebuilt {tt['title']}, but my measurement came back exactly the same: "
                                    f"{findings[0]} When a redesign doesn't move the measurement, the measurement or the "
                                    "interface spec is usually what's wrong, not the part. Look at the part: if the "
                                    "feature is as specified, approve it yourself; if the spec asks for something the "
                                    "part can't have, change the interface.")
                 return None
-            if n > gage.MAX_SENDBACKS:
-                _set_run(tt, review_round=n)
+            if n > gage.MAX_SENDBACKS + supervisor.cap_extra(d, tt, "review_rounds"):
+                _set_run(tt, review_round=n, last_items=keyed)
                 self._fail(d, tid, f"Gage sent {tt['title']} back {n} times; a measurable check still fails: "
                                    f"{findings[0]} It needs your decision: comment, take over, or approve it yourself.")
                 return None
             service.move(self.root, d, tid, "changes_requested", g)
-            _set_run(tt, status="designing", next="design", review_round=n, feedback=findings,
+            _set_run(tt, status="designing", next="design", review_round=n, feedback=findings, last_items=keyed,
                      last_findings=findings if hard else None, ai_findings=None if hard else findings,
                      line=f"Gage sent {tt['title']} back: {findings[0]}")
             self.handoff(d, tt, "gage", spec, f"Gage → {sname}: {tt['title']} sent back. {findings[0]}")
@@ -1321,6 +1424,14 @@ class Runner:
                 _set_run(tt, status="done", next=None, line=res["skipped"], agent="fitz")
                 return None
             clashes = (res.get("last") or {}).get("clashes") or []
+            o = supervisor.relaxed_clash(d, tt) if clashes else None
+            if o is not None:  # Archie relaxed the swap-in clash check for this part: recorded as relaxed, never 0
+                first = clashes[0]
+                supervisor.consume(self.root, d, tt, [{
+                    "rule": "clash", "key": None, "label": supervisor.RULES["clash"]["label"], "override": o["id"],
+                    "reason": o["reason"], "text": f"Clash: {first['a_name']} ↔ {first['b_name']}, "
+                                                   f"{float(first['volume_mm3']):.1f} mm³ of overlap"}])
+                clashes = []
             if clashes:
                 n = int(run_of(tt).get("clash_round") or 0) + 1
                 desc = [f"Clash: {c['a_name']} ↔ {c['b_name']}, {float(c['volume_mm3']):.1f} mm³ of overlap"
@@ -1329,7 +1440,7 @@ class Runner:
                                 "assembly:\n" + "\n".join(f"- {x}" for x in desc), f)
                 tt["comments"][-1]["delivery"] = "stored"
                 tt["fitted"] = False
-                if n > MAX_CLASH_ROUNDS:
+                if n > MAX_CLASH_ROUNDS + supervisor.cap_extra(d, tt, "clash_rounds"):
                     _set_run(tt, clash_round=n, next=None)
                     self._fail(d, tid, f"{tt['title']} still clashes in the program assembly after {n - 1} rounds: "
                                        + desc[0])
@@ -1343,8 +1454,12 @@ class Runner:
             tt["fitted"] = True
             checked = bool((res.get("last") or {}).get("checked"))  # "0 clashes" only when it was measured
             cl = "0 clashes" if checked else "its clash check is left to the final assembly"
+            if o is not None:
+                cl = f"the clash check relaxed by Archie (not passed): {o['reason']}"
+            nrel = len(tt.get("relaxed") or [])
             _set_run(tt, status="done", next=None, agent="fitz", fit_attempt=0,
-                     line=f"Fitz swapped {tt['title']} in: interface mates re-attached, {cl}")
+                     line=f"Fitz swapped {tt['title']} in: interface mates re-attached, {cl}"
+                     + (f" ({nrel} check{'s' if nrel != 1 else ''} relaxed by Archie, not passed)" if nrel else ""))
             service.emit(self.root, d, "ticket.fitted", f"Fitz swapped the real {tt['title']} in for its placeholder: "
                          f"every interface mate re-attached by name, {cl}"
                          + (f" ({res['mates']} mates in the program assembly)." if res.get("mates") else "."), f, tid,
@@ -1392,6 +1507,8 @@ class Runner:
                 if look.get("line"):
                     service.comment(self.root, d, tid, look["line"], service.agent_actor("archie"))
                     tt["comments"][-1]["delivery"] = "stored"
+                if (look.get("verdict") or {}).get("overall") == "looks_wrong":
+                    supervisor.notify(d, "looks_wrong", tt, look.get("line") or "the visual check says it looks wrong")
                 if text and (look.get("unconfirmed") or look.get("unplaced") or tt["item_id"] == "root"
                              or (look.get("verdict") or {}).get("overall") != "looks_assembled"):
                     archie_chat.post(self.root, self.pid, text, acts, kind="look",

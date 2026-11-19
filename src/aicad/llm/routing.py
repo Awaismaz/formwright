@@ -29,6 +29,7 @@ DEFAULT_ROUTES: dict[str, str] = {
     "intent.simple": "sonnet",        # a shaft and what rides on it: docs/reports/design-graph.md (same graph)
     "change_review": "opus",          # Archie: ICD change requests
     "office_chat": "opus",            # Archie in the program chat (orchestration)
+    "supervisor": "opus",             # Archie supervising a running program (office/supervisor, WORKLIST 49)
     "reconcile": "opus",
     "vision": "opus",                 # reading drawings and photos to geometry
     "reviewer": "opus",               # Gage's note can send a part back: Haiku not benchmarked yet (parked)

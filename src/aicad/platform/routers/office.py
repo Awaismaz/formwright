@@ -40,6 +40,10 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   GET    /api/office/programs/{pid}/releases/{rev}/pack.zip  a program release pack (immutable once written)
   POST   /api/office/programs/{pid}/tickets/{tid}/review     the per-part review gate: approve / request changes
   POST   /api/office/programs/{pid}/ecn                      raise a change notice on a released program (CD-024)
+  GET    /api/office/programs/{pid}/supervisor               Archie's log, rule overrides, relaxed checks (WORKLIST 49)
+  POST   /api/office/programs/{pid}/supervisor/run           ask Archie to look at the program now
+  POST   /api/office/programs/{pid}/supervisor/actions/{aid}/decide   yes / no to one of Archie's major proposals
+  POST   /api/office/programs/{pid}/supervisor/actions/{aid}/undo     undo one of Archie's actions
 """
 
 from __future__ import annotations
@@ -71,6 +75,7 @@ from aicad.office import (
     roster,
     service,
     store,
+    supervisor,
     timeline,
 )
 from aicad.office import ecn as ecn_mod
@@ -184,6 +189,10 @@ class ArchieActIn(BaseModel):
     message: str
     action: str
     decision: str = "apply"  # "apply" | "dismiss"
+
+
+class SupervisorDecideIn(BaseModel):
+    choice: str  # "approve" | "decline"
 
 
 # ----------------------------------------------------------------------------- access helpers
@@ -606,11 +615,21 @@ def edit_interface(pid: str, iid: str, body: IcdEditIn, ctx: Ctx = Depends(verif
 
 
 @router.post("/programs/{pid}/icd/fix")
-def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
-    """Archie adjusts the draft ICD so every part can be made (deterministic, no AI, no tokens; CD-028)."""
-    out: list[dict[str, Any]] = []
-    doc = _mutate(ctx, pid, lambda root, d: out.append(interfaces.fix(root, d, _actor(ctx))))
-    return {**_view(doc), "fix": out[0]}
+async def fix_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """"Fix with Archie" at the interfaces gate. Step 1: the smallest safe number changes (deterministic, no AI, no
+    tokens; CD-028). Step 2, when problems remain: Archie supervising (WORKLIST 49) diagnoses what numbers can't fix
+    and acts (minor: done and logged; major: plan changes asked in the program chat with clickable choices). The answer
+    says what was fixed, what he did or proposes, and what is still open and why."""
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    try:
+        res = await supervisor.fix_gate(_root(ctx), pid, _actor(ctx), _sup_env(ctx, doc))
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
+    doc = _load(ctx, pid)
+    if res.get("archie") and not (doc.get("icd") or {}).get("problems"):
+        _look_at_layout(ctx, pid, doc)  # cleared: Archie looks at the new layout once
+    return {**_view(doc), "fix": res}
 
 
 @router.post("/programs/{pid}/icd/separate")
@@ -1305,8 +1324,25 @@ async def _resume_on_startup() -> None:
     orchestrator.resume_all(get_settings().data_dir)
 
 
+_heartbeat: list[asyncio.Task[None]] = []
+
+
+async def _supervisor_heartbeat() -> None:
+    """Archie's heartbeat for programs that wait without a runner (WORKLIST 49); runners beat on their own."""
+    if supervisor.enabled():
+        _heartbeat.append(asyncio.create_task(supervisor.heartbeat_loop(get_settings().data_dir)))
+
+
+async def _stop_heartbeat() -> None:
+    while _heartbeat:
+        t = _heartbeat.pop()
+        t.cancel()
+
+
 router.on_startup.append(_resume_on_startup)
+router.on_startup.append(_supervisor_heartbeat)
 router.on_shutdown.append(orchestrator.shutdown)
+router.on_shutdown.append(_stop_heartbeat)
 
 
 # ----------------------------------------------------------------------------- motion range check (ASM-011)
@@ -1481,7 +1517,7 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
     elif typ == "replan":
         await replan(pid, ReplanIn(planner="archie", notes=a["notes"]), ctx)
     elif typ == "fix_icd":
-        fix_icd(pid, ctx)
+        await fix_icd(pid, ctx)
     elif typ == "keep_separate":
         await keep_separate(pid, SeparateIn(items=a["items"], keep=True), ctx)
     elif typ == "revise_plan":
@@ -1499,6 +1535,69 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
         await raise_ecn(pid, EcnIn(reason=a["reason"], items=items), ctx)
     else:
         raise HTTPException(409, "Unknown action")
+
+
+# ----------------------------------------------------------------------------- Archie supervises (WORKLIST 49)
+def _sup_env(ctx: Ctx, doc: dict[str, Any]) -> Any:
+    return orchestrator.make_env(_root(ctx), {**doc, "orchestrator": {**(doc.get("orchestrator") or {}),
+                                                                      "user_id": ctx.user.id,
+                                                                      "god_tokens": ctx.god_on("bypass_tokens")}})
+
+
+def _sup_view(ctx: Ctx, pid: str) -> dict[str, Any]:
+    doc = _load(ctx, pid)
+    return {"supervisor": supervisor.view(doc), "program": _view(doc), **_chat_view(ctx, pid, doc)}
+
+
+@router.get("/programs/{pid}/supervisor")
+def supervisor_log(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Every action Archie took or proposed while supervising: when, what, why, the evidence and the outcome."""
+    return {"supervisor": supervisor.view(_load(ctx, pid))}
+
+
+@router.post("/programs/{pid}/supervisor/run")
+async def supervisor_run(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer asks Archie to look now: one pass over what needs attention (a model call only when something
+    does and the hourly cap allows; otherwise the rule-based reading)."""
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    res = await supervisor.run_pass(_root(ctx), pid, _sup_env(ctx, doc), force=True)
+    audit(ctx.db, "office.supervisor_run", ctx.user, doc["org_id"], target=pid, ran=bool(res.get("ran")))
+    ctx.db.commit()
+    return {**_sup_view(ctx, pid), "result": res}
+
+
+@router.post("/programs/{pid}/supervisor/actions/{aid}/decide")
+async def supervisor_decide(pid: str, aid: str, body: SupervisorDecideIn,
+                            ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Yes or no to a major change Archie proposed (re-checked against the program as it is now)."""
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    try:
+        e = await supervisor.decide(_root(ctx), pid, aid, body.choice, _actor(ctx), _sup_env(ctx, doc))
+    except OfficeInputError as ex:
+        raise HTTPException(409, str(ex)) from ex
+    audit(ctx.db, "office.supervisor_decision", ctx.user, doc["org_id"], target=pid, step=aid,
+          choice=body.choice, status=e.get("status"), tool=e.get("tool"))
+    ctx.db.commit()
+    doc = _load(ctx, pid)
+    if e.get("status") == "applied" and (doc.get("icd") or {}).get("status") == "draft":
+        _look_at_layout(ctx, pid, doc)  # the plan changed at the gate: Archie looks at the new layout
+    return _sup_view(ctx, pid)
+
+
+@router.post("/programs/{pid}/supervisor/actions/{aid}/undo")
+async def supervisor_undo(pid: str, aid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    _editor(ctx)
+    doc = _load(ctx, pid)
+    try:
+        e = supervisor.undo(_root(ctx), pid, aid, _actor(ctx))
+    except OfficeInputError as ex:
+        raise HTTPException(409, str(ex)) from ex
+    audit(ctx.db, "office.supervisor_undo", ctx.user, doc["org_id"], target=pid, step=aid, tool=e.get("tool"))
+    ctx.db.commit()
+    orchestrator.poke(pid)
+    return _sup_view(ctx, pid)
 
 
 @router.post("/programs/{pid}/archie/actions")

@@ -51,7 +51,7 @@ rejected by the schema (the office falls back), questions (housing / bearings / 
 dropped, housing answered by code: base, cover, a seat per shaft, 4 caps, screws, bolts, gearbox layout), the flag off
 keeps the old planner, approval refused until questions are answered.
 
-Tests: `tests/test_design_graph.py` 32 passed (about 85 s with the three office runs). Neighbours, two files per run,
+Tests: `tests/test_design_graph.py` 27 passed (about 80 s with the three office runs). Neighbours, two files per run,
 workers reaped: see "Gate" below.
 
 ## Comparison: old path vs graph path (live, one call per case and path)
@@ -103,7 +103,7 @@ the shots: assumptions listed labels (role, style) as "assumed" sizes; fastener 
 ("hex_bolt"); material not shown.
 
 ## Gate
-`uv run ruff check src tests` clean; `npx tsc --noEmit` clean; `npx vite build` ok; tests below.
+`uv run ruff check src tests` clean; `npx tsc --noEmit` clean; `npx vite build` ok. Two files per pytest run, workers reaped, before and after `git merge main` (the supervisor merge; one conflict in `llm/base.py` ROLES, both roles kept): `test_design_graph` + `test_llm_providers` 62, `test_office_supervisor` + `test_office_small` 32, `test_office` + `test_office_orchestrator` 41, `test_office_shaft_line` + `test_office_gearbox_caps` 21, `test_office_orchestrator` + `test_office_direct` 31, `test_office_polish` + `test_office_archie_chat` 25, `test_office_phase5` + `test_office_phase6_layout` 14, `test_office_layout_envelopes` + `test_office_phase6_review_ecn` 9, `test_assembly_trains` + `test_toolbox_keys` 20, `test_office_icd` + `test_office_small` 29, `test_agent_latency` + `test_office` 29: all passed. The full suite was not run in one go (resource rule: two files per call).
 
 ## Parked decisions (default used)
 - **PD-110 Graph path default.** `FW_DESIGN_GRAPH` stays off by default; Archie's free-text planner is the default

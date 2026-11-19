@@ -235,7 +235,10 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
                             (surplus if t is not None else "Added by Fitz for the bolted joints")),
             "ticket": t["id"] if t is not None else None,
             "key": ", ".join(x["key"] for x in ts) if ts else None,
-            "part_key": r.get("part_key"), "instances": r.get("instances") or []})
+            "part_key": r.get("part_key"), "instances": r.get("instances") or [],
+            "relaxed": _relaxed(ts)})
+        if rows[-1]["relaxed"]:
+            rows[-1]["description"] += "; " + "; ".join(rows[-1]["relaxed"])
         seen.update(x["id"] for x in ts)
     for t in tickets:  # plan items not in the assembly (yet)
         if t["kind"] not in ("part", "standard") or t["id"] in seen:
@@ -251,8 +254,9 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
                      "designation": r.get("title") if buy else None, "standard": r.get("standard") if buy else None,
                      "material": info.get("material") or r.get("material"), "mass_each_g": each,
                      "mass_total_g": None if each is None else round(float(each) * qty, 2),
-                     "description": "Not in the program assembly yet" if not buy else "From the plan (not placed)",
-                     "ticket": t["id"], "key": t["key"], "part_key": None, "instances": []})
+                     "description": ("Not in the program assembly yet" if not buy else "From the plan (not placed)")
+                     + "".join(f"; {x}" for x in _relaxed([t])),
+                     "ticket": t["id"], "key": t["key"], "part_key": None, "instances": [], "relaxed": _relaxed([t])})
     order = {t["id"]: n for n, t in enumerate(tickets)}
     rows.sort(key=lambda x: (x["make_buy"] != "make", order.get(x["ticket"] or "", 10_000), x["part"]))
     for n, r in enumerate(rows, start=1):
@@ -263,7 +267,21 @@ def bom(tickets: list[dict[str, Any]], asm_rows: list[dict[str, Any]] | None,
             "total_mass_g": round(sum(float(r["mass_total_g"]) for r in known), 2),
             "mass_unknown": sum(1 for r in rows if r["mass_total_g"] is None),
             "note": "Masses use nominal densities for the stated materials (verify with your supplier); Toolbox parts "
-                    "are modelled envelopes. Placeholders have no mass."}
+                    "are modelled envelopes. Placeholders have no mass.",
+            "relaxed": [f"{t['key']} {t['title']}: {x}" for t in tickets for x in _relaxed([t])]}
+
+
+def _relaxed(ts: list[dict[str, Any]]) -> list[str]:
+    """Checks Archie relaxed on these parts (office/supervisor): carried into the BOM as relaxed, never as passed."""
+    from aicad.office.supervisor import feature_text
+
+    out = []
+    for t in ts:
+        for r in t.get("relaxed") or []:
+            out.append(f"{r['label']}{' for ' + feature_text(r['feature']) if r.get('feature') else ''} relaxed by "
+                       f"Archie, not passed{' (undone after integration, not measured again)' if r.get('undone') else ''}"
+                       f": {r['reason']}")
+    return out
 
 
 def bom_csv(b: dict[str, Any]) -> str:
@@ -277,6 +295,8 @@ def bom_csv(b: dict[str, Any]) -> str:
                     "" if r["mass_total_g"] is None else f"{r['mass_total_g']:.2f}", r["key"] or "", r["description"]])
     w.writerow(["", b["total_qty"], "Total", f"{b['make']} make / {b['buy']} buy", "", "", "", "",
                 f"{b['total_mass_g']:.2f}", "", ""])
+    for x in b.get("relaxed") or []:  # a relaxed check stays visible in the BOM (office/supervisor)
+        w.writerow(["", "", "Relaxed check", "", "", "", "", "", "", "", x])
     return buf.getvalue()
 
 
@@ -368,6 +388,12 @@ def readme(doc: dict[str, Any], rel: dict[str, Any], files: list[str], parts: li
     if dfm:
         lines.append(f"Manufacturing review: {dfm['analysed']} parts screened, {dfm['critical']} critical and "
                      f"{dfm['warning']} warning flags ({dfm['label'].lower()} for costs)")
+    from aicad.office import supervisor
+
+    relaxed = supervisor.relaxed_summary(doc)
+    if relaxed:
+        lines += ["", "Checks relaxed by Archie (relaxed, NOT passed; review them before you rely on these parts):",
+                  *[f"  {x}" for x in relaxed]]
     lines += ["", "Contents:", *[f"  {f}" for f in sorted(files)], "", PACK_NOTE,
               "Verify each file's SHA-256 against manifest.json."]
     return "\n".join(lines) + "\n"
