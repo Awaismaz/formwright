@@ -43,6 +43,14 @@ skeleton (allowed, PD-69). Brief-text sizes are not treated as planned. Frontend
 **Decision parked.** PD-69 (slack 1.5 x, what counts as planned, pad sizes, rod rule, copy spreading).
 
 ---
+## 2026-11-19 (f6) — Assembly steps do only what matters (CD-035, CD-036)
+
+Founder: Centre body stuck; assembly slow and unreliable; assembling should be quicker than modelling. Causes: a
+batch swap timed out on a whole-program clash check and the failed swaps were recorded as done (CD-035: focused check,
+retry, wait-and-fit, heal); every sub-assembly step re-checked its whole sub-assembly and then the whole final
+assembly, whose result it discarded (CD-036: only new fastener stacks at a level, whole program once at the end,
+timeouts retry). A parallel agent adds a pair cache and shorter lock holds (ASM-023, wip/asm-perf).
+
 ## 2026-11-19 (f5) — Fastener-kit sub-assemblies integrate (CD-034); layout-envelopes merged (CD-029)
 
 Founder: Assemble Fasteners stuck on F1. Cause: Archie's plan put every bought-out part in a "Fasteners" sub-assembly

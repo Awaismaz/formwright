@@ -436,7 +436,8 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
             out.append(t)
             continue
         if r.get("status") == "blocked" and t["kind"] == "integration" and (
-                why.startswith(("Fitz is still waiting for the real", "Fitz couldn't swap"))):
+                why.startswith(("Fitz is still waiting for the real", "Fitz couldn't swap"))
+                or (why.startswith("Fitz couldn't integrate this") and "timed out" in why)):
             close_wait(t)
             _set_run(t, status="queued", next="integrate", attempt=0, blocked=None, line="Back to Fitz")
             out.append(t)
@@ -1194,6 +1195,15 @@ class Runner:
             f = service.agent_actor("fitz")
             if res.get("blocked"):
                 self._fail(d, tid, res["blocked"])
+                return
+            if res.get("error"):
+                n = int(run_of(tt).get("attempt") or 0) + 1
+                if n > MAX_ATTEMPTS + 1:
+                    self._fail(d, tid, f"{res['error']} ({n - 1} tries). Retry it, or rebuild the program assembly.")
+                    return
+                _set_run(tt, status="retry", next="integrate", attempt=n, agent="fitz",
+                         next_try_at=time.time() + backoff(n, RETRY_BASE_S, RETRY_CAP_S),
+                         line=f"{res['error']}: Fitz tries again shortly")
                 return
             if res.get("wait_fit"):
                 for k in res["wait_fit"]:
