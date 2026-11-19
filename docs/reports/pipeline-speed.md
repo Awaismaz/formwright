@@ -218,15 +218,15 @@ Notes on the live run:
 
 ## Parked decisions (defaults used)
 
-- **PD-73: compact system prompt as the default.** Default: unchanged (`claude_code` preset), compact opt-in via
+- **PD-81: compact system prompt as the default.** Default: unchanged (`claude_code` preset), compact opt-in via
   `FW_AGENT_SYSTEM_PROMPT=compact`. Switch after one EVAL-003 benchmark shows no quality loss. The gain is prompt
   caching across projects (about $0.08 per new project's first turn), not latency.
-- **PD-74: model routing for small edits.** Not implemented. Default: the configured model for everything. Script
+- **PD-82: model routing for small edits.** Not implemented. Default: the configured model for everything. Script
   writing dominates a turn, but a faster model writes worse CAD. Revisit with EVAL-003 numbers, behind the
   `design_agent` provider configuration.
-- **PD-75: one automatic follow-up when a deferred check fails.** Default: 1 per turn (it costs tokens; 0 would leave
+- **PD-83: one automatic follow-up when a deferred check fails.** Default: 1 per turn (it costs tokens; 0 would leave
   a turn ending unverified with the failure only shown in the next turn).
-- **PD-76: pre-connected agent process idle timeout.** Default: 10 min. Each open Studio tab with agent rights holds one
+- **PD-84: pre-connected agent process idle timeout.** Default: 10 min. Each open Studio tab with agent rights holds one
   Claude Code process (~150-300 MB) until then.
 
 ## Known limits

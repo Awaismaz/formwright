@@ -126,9 +126,23 @@ Assembling must be quicker than modelling. Parts are quality-checked (Gage, swap
 fasteners straight from the ICD and do no geometry checking; the whole-program clash check is advisory, runs after the
 final assembly in the background and never blocks. Assembly checks go through the pair cache (ASM-023, PD-70).
 
+## Founder rule: agents see and speak; Design and Assembly are the core (2026-11-19 evening)
+
+- In-app agents (Archie, Fitz, Gage...) look at assemblies the way an engineer does (rendered pictures, ASM-024) and tell
+  the user in plain words, as it happens, when something is wrong, with a fix to apply. A gate must never pass silently
+  on a degenerate result (zero interfaces, a row of parts on the floor). Vision is advisory; measurements decide (PD-73).
+- Design Studio and Assembly must be state of the art; speed matters a lot ("I can't stand such a slow system"):
+  measure, then optimise the build / check / agent pipelines (changes there are allowed). Prefer deterministic no-AI
+  paths where the structure allows (e.g. ICD-defined parts).
+- Standing assembly test case: 1:3 spur gear pair (m2, 20/60 teeth), Ø20 shafts, four 6204 bearings, no housing.
+
 ## Where things stand (handoff, updated 2026-11-18 evening)
 
-**Latest (2026-11-19 close):** main at the assembly solver patch (ASM-023) after CD-026…CD-039. Founder's F1 program
+**Latest (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
+PD-73..87; SESSION_LOG 2026-11-19 (i)). In flight: live Design Office run of the test case (`wip/live-gear`) and
+ICD-defined parts without the LLM (`wip/office-direct`). Open follow-ups: WORKLIST 35 and 40.
+
+**Earlier (2026-11-19 close):** main at the assembly solver patch (ASM-023) after CD-026…CD-039. Founder's F1 program
 is complete to the release gate (final assembly, 29 part sheets + assembly drawing, manufacturing review); 2 sheets
 flagged for a Drawing Studio touch-up (FC-14, FC-20). Open follow-ups are WORKLIST row 35.
 
