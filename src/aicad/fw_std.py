@@ -17,6 +17,7 @@ millimetres. Standards values come from the tables in ``holes.py`` / ``toolbox.p
 
 from __future__ import annotations
 
+import itertools
 import math
 from typing import Any
 
@@ -484,3 +485,353 @@ def meta(group: str | None = None, unit: str = "mm", **limits: Any) -> dict[str,
             m["group"] = group
         out[k] = m
     return out
+
+
+# ------------------------------------------------------------------ machined blocks and discs (WORKLIST 45 generators)
+_AX = {"x": 0, "y": 1, "z": 2}
+_ACROSS = {"z": (0, 1), "y": (0, 2), "x": (1, 2)}  # the part axes a cut's "c" is written in, per cut axis
+_EPS = 1e-6
+
+
+def _body_box(body: Any) -> tuple[list[float], list[float]]:
+    kind = body[0]
+    if kind == "box":
+        L, W, H = (float(x) for x in body[1:4])
+        return [-L / 2, -W / 2, -H / 2], [L / 2, W / 2, H / 2]
+    if kind == "disc":
+        D, H = float(body[1]), float(body[2])
+        return [-D / 2, -D / 2, -H / 2], [D / 2, D / 2, H / 2]
+    raise ValueError("body is ('box', L, W, H) or ('disc', D, H)")
+
+
+def _clip(lo: list[float], hi: list[float], blo: list[float], bhi: list[float]) -> tuple[list[float], list[float]]:
+    return [max(a, b) for a, b in zip(lo, blo, strict=True)], [min(a, b) for a, b in zip(hi, bhi, strict=True)]
+
+
+def _span(c: dict[str, Any], blo: list[float], bhi: list[float]) -> tuple[float, float]:
+    a = _AX[c["ax"]]
+    if c.get("span") is None:
+        return blo[a], bhi[a]
+    s0, s1 = sorted(float(x) for x in c["span"])
+    return max(s0, blo[a]), min(s1, bhi[a])
+
+
+def _cyl_box(c: dict[str, Any], s: tuple[float, float]) -> tuple[list[float], list[float]]:
+    r = float(c["d"]) / 2
+    a, (i, j) = _AX[c["ax"]], _ACROSS[c["ax"]]
+    lo, hi = [0.0] * 3, [0.0] * 3
+    lo[a], hi[a] = s
+    lo[i], hi[i] = float(c["c"][0]) - r, float(c["c"][0]) + r
+    lo[j], hi[j] = float(c["c"][1]) - r, float(c["c"][1]) + r
+    return lo, hi
+
+
+def _boxes_meet(a: tuple[list[float], list[float]], b: tuple[list[float], list[float]]) -> bool:
+    return all(min(a[1][k], b[1][k]) - max(a[0][k], b[0][k]) > _EPS for k in range(3))
+
+
+def _disk_in_rect(u: float, v: float, r: float, rect: tuple[float, float, float, float]) -> str:
+    """'in', 'out' or 'straddle': a disk against an axis-aligned rectangle (u0, u1, v0, v1)."""
+    u0, u1, v0, v1 = rect
+    if u - r >= u0 - _EPS and u + r <= u1 + _EPS and v - r >= v0 - _EPS and v + r <= v1 + _EPS:
+        return "in"
+    if u + r <= u0 + _EPS or u - r >= u1 - _EPS or v + r <= v0 + _EPS or v - r >= v1 - _EPS:
+        return "out"
+    return "straddle"
+
+
+def _pad_meets_cut(p: dict[str, Any], kp: dict[str, Any], c: dict[str, Any], s: tuple[float, float]) -> bool:
+    """A pad across another axis than the cut's: does its box meet the cut's box?"""
+    ki, kj = _ACROSS[kp["ax"]]
+    klo, khi = list(p["lo"]), list(p["hi"])
+    klo[ki], khi[ki] = kp["u"] - kp["r"], kp["u"] + kp["r"]
+    klo[kj], khi[kj] = kp["v"] - kp["r"], kp["v"] + kp["r"]
+    return _boxes_meet((klo, khi), _cyl_box(c, s))
+
+
+def _pockets(body: Any, pockets: Any, blo: list[float], bhi: list[float], problems: list[str],
+             removed: list[tuple[str, float]]) -> tuple[list[dict[str, Any]], float]:
+    pk: list[dict[str, Any]] = []
+    total = 0.0
+    for p in pockets:
+        nm = p.get("name", "pocket")
+        if body[0] != "box":
+            problems.append("a disc takes no box pockets (use coaxial cuts)")
+            continue
+        lo, hi = _clip([float(x) for x in p["min"]], [float(x) for x in p["max"]], blo, bhi)
+        if any(hi[k] - lo[k] <= _EPS for k in range(3)):
+            problems.append(f"{nm} lies outside the body")
+            continue
+        v = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2])
+        keeps = []
+        for kp in p.get("keep") or []:
+            a, (i, j) = _AX[kp["ax"]], _ACROSS[kp["ax"]]
+            u, w, r = float(kp["c"][0]), float(kp["c"][1]), float(kp["d"]) / 2
+            if _disk_in_rect(u, w, r, (lo[i], hi[i], lo[j], hi[j])) != "in":
+                problems.append(f"{nm}: a pad Ø{2 * r:g} doesn't fit inside it")
+                continue
+            v -= math.pi * r * r * (hi[a] - lo[a])
+            keeps.append({"ax": kp["ax"], "u": u, "v": w, "r": r})
+        pk.append({"name": nm, "lo": lo, "hi": hi, "keeps": keeps})
+        total += v
+        removed.append((nm, v))
+    for n, a in enumerate(pk):
+        for b in pk[n + 1:]:
+            if _boxes_meet((a["lo"], a["hi"]), (b["lo"], b["hi"])):
+                problems.append(f"{a['name']} and {b['name']} overlap")
+    return pk, total
+
+
+def _void(c: dict[str, Any], u: float, w: float, r: float, s: tuple[float, float], pk: list[dict[str, Any]],
+          problems: list[str]) -> list[tuple[float, float]]:
+    """Where along its axis a cut runs through a pocket (no material there)."""
+    a, (i, j) = _AX[c["ax"]], _ACROSS[c["ax"]]
+    nm = c.get("name", "cut")
+    out: list[tuple[float, float]] = []
+    for p in pk:
+        o0, o1 = max(s[0], p["lo"][a]), min(s[1], p["hi"][a])
+        if o1 - o0 <= _EPS:
+            continue
+        where = _disk_in_rect(u, w, r, (p["lo"][i], p["hi"][i], p["lo"][j], p["hi"][j]))
+        if where == "straddle":
+            problems.append(f"{nm} half enters {p['name']}")
+            continue
+        if where == "out":
+            continue
+        in_pad = False
+        for kp in p["keeps"]:
+            if kp["ax"] == c["ax"]:
+                dist = math.hypot(u - kp["u"], w - kp["v"])
+                if dist + r <= kp["r"] + _EPS:
+                    in_pad = True
+                elif dist < r + kp["r"] - _EPS:
+                    problems.append(f"{nm} half enters a pad of {p['name']}")
+            elif _pad_meets_cut(p, kp, c, s):
+                problems.append(f"{nm} crosses a pad of {p['name']}")
+        if not in_pad:
+            out.append((o0, o1))
+    return out
+
+
+def machined_volume(body: Any, pockets: Any = (), cuts: Any = (), chamfers: Any = ()) -> dict[str, Any]:
+    """The hand volume of a machined part (pure Python, no CAD kernel): a box ("box", L, W, H) or a disc
+    ("disc", D, H, axis Z), centred on the origin, less axis-aligned box pockets (each optionally keeping round pads
+    ``keep`` standing in it) and axis-aligned cylindrical cuts (holes, bores, seats, recesses), less 45° rim chamfers
+    on a disc. Removed volume: each pocket's box inside the body less its pads; each cut π/4 d² times the length of
+    material it passes (its span inside the body, outside every pocket it lies in); coaxial cuts are united by length
+    (the larger Ø wins where they overlap); a rim chamfer c removes (c² / 2) · 2π (R - c / 3) (Pappus).
+
+    The formula holds while the features stay apart. Anything it can't sum exactly is listed in ``problems`` (and
+    ``machined`` refuses to build it): cuts that overlap other cuts across their axes, a cut that half enters a pocket
+    or a pad, a hole breaking out of the side, pockets that overlap."""
+    blo, bhi = _body_box(body)
+    problems: list[str] = []
+    removed: list[tuple[str, float]] = []
+    if body[0] == "box":
+        vol = (bhi[0] - blo[0]) * (bhi[1] - blo[1]) * (bhi[2] - blo[2])
+    else:
+        vol = math.pi * (float(body[1]) / 2) ** 2 * float(body[2])
+    pk, pv = _pockets(body, pockets, blo, bhi, problems, removed)
+    vol -= pv
+    cs: list[dict[str, Any]] = []
+    for c in cuts:
+        i, j = _ACROSS[c["ax"]]
+        u, w, r = float(c["c"][0]), float(c["c"][1]), float(c["d"]) / 2
+        nm = c.get("name", "cut")
+        s = _span(c, blo, bhi)
+        if r <= 0 or s[1] - s[0] <= _EPS:
+            problems.append(f"{nm}: no size or outside the body")
+            continue
+        if body[0] == "disc":
+            if c["ax"] != "z":
+                problems.append(f"{nm}: a disc takes cuts along its axis only")
+                continue
+            if math.hypot(u, w) + r > float(body[1]) / 2 + _EPS:
+                problems.append(f"{nm} breaks out of the rim")
+        elif _disk_in_rect(u, w, r, (blo[i], bhi[i], blo[j], bhi[j])) != "in":
+            problems.append(f"{nm} breaks out of the side")
+        cs.append({**c, "s": s, "u": u, "w": w, "r": r, "void": _void(c, u, w, r, s, pk, problems),
+                   "key": (c["ax"], round(u, 6), round(w, 6))})
+    for n, a_ in enumerate(cs):
+        for b_ in cs[n + 1:]:
+            if a_["key"] == b_["key"]:
+                continue
+            if a_["ax"] == b_["ax"]:
+                over = min(a_["s"][1], b_["s"][1]) - max(a_["s"][0], b_["s"][0]) > _EPS
+                if over and math.hypot(a_["u"] - b_["u"], a_["w"] - b_["w"]) < a_["r"] + b_["r"] - _EPS:
+                    problems.append(f"{a_.get('name', 'cut')} and {b_.get('name', 'cut')} overlap")
+            elif _boxes_meet(_cyl_box(a_, a_["s"]), _cyl_box(b_, b_["s"])):
+                problems.append(f"{a_.get('name', 'cut')} and {b_.get('name', 'cut')} cross")
+    groups: dict[tuple[str, float, float], list[dict[str, Any]]] = {}
+    for c in cs:
+        groups.setdefault(c["key"], []).append(c)
+    for members in groups.values():
+        cuts_at = sorted({x for m in members for x in (*m["s"], *(y for v in m["void"] for y in v))})
+        for z0, z1 in itertools.pairwise(cuts_at):
+            if z1 - z0 <= _EPS:
+                continue
+            mid = (z0 + z1) / 2
+            here = [m for m in members if m["s"][0] - _EPS <= mid <= m["s"][1] + _EPS]
+            if not here:
+                continue
+            big = max(here, key=lambda m: m["r"])
+            if any(v0 - _EPS <= mid <= v1 + _EPS for v0, v1 in big["void"]):
+                continue
+            v = math.pi * big["r"] ** 2 * (z1 - z0)
+            vol -= v
+            removed.append((big.get("name", "cut"), v))
+    for ch in chamfers:
+        if body[0] != "disc":
+            problems.append("rim chamfers are for discs")
+            continue
+        R, c = float(body[1]) / 2, float(ch["c"])
+        if c <= 0 or c >= R:
+            problems.append("a rim chamfer needs 0 < c < R")
+            continue
+        for m in cs:
+            if math.hypot(m["u"], m["w"]) + m["r"] > R - c - _EPS:
+                problems.append(f"{m.get('name', 'cut')} runs into the rim chamfer")
+        v = c * c / 2 * 2 * math.pi * (R - c / 3)
+        vol -= v
+        removed.append(("rim chamfer", v))
+    seen: set[str] = set()
+    problems = [p for p in problems if not (p in seen or seen.add(p))]  # type: ignore[func-returns-value]
+    return {"volume": vol, "bbox": [bhi[k] - blo[k] for k in range(3)], "solids": 1, "removed": removed,
+            "problems": problems}
+
+
+def _cyl_tool(c: dict[str, Any], s: tuple[float, float]) -> Any:
+    from build123d import Cylinder, Pos, Rot
+
+    a, (i, j) = _AX[c["ax"]], _ACROSS[c["ax"]]
+    p = [0.0, 0.0, 0.0]
+    p[a] = (s[0] + s[1]) / 2
+    p[i], p[j] = float(c["c"][0]), float(c["c"][1])
+    rot = {"z": Rot(0, 0, 0), "y": Rot(90, 0, 0), "x": Rot(0, 90, 0)}[c["ax"]]
+    return Pos(*p) * rot * Cylinder(float(c["d"]) / 2, s[1] - s[0])
+
+
+def machined(body: Any, *, pockets: Any = (), cuts: Any = (), chamfers: Any = (),
+             name: str = "Body") -> tuple[Any, dict[str, Any]]:
+    """Build the part ``machined_volume`` describes (same arguments) and return (part, expected): a box or disc
+    centred on the origin, then each pocket, each group of cuts with the same ``name`` (one feature), cosmetic
+    threads for cuts with ``thread`` ("M6x1"), and rim chamfers. Cuts: ``{"name", "ax": "x" | "y" | "z", "c": (u, v),
+    "d": Ø, "span": (a, b) or None (through), "thread": None}``; ``c`` is the position across the axis in part
+    coordinates (X, Y for a Z cut; X, Z for a Y cut; Y, Z for an X cut). Pockets: ``{"name", "min": (x, y, z),
+    "max": (x, y, z), "keep": [{"ax", "c", "d"}]}``. Chamfers (disc): ``{"z": ±H / 2, "c": size}``. Raises
+    ValueError with the reasons when the hand volume can't be exact."""
+    from build123d import Box, Cylinder, Pos
+    from build123d import chamfer as _chamfer
+
+    from aicad import fw
+
+    info = machined_volume(body, pockets, cuts, chamfers)
+    if info["problems"]:
+        raise ValueError("; ".join(info["problems"]))
+    blo, bhi = _body_box(body)
+    part = Box(*(float(x) for x in body[1:4])) if body[0] == "box" else Cylinder(float(body[1]) / 2, float(body[2]))
+    part = fw.feature(name, part, size=" x ".join(f"{float(x):g}" for x in body[1:]))
+    pk_boxes = []
+    for p in pockets:
+        lo, hi = _clip([float(x) for x in p["min"]], [float(x) for x in p["max"]], blo, bhi)
+        pk_boxes.append((lo, hi))
+        glo = [lo[k] - 1.0 if lo[k] <= blo[k] + _EPS else lo[k] for k in range(3)]
+        ghi = [hi[k] + 1.0 if hi[k] >= bhi[k] - _EPS else hi[k] for k in range(3)]
+        tool = Pos(*((glo[k] + ghi[k]) / 2 for k in range(3))) * Box(*(ghi[k] - glo[k] for k in range(3)))
+        for kp in p.get("keep") or []:
+            a = _AX[kp["ax"]]
+            tool = tool - _cyl_tool(kp, (glo[a] - 1.0, ghi[a] + 1.0))
+        part = fw.feature(p.get("name", "Pocket"), part - tool,
+                          depth=round(min(hi[k] - lo[k] for k in range(3)), 6))
+    order: list[str] = []
+    by: dict[str, list[dict[str, Any]]] = {}
+    for c in cuts:
+        nm = c.get("name", "Cut")
+        if nm not in by:
+            order.append(nm)
+        by.setdefault(nm, []).append(c)
+    for nm in order:
+        tool = None
+        for c in by[nm]:
+            a, (i, j) = _AX[c["ax"]], _ACROSS[c["ax"]]
+            s0, s1 = _span(c, blo, bhi)
+            g0, g1 = s0, s1
+            if s0 <= blo[a] + _EPS:
+                g0 -= 1.0
+            if s1 >= bhi[a] - _EPS:
+                g1 += 1.0
+            for lo, hi in pk_boxes:  # an end on a pocket face, inside its opening: run into the pocket
+                inside = _disk_in_rect(float(c["c"][0]), float(c["c"][1]), float(c["d"]) / 2,
+                                       (lo[i], hi[i], lo[j], hi[j])) == "in"
+                if inside and abs(s0 - hi[a]) < _EPS:
+                    g0 -= 1.0
+                if inside and abs(s1 - lo[a]) < _EPS:
+                    g1 += 1.0
+            t = _cyl_tool(c, (g0, g1))
+            tool = t if tool is None else tool + t
+        part = fw.feature(nm, part - tool, d=float(by[nm][0]["d"]), count=len(by[nm]))
+        for c in by[nm]:
+            if not c.get("thread"):
+                continue
+            a, (i, j) = _AX[c["ax"]], _ACROSS[c["ax"]]
+            s0, s1 = _span(c, blo, bhi)
+            entry = c.get("entry")
+            if entry is None:
+                entry = 1 if s1 >= bhi[a] - _EPS else -1
+            q = [0.0, 0.0, 0.0]
+            q[a] = (s1 - 0.5) if entry > 0 else (s0 + 0.5)
+            q[i], q[j] = float(c["c"][0]) + float(c["d"]) / 2, float(c["c"][1])
+            part = fw.thread(part, tuple(q), str(c["thread"]), depth=s1 - s0)
+    if chamfers:
+        R = float(body[1]) / 2
+        edges = fw.edges_near(part, [(R, 0.0, float(ch["z"])) for ch in chamfers])
+        part = fw.feature("Rim chamfer", _chamfer(edges, float(chamfers[0]["c"])), length=float(chamfers[0]["c"]))
+    return part, {"bbox": info["bbox"], "volume": info["volume"], "solids": 1}
+
+
+def hub_keyway(part: Any, bore: float, b: float, t2: float, z0: float, z1: float, *, angle: float = 90.0,
+               name: str | None = None) -> tuple[Any, float]:
+    """A hub keyway b wide, t2 deep above a Ø bore (DIN 6885 t2), from Z z0 to z1, on the side ``angle`` degrees
+    from +X about Z (90: +Y). The bore must already be cut. Returns (part, removed volume): the strip b x (bore / 2 +
+    t2) less the part of the bore disc inside it, times the length."""
+    from build123d import Align, Box, Pos, Rot
+
+    from aicad import fw
+
+    if b <= 0 or t2 <= 0 or z1 <= z0 or b >= bore:
+        raise ValueError("a hub keyway needs 0 < b < bore, t2 > 0 and z1 > z0")
+    depth = bore / 2 + t2
+    tool = Pos(0, 0, z0 - 0.5) * Box(b, depth, z1 - z0 + 1, align=(Align.CENTER, Align.MIN, Align.MIN))
+    if angle != 90.0:
+        tool = Rot(0, 0, angle - 90.0) * tool
+    part = fw.feature(name or f"Keyway {b:g}×{t2:g}", part - tool, b=b, t2=t2)
+    return part, (b * depth - _keyway_segment(bore / 2, b)) * (z1 - z0)
+
+
+def revolved_volume(profile: list[tuple[float, float]]) -> float:
+    """Volume of a closed (r, z) polygon revolved 360° about Z (Pappus: 2π times the first moment of its area about
+    the axis, from the vertex formula (1/6) Σ (r_i + r_i+1)(r_i z_i+1 - r_i+1 z_i))."""
+    m = 0.0
+    n = len(profile)
+    for k in range(n):
+        r0, z0 = profile[k]
+        r1, z1 = profile[(k + 1) % n]
+        m += (r0 + r1) * (r0 * z1 - r1 * z0)
+    return abs(2 * math.pi * m / 6)
+
+
+def revolved(profile: list[tuple[float, float]], *, name: str = "Revolved body") -> tuple[Any, dict[str, Any]]:
+    """A turned part: the closed (r, z) polygon ``profile`` (r >= 0) revolved about Z. Returns (part, expected) with
+    the Pappus volume and the bounding box from the profile."""
+    from build123d import Axis, Plane, Polyline, make_face, revolve
+
+    from aicad import fw
+
+    if len(profile) < 3 or any(r < 0 for r, _z in profile):
+        raise ValueError("a profile is three or more (r, z) points with r >= 0")
+    pts = [(float(r), float(z)) for r, z in profile]
+    face = make_face(Plane.XZ * Polyline(*pts, close=True))
+    part = fw.feature(name, revolve(face, Axis.Z, 360), points=len(pts))
+    R = max(r for r, _z in pts)
+    return part, {"bbox": [2 * R, 2 * R, max(z for _r, z in pts) - min(z for _r, z in pts)],
+                  "volume": revolved_volume(pts), "solids": 1}
