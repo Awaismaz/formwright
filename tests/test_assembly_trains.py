@@ -231,7 +231,10 @@ def test_three_gear_train_and_honest_codes(app_client: Any) -> None:  # noqa: F8
     assert codes.count("module_mismatch") == 4                 # the m3 gear, shaft 2 and its two bearings
     assert codes.count("bearing_spare") == 1
     assert all(o["inst"] and o["text"] for o in v["result"]["outcomes"] if o["code"] != "shafts_not_held")
-    assert v["result"]["placed_loose"] == 5 and v["analysis"]["interference"]["count"] == 0
+    # five loose parts are a measured placement problem: the clash check measures those parts at once (targeted,
+    # PD-73) and the whole check follows in the background, so the response carries Fitz's clashes, not an analysis
+    assert v["result"]["placed_loose"] == 5 and v["result"]["clashes"] == []
+    assert v["result"]["checks"]["policy"]["exact"] == "targeted"
 
 
 def pulley(out: Path) -> None:
