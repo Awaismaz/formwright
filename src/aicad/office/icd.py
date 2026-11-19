@@ -632,6 +632,25 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
                 break
             seen.add(j)
             j = parent.get(j)
+    # a rod / pin / axle hung on another shaft (Archie's ``mounts_on``) has nothing to fit on a shaft: it stands in a
+    # bore of the block that carries that shaft (the nearest block up the tree), beside it, instead of lying loose
+    rehung: list[str] = []
+    for p in designed:
+        i = p["id"]
+        if spec[i]["role"] != "shaft" or not parent.get(i) or spec[parent[i]]["role"] != "shaft":  # type: ignore[index]
+            continue
+        j, seen = parent[i], {i}
+        while j is not None and spec[j]["role"] != "block" and j not in seen:
+            seen.add(j)
+            j = parent.get(j)
+        host = j if j is not None and spec[j]["role"] == "block" else (
+            prog_base if prog_base and spec[prog_base]["role"] == "block" else None)
+        if host:
+            rehung.append(f"{p['name']} (planned on {by_id[parent[i]]['name']})")  # type: ignore[index]
+            parent[i] = host
+    if rehung:
+        notes.append("A rod or pin can't be carried by another shaft: " + ", ".join(rehung) + " stand"
+                     + ("s" if len(rehung) == 1 else "") + " in a bore of the block carrying that shaft instead.")
     if prog_base is None:
         return _empty(parts, spec), []
     layout = "block"
