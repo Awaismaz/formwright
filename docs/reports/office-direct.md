@@ -75,8 +75,10 @@ tokens, seconds instead of minutes.
 |---|---|---|
 | Live, whole program, Run to complete | master's live run 2026-11-19 (`assembly-fix/live-gear-run.md`): about 6.5 min machine time (17 min wall with stops), **689 platform tokens**; design turns 70-125 s and about 300 tokens per part; Gage AI notes 11-19 s per part | **16.4 s, 0 tokens** (this branch on :8798: real platform and build worker, no simulated agents; visual check off). 4 real parts + 4 bearings, 6 mates, **0 clashes** |
 | Per designed part, live | gear shaft $2.96 in 3 turns, gear $3.01 in 4 turns, 70-80 s each, then Gage 11-19 s | Pinion 8.4 s, Gear 9.1 s, Input shaft 9.1 s, Output shaft 3.5 s (build 1.9 s + CHK-07/08 1.6 s); Gage 0.9-2.5 s (measurements only) |
+| Per designed part, live, after `wip/agent-cost` (main 7c3b035) | the same Pinion shaft ticket: **$0.214 (22 tokens), 61.3 s** per cold turn (`agent-cost.md`); 4 designed parts in this program: about 88 tokens and 4 turns of about 61 s (3 in parallel), plus Gage notes | unchanged: 3.5-9 s per part, 0 tokens; the program is about 4x faster than one LLM turn and deterministic (the same ICD gives the same script and STEP bytes) |
 | Simulated (fake agents) | 27.4 s wall, 3 fake agent turns (a fake turn takes about 0 s, so this hides the LLM time entirely), 105 tokens | 16.0 s wall, 0 agent turns, 0 tokens |
 
+- After `wip/agent-cost` the token gap is small (about 22 tokens a part instead of about 300), but the time gap stays: a design turn is still about a minute, the direct build seconds, and the direct part is the same every time.
 - The first three parts are claimed together and queue on the organisation's one build worker (about 9 s each); a part
   built alone takes 3-3.5 s (shaft: build 1.7-1.9 s, deferred CHK-07 + CHK-08 1.4-1.6 s).
 - Loaded machine (about 5 agents). No live "before" on this branch: the master's live measurement of the same case
