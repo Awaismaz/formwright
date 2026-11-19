@@ -51,13 +51,13 @@ def _simpson(f: Any, a: float, b: float, n: int = 2000) -> float:
 
 
 def cross_hole_volume(R: float, a: float) -> float:
-    """Material a Ã˜2a through hole removes from a Ã˜2R rod, axes perpendicular and intersecting (hand integral: the
-    hole's cross-section disc yÂ² + zÂ² <= aÂ² times the rod's chord 2 sqrt(RÂ² - yÂ²))."""
+    """Material a Ø2a through hole removes from a Ø2R rod, axes perpendicular and intersecting (hand integral: the
+    hole's cross-section disc y² + z² <= a² times the rod's chord 2 sqrt(R² - y²))."""
     return _simpson(lambda y: 2 * math.sqrt(max(a * a - y * y, 0)) * 2 * math.sqrt(R * R - y * y), -a, a)
 
 
 def _chamfer45(r: float, c: float) -> float:
-    """A 45Â° chamfer c on a circular edge of radius r (Pappus: triangle cÂ²/2 at radius r - c/3)."""
+    """A 45° chamfer c on a circular edge of radius r (Pappus: triangle c²/2 at radius r - c/3)."""
     return c * c / 2 * 2 * math.pi * (r - c / 3)
 
 
@@ -118,8 +118,8 @@ EXPECTED = {"bbox": s["bbox"], "volume": s["volume"] - kv, "solids": 1}
      "prompt": ("Gusseted L-bracket in 6061-T6, 8 mm plate throughout, 80 mm wide along X. The base leg is 60 mm deep "
                 "along Y and lies on Z = 0; the upright leg stands at the back edge, 70 mm tall overall. Two triangular "
                 "gussets, 8 mm thick, flush with the two side faces, with 40 mm legs along the base and up the upright "
-                "measured from the inside corner. Two Ã˜9 mm through holes in the base at X = Â±25, 20 mm from the front "
-                "edge; two Ã˜9 mm through holes in the upright at X = Â±20, 50 mm above the underside. Sharp edges, no "
+                "measured from the inside corner. Two Ø9 mm through holes in the base at X = ±25, 20 mm from the front "
+                "edge; two Ø9 mm through holes in the upright at X = ±20, 50 mm above the underside. Sharp edges, no "
                 "fillets."),
      "expect": {"bbox": [80, 60, 70], "volume": _brk_vol, "vol_tol": 0.01, "cylinders": {9: 4}, "solids": 1},
      "reference": HDR + '''NAME = "Gusseted L-bracket"
@@ -137,10 +137,10 @@ result = part
 EXPECTED = {"bbox": [80, 60, 70], "volume": 80*60*8 + 80*8*62 + 2*0.5*40*40*8 - 4*pi*4.5**2*8, "solids": 1}
 '''},
     {"id": "MMP", "kind": "plate", "simple": True,
-     "prompt": ("NEMA 23 motor mount plate in 6061-T6: 90 Ã— 90 Ã— 10 mm with R5 vertical corner radii; a Ã˜38.1 mm "
-                "pilot bore through the centre; four Ã˜5.5 mm through holes for the M5 motor screws on a 47.14 mm "
+     "prompt": ("NEMA 23 motor mount plate in 6061-T6: 90 × 90 × 10 mm with R5 vertical corner radii; a Ø38.1 mm "
+                "pilot bore through the centre; four Ø5.5 mm through holes for the M5 motor screws on a 47.14 mm "
                 "square pattern centred on the bore; four M6 counterbored mounting holes 10 mm in from both adjacent "
-                "edges (Ã˜6.6 through, counterbore Ã˜11 Ã— 6.5 mm deep from the top face)."),
+                "edges (Ø6.6 through, counterbore Ø11 × 6.5 mm deep from the top face)."),
      "expect": {"bbox": [90, 90, 10], "volume": _mmp_vol, "vol_tol": 0.01, "cylinders": {38.1: 1, 5.5: 4, 6.6: 4,
                                                                                          11: 4}, "solids": 1},
      "reference": HDR + f'''NAME = "NEMA 23 motor plate"
@@ -158,8 +158,8 @@ result = part
 EXPECTED = {{"bbox": [90, 90, 10], "volume": {_mmp_vol!r}, "solids": 1}}
 '''},
     {"id": "EDT", "kind": "edit", "simple": True, "seed": EDIT_SEED,
-     "prompt": ("Change the six bolt holes to M8 counterbored holes for socket head cap screws: Ã˜9 through with a "
-                "Ã˜15 Ã— 9 mm deep counterbore from the top face. Keep everything else."),
+     "prompt": ("Change the six bolt holes to M8 counterbored holes for socket head cap screws: Ø9 through with a "
+                "Ø15 × 9 mm deep counterbore from the top face. Keep everything else."),
      "expect": {"bbox": [200, 150, 12], "volume": _edt_vol, "vol_tol": 0.01, "cylinders": {40: 1, 9: 6, 15: 6},
                 "solids": 1},
      "reference": EDIT_SEED.replace("HOLE_D = 6.6  # M6 clearance (ISO 273 medium)", "HOLE_D = 9  # M8 clearance\n"
@@ -171,9 +171,9 @@ EXPECTED = {{"bbox": [90, 90, 10], "volume": {_mmp_vol!r}, "solids": 1}}
                                     "- N_HOLES * (pi * HOLE_D ** 2 / 4 * THICK + pi * (CB_D ** 2 - HOLE_D ** 2) / 4 "
                                     "* CB_DEPTH)}")},
     {"id": "THR", "kind": "turned + thread", "simple": True,
-     "prompt": ("Threaded pivot pin in 303 stainless steel, axis Z: a Ã˜30 Ã— 12 mm head from Z = 0, then a Ã˜16 mm shank "
-                "50 mm long. The last 25 mm of the shank carries an M16Ã—1.5 external thread (cosmetic). A Ã˜6 mm cross "
-                "hole goes through the shank along X, 10 mm above the head's top face. 1 mm Ã— 45Â° chamfers on both end "
+     "prompt": ("Threaded pivot pin in 303 stainless steel, axis Z: a Ø30 × 12 mm head from Z = 0, then a Ø16 mm shank "
+                "50 mm long. The last 25 mm of the shank carries an M16×1.5 external thread (cosmetic). A Ø6 mm cross "
+                "hole goes through the shank along X, 10 mm above the head's top face. 1 mm × 45° chamfers on both end "
                 "edges (the head's bottom edge and the shank tip)."),
      "expect": {"bbox": [30, 30, 62], "volume": _thr_vol, "vol_tol": 0.01, "cylinders": {30: 1, 16: 1, 6: 1},
                 "solids": 1},
@@ -295,7 +295,7 @@ def markdown(rows: list[dict[str, Any]], label: str) -> str:
 def compare(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> str:
     """Before/after per case (markdown)."""
     a = {r["id"]: r for r in after}
-    lines = ["| Case | Wall s (before â†’ after) | First response s | Output tokens | Cost $ | Pass |",
+    lines = ["| Case | Wall s (before → after) | First response s | Output tokens | Cost $ | Pass |",
              "|---|---|---|---|---|---|"]
     for b in before:
         x = a.get(b["id"])
@@ -305,11 +305,11 @@ def compare(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> str:
         def cell(k: str, nd: int = 1, b: dict[str, Any] = b, x: dict[str, Any] = x) -> str:
             vb, va = b.get(k), x.get(k)
             if vb is None or va is None:
-                return f"{vb} â†’ {va}"
-            return f"{round(float(vb), nd):g} â†’ {round(float(va), nd):g}"
+                return f"{vb} → {va}"
+            return f"{round(float(vb), nd):g} → {round(float(va), nd):g}"
 
         lines.append(f"| {b['id']} | {cell('wall_s')} | {cell('first_response_s')} | {cell('output_tokens', 0)} | "
-                     f"{cell('cost_usd', 3)} | {'yes' if b.get('passed') else 'no'} â†’ "
+                     f"{cell('cost_usd', 3)} | {'yes' if b.get('passed') else 'no'} → "
                      f"{'yes' if x.get('passed') else 'no'} |")
     return "\n".join(lines) + "\n"
 
