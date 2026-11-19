@@ -113,7 +113,7 @@ def test_bearing_rings_carry_their_corner_chamfer() -> None:
     # Pappus: a 45° chamfer c removes c² / 2 at radius r ± c / 3; two bore corners, two outside corners
     cut = 2 * 2 * math.pi * c * c / 2 * (d / 2 + c / 3) + 2 * 2 * math.pi * c * c / 2 * (D / 2 - c / 3)
     balls = e["volume"] - (sharp - cut)
-    assert balls > 0 and toolbox.VERSION == 2
+    assert balls > 0 and toolbox.VERSION >= 2  # v2 added the chamfers; later versions keep them
     _s0, e0 = toolbox.build("bearing", SERIES=6000)  # r_s min 0.3
     assert e0["bbox"] == [26, 26, 8]
 

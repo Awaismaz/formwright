@@ -162,13 +162,9 @@ export default function AppLayout() {
   const loc = useLocation();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const studio = /^\/app\/projects\/[^/]+\/?$/.test(loc.pathname);
-  // the Design Studio starts with the sidebar collapsed (remembered separately) so the ribbon and viewer get the width (STU-09)
-  // tablets start with the icon rail so pages keep their width (UX-018); a choice the user made is kept
-  const [appCollapsed, setAppCollapsed] = useStored("fw_sidebar", typeof matchMedia === "function" && matchMedia("(max-width: 1023px)").matches);
-  const [studioCollapsed, setStudioCollapsed] = useStored("fw_sidebar_studio", true);
-  const [collapsed, setCollapsed] = studio ? [studioCollapsed, setStudioCollapsed] : [appCollapsed, setAppCollapsed];
-  const [peek, setPeek] = useState(false);
+  // One sidebar state for every page, changed only by the user (founder 2026-11-20: clicking a module or project must
+  // never fold it). Tablets start with the icon rail so pages keep their width (UX-018); the user's choice is kept.
+  const [collapsed, setCollapsed] = useStored("fw_sidebar", typeof matchMedia === "function" && matchMedia("(max-width: 1023px)").matches);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const install = useInstallAction();
@@ -181,8 +177,8 @@ export default function AppLayout() {
   const projectMatch = useMatch("/app/projects/:id");
   const moduleMatch = useMatch("/app/modules/:code");
   const workspace = !!projectMatch || !!moduleMatch;
-  const folded = collapsed || (workspace && !peek);
-  useEffect(() => { setPeek(false); setMobileOpen(false); }, [loc.pathname]);
+  const folded = collapsed;
+  useEffect(() => { setMobileOpen(false); }, [loc.pathname]);
 
   const projectId = projectMatch?.params.id;
   const project = useQuery({ queryKey: ["project", projectId], enabled: !!projectId,
@@ -280,7 +276,7 @@ export default function AppLayout() {
       </div>
     )}
     {install.can && <InstallSidebarButton onClick={() => void install.run()} collapsed={f} />}
-    <button onClick={() => (workspace && collapsed === false ? setPeek(!peek) : setCollapsed(!collapsed))}
+    <button onClick={() => setCollapsed(!collapsed)}
       className="hidden h-10 items-center justify-center gap-2 border-t border-white/[.06] text-[12px] text-chrome-muted hover:text-white md:flex"
       aria-label={f ? "Expand sidebar" : "Collapse sidebar"}>
       {f ? <ChevronsRight className="h-5 w-5" /> : <><ChevronsLeft className="h-4 w-4" /> Collapse</>}
