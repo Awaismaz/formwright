@@ -1,3 +1,4 @@
+import type { QuickFinding, VisualRecord, VisualVerdict } from "@/components/VisualCheck";
 /** Design Office API shapes (src/aicad/platform/routers/office.py, src/aicad/office/service.py). */
 
 export type AgentState = "idle" | "working" | "review" | "blocked" | "done";
@@ -55,7 +56,7 @@ export interface Ticket {
 }
 
 // ------------------------------------------------------------------ Phase 4: skeleton, ICD, change requests
-export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel";
+export type InterfaceKind = "hole_pattern" | "shaft_bore" | "face" | "gear_mesh" | "bearing_seat" | "key" | "dowel" | "bearing_journal";
 export interface CheckRow { feature: string; spec: string; measured: string; ok: boolean; delta_mm?: number; d_mm?: number }
 /** The part's own frame as Gage matched it to the ICD part frame (identity: modelled in the ICD frame). */
 export interface PartFrame { R: number[][]; t: number[]; identity: boolean; label: string }
@@ -89,7 +90,9 @@ export interface SkeletonItem {
   bearing?: { designation: number; item: string; journal: number; seats: number };
 }
 export interface Skeleton {
-  units: "mm"; base: string | null; csys: string; envelope: { min: number[]; max: number[]; size: number[] };
+  units: "mm"; base: string | null; csys: string;
+  /** How the program is laid out: on a block, in a gearbox housing, as a shaft line (no housing) or a row (nothing to mount on). */
+  layout?: "block" | "gearbox" | "shaft_line" | "row"; envelope: { min: number[]; max: number[]; size: number[] };
   datums: { id: string; kind: string; name: string; origin: number[]; normal: number[] }[];
   axes: { id: string; name: string; item: string; origin: number[]; dir: number[] }[];
   items: Record<string, SkeletonItem>; notes: string[];
@@ -97,7 +100,13 @@ export interface Skeleton {
 }
 export interface Icd {
   version: number; status: "draft" | "approved"; interfaces: Interface[]; history: IcdHistory[]; problems: string[];
+  /** Layout warnings shown at the gate, not blocking (e.g. bearings no seat or journal takes). */
+  warnings?: string[];
+  /** The problems with a stable code and the items / interfaces they name. */
+  issues?: { code: string; severity: "error" | "warning"; text: string; items: string[]; interfaces: string[] }[];
   skeleton: Skeleton; fits: string[]; fasteners: string[]; bearings?: string[]; housing_fits?: string[];
+  /** PD-73: Archie's look at the drafted layout. */
+  look?: { at: string; verdict: VisualVerdict | null; quick: QuickFinding[]; image: boolean; line: string } | null;
 }
 export interface ChangeRequest {
   id: string; interface: string; interface_name: string; values: Record<string, unknown>; before: Record<string, unknown>;
@@ -119,6 +128,8 @@ export interface LiveInstance {
 }
 export interface LiveAssembly {
   status: AssemblyState["status"] | null; summary?: string | null; at?: string | null;
+  /** PD-73: the visual checks (layout, each integrated level), advisory. */
+  looks?: (VisualRecord & { image: string | null; name: string; level: string })[];
   /** PD-71: the whole-program clash check after the final assembly (advisory, never blocks). */
   check?: { status: "running" | "done" | "failed" | "skipped"; text?: string; at?: string; count?: number } | null;
   clashes: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
@@ -175,7 +186,10 @@ export interface ArchieAction {
 }
 export interface ArchieMessage {
   id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;
-  kind?: "status" | "ai" | "office"; tokens?: number; actions?: ArchieAction[];
+  kind?: "status" | "ai" | "office" | "look"; tokens?: number; actions?: ArchieAction[];
+  /** Archie spoke first (a look, a failure): founder 2026-11-19. */
+  unprompted?: boolean;
+  visual?: { level: string; image: string | null; verdict: VisualVerdict | null; quick: QuickFinding[] | null; tokens?: number };
 }
 export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 

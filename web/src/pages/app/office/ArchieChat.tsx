@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
 import { Badge, Button } from "@/components/ui";
+import { VerdictBadge } from "@/components/VisualCheck";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
 import type { ArchieChat as Chat, ArchieMessage, Program } from "./types";
@@ -20,7 +21,7 @@ const QUICK: Record<string, string[]> = {
 export default function ArchieChat({ program, open, onOpenChange }: { program: Program; open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient();
   const key = ["office-archie", program.id];
-  const q = useQuery({ queryKey: key, enabled: open, queryFn: () => api.get<Chat>(`${BASE}/programs/${program.id}/archie`) });
+  const q = useArchieChat(program.id, open);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
@@ -28,6 +29,7 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
   const msgs = q.data?.messages ?? [];
   const canEdit = q.data?.can_edit !== false && program.can_edit !== false;
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [msgs.length, busy, open]);
+  useEffect(() => { if (open && msgs.length) markSeen(program.id, msgs[msgs.length - 1]!.id); }, [open, msgs, program.id]);
 
   const send = async (body: string) => {
     const t = body.trim();
@@ -73,7 +75,11 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
           : <div key={m.id} className="flex gap-2">
             <AgentAvatar code="archie" size={26} still />
             <div className="min-w-0 flex-1">
-              <div className="rounded-lg border border-border bg-panel2 px-3 py-2 text-[13px] whitespace-pre-line">{m.text}</div>
+              <div className={cx("rounded-lg border bg-panel2 px-3 py-2 text-[13px] whitespace-pre-line", m.unprompted && m.actions?.length ? "border-warning/50" : "border-border")} data-archie-msg={m.kind}>{m.text}</div>
+              {m.visual && (m.visual.image || m.visual.verdict) && <div className="mt-1.5 rounded-md border border-border bg-panel p-2" data-archie-visual>
+                {m.visual.image && <a href={m.visual.image} target="_blank" rel="noreferrer"><img src={m.visual.image} alt="The assembly from four sides" className="max-h-[160px] w-full rounded object-contain" /></a>}
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-muted"><VerdictBadge v={m.visual.verdict} />Visual check, advisory{m.visual.tokens ? ` · ${m.visual.tokens} tokens` : ""}</div>
+              </div>}
               {(m.actions ?? []).map(a => (
                 <div key={a.id} className={cx("mt-1.5 rounded-md border px-2.5 py-2 text-[12.5px]", a.status === "proposed" ? "border-primary/30" : "border-border opacity-75")} data-archie-action={a.type}>
                   <div>{a.label}</div>
@@ -84,7 +90,7 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
                       : <Badge tone={a.status === "applied" ? "success" : "neutral"}>{a.status === "applied" ? `Applied${a.by ? ` by ${a.by.name}` : ""}` : a.status === "dismissed" ? "Dismissed" : "Proposed"}</Badge>}
                   </div>
                 </div>))}
-              <div className="mt-1 text-[10.5px] text-muted">{m.kind === "status" ? "From the program, no AI" : m.kind === "ai" ? "Archie (AI)" : "Office"} · {ago(m.t)}</div>
+              <div className="mt-1 text-[10.5px] text-muted">{m.kind === "status" ? "From the program, no AI" : m.kind === "ai" ? "Archie (AI)" : m.kind === "look" ? "Archie looked" : "Office"} · {ago(m.t)}</div>
             </div>
           </div>)}
         {busy && <div className="flex items-center gap-2 text-[12px] text-muted"><AgentAvatar code="archie" size={22} state="working" />Archie is looking at the board…</div>}
@@ -105,6 +111,33 @@ export default function ArchieChat({ program, open, onOpenChange }: { program: P
   );
 }
 
-export function TalkToArchieButton({ onClick }: { onClick: () => void }) {
-  return <Button variant="secondary" size="sm" icon={<MessageSquare className="h-4 w-4" />} onClick={onClick} data-talk-archie>Talk to Archie</Button>;
+/** The conversation, shared by the chat and the button (polled while the chat is closed, so Archie can speak first). */
+function useArchieChat(pid: string, open: boolean) {
+  return useQuery({ queryKey: ["office-archie", pid], queryFn: () => api.get<Chat>(`${BASE}/programs/${pid}/archie`),
+    refetchInterval: open ? false : 8000 });
+}
+const SEEN = (pid: string) => `fw-archie-seen-${pid}`;
+function markSeen(pid: string, id: string) { try { localStorage.setItem(SEEN(pid), id); } catch { /* private mode */ } }
+function seenId(pid: string): string | null { try { return localStorage.getItem(SEEN(pid)); } catch { return null; } }
+
+/** Messages Archie posted by himself (a look at the layout, a stopped step) since the engineer last opened the chat. */
+export function unread(msgs: ArchieMessage[], seen: string | null): ArchieMessage[] {
+  const k = seen ? msgs.findIndex(m => m.id === seen) : -1;
+  return msgs.slice(k + 1).filter(m => m.role === "archie" && m.unprompted);
+}
+
+export function TalkToArchieButton({ onClick, programId }: { onClick: () => void; programId?: string }) {
+  const q = useArchieChat(programId ?? "", false);
+  const fresh = programId ? unread(q.data?.messages ?? [], seenId(programId)) : [];
+  const told = useRef<string | null>(null);
+  useEffect(() => {
+    const last = fresh[fresh.length - 1];
+    if (!last || told.current === last.id) return;
+    told.current = last.id;
+    toast.message("Archie has something to tell you", { description: last.text.split(String.fromCharCode(10))[0]?.slice(0, 140), action: { label: "Open", onClick } });
+  }, [fresh, onClick]);
+  return <span className="relative inline-flex">
+    <Button variant="secondary" size="sm" icon={<MessageSquare className="h-4 w-4" />} onClick={onClick} data-talk-archie>Talk to Archie</Button>
+    {fresh.length > 0 && <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 text-[10px] font-semibold text-white" data-archie-unread>{fresh.length}</span>}
+  </span>;
 }

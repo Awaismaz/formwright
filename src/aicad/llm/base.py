@@ -36,6 +36,7 @@ ROLES: tuple[str, ...] = (
     "librarian",      # Assembly librarian: parts list reading (assembly/librarian.ask_ai)
     "reconcile",      # Branch merge: conflict reconciliation (platform/collab/reconcile.propose)
     "office_chat",    # Design Office: talking to Archie during a program (office/archie_chat, CD-026)
+    "assembly_check", # visual assembly check: one look at the 4-view picture (assembly/visual.ask, PD-73)
 )
 
 # Capability names a provider declares (contract tests are gated on them).
@@ -79,6 +80,7 @@ class CallRequest:
     max_tokens: int = 16000  # API providers: output cap (thinking counts toward it)
     model: str | None = None  # None = the provider's default for the role
     standalone_system: bool = False  # harness providers: ``system`` replaces the harness's own instructions
+    effort: str | None = None  # "low" | "medium" | "high": reasoning effort where the provider supports it
 
     def __post_init__(self) -> None:
         if self.role not in ROLES:

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState, Spinner } from "@/components/ui";
+import { VisualCheck, VerdictBadge } from "@/components/VisualCheck";
 import type { Topo } from "@/viewer/types";
 import { AssemblyViewer } from "../modules/assembly/viewer";
 import { MotionScrubber, stepScene } from "../modules/assembly/MotionPanel";
@@ -54,7 +55,7 @@ export default function AssemblyView({ program, recent }: { program: Program; re
     const fresh = recent.filter(e => e.seq > lastSeq.current);  // a burst can bring several at once
     if (!fresh.length) return;
     lastSeq.current = Math.max(...fresh.map(e => e.seq));
-    if (fresh.some(e => ["ticket.fitted", "assembly.updated", "ticket.integrated", "ticket.comment", "gate.approved", "cr.accepted", "program.done"].includes(e.type)))
+    if (fresh.some(e => ["ticket.fitted", "assembly.updated", "ticket.integrated", "ticket.comment", "ticket.blocked", "gate.approved", "cr.accepted", "program.done"].includes(e.type)))
       qc.invalidateQueries({ queryKey: ["office-assembly", program.id] });
   }, [recent, qc, program.id]);
 
@@ -167,6 +168,7 @@ export default function AssemblyView({ program, recent }: { program: Program; re
             <Link to={`/app/modules/assembly?assembly=${view.assembly_id}`} className="inline-flex items-center gap-1 text-[12px] font-medium text-primary hover:underline">Open the final assembly in Assembly Studio<ExternalLink className="h-3 w-3" /></Link>
           </div>
         </Card>
+        {(data.looks?.length ?? 0) > 0 && <LooksCard looks={data.looks!} />}
         <Card className="p-3 text-[12px]" data-program-motion>
           <div className="mb-1 flex items-center gap-2 font-semibold"><RotateCw className="h-4 w-4 text-primary" />Motion
             <Button size="sm" variant="secondary" className="ml-auto" loading={moving} onClick={checkMotion} data-check-motion>Check motion</Button></div>
@@ -187,4 +189,16 @@ export default function AssemblyView({ program, recent }: { program: Program; re
       </div>
     </div>
   );
+}
+
+/** PD-73: the visual checks of the layout and of each level Fitz integrated (advisory), newest first by default. */
+function LooksCard({ looks }: { looks: NonNullable<LiveAssembly["looks"]> }) {
+  const [sel, setSel] = useState(looks.length - 1);
+  const cur = looks[Math.min(sel, looks.length - 1)]!;
+  return <Card className="p-3" data-program-looks>
+    {looks.length > 1 && <div className="mb-2 flex flex-wrap gap-1">{looks.map((l, k) => (
+      <button key={`${l.level}-${k}`} onClick={() => setSel(k)} className={cx("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
+        k === sel ? "border-primary/50 bg-primary-soft" : "border-border text-muted hover:text-text")}>{l.name.replace(/^Assemble /, "")}<VerdictBadge v={l.verdict} /></button>))}</div>}
+    <VisualCheck rec={cur} image={cur.image} compact />
+  </Card>;
 }

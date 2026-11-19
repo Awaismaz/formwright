@@ -1,7 +1,8 @@
 """Joints of a program assembly from its ICD (ASM-011 for the Design Office).
 
-Every shaft that runs in bearing seats (``bearing_seat``) or through a bore in a block (``shaft_bore`` whose bore
-side is a block) turns about its axis: one revolute joint per shaft copy, carrying the shaft and every item mounted
+Every shaft that runs in bearing seats (``bearing_seat``), in bearings on its own journals (``bearing_journal``, a
+shaft line with no housing) or through a bore in a block (``shaft_bore`` whose bore side is a block) turns about its
+axis: one revolute joint per shaft copy, carrying the shaft and every item mounted
 on it (hubs and gears with a ``shaft_bore`` or ``key`` interface to that shaft copy). Every ``gear_mesh`` couples the
 two shafts carrying its gears with ratio −z_a / z_b (external spur mesh). Bearings, housings, caps and fasteners
 stay put. Axes come from ``icd.joint_axis`` (program frame), mapped into the assembly through the shaft instance's
@@ -52,9 +53,14 @@ def program_joints(prog: dict[str, Any], adoc: dict[str, Any]) -> dict[str, Any]
         if f["kind"] == "bearing_seat" or (f["kind"] == "shaft_bore" and (items.get(a["item"]) or {}).get("role") == "block"
                                             and (items.get(b["item"]) or {}).get("role") == "shaft"):
             key = (b["item"], int(b.get("copy") or 0))
-            ax = icd.joint_axis(f)
-            if ax and key not in shafts:
-                shafts[key] = {"axis": ax, "via": f["id"], "name": b.get("name") or items.get(b["item"], {}).get("name")}
+        elif f["kind"] == "bearing_journal":  # the shaft is side a; the bearing (side b) stays put
+            key = (a["item"], int(a.get("copy") or 0))
+        else:
+            continue
+        ax = icd.joint_axis(f)
+        if ax and key not in shafts:
+            side = a if f["kind"] == "bearing_journal" else b
+            shafts[key] = {"axis": ax, "via": f["id"], "name": side.get("name") or items.get(key[0], {}).get("name")}
     riders: dict[tuple[str, int], list[tuple[str, int]]] = {k: [] for k in shafts}
     for f in ifaces:
         if f["kind"] not in ("shaft_bore", "key"):

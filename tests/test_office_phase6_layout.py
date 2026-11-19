@@ -112,7 +112,8 @@ def test_gearbox_caps_that_cannot_fit_stay_on_the_housing() -> None:
     # (the casing is open at the top: nothing but the lid can bolt there) for the engineer to place
     parts, ids = _gearbox("A spur gear reducer.")
     sk, ifs = icd.build(parts, "")
-    assert icd.problems(sk, ifs) == []
+    # a part with no interface would lie beside the program: the ICD gate shows it as a problem (not silent)
+    assert [(x["code"], x["items"]) for x in icd.issues(sk, ifs)] == [("no_interface", [ids["Bearing cap"]])]
     assert sk["items"][ids["Input shaft"]].get("ax") == "y" and not sk["items"][ids["Bearing cap"]].get("ax")
     assert any("no cap fits over the bearing seats" in n for n in sk["notes"])
     assert any(n.startswith("Bearing cap has no interface") for n in sk["notes"])

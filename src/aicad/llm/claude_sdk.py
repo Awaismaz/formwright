@@ -71,6 +71,8 @@ class ClaudeAgentSDKProvider(LLMProvider):
             opts.max_budget_usd = max(0.01, req.budget_usd)
         if req.model:
             opts.model = req.model
+        if req.effort in ("low", "medium", "high"):
+            opts.effort = req.effort
         return opts
 
     async def _complete(self, req: CallRequest) -> CallResult:
