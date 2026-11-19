@@ -3,6 +3,11 @@
 Branch `wip/viewport-dims`. Founder request (2026-11-19): "parameters to be toggled on and off on view port. So user must
 be able to edit them directly on screen, instead of trying to relate which param means what on model."
 
+Proposed punch-list row (for the master): **DS-038 | Studio | Design parameters as dimensions on the model: toggle
+(D), hover links dimension ↔ faces ↔ Params row, click a value to change it without AI | P1 | Done | evidence
+`tests/test_dims.py`, `web/src/viewer/dims.test.ts`, walkthrough `docs/reports/viewport-dims/` | Founder request
+2026-11-19.**
+
 ## What it does
 - **Dimensions toggle** in the viewport toolbar (↔ button next to Section) and the **D** key (listed in the `?`
   shortcuts). The Params tab has the same toggle at the top; rows that have an on-model dimension carry a small ↔.
@@ -65,15 +70,22 @@ In-process (`dims.map_script`, quiet machine, worker warm):
 | Motor mount (agent-style, replayed agent build) | 12 | all but none: incl. SLOT_L (outer tangents), BOLT_PCD `Ø44`, BOLT_N `4×`, FILLET_R `R5` | — | 1.1 s |
 | Toolbox: bolts/SHCS/nut (D from list), standoff, dowel, shaft, flange, L bracket | 1–6 | all size params | washer D (clearance ≠ nominal), bearing series, gear M/Z, shaft chamfer | 0.01–0.3 s |
 
-In the app (walkthrough on 8794, `queued_s` = time waiting behind builds/renders on the same worker): mounting plate
-toggle → dimensions on screen 4.2 s on first use (mapping 4.0 s on a loaded machine), L bracket page open → shown
-2.7 s (mapping 1.0 s), Toolbox insert → ready 2.7–3.6 s (mostly queued behind export + render), on-screen edit
-L 120 → 150 → rebuilt and label updated 2.1 s, undo 1.4 s, value edits re-check in ~0.01 s of worker time. Under heavy
-load from parallel agents (pytest of 8 dims tests took 10 min instead of 35 s) one pass took 105 s (nudges 5–16 s
-each); the time budget and resumable passes handled it.
+In the app (walkthroughs on 8794 while ~5 agents shared the machine; `queued_s` = time waiting behind builds,
+exports and renders on the same worker):
+
+| Step | Result |
+|---|---|
+| Mounting plate, D pressed, first mapping | dimensions on screen 4.2 s (quieter run) / 14.3 s (loaded run: 10 nudges 0.4–1.9 s each) |
+| L bracket, page open with dimensions on | shown 2.7 s (pass 1.0 s, queued 0 s) |
+| Toolbox insert (shaft / dowel) | mapping ready 2.7–3.6 s after the insert (mostly queued behind export + render) |
+| Replayed agent build (motor mount, 12 params) | shown 8.5 s after the build (pass 6.5 s, 0.23–0.65 s per nudge) |
+| On-screen edit L 120 → 150 | rebuilt + label 150 in 2.1 s (quiet) / 36 s (loaded; the build alone took 24.6 s) |
+| Undo (Ctrl+Z) | label back to 120 in 1.4 s (quiet) / 20.6 s (loaded) |
+| Value edit re-check (same structure) | reused, ~0.01 s of worker time; count edit (flange 6 → 8 holes, motor mount 4 → 6) re-maps: 9.6 s / 27 s incl. 5.7 s / 20 s queued |
+| Very heavy load (one earlier run) | one pass 105 s (nudges 5–16 s); budget + resumable passes completed it |
 
 ## Evidence
-- `tests/test_dims.py` (10): block L/W/H (faces by hand: normals ±X/±Y/±Z at ±L/2…), plate hole Ø + pattern count +
+- `tests/test_dims.py` (10, all pass; `test_platform`/`test_studio` param, compare, runner, manual-feature tests pass): block L/W/H (faces by hand: normals ±X/±Y/±Z at ±L/2…), plate hole Ø + pattern count +
   pitch (axis–axis), revolved shaft with a step (Ø and shoulder planes at z = 0/40/65), reuse after a value edit and
   re-map on structure/count change, all demo parts (kinds stated by hand), agent-style motor mount (wall height
   planes z = 8/68, slot length over the round ends = 30), explicit override + nudge that fails the script's own
@@ -86,7 +98,10 @@ each); the time budget and resumable passes handled it.
 - Puppeteer walkthrough (port 8794, throwaway data, puppeteer-core): screenshots in `docs/reports/viewport-dims/`:
   `01` plate dimensions on, `02` hover length (faces + Params row), `04` inline edit with limits, `05` rebuilt at 150,
   `06` after undo, `10` flange (Ø120 PCD, 6× Ø14, 6×), `12` shaft (keyway depth to the tangent), `20` replayed agent
-  build (motor mount), `21` editing the bolt count on screen. 0 page errors in the main run.
+  build (motor mount), `21` editing the bolt count on screen, `22` six bolts (holes highlighted), `07` limit refused,
+  `08` Top view (thickness/depth hidden end-on), `13` Toolbox standoff. Scripts: `dims.mjs`, `agent.mjs` (same folder).
+  The only console errors are the known 404 on `status.json` of a brand-new project before its first build; one 500
+  found on `/dims` (status.json read mid-replace on Windows) was fixed (retry) and re-walked.
 
 ## Files
 New: `src/aicad/dims.py`, `src/aicad/platform/dims_service.py`, `web/src/viewer/dims.ts`, `web/src/viewer/dims.test.ts`,
