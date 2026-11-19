@@ -115,6 +115,155 @@ def _usage_ints(u: dict[str, Any] | None) -> dict[str, int]:
     return out
 
 
+def _int(v: Any) -> int:
+    return int(v) if isinstance(v, int | float) else 0
+
+
+def _tool_result_size(b: Any) -> dict[str, int]:
+    """Characters of text and number of images in one tool result (what the next model call has to read)."""
+    c = b.content
+    if isinstance(c, str):
+        return {"text_chars": len(c), "images": 0}
+    text, images = 0, 0
+    for x in c or []:
+        if isinstance(x, dict):
+            if x.get("type") == "image":
+                images += 1
+            else:
+                text += len(str(x.get("text") or ""))
+    return {"text_chars": text, "images": images}
+
+
+class CallLog:
+    """Per model call (one API request of the agent harness): tokens by kind, wall time and the tools it asked for.
+
+    Fed from the SDK's partial-message stream (``StreamEvent``: ``message_start`` carries the input and prompt-cache
+    usage, ``message_delta`` the final output count, ``message_stop`` the end) and, when a client sends no stream
+    events (replay, fakes, older CLIs), from the ``AssistantMessage`` usage snapshots, which miss most of the output.
+    The run record and the session's live meter both price these numbers (agent-cost report)."""
+
+    def __init__(self, clock: Any = time.perf_counter, t0: float | None = None) -> None:
+        self.clock = clock
+        self.t0 = clock() if t0 is None else t0
+        self.calls: dict[str, dict[str, Any]] = {}
+        self.order: list[str] = []
+        self.streamed = False
+        self._current: str | None = None
+
+    def _call(self, mid: str, model: str | None) -> dict[str, Any]:
+        c = self.calls.get(mid)
+        if c is None:
+            c = {"n": len(self.order) + 1, "id": mid, "model": model or "", "start_s": round(self.clock() - self.t0, 3),
+                 "duration_s": None, "input_tokens": 0, "cache_write_1h": 0, "cache_write_5m": 0,
+                 "cache_read_input_tokens": 0, "output_tokens": 0, "tools": [], "tool_results": []}
+            self.calls[mid] = c
+            self.order.append(mid)
+        elif model and not c["model"]:
+            c["model"] = model
+        return c
+
+    @staticmethod
+    def _apply(c: dict[str, Any], u: Any) -> None:
+        """Merge one usage report (largest value wins: reports of one call only grow)."""
+        if not isinstance(u, dict):
+            return
+        for k in ("input_tokens", "cache_read_input_tokens", "output_tokens"):
+            if k in u:
+                c[k] = max(c[k], _int(u.get(k)))
+        if "cache_creation_input_tokens" in u:
+            cw = _int(u.get("cache_creation_input_tokens"))
+            split = u.get("cache_creation") if isinstance(u.get("cache_creation"), dict) else {}
+            one_h = min(_int(split.get("ephemeral_1h_input_tokens")), cw)
+            c["cache_write_1h"] = max(c["cache_write_1h"], one_h)
+            c["cache_write_5m"] = max(c["cache_write_5m"], cw - one_h)
+
+    def stream(self, ev: dict[str, Any]) -> str | None:
+        """One raw API stream event. Returns the id of the call whose usage changed."""
+        t = ev.get("type")
+        if t == "message_start":
+            m = ev.get("message") or {}
+            mid = str(m.get("id") or f"call{len(self.order) + 1}")
+            self.streamed = True
+            self._current = mid
+            self._apply(self._call(mid, m.get("model")), m.get("usage"))
+            return mid
+        if t == "message_delta" and self._current:
+            self._apply(self.calls[self._current], ev.get("usage"))
+            return self._current
+        if t == "message_stop" and self._current:
+            c = self.calls[self._current]
+            c["duration_s"] = round(self.clock() - self.t0 - c["start_s"], 3)
+            self._current = None
+        return None
+
+    def message(self, mid: str | None, model: str | None, usage: Any, tools: list[str]) -> str:
+        """An ``AssistantMessage`` (one content block of a call). Its usage counts only when no stream events came."""
+        key = mid or f"m{len(self.order) + 1}"
+        c = self._call(key, model)
+        if not self.streamed:
+            self._apply(c, usage)
+        c["tools"].extend(tools)
+        return key
+
+    def tool_result(self, mid: str | None, name: str, size: dict[str, int]) -> None:
+        c = self.calls.get(mid or "")
+        if c is not None:
+            c["tool_results"].append({"tool": name, **size})
+
+    @staticmethod
+    def usage_of(c: dict[str, Any]) -> dict[str, Any]:
+        """A call's usage in the API's shape (for ``pricing.usage_cost_usd``)."""
+        return {"input_tokens": c["input_tokens"], "output_tokens": c["output_tokens"],
+                "cache_read_input_tokens": c["cache_read_input_tokens"],
+                "cache_creation_input_tokens": c["cache_write_1h"] + c["cache_write_5m"],
+                "cache_creation": {"ephemeral_1h_input_tokens": c["cache_write_1h"],
+                                   "ephemeral_5m_input_tokens": c["cache_write_5m"]}}
+
+    def cost(self, mid: str) -> float:
+        from aicad.agent.pricing import usage_cost_usd
+
+        c = self.calls[mid]
+        return usage_cost_usd(c["model"], self.usage_of(c))
+
+    def total_usd(self) -> float:
+        return sum(self.cost(m) for m in self.order)
+
+    def rows(self) -> list[dict[str, Any]]:
+        out = []
+        for mid in self.order:
+            c = dict(self.calls[mid])
+            c["context_tokens"] = (c["input_tokens"] + c["cache_write_1h"] + c["cache_write_5m"]
+                                   + c["cache_read_input_tokens"])
+            c["cost_usd"] = round(self.cost(mid), 6)
+            out.append(c)
+        return out
+
+    def summary(self) -> dict[str, Any]:
+        """Where the turn's cost went, by token kind (the agent-cost breakdown)."""
+        from aicad.agent.pricing import usage_cost_usd
+
+        rows = self.rows()
+        tot = {k: sum(r[k] for r in rows) for k in ("input_tokens", "cache_write_1h", "cache_write_5m",
+                                                     "cache_read_input_tokens", "output_tokens")}
+        by_kind = {"input": 0.0, "cache_write": 0.0, "cache_read": 0.0, "output": 0.0}
+        for r in rows:
+            u = self.usage_of(r)
+            by_kind["input"] += usage_cost_usd(r["model"], {"input_tokens": r["input_tokens"]})
+            by_kind["cache_write"] += usage_cost_usd(r["model"], {k: u[k] for k in ("cache_creation_input_tokens",
+                                                                                      "cache_creation")})
+            by_kind["cache_read"] += usage_cost_usd(r["model"], {"cache_read_input_tokens": r["cache_read_input_tokens"]})
+            by_kind["output"] += usage_cost_usd(r["model"], {"output_tokens": r["output_tokens"]})
+        ctx = [r["context_tokens"] for r in rows]
+        total_in = sum(ctx)
+        return {"model_calls": len(rows), "source": "stream" if self.streamed else "messages", **tot,
+                "context_tokens_max": max(ctx) if ctx else 0,
+                "cache_hit_ratio": round(tot["cache_read_input_tokens"] / total_in, 4) if total_in else None,
+                "cost_usd_by_kind": {k: round(v, 6) for k, v in by_kind.items()},
+                "cost_usd": round(sum(r["cost_usd"] for r in rows), 6),
+                "tool_result_chars": sum(t["text_chars"] for r in rows for t in r["tool_results"]),
+                "tool_result_images": sum(t["images"] for r in rows for t in r["tool_results"])}
+
+
 class RunRecorder:
     """Collects one agent turn as the SDK messages stream past, then writes run.json."""
 
@@ -130,12 +279,15 @@ class RunRecorder:
             "model": {"requested": requested_model, "used": []},
             "versions": versions(), "agent": {}, "tokens": {}, "cost_usd": {}, "timings_s": {},
             "tools": {"calls": 0, "by_name": {}, "errors": 0, "builds": 0}, "builds": [], "checks": None,
+            "calls": [], "cost_breakdown": None,
             "outcome": {}, "render_similarity": None}
         self._marks: dict[str, float] = {}
         self._open: dict[str, tuple[str, float]] = {}  # tool_use id -> (name, start)
         self._tool_time: dict[str, float] = {"build": 0.0, "other": 0.0}
         self._usage: dict[str, dict[str, int]] = {}  # message id -> max usage seen
         self._usage_model: dict[str, str] = {}
+        self.calls = CallLog(clock, self.t0)  # per model call (agent-cost)
+        self._tool_call: dict[str, str] = {}  # tool_use id -> the model call that asked for it
         self._result: dict[str, Any] | None = None
         self._render_before = self._read_render()
 
@@ -185,6 +337,7 @@ class RunRecorder:
         from claude_agent_sdk import (
             AssistantMessage,
             ResultMessage,
+            StreamEvent,
             SystemMessage,
             ToolResultBlock,
             ToolUseBlock,
@@ -192,6 +345,10 @@ class RunRecorder:
         )
 
         now = self.clock()
+        if isinstance(msg, StreamEvent):
+            if msg.parent_tool_use_id is None and isinstance(msg.event, dict):
+                self.calls.stream(msg.event)
+            return
         if isinstance(msg, SystemMessage) and msg.subtype == "init":
             data = msg.data or {}
             self.rec["agent"] = {k: data.get(k) for k in ("claude_code_version", "apiKeySource", "model",
@@ -207,6 +364,11 @@ class RunRecorder:
                 if prev is None or sum(u.values()) >= sum(prev.values()):
                     self._usage[key] = u
                     self._usage_model[key] = msg.model or ""
+            uses = [b for b in msg.content if isinstance(b, ToolUseBlock)]
+            call = self.calls.message(msg.message_id, msg.model, msg.usage,
+                                      [b.name.replace("mcp__cad__", "cad:") for b in uses])
+            for b in uses:
+                self._tool_call[b.id] = call
             for b in msg.content:
                 if isinstance(b, ToolUseBlock):
                     name = b.name.replace("mcp__cad__", "cad:")
@@ -221,6 +383,8 @@ class RunRecorder:
                 if not isinstance(b, ToolResultBlock):
                     continue
                 name, start = self._open.pop(b.tool_use_id, ("", now))
+                self.calls.tool_result(self._tool_call.pop(b.tool_use_id, None), name.replace("mcp__cad__", "cad:"),
+                                       _tool_result_size(b))
                 kind = "build" if "build_model" in name else "other"
                 self._tool_time[kind] += max(0.0, now - start)
                 if b.is_error:
@@ -268,6 +432,10 @@ class RunRecorder:
         rec["tokens"] = {**(res_usage or msg_sum), "source": "result" if res_usage else "messages",
                          "responses": len(self._usage), "per_response_sum": msg_sum}
         est = sum(usage_cost_usd(self._usage_model.get(k, ""), u) for k, u in self._usage.items())
+        if self.calls.streamed:  # the stream has each call's final usage; the snapshots miss most of the output
+            est = self.calls.total_usd()
+        rec["calls"] = self.calls.rows()
+        rec["cost_breakdown"] = self.calls.summary()
         rec["cost_usd"] = {"run": None if run_cost_usd is None else round(float(run_cost_usd), 6),
                            "estimate_from_usage": round(est, 6),
                            "meter": None if meter_usd is None else round(float(meter_usd), 6),
