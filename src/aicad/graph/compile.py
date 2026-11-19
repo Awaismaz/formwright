@@ -202,7 +202,10 @@ def part(g: DesignGraph, c: Component) -> dict[str, Any]:
         if all(dims):
             p["envelope"] = [float(x) for x in dims]
     else:
-        p["description"] = c.name + "."
+        dims = [c.v(n) for n in ("L", "W", "H")]
+        p["description"] = c.name + (f", {' x '.join(_f(x) for x in dims)} mm." if all(dims) else ".")
+        if all(dims):
+            p["envelope"] = [float(x) for x in dims]
     if c.material and "description" in p and ct.family != "standard" and c.material not in p["description"]:
         p["description"] = p["description"].rstrip(".") + f", {c.material}."
     return p

@@ -91,7 +91,7 @@ def test_registries_are_consistent() -> None:
     kh = registry.CONNECTIONS["keyed_hub"]
     assert kh.hosts == ("shaft",) and "spur_gear" in kh.guests and kh.via == ("key",) and kh.via_required
     assert any("keyseat" in f for f in kh.host_features) and any("keyway" in f for f in kh.guest_features)
-    assert registry.CONNECTIONS["bearing_seat"].hosts == ("housing", "pillow_block", "bracket")  # step 2: pillow blocks
+    assert registry.CONNECTIONS["bearing_seat"].hosts == ("housing", "pillow_block", "bracket", "plate")  # step 2
     assert any("groove" in f for f in registry.CONNECTIONS["ring_retained"].host_features)
     assert any("hole" in f for f in registry.CONNECTIONS["bolted_joint"].guest_features)
     assert "m (z1 + z2) / 2" in registry.CONNECTIONS["gear_mesh"].placement

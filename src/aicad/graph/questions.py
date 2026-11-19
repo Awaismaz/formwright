@@ -45,7 +45,8 @@ def ask(g: DesignGraph, answers: dict[str, str] | None = None) -> list[Question]
     out: list[Question] = []
     brief = g.brief or ""
     cons = g.constraints
-    if (g.of_kind("shaft") and g.of_kind("bearing") and not g.of_kind("housing", "pillow_block") and "housing" not in cons.named
+    if (g.of_kind("shaft") and g.of_kind("bearing") and not g.of_kind("housing", "pillow_block")
+            and not any(x.kind == "bearing_seat" for x in g.connections) and "housing" not in cons.named
             and "housing" not in cons.excluded and not _HOUSING_WORDS.search(brief) and "housing" not in answers
             and not cons.exclusive):
         out.append(Question(id="housing", question="Should the shafts run in a housing?",

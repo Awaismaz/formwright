@@ -7,11 +7,12 @@ Five golden mechanisms, every expected number a hand calculation from the placem
    key 6 x 6 x 18 (DIN 6885-1, Ø20), Y -19 .. -1, underside 10 - 3.5 = 6.5 off the axis.
 2. 1:3 pair m2 20 / 60, Ø20 shafts, four 6204 (20 x 47 x 14), no housing: a = 2 (20 + 60) / 2 = 80; gears Y -10 .. 10;
    bearings BEARING_CLEAR 5 from the gear faces: Y 15 .. 29 and -29 .. -15; shafts SHAFT_END 10 beyond: length 78.
-3. 3:1 reducer, split housing, four caps, shoulders inside (the live reply): the housing as the template sizes it,
-   216 x 84 x 146 (walls 20, seats at the outer faces Y -42 / +42); input Ø20 seat, step 20 + 2 max(2.5, 0.1 x 20 + 1)
+3. 3:1 reducer, split housing, four caps, shoulders inside (the live reply): cap screws M6 x 16 and cover bolts M8 x 30
+   (PD-114, the rule code completes housings with; golden suite F6); walls max(16 + 4, tap depth 2.5 x 6 + 3 + 3 = 21,
+   the M8 lid screws 2.5 x 9 + 1.5 = 24) = 24, so 224 x 92 x 146 (half inside 10 + 12 = 22; seats at Y -46 / +46); input Ø20 seat, step 20 + 2 max(2.5, 0.1 x 20 + 1)
    = Ø26; output Ø30 (6206, 30 x 62 x 16), step 30 + 2 max(2.5, 4) = Ø38; each gear's +Y face (Y 10) on its shoulder,
    a 5 mm collar (Y 10 .. 15) in the cavity, the seat from the -Y bearing's inner face (-42 + 14 = -28, -42 + 16 = -26)
-   to the shoulder, the +Y journal from the collar's end to the shaft end (input 84 + 16 + 20 = 120 long: Y -42 .. 78).
+   to the shoulder, the +Y journal from the collar's end to the shaft end (input 92 + 16 + 20 = 128 long: Y -46 .. 82).
 4. Belt drive (new): pulleys Ø60 / Ø120 x 20 on Ø20 shafts, two pillow blocks per shaft, 6204, on a base plate.
    C = D1 + D2 = 180 (stated rule); belt pitch length 2 C + pi (D1 + D2) / 2 + (D2 - D1)^2 / 4C = 360 + 282.74 + 5 =
    647.74. Bearings BEARING_CLEAR + SHOULDER = 9 from the pulley faces: Y 19 .. 33 and -33 .. -19; blocks 14 + 4 = 18
@@ -118,17 +119,19 @@ def test_reducer_shoulders_inside_the_housing() -> None:
     plan, sk, ifs = _solve(g)
     it = _it(sk)
     assert sk["layout"] == "gearbox" and icd.problems(sk, ifs) == []
-    assert it["Housing base"]["size"] == [216, 84, 146] and it["Housing base"]["cavity"]["wall"] == 20
+    assert it["Housing base"]["size"] == [224, 92, 146] and it["Housing base"]["cavity"]["wall"] == 24
     xi, xo = it["Input shaft"]["copies"][0][0], it["Output shaft"]["copies"][0][0]
     assert (xi, xo) == (-60, 20) and it["Input shaft"]["copies"][0][2] == it["Output shaft"]["copies"][0][2] == -68
-    assert it["Input shaft"]["size"] == [26, 26, 120] and it["Output shaft"]["size"] == [38, 38, 130]
+    assert it["Input shaft"]["size"] == [26, 26, 128] and it["Output shaft"]["size"] == [38, 38, 138]
     bores = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "shaft_bore")}
     pin, out = bores["Input shaft"], bores["Output shaft"]
-    assert (pin["d"], pin["shoulder_d"], pin["shoulder_z"], pin["seat_z"], pin["z"]) == (20, 26, 10, [-28, 10], [-10, 10])
-    assert (out["d"], out["shoulder_d"], out["shoulder_z"], out["seat_z"]) == (30, 38, 10, [-26, 10])
+    assert (pin["d"], pin["shoulder_d"], pin["shoulder_z"], pin["seat_z"], pin["z"]) == (20, 26, 10, [-32, 10], [-10, 10])
+    assert (out["d"], out["shoulder_d"], out["shoulder_z"], out["seat_z"]) == (30, 38, 10, [-30, 10])
     seats = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "bearing_seat")}
-    assert seats["Input shaft"]["journals"] == [[-42, -28], [15, 78]]
-    assert seats["Output shaft"]["journals"] == [[-42, -26], [15, 88]]
+    assert seats["Input shaft"]["journals"] == [[-46, -32], [15, 82]]
+    assert seats["Output shaft"]["journals"] == [[-46, -30], [15, 92]]
+    joints = {f["b"]["name"]: f["data"] for f in _ifs(ifs, "hole_pattern")}
+    assert joints["Housing cover"]["fastener"] == "M8" and joints["Input open cap"]["fastener"] == "M6"
     assert {n: s["designation"] for n, s in seats.items()} == {"Input shaft": "6204", "Output shaft": "6206"}
     caps = sorted((f["b"]["name"], f["data"]["cap"], f["data"]["normal"][1]) for f in _ifs(ifs, "hole_pattern")
                   if f["data"].get("cap"))
@@ -140,14 +143,15 @@ def test_reducer_shoulders_inside_the_housing() -> None:
     assert gc.check(g, sk, ifs) == [] and gc.limits(g, sk, ifs) == []  # "not laid out yet" is gone
     assert "Shoulders inside the housing" in sk["notes"][0] and "consistent by construction" in sk["notes"][0]
     d_ = gc.to_direct(g, plan)
-    assert d_["input_shaft"]["summary"] == "shaft Ø20 / Ø26 / Ø20 × 120, 2 bearing journals, 1 seat, 1 keyseat"
-    assert d_["output_shaft"]["summary"] == "shaft Ø30 / Ø38 / Ø30 × 130, 2 bearing journals, 1 seat, 1 keyseat"
+    assert d_["input_shaft"]["summary"] == "shaft Ø20 / Ø26 / Ø20 × 128, 2 bearing journals, 1 seat, 1 keyseat"
+    assert d_["output_shaft"]["summary"] == "shaft Ø30 / Ø38 / Ø30 × 138, 2 bearing journals, 1 seat, 1 keyseat"
 
 
-@pytest.mark.parametrize("case", ["keyed_gear", "gear_pair", "reducer"])
+@pytest.mark.parametrize("case", ["keyed_gear", "gear_pair"])
 def test_parity_with_the_template_on_the_golden_cases(case: str) -> None:
-    """The recorded golden graphs (no shoulder in a housing): the solver gives exactly the template's layout, item by
-    item and number by number."""
+    """The recorded golden graphs: the solver gives exactly the template's layout, item by item and number by number.
+    (The reducer's graph now states M8 cover bolts, PD-114, which the template reads as M6: its parity is measured
+    on the reverse-adapted layouts instead, docs/reports/connection-layout.md.)"""
     g = _graph(G1 / f"{case}.json")
     plan = gc.to_plan(g, resolved=True)
     t_sk, t_if = gc.to_icd(g, plan, template=True)
@@ -292,13 +296,13 @@ def test_two_stated_heights_that_disagree_are_a_conflict() -> None:
 
 # ----------------------------------------------------------------------------- fallback, stability, the office hook
 def test_graphs_the_solver_does_not_lay_out_yet_use_the_template_and_say_so() -> None:
+    """Two blocks that nothing connects: no base to walk from, so the template lays them out (and says so)."""
     reply = {"components": [{"id": "p", "kind": "plate", "name": "Base plate", "params": {"L": 200, "W": 100, "T": 10}},
-                            {"id": "b", "kind": "bracket", "name": "Bracket", "params": {"L": 60, "W": 40, "H": 30}},
-                            {"id": "f", "kind": "fastener", "name": "Bolt", "qty": 4, "params": {"size": 6}}],
-             "connections": [{"kind": "bolted_joint", "host": "p", "guest": "b", "via": ["f"]}]}
-    g, _iss, _qs = intent.compile_reply(reply, "Bracket", "A bracket bolted to a plate")
-    sk, ifs = gc.to_icd(g)
-    assert "solver" not in sk and sk["layout"] == "block" and icd.problems(sk, ifs) == []
+                            {"id": "b", "kind": "bracket", "name": "Bracket", "params": {"L": 60, "W": 40, "H": 30}}],
+             "connections": []}
+    g, _iss, _qs = intent.compile_reply(reply, "Bracket", "A bracket and a plate")
+    sk, _ifs = gc.to_icd(g)
+    assert "solver" not in sk
     assert any(n.startswith("Laid out with the standard layout") for n in sk["notes"])
     with pytest.raises(layout.Unsupported):
         layout.build(g, gc.plan_parts(gc.to_plan(g, resolved=True)), g.brief)

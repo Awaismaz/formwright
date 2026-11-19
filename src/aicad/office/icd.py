@@ -2489,10 +2489,14 @@ def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
     for f in ifs:
         d = f["data"]
         if f["kind"] == "dowel" and d.get("pin_item") == item:
-            at = [[x, y, _r2(d["plane_z"] - d["length"] / 2)] for x, y in d["positions"]]
-            return {"code": "dowel", "params": {"D": d["d"], "L": d["length"]}, "at": at, "interface": f["id"],
-                    "title": f"Dowel pin ISO 8734 Ø{d['d']:g}×{d['length']:g}", "standard": "ISO 8734",
-                    "what": "dowel holes"}
+            ax = ax_of(d)  # (a hinge pin lies along Y: graph layout's pin joint)
+            at = [[_r2(v) for v in point3(ax, xy, d["plane_z"] - d["length"] / 2)] for xy in d["positions"]]
+            out_d = {"code": "dowel", "params": {"D": d["d"], "L": d["length"]}, "at": at, "interface": f["id"],
+                     "title": f"Dowel pin ISO 8734 Ø{d['d']:g}×{d['length']:g}", "standard": "ISO 8734",
+                     "what": "dowel holes" if ax == "z" else "pin bores"}
+            if ax != "z":
+                out_d["R"] = CANON[ax]
+            return out_d
     return None
 
 
@@ -2574,7 +2578,7 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                 if rim < 1.0 and it["role"] != "shaft":
                     add("rim", f"{it['name']}: {h.get('label', 'hole')} Ø{h['d']:g} leaves {max(rim, 0):.1f} mm of "
                         "material (at least 1 mm needed).", [i], hif)
-            if cav and h["type"] == "hole":  # a hole must not break into the gear cavity
+            if cav and h["type"] == "hole" and not cav.get("open_through"):  # a hole must not break into a cavity
                 lax = h.get("ax") or "z"
                 lo_c = to_canon(lax, cav["min"])
                 hi_c = to_canon(lax, cav["max"])
@@ -2738,6 +2742,19 @@ def _bearing_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dic
                                 "layout, so Fitz will leave them in the parts bin. A bearing needs a shaft and a "
                                 "housing (or the shaft's own journals, with no housing) in the same program: add them "
                                 "to the plan, or plan fewer bearings."})
+    # every other bought-out part (a pin, a key, a ring, an oil plug) that no interface places: said at the gate,
+    # never vanishing silently (golden suite F3). Fasteners, nuts and washers are placed by the bolted joints' stacks.
+    named = {str(v) for f in ifs for k, v in (f.get("data") or {}).items()
+             if k in ("fastener_item", "key_item", "ring_item", "pin_item", "bearing_item", "cap_item") and v}
+    for st in skel.get("standard") or []:
+        nm = st.get("name") or ""
+        if _BEARINGY.search(nm) or re.search(r"screw|bolt|\bnut|washer|\bstud", nm, re.IGNORECASE) \
+                or st["item"] in named or seated(ifs, st["item"]):
+            continue
+        out.append({"code": "part_unplaced", "severity": "warning", "items": [st["item"]], "interfaces": [],
+                    "text": f"{nm}: no interface in this layout places it, so Fitz can't fit it in the assembly (it "
+                            "stays in the bill of materials and the parts bin). Say what it fits into, or remove it "
+                            "from the plan."})
     return out
 
 
@@ -3083,7 +3100,11 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                         "bearing's outer ring is flush with the wall face, so no spigot)")
         lines.append(f"- {f['id']} {f['name']}: " + "; ".join(bits) + f" (position tolerance ±{d.get('position_tol', POS_TOL):g}).")
     cav = it.get("cavity")
-    if cav:
+    if cav and cav.get("open_through"):  # a slot (a clevis between its lugs: graph layout's pin joint)
+        lines.append(f"- Slot (keep clear, {cav.get('note') or 'a part moves there'}): X {cav['min'][0]:g} to "
+                     f"{cav['max'][0]:g} (open at both ends), Y {cav['min'][1]:g} to {cav['max'][1]:g}, Z "
+                     f"{cav['min'][2]:g} up to the top face; lugs {cav['wall']:g} thick, floor {cav['floor']:g} mm.")
+    elif cav:
         lines.append(f"- Gear cavity (keep clear, the gears run there): X {cav['min'][0]:g} to {cav['max'][0]:g}, "
                      f"Y {cav['min'][1]:g} to {cav['max'][1]:g}, Z {cav['min'][2]:g} up to the top face (open, the "
                      f"lid closes it); side walls {cav['wall']:g}, end walls {cav['end_wall']:g}, floor "

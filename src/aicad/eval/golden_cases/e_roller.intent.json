@@ -1,0 +1,72 @@
+{
+  "case": "e_roller",
+  "name": "Conveyor roller",
+  "brief": "A conveyor idler roller: a Ø50 x 200 mm steel roller tube fixed on a Ø20 shaft that turns in two 6204 bearings, one in each of two 15 mm thick steel side plates. No frame.",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "A roller tube fixed on a shaft that turns in two 6204 bearings, one in each side plate.",
+    "components": [
+      {
+        "id": "shaft",
+        "kind": "shaft",
+        "name": "Roller shaft",
+        "qty": 1,
+        "params": {
+          "d": 20
+        }
+      },
+      {
+        "id": "tube",
+        "kind": "hub",
+        "name": "Roller tube",
+        "qty": 1,
+        "params": {
+          "od": 50,
+          "width": 200
+        }
+      },
+      {
+        "id": "plate",
+        "kind": "plate",
+        "name": "Side plate",
+        "qty": 2,
+        "params": {
+          "L": 100,
+          "W": 120,
+          "T": 15
+        }
+      },
+      {
+        "id": "brg",
+        "kind": "bearing",
+        "name": "Bearing 6204",
+        "qty": 2,
+        "params": {
+          "designation": 6204
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "hub_fit",
+        "host": "shaft",
+        "guest": "tube"
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "shaft",
+        "guest": "brg",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_seat",
+        "host": "plate",
+        "guest": "brg"
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

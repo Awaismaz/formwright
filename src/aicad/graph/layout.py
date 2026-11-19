@@ -221,6 +221,12 @@ class _Layout:
             self._gearbox()
         elif self.kind == "plate":
             self._plate()
+        elif self.kind == "guide":
+            self._guide()
+        elif self.kind == "pin":
+            self._pin()
+        elif self.kind == "blocks":
+            self._blocks()
         else:
             self._line()
         self._loose()
@@ -433,6 +439,21 @@ class _Layout:
 
     # ------------------------------------------------------------------ 3. which mechanism carries the shafts
     def _context(self) -> None:
+        self.rod_x = [x for x in self.g.connections if x.kind == "rod_support" and x.guest in self.spec
+                      and x.host in self.spec]
+        self.slide_x = [x for x in self.g.connections if x.kind == "slide" and x.host in self.spec and x.guest in self.spec]
+        self.pin_x = [x for x in self.g.connections if x.kind == "pin_joint" and x.host in self.spec
+                      and x.guest in self.spec]
+        rods = {x.guest for x in self.rod_x}
+        if self.shafts and rods >= set(self.shafts) and not any(self.brg[s] for s in self.shafts):
+            self.kind, self.sub_line, self.ctx = "guide", False, {s: "guide" for s in self.shafts}
+            return
+        if not self.shafts and self.pin_x:
+            self.kind, self.sub_line, self.ctx = "pin", False, {}
+            return
+        if not self.shafts and self.designed and all(self.role(c) == "block" for c in self.designed) and self.joints:
+            self.kind, self.sub_line, self.ctx = "blocks", False, {}
+            return
         ctx: dict[str, str] = {}
         host_of: dict[str, set[str]] = {}
         for sh in self.shafts:
@@ -443,8 +464,8 @@ class _Layout:
                 ctx[sh] = "sub"
             elif "housing" in kinds:
                 ctx[sh] = "housing"
-            elif kinds and kinds <= {"pillow_block", "bracket"}:
-                ctx[sh] = "pillow"
+            elif kinds and (kinds <= {"pillow_block", "bracket"} or all(self._joint_to(h) is None for h in hosts)):
+                ctx[sh] = "pillow"  # pillow blocks on a base, or supports standing on their own (side plates)
             elif kinds:
                 raise Unsupported(f"{self.name(sh)} runs in bearings seated in a {min(kinds)}")
             else:
@@ -872,17 +893,43 @@ class _Layout:
                 parent[x.guest] = (x.host, x)
         blocks = [c for c in self.designed if self.role(c) == "block"]
         roots = [b for b in blocks if b not in parent]
+        pbs = sorted({self.seat_host[b][0] for sh in self.shafts for b, _k, _x in self.brg[sh]}, key=self.designed.index)
+        self.parent = parent
+        motors = [e for e in self.edges if e["kind"] == "coupling" and e.get("motor")]
+        self.motor_edges = motors
+        # supports standing on their own (side plates, no frame in the design): the shaft is the base, the supports
+        # are centred on their bearings, the axis is datum A (Z = 0)
+        self.frameless = bool(roots) and all(r in pbs for r in roots)
+        if self.frameless:
+            if motors:
+                raise Unsupported("a motor beside supports that stand on nothing")
+            self.base = min(self.shafts, key=self._rank)
+            for pb in pbs:  # a plate carrying a bearing stands across the shaft: its thickness along the axis
+                s = self.spec[pb]
+                if self.comp[pb].kind == "plate":
+                    s["L"], s["W"], s["H"] = s["L"], s["H"], s["W"]
+                    s["given"] = {{"W": "H", "H": "W"}.get(k, k) for k in s["given"]}
+                    if s.get("planned"):
+                        s["planned"] = [s["planned"][0], s["planned"][2], s["planned"][1]]
+            self.h = 0.0
+            self._place_supports(pbs)
+            for sh in self.shafts:
+                s = self.spec[sh]
+                x = self.pos[sh][0]
+                self.at[sh] = [[_r2(x), _r2((s["y0"] + s["y1"]) / 2), 0.0]]
+                for r in self.riders[sh]:
+                    self.at[r] = [[_r2(x), _r2(self.gy(sh, r)), 0.0]]
+                self._seat_spans(sh)
+            self._place_couplings({sh: 0.0 for sh in self.shafts})
+            self.cy = 0.0
+            return
         plates = [b for b in roots if self.comp[b].kind == "plate"] or roots
         if len(plates) != 1:
             raise Unsupported("the shafts' supports stand on more than one base")
         self.base = plates[0]
-        self.parent = parent
-        pbs = sorted({self.seat_host[b][0] for sh in self.shafts for b, _k, _x in self.brg[sh]}, key=self.designed.index)
         for pb in pbs:
             if parent.get(pb, (None,))[0] != self.base:
                 raise Unsupported(f"{self.name(pb)} is not bolted to the base plate")
-        motors = [e for e in self.edges if e["kind"] == "coupling" and e.get("motor")]
-        self.motor_edges = motors
         # heights: every path from the plate to an axis must agree (the axes of coupled / belted shafts coincide)
         need: list[tuple[float, str]] = []   # (the least axis height a path allows, why)
         fixed: list[tuple[float, str, list[str]]] = []
@@ -925,7 +972,12 @@ class _Layout:
                               f"least {v:g} mm.", fixed[0][2] + list(self.shafts), [x.id for x in self.joints])
                 h = hmin
         self.h = _r2(h)
-        # pillow blocks: centred on their bearing (seat open outboard, the shoulder wall inboard)
+        self._place_supports(pbs)
+        self._plate_rest(motors, parent)
+
+    def _place_supports(self, pbs: list[str]) -> None:
+        """Pillow blocks (or side plates): centred on their bearing, the seat open outboard, the shoulder wall
+        inboard; on the plate (bolt feet either side) or, standing on their own, centred on the axis."""
         self.pb_of: dict[tuple[str, int], tuple[str, int]] = {}  # (pillow block, copy) -> (bearing, piece)
         self.pb_seat: dict[tuple[str, int], dict[str, Any]] = {}
         used: dict[str, int] = {}
@@ -945,20 +997,22 @@ class _Layout:
                 m = self._fastener(self._joint_to(pb), 2 * D)
                 inset = max(2 * CLEARANCE[m], 6.0)
                 Ws = B + SHOULDER
-                Hs = _up(self.h + D / 2 + wall, 0.5)
-                Ls = _up(D + 2 * wall + 4 * inset, 0.5)
+                Hs = _up((self.h + D / 2 + wall) if not self.frameless else D + 2 * wall, 0.5)
+                Ls = _up(D + 2 * wall + (4 * inset if not self.frameless else 0.0), 0.5)
                 for key, v in (("L", Ls), ("W", Ws), ("H", Hs)):
                     if key not in s["given"]:
                         s[key] = _r2(max(v, float(s[key]) if n else v))
-                y_lo, y_hi = (b0, b1 + SHOULDER) if sd < 0 else (b0 - SHOULDER, b1)
-                if "W" in s["given"]:
-                    y_lo, y_hi = (b0, b0 + float(s["W"])) if sd < 0 else (b1 - float(s["W"]), b1)
+                # every copy of one support is the same part: the seat opens toward -Y on each (the +Y bearing goes in
+                # from the inboard side, against a shoulder outboard), so one design serves both
+                y_lo, y_hi = b0, (b0 + float(s["W"])) if "W" in s["given"] else b1 + SHOULDER
                 self.at.setdefault(pb, [None] * self.ncopies(pb))
-                self.at[pb][n] = [_r2(x), _r2((y_lo + y_hi) / 2), _r2(float(s["H"]) / 2)]
+                self.at[pb][n] = [_r2(x), _r2((y_lo + y_hi) / 2), 0.0 if self.frameless else _r2(float(s["H"]) / 2)]
                 self.pb_of[(pb, n)] = (b, k)
                 self.pb_seat[(pb, n)] = {"shaft": sh, "side": sd, "z": [_r2(y_lo), _r2(y_hi)], "seat": [_r2(b0), _r2(b1)],
                                          "des": self._des(b)}
                 s["ax_hint"] = "y"
+
+    def _plate_rest(self, motors: list[dict[str, Any]], parent: dict[str, tuple[str, Connection]]) -> None:
         # the motor and its bracket: coaxial with the shaft it drives, its +Y face behind the coupling
         for e in motors:
             m, sh = e["motor"], e["b"]
@@ -1240,6 +1294,191 @@ class _Layout:
             return float(BEARINGS[self._des(self.brg[sh][-1][0])][0]) if self.brg[sh] else s["seat"]
         return float(s["seat"])
 
+    # ------------------------------------------------------------------ 5d. guide rods in end blocks, a carriage on them
+    def foot(self, cid: str) -> tuple[float, float]:
+        """A block's footprint in the program frame (X, Y): its L x W, or W x L when turned a quarter."""
+        s = self.spec[cid]
+        return (float(s["W"]), float(s["L"])) if s.get("rot") in (90, 270) else (float(s["L"]), float(s["W"]))
+
+    def _turn_along_y(self, cid: str) -> None:
+        """A block whose shorter side runs along the rods (an end block, a carriage): a quarter turn, so that side
+        lies along +Y (the rods' axis). An edit or a frozen turn at the ICD gate wins."""
+        s, o = self.spec[cid], self.o(cid)
+        if "rot" in o:
+            s["rot"] = int(o["rot"]) % 360
+        elif float(s["L"]) < float(s["W"]) - TOL:
+            s["rot"] = 90
+
+    def _guide(self) -> None:
+        """Parallel rods along +Y, held at both ends in end blocks on the base, a carriage sliding on them: the rods
+        at the stated spacing (else the end block's width / 2), symmetric about X = 0, at the stated height above the
+        base (else half the end block's height); each rod's ends flush with its blocks' outer faces; the carriage
+        centred between the blocks unless the design places it."""
+        rods = sorted(self.shafts, key=self._rank)
+        hosts: list[str] = list(dict.fromkeys(x.host for x in self.rod_x))
+        carriages = list(dict.fromkeys(x.guest for x in self.slide_x))
+        parent: dict[str, tuple[str, Connection]] = {}
+        for x in self.joints:
+            if self.role(x.host) == "block" and self.role(x.guest) == "block" and x.guest not in parent:
+                parent[x.guest] = (x.host, x)
+        self.parent = parent
+        roots = [b for b in self.designed if self.role(b) == "block" and b not in parent and b not in carriages]
+        if len(roots) != 1 or any(parent.get(h, (None,))[0] != roots[0] for h in hosts):
+            raise Unsupported("the rods' end blocks are not on one base")
+        self.base = roots[0]
+        for c in hosts + carriages:
+            self._turn_along_y(c)
+        spacing = next((float(x.v("spacing")) for x in self.rod_x if x.v("spacing")), None)
+        height = next((float(x.v("height")) for x in self.rod_x if x.v("height")), None)
+        b0 = hosts[0]
+        bx, by = self.foot(b0)
+        if spacing is None:
+            spacing = _r2(bx / 2)
+        if height is None:
+            height = _r2(float(self.spec[b0]["H"]) / 2)
+        t = by  # the block's thickness along the rods
+        copies = [(r, k) for r in rods for k in range(self.ncopies(r))]  # (a "Guide rod" x 2 is two rods)
+        n = len(copies)
+        self.h = height
+        for r in rods:
+            s = self.spec[r]
+            L = float(s.get("length") or 0.0)
+            if not L:
+                cl = max((self.foot(c)[1] for c in carriages), default=0.0)
+                L = _r2(3 * cl + 2 * t) if cl else _r2(6 * t)
+                s["length"] = L
+            s["ax"], s["y0"], s["y1"], s["brg"] = "y", _r2(-L / 2), _r2(L / 2), []
+            self.at[r] = [None] * self.ncopies(r)
+        for j, (r, k) in enumerate(copies):
+            x = _r2((j - (n - 1) / 2) * spacing)
+            self.at[r][k] = [x, 0.0, height]
+            if k == 0:
+                self.pos[r] = [x, height]
+        self.rod_copies = copies
+        L = float(self.spec[rods[0]]["length"])
+        self.rod_ends = (-L / 2, L / 2)
+        for h in hosts:  # copy 0 at the -Y ends, copy 1 at the +Y ends (one block holds every rod at its end)
+            hx, hy = self.foot(h)
+            hs = self.spec[h]
+            self.at[h] = [[0.0, _r2(-L / 2 + hy / 2), _r2(float(hs["H"]) / 2)],
+                          [0.0, _r2(L / 2 - hy / 2), _r2(float(hs["H"]) / 2)]][:self.ncopies(h)]
+            if height + float(self.spec[rods[0]]["d"]) / 2 > float(hs["H"]) - 1.0 + TOL or \
+                    abs(spacing) * (n - 1) / 2 + float(self.spec[rods[0]]["d"]) / 2 > hx / 2 - 1.0 + TOL:
+                self.conflict(f"the rods (Ø{self.spec[rods[0]]['d']:g}, {spacing:g} apart, {height:g} above the base) "
+                              f"don't fit in {self.name(h)} ({hx:g} x {float(hs['H']):g}).", [h] + rods,
+                              [x.id for x in self.rod_x if x.host == h])
+        for c in carriages:
+            cs = self.spec[c]
+            self.at[c] = [[0.0, 0.0, _r2(height)]]
+            _cx, cy_ = self.foot(c)
+            if cy_ > L - 2 * t + TOL:
+                self.conflict(f"{self.name(c)} ({cy_:g} along the rods) doesn't fit between the end blocks "
+                              f"({L - 2 * t:g} mm apart).", [c] + hosts, [x.id for x in self.slide_x if x.guest == c])
+            if height - float(cs["H"]) / 2 < -TOL:
+                self.conflict(f"{self.name(c)} reaches below the base.", [c, self.base],
+                              [x.id for x in self.slide_x if x.guest == c])
+        # the base: under everything; turned when its long side must run along the rods; grown unless stated
+        bs = self.spec[self.base]
+        ext_x = max([self.foot(h)[0] for h in hosts] + [self.foot(c)[0] for c in carriages]
+                    + [abs(spacing) * (n - 1) + float(self.spec[rods[0]]["d"])])
+        ext_y = L
+        bL, bW = float(bs["L"]), float(bs["W"])
+        if "rot" in self.o(self.base):
+            bs["rot"] = int(self.o(self.base)["rot"]) % 360
+        elif not (bL >= ext_x and bW >= ext_y) and (bW >= ext_x and bL >= ext_y or (bL > bW and ext_y > ext_x)):
+            bs["rot"] = 90  # its long side along the rods
+        fx, fy = self.foot(self.base)
+        for key, have, need in (("x", fx, ext_x), ("y", fy, ext_y)):
+            if have < need - 1e-6:
+                k = ("L" if (key == "x") == (bs.get("rot") not in (90, 270)) else "W")
+                if k in bs["given"]:
+                    self.conflict(f"{self.name(self.base)} ({fx:g} x {fy:g}) is smaller than what it carries "
+                                  f"({_r2(ext_x):g} x {_r2(ext_y):g}).", [self.base] + hosts, [x.id for x in self.joints])
+                else:
+                    bs[k] = _up(need + 2 * MARGIN, 1.0)
+        self.at[self.base] = [[0.0, 0.0, -float(bs["H"]) / 2]]
+
+    # ------------------------------------------------------------------ 5f. blocks bolted on blocks
+    def _blocks(self) -> None:
+        """No shafts: every block on its host's top face (bolted_joint / mounted_on), side by side along +X with
+        GAP between them, the row centred on the host; the root (the largest part nothing carries) is the base."""
+        parent: dict[str, tuple[str, Connection]] = {}
+        for x in self.joints:
+            if x.guest not in parent and x.guest != x.host:
+                parent[x.guest] = (x.host, x)
+        roots = [b for b in self.designed if b not in parent]
+        if len(roots) != 1:
+            raise Unsupported("blocks on more than one base")
+        self.base, self.parent = roots[0], parent
+        bs = self.spec[self.base]
+        self.at[self.base] = [[0.0, 0.0, _r2(-float(bs["H"]) / 2)]]
+        self.block_order: list[tuple[str, int]] = []
+
+        def place(h: str) -> None:
+            kids = [(k, c) for k in self.designed if parent.get(k, (None,))[0] == h for c in range(self.ncopies(k))]
+            if not kids:
+                return
+            hp = self.at[h][0]
+            assert hp is not None
+            top = hp[2] + float(self.spec[h]["H"]) / 2
+            widths = [self.foot(k)[0] for k, _c in kids]
+            x = -(sum(widths) + GAP * (len(kids) - 1)) / 2
+            for (k, c), w in zip(kids, widths, strict=True):
+                self.at.setdefault(k, [None] * self.ncopies(k))
+                self.at[k][c] = [_r2(hp[0] + x + w / 2), _r2(hp[1]), _r2(top + float(self.spec[k]["H"]) / 2)]
+                x += w + GAP
+                self.block_order.append((k, c))
+            for k in dict.fromkeys(k for k, _c in kids):
+                place(k)
+
+        place(self.base)
+
+    # ------------------------------------------------------------------ 5e. a pin joint (a hinge)
+    def _pin(self) -> None:
+        """An arm pivoting on a pin between the lugs of its host: the host is the base (its top face datum A); the
+        pin axis along Y at the stated pivot height above the host's underside (else 80 % of its height), the guest
+        centred between the lugs, lying along +X, its pivot bore half its width from its end; the slot between the
+        lugs is the host's open cavity (the gap stated, else the guest's width + 2 mm)."""
+        x = self.pin_x[0]
+        host, guest = x.host, x.guest
+        roots = [b for b in self.designed if self.role(b) == "block" and not any(j.guest == b for j in self.joints)
+                 and b != guest]
+        if roots != [host]:
+            raise Unsupported("a pin joint whose host is not the base")
+        self.base = host
+        self.parent = {guest: (host, x)}
+        hs, gs = self.spec[host], self.spec[guest]
+        if "rot" in self.o(guest):
+            gs["rot"] = int(self.o(guest)["rot"]) % 360
+        elif float(gs["L"]) < float(gs["W"]) - TOL:
+            gs["rot"] = 90  # its long side along +X
+        glen, gw = self.foot(guest)
+        gh = float(gs["H"])
+        H = float(hs["H"])
+        ph = float(x.v("pivot_height") or _r2(0.8 * H))
+        gap = float(x.v("gap") or gw + 2.0)
+        pin = next((v for v in x.via if self.comp.get(v) is not None and self.comp[v].kind == "dowel"), None)
+        pd = float(self.comp[pin].v("d") or 8.0) if pin else 8.0
+        pl = float(self.comp[pin].v("length") or self.foot(host)[1]) if pin else self.foot(host)[1]
+        self.at[host] = [[0.0, 0.0, _r2(-H / 2)]]
+        zp = _r2(-H + ph)
+        e = gw / 2  # the pivot bore half the arm's width from its end
+        self.at[guest] = [[_r2(glen / 2 - e), 0.0, zp]]
+        floor = _r2(ph - gh / 2 - 2.0)  # 2 mm under the arm at the pivot
+        hs["cavity"] = {"min": [_r2(-float(hs["L"]) / 2), _r2(-gap / 2), _r2(-H / 2 + floor)],
+                        "max": [_r2(float(hs["L"]) / 2), _r2(gap / 2), _r2(H / 2)], "wall": _r2((self.foot(host)[1] - gap) / 2),
+                        "floor": floor, "open_through": True,
+                        "note": "Slot between the lugs: the arm swings here; the pin bore crosses it."}
+        if gap < gw + TOL:
+            self.conflict(f"{self.name(guest)} ({gw:g} wide) doesn't fit between the lugs of {self.name(host)} "
+                          f"({gap:g} apart).", [guest, host], [x.id])
+        if ph + pd / 2 > H - 1.0 + TOL:
+            self.conflict(f"the pivot ({ph:g} above the underside) leaves no lug above the Ø{pd:g} pin bore in "
+                          f"{self.name(host)} ({H:g} high).", [host], [x.id])
+        if pl > self.foot(host)[1] + TOL:
+            self.notes.append(f"The pin ({pl:g} long) stands {(pl - self.foot(host)[1]) / 2:g} mm out of each lug.")
+        self.pin = {"x": x, "pin": pin, "d": pd, "length": pl, "axis": [0.0, zp]}
+
     # ------------------------------------------------------------------ anything no connection reached
     def _loose(self) -> None:
         if self.kind == "line":
@@ -1306,6 +1545,26 @@ class _Layout:
                 self._riders(sh)
             for st, n, side in hm["caps"]:
                 self._cap_joint(st, n, side)
+        elif self.kind == "guide":
+            for x in self.joints:  # the end blocks on the base
+                if self.role(x.host) == "block" and self.role(x.guest) == "block" and x.guest in self.at:
+                    for c in range(len(self.at[x.guest])):
+                        if self.at[x.guest][c] is not None:
+                            self._grid_joint(x.host, 0, x.guest, c, x, tapped=False)
+            for r, k in self.rod_copies:
+                for x in self.rod_x:
+                    if x.guest == r:
+                        for c in range(len(self.at.get(x.host) or [])):
+                            self._rod_bore(x.host, c, r, k, "end")
+                for x in self.slide_x:
+                    if x.host == r:
+                        self._rod_bore(x.guest, 0, r, k, "slide")
+        elif self.kind == "pin":
+            self._pin_joint()
+        elif self.kind == "blocks":
+            for k, c in self.block_order:
+                x = self.parent[k][1]
+                self._grid_joint(self.parent[k][0], 0, k, c, x, tapped=False)
         elif self.kind == "plate":
             for x in self.joints:  # blocks on blocks: pillow blocks and the bracket on the plate, the motor on it
                 if self.role(x.host) == "block" and self.role(x.guest) == "block":
@@ -1335,6 +1594,35 @@ class _Layout:
                 self._belt(e)
         self._rings()
         self._phase()
+
+    def _rod_bore(self, block: str, c: int, rod: str, k: int, what: str) -> None:
+        """A rod in a block's bore: held at its end (flush with the -Y block's outer face), or a carriage sliding."""
+        pos = self.at[block][c]
+        assert pos is not None
+        y0 = pos[1] - self.foot(block)[1] / 2
+        y1 = pos[1] + self.foot(block)[1] / 2
+        d = float(self.spec[rod]["seat"])
+        o = self.nxt()
+        fit = str(o.get("fit") or ("H7/h6" if what == "end" else "H7/g6"))
+        flush = _r2(y0) if what == "end" and abs(y0 - self.rod_ends[0]) < 1e-6 else None
+        rp = self.at[rod][k]
+        assert rp is not None
+        self.add("shaft_bore", (self.item[block], c), (self.item[rod], k), {
+            "d": d, "fit": fit if fit in FITS else "H7/h6", "length": _r2(y1 - y0), "ax": "y", "axis": [rp[0], rp[2]],
+            "z": [_r2(y0), _r2(y1)], "flush_z": flush, "position_tol": POS_TOL}, ["A", "B", "C"],
+            ("rod end held in its block" + (", flush with the outer face" if flush is not None else "")) if what == "end"
+            else "carriage sliding on the rod")
+
+    def _pin_joint(self) -> None:
+        """The pin through both lugs and the arm's pivot bore (ISO 8734 dowel pin, along Y)."""
+        p = self.pin
+        x = p["x"]
+        o = self.nxt()
+        self.add("dowel", (self.item[x.host], 0), (self.item[x.guest], 0), {
+            "d": p["d"], "fit": str(o.get("fit") or "H7/h6"), "count": 1, "positions": [p["axis"]], "plane_z": 0.0,
+            "ax": "y", "length": p["length"], "pin_item": self.item[p["pin"]] if p["pin"] else None,
+            "joint": None, "standard": "ISO 8734", "position_tol": POS_TOL}, ["A", "B", "C"],
+            f"hinge pin Ø{p['d']:g} x {p['length']:g} (ISO 8734)")
 
     def _axis2(self, sh: str) -> list[float]:
         c = self.at[sh][0]
@@ -1472,7 +1760,7 @@ class _Layout:
             "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
             "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
             "axis": self._axis2(sh), "z": ps["z"],
-            "seats": [{"face": f"{'-' if sd < 0 else '+'}Y face", "open": sd, "z": [_r2(s_lo), _r2(s_hi)]}],
+            "seats": [{"face": "-Y face", "open": -1, "z": [_r2(s_lo), _r2(s_hi)]}],
             "clearance_d": _r2(max(bd + 2, inboard + 2)), "flush_z": None, "bearing_item": self.item[bitem],
             "piece": k, "shaft_d": s["seat"], "count": 1, "r_s_min": icd._BEARING_RS[int(des)],
             "journals": [[_r2(jz[0]), _r2(jz[1])]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
@@ -1536,7 +1824,7 @@ class _Layout:
         pos = self.at[child][cc]
         assert pos is not None
         o = self.nxt()
-        Lp, Wp = float(ks["L"]), float(ks["W"])
+        Lp, Wp = self.foot(child)
         bottom = pos[2] - float(ks["H"]) / 2
         if self.comp[child].kind == "pillow_block":
             span = 2 * max(BEARINGS[self._des(b)][1] for b in self._pb_bearings(child))
@@ -1549,6 +1837,10 @@ class _Layout:
         inset = float(o.get("inset") or inset_pref)
         wod = WASHER_OD.get(max(m, icd.bolt_for_hole(d)), 2 * d)
         count = int(o.get("count") or (4 if min(Lp, Wp) - 2 * inset >= wod and max(Lp, Wp) - 2 * inset >= wod else 2))
+        bolts = next((self.comp[v] for v in (x.via if x else []) if self.comp.get(v) is not None
+                      and self.comp[v].kind == "fastener"), None)
+        if not o.get("count") and bolts is not None and int(bolts.qty) in (2, 3):  # no more holes than planned bolts
+            count = 2
         pts = _grid(pos, Lp, Wp, count, inset)
         if count == 2 and not o.get("inset"):
             inset = _r2(max(min(inset_pref, (max(Lp, Wp) - wod) / 2), d / 2 + 1.0))
@@ -1672,7 +1964,7 @@ class _Layout:
                 if s["role"] == "shaft" and not s.get("length"):
                     s["length"] = 40.0
             size = icd._size_of(s)
-            Rw = frames.item_rotation(s.get("ax") or "z", 0.0)
+            Rw = frames.item_rotation(s.get("ax") or "z", float(s.get("rot") or 0) if s["role"] == "block" else 0.0)
             wsize = [sum(abs(Rw[r][j]) * size[j] for j in range(3)) for r in range(3)]
             cps = [c for c in self.at[cid] if c is not None]
             for c in cps:
@@ -1687,9 +1979,11 @@ class _Layout:
             items[i] = {"name": p["name"], "role": s["role"], "shape": "box" if s["role"] == "block" else "cylinder",
                         "size": [_r2(x) for x in size], "sub": p["sub"], "parent": self._parent_item(cid),
                         "copies": [[_r2(x) for x in c] for c in cps], "qty": p["qty"], "source": s["source"],
+                        **({"rot": s["rot"]} if s.get("rot") and s["role"] == "block" else {}),
                         **({"planned": s["planned"]} if s.get("planned") else {}),
                         **({"ax": s["ax"]} if s.get("ax") and s["ax"] != "z" else {}),
-                        **({"cavity": self._cavity()} if self.kind == "gearbox" and cid == self.housing else {}),
+                        **({"cavity": self._cavity()} if self.kind == "gearbox" and cid == self.housing else
+                           {"cavity": s["cavity"]} if s.get("cavity") else {}),
                         **({"phase": self.phase[i]} if self.phase.get(i) else {}),
                         **({"d": s["d"]} if s["role"] == "shaft" else {}),
                         **({"bearing": bearing} if bearing else {}),
@@ -1700,7 +1994,7 @@ class _Layout:
                  0.0, items[i]["copies"][0][2]], "dir": [0.0, 1.0, 0.0]}
                 for n, i in enumerate(i for i in items if items[i]["role"] == "shaft")]
         base = items[self.item[self.base]]
-        if self.kind == "line":
+        if self.kind == "line" or getattr(self, "frameless", False):
             csys, datums = self._line_datums(base)
         else:
             csys = (f"Origin at the centre of the top face of the {base['name']} (datums A, B, C); +Z up, away from "
@@ -1714,7 +2008,8 @@ class _Layout:
         parts_std = [{"item": p["id"], "name": p["name"], "qty": p["qty"], "sub": p["sub"]}
                      for p in self.parts if p["family"] == "standard"]
         skel = {"units": "mm", "base": self.item[self.base],
-                "layout": {"gearbox": "gearbox", "plate": "block", "line": "shaft_line"}[self.kind],
+                "layout": {"gearbox": "gearbox", "plate": "block", "line": "shaft_line", "guide": "block",
+                           "pin": "block", "blocks": "block"}[self.kind],
                 "csys": csys, "datums": datums, "axes": axes,
                 "envelope": {"min": [_r2(x) for x in lo], "max": [_r2(x) for x in hi],
                              "size": [_r2(hi[k] - lo[k]) for k in range(3)]},
@@ -1733,7 +2028,7 @@ class _Layout:
             return self.item[self.rider_of[cid]]
         if self.kind == "gearbox":
             return None if cid == self.housing else self.item[self.housing]
-        if self.kind == "plate":
+        if self.kind in ("plate", "guide", "pin", "blocks"):
             if cid == self.base:
                 return None
             if cid in getattr(self, "parent", {}):
@@ -1803,6 +2098,25 @@ class _Layout:
                   if r in self.stops[sh] and self.spec[sh].get("body")]
             if st:
                 head += " Shoulders inside the housing: " + "; ".join(st) + "."
+        elif self.kind == "guide":
+            xs = [self.at[r][k][0] for r, k in self.rod_copies]  # type: ignore[index]
+            r0 = self.rod_copies[0][0]
+            head += (f"Guide rods: {len(xs)} x Ø{self.spec[r0]['seat']:g} along +Y, "
+                     f"{_r2((max(xs) - min(xs)) / max(1, len(xs) - 1)):g} mm apart, {self.h:g} mm above the top face "
+                     f"of the {self.name(self.base)}, each end flush in its end block; the carriage slides on them, "
+                     "centred between the blocks.")
+        elif self.kind == "pin":
+            p = self.pin
+            head += (f"Pin joint: {self.name(p['x'].guest)} pivots on a Ø{p['d']:g} x {p['length']:g} pin along +Y "
+                     f"between the lugs of the {self.name(self.base)}, {self.spec[self.base]['H'] + p['axis'][1]:g} mm "
+                     "above its underside; the arm lies along +X in the slot.")
+        elif self.kind == "blocks":
+            head += (f"Blocks bolted on their host's top face: the {self.name(self.base)} is the base (its top face "
+                     "datum A), each part centred on it (side by side along +X when several), its bolts no more than "
+                     "the design plans.")
+        elif self.kind == "plate" and getattr(self, "frameless", False):
+            head += ("No frame in the design: the shaft is the base (its axis datum A), each bearing in its support, "
+                     "the supports standing across the shaft, centred on their bearings.")
         elif self.kind == "plate":
             head += (f"The shafts run along +Y {self.h:g} mm above the top face of the {self.name(self.base)}, each in "
                      "its pillow blocks (the seat open outboard, the shoulder wall inboard)"

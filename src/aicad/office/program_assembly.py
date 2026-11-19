@@ -738,7 +738,11 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         "ok" if extra <= 0 else "warn")
                     continue
                 if kind == "fastener" or code in ("hex_bolt", "shcs"):
-                    mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or joints
+                    # a joint whose ICD names another fastener item is that item's: never stacked with this one
+                    # (golden suite F6: the cover bolts took the caps' joints, 16 hex bolts for the cap screws)
+                    mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or \
+                        [f for f in joints if not any(t2.get("item_id") == f["data"].get("fastener_item")
+                                                      for t2 in prog.get("tickets") or [])]
                     planned = await asyncio.to_thread(plan_stacks, aroot, adoc, sk, mine, fitted)
                     want = int(t.get("qty") or 1)
                     if t.get("_kit"):
@@ -747,6 +751,12 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         want = len(planned)
                     stats["asked"] += want
                     planned = planned[:want]
+                    if not planned and any(f["kind"] == "hole_pattern" and f["data"].get("fastener_item") == t["item_id"]
+                                           and sk["items"][f["a"]["item"]]["sub"] != sk["items"][f["b"]["item"]]["sub"]
+                                           for f in ifaces):
+                        say(f"{t['title']}: their joints are between sub-assemblies, so Fitz fits them in the final "
+                            "assembly")
+                        continue
                     if not planned:
                         stats["unplaced"] += want
                         say(f"{t['title']}: no bolted joint of the ICD inside this sub-assembly takes it, so Fitz "
@@ -844,15 +854,25 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                 joints = [f for f in ifaces if f["kind"] == "hole_pattern"
                           and sk["items"][f["a"]["item"]]["sub"] != sk["items"][f["b"]["item"]]["sub"]]
                 fitted = {(g["hole"]["inst"], int(g["hole"]["hole"])) for g in final["groups"] if g.get("hole")}
-                planned = await asyncio.to_thread(plan_stacks, aroot, final, sk, joints, fitted)
-                if planned:  # PD-71: from the ICD, like every level
-                    try:
-                        res = await aservice.insert_planned(aroot, org_id, final, planned, "hex_bolt")
+                # each joint takes the style of the fastener its ICD names (cap screws stay socket head, golden F6)
+                by_style: dict[str, list[dict[str, Any]]] = {}
+                for f in joints:
+                    tk = next((x for x in prog.get("tickets") or []
+                               if x.get("item_id") and x.get("item_id") == f["data"].get("fastener_item")), None)
+                    code = ((tk or {}).get("reuse") or {}).get("code")
+                    by_style.setdefault("shcs" if code == "shcs" else "hex_bolt", []).append(f)
+                for style, js in by_style.items():
+                    planned = await asyncio.to_thread(plan_stacks, aroot, final, sk, js, fitted)
+                    if not planned:
+                        continue
+                    try:  # PD-71: from the ICD, like every level
+                        res = await aservice.insert_planned(aroot, org_id, final, planned, style)
                     except AssemblyInputError as e:  # e.g. the assembly is full
                         res = {"inserted": 0, "plan": {"holes": [{"proposal": {"ok": False, "error": str(e)}}]}}
                     stats["stacks"] += res["inserted"]
                     if res["inserted"]:
-                        say(f"Fitz fitted {res['inserted']} bolt stacks at the joints between sub-assemblies (from the ICD)")
+                        say(f"Fitz fitted {res['inserted']} {'cap screw' if style == 'shcs' else 'bolt'} stacks at the "
+                            "joints between sub-assemblies (from the ICD)")
                     else:
                         say("Fitz couldn't fit the joints between sub-assemblies: " + next(
                             (h["proposal"]["error"] for h in res["plan"]["holes"] if h["proposal"].get("error")),
