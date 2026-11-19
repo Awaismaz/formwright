@@ -255,7 +255,8 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             {/\[Selected feature\(s\) in the feature tree:/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ListTree className="mr-1 inline h-3 w-3" />about {/\[Selected feature\(s\) in the feature tree: ([^\]]*)\]/.exec(i.text)?.[1]}</div>}
             {/\[Reference image/.test(i.text) && <div className="mt-1 text-[11px] text-white/75"><ImagePlus className="mr-1 inline h-3 w-3" />with reference image</div>}</div>;
           if (i.kind === "agent") return <div key={n} className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={i.text} /></div>;
-          if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={n === items.length - 1 && !busy} onSubmit={a => send(a)} />;
+          // live until the user sends something newer (the turn's "result" event always follows the questions)
+          if (i.kind === "questions") return <Questions key={n} qs={i.questions} active={!busy && !items.slice(n + 1).some(x => x.kind === "user" || x.kind === "questions")} onSubmit={a => send(a)} />;
           if (i.kind === "brief") return <BriefCard key={n} brief={i.brief} active={!busy && !items.slice(n + 1).some(x => x.kind === "user")}
             onApprove={a => { setMode("build"); void send(a, true, "build", true); }} />;
           if (i.kind === "review") return <SelfReview key={n} review={i.review} />;
