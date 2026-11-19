@@ -160,6 +160,8 @@ def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
         return None
     if not deps_done(doc, t):
         return None
+    if t["kind"] == "integration" and (doc.get("assembly") or {}).get("status") == "building"             and (doc.get("assembly") or {}).get("revision"):
+        return None  # Fitz is laying the program assembly out again for a program revision: integrate after
     if st is None:  # never touched by the orchestrator: only what the plan put in Backlog / Ready
         if t["column"] in ("ready", "backlog"):
             return first_stage(t)
