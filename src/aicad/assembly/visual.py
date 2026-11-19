@@ -118,16 +118,18 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
             out.append(f"{a} is located on {b} by dowel pins")
         else:
             out.append(f"{a} sits on {b}")
-    if not ifaces:
-        gears = [(i, it) for i, it in items.items() if it.get("role") == "gear"]
-        shafts = [it["name"] for it in items.values() if it.get("role") == "shaft"]
+    meshed = any(f["kind"] == "gear_mesh" for f in ifaces)
+    gears = [(i, it) for i, it in items.items() if it.get("role") == "gear"]
+    if not meshed:  # the brief's intent even when the ICD has no mesh: a wrong ICD must not set the bar (live run)
         for k, (_i, g1) in enumerate(gears):
             for _j, g2 in gears[k + 1:]:
                 a, b = _gear_of(g1), _gear_of(g2)
-                if a and b and abs(a[0] - b[0]) < 1e-6:
+                if a and b and abs(a[0] - b[0]) < 1e-6 and g1.get("sub") == g2.get("sub"):
                     c = a[0] * (a[1] + b[1]) / 2
-                    out.append(f"{g1['name']} meshes with {g2['name']}: axes parallel, {c:g} mm apart "
-                               "(m (z1 + z2) / 2), the two gears in one plane")
+                    out.insert(0, f"{g1['name']} meshes with {g2['name']}: axes parallel, {c:g} mm apart "
+                                  "(m (z1 + z2) / 2), the two gears in one plane, each on its own shaft")
+    if not ifaces:
+        shafts = [it["name"] for it in items.values() if it.get("role") == "shaft"]
         if gears and shafts:
             out.append("each gear sits on its own shaft (" + ", ".join(shafts) + ")")
         blocks = [it["name"] for it in items.values() if it.get("role") == "block"]

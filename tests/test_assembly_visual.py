@@ -199,7 +199,13 @@ def test_relations_from_the_brief_roles() -> None:
     sk, ifs = _row_layout()
     rels = [r["text"] for r in visual.relations_from_skeleton(sk, ifs, BRIEF)]
     assert rels[0] == ("Pinion meshes with Gear: axes parallel, 80 mm apart (m (z1 + z2) / 2), the two gears in one "
-                       "plane")
+                       "plane, each on its own shaft")
+    # with interfaces but no gear mesh among them (a wrong layout), the brief's mesh still sets the bar
+    sk2, ifs2 = icd.build(_parts({"subassemblies": [{"name": "Gear pair", "parts": [
+        {"name": "Housing", "family": "machined", "complexity": 3, "qty": 1, "description": "Housing."},
+        *GEAR_PAIR["subassemblies"][0]["parts"]]}]}), BRIEF)
+    if ifs2 and not any(f["kind"] == "gear_mesh" for f in ifs2):
+        assert visual.relations_from_skeleton(sk2, ifs2)[0]["text"].startswith("Pinion meshes with Gear")
     assert any("each gear sits on its own shaft" in r for r in rels)
     assert any(r.startswith("4 × Deep groove ball bearing 6204 carry the shafts") for r in rels)
 
