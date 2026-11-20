@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, CheckCircle2, ExternalLink, FileWarning, Hand, Library, MessageSquareWarning, Pause, Play, Puzzle, RotateCcw, Ruler, Send, Undo2 } from "lucide-react";
+import { Bot, CheckCircle2, ExternalLink, FileWarning, Hand, LayoutTemplate, Library, MessageSquareWarning, Pause, Play, Puzzle, RotateCcw, Ruler, Send, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { ago, cx } from "@/lib/format";
@@ -55,6 +55,15 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
   };
   const review = (decision: "approve" | "changes") => call(decision, () => api.post<Program>(
     `${BASE}/programs/${program.id}/tickets/${t.id}/review`, { decision, note })).then(() => setNote(""));
+  const keepTemplate = async () => {
+    setBusy("template");
+    try {
+      const r = await api.post<{ name: string; mapped: number; params: number }>(`${BASE}/programs/${program.id}/tickets/${t.id}/template`);
+      toast.success(`Kept as the template ${r.name}: ${r.mapped} of ${r.params} sizes follow the interfaces`);
+      qc.invalidateQueries({ queryKey: ["office-program", program.id] });
+      qc.invalidateQueries({ queryKey: ["office-templates"] });
+    } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not keep the template"); } finally { setBusy(null); }
+  };
   const control = (action: string) => call(action, () => api.post<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}/control`, { action }));
   const who = t.agent ?? t.specialist;
   const holder = AGENT[who];
@@ -104,6 +113,14 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
           {t.reuse && <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]">
             <Library className="mt-0.5 h-4 w-4 shrink-0 text-success" /><span>{t.reuse.found}. Reused, so no design run and 0 tokens.</span></div>}
           {t.direct && !t.reuse && <DesignPathNote d={t.direct} />}
+          {t.kind === "part" && t.direct?.path === "agent" && ["approved", "integrated", "done"].includes(t.column) && <div
+            className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]" data-template-offer>
+            <LayoutTemplate className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            {t.template_kept ? <span>Kept as a workspace template {ago(t.template_kept.at)}: the next part of this kind starts from it.</span>
+              : <span className="flex-1">The designer made this part with AI. Keep it as a workspace template, and the next part of the same kind starts from it, or is built from it without AI when every size maps onto its interfaces.
+                {canEdit && <span className="mt-1.5 block"><Button size="sm" variant="secondary" loading={busy === "template"}
+                  icon={<LayoutTemplate className="h-3.5 w-3.5" />} onClick={keepTemplate}>Keep as a template</Button></span>}</span>}
+          </div>}
           {(t.relaxed ?? []).length > 0 && <div className="rounded-md border border-warning/40 bg-warning/5 p-2.5 text-[12.5px]" data-relaxed>
             <div className="font-medium text-warning">Checks relaxed by Archie: relaxed, not passed</div>
             <ul className="mt-1 space-y-1">{(t.relaxed ?? []).map((r, i) => <li key={i}>
@@ -219,7 +236,8 @@ function DesignPathNote({ d }: { d: DesignPath }) {
     return <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/5 p-2.5 text-[12.5px]" data-design-path="direct">
       <Ruler className="mt-0.5 h-4 w-4 shrink-0 text-success" />
       <span><b>{d.label ?? "Built from the interface spec (no AI)"}</b>{d.seconds != null ? ` in ${d.seconds} s` : ""}: {d.summary}
-        {d.material ? `, ${d.material}` : ""}. Every size comes from ICD v{d.icd_version}; 0 tokens. Its parameters can be edited in the Design Studio without AI.</span></div>;
+        {d.material ? `, ${d.material}` : ""}. {d.template ? `Its mapped sizes come from ICD v${d.icd_version}` : `Every size comes from ICD v${d.icd_version}`}; 0 tokens. Its parameters can be edited in the Design Studio without AI.
+        {(d.notes ?? []).length > 0 && <span className="mt-1 block text-[11.5px] text-muted" data-design-notes>{(d.notes ?? []).join(" ")}</span>}</span></div>;
   }
   if (d.path === "direct") {
     return <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]" data-design-path="direct-then-agent">
@@ -228,5 +246,5 @@ function DesignPathNote({ d }: { d: DesignPath }) {
   }
   return <div className="flex items-start gap-2 rounded-md border border-border bg-panel2 p-2.5 text-[12.5px]" data-design-path="agent">
     <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-    <span>Designed with AI{d.seeded ? ", starting from a model built from the interface spec" : ""}: {(d.reasons ?? []).join("; ") || "the interfaces don't fix every size"}.</span></div>;
+    <span>Designed with AI{d.seeded ? (d.template ? `, starting from the workspace template ${d.template.name}` : ", starting from a model built from the interface spec") : ""}: {(d.reasons ?? []).join("; ") || "the interfaces don't fix every size"}.</span></div>;
 }

@@ -157,12 +157,13 @@ def test_what_goes_to_the_agent() -> None:
     dd = copy.deepcopy(doc)  # a journal without its bearing data
     del next(f for f in dd["icd"]["interfaces"] if f["id"] == "IF-01")["data"]["journal_z"]
     assert direct.plan(dd, _t(dd, S_IN))["reasons"] == ["the interfaces of this part are incomplete"]
-    # a block, a pulley: the designer
+    # a plate: built by the block generator now (WORKLIST 45, tests/test_generators.py)
     db = _doc(_plan({"name": "Base plate", "family": "machined", "complexity": 2, "qty": 1,
                      "description": "Plate 300 x 150 x 15"}, _g("Pinion", "m2 20 teeth"), _g("Gear", "m2 60 teeth"),
                     _s("Input shaft", "Shaft Ø20 x 100"), _s("Output shaft", "Shaft Ø20 x 100"), _b(4)))
     plate = next(i for i, v in db["skeleton"]["items"].items() if v["name"] == "Base plate")
-    assert direct.plan(db, _t(db, plate))["reasons"][0].startswith("a block or plate needs the designer")
+    bp = direct.plan(db, _t(db, plate))
+    assert bp["path"] == "direct" and bp["kind"] == "plate", bp.get("reasons")
     # the block layout's vertical shafts are built direct too (end face flush with the plate's bottom)
     shaft = next(i for i, v in db["skeleton"]["items"].items() if v["name"] == "Input shaft")
     assert direct.plan(db, _t(db, shaft))["path"] == "direct"

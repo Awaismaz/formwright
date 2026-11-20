@@ -67,7 +67,11 @@ class V:
         return x if isinstance(x, V) else V(_f(x), float(x))
 
     def _bin(self, o: Any, op: str, prec: int, fn: Any, swap: bool = False) -> V:
+        if not isinstance(o, V) and float(o).is_integer():
+            o = V(str(int(float(o))), float(o))  # an operand reads like hand-written code: WIDTH / 2
         a, b = (V.of(o), self) if swap else (self, V.of(o))
+        if op in "+-" and a.prec == 9 and not _is_name(a.src) and a.val == 0:
+            return b if op == "+" else -b
         if b.prec == 9 and a.prec == 9 and not _is_name(a.src) and not _is_name(b.src):
             v = fn(a.val, b.val)
             return V(_f(v), v)
@@ -266,6 +270,10 @@ def _r(x: float) -> float:
     return round(float(x), 4) + 0.0
 
 
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
 def _ext_name(ax: str) -> str:
     return {"x": "LENGTH", "y": "WIDTH", "z": "HEIGHT"}[ax]
 
@@ -300,8 +308,13 @@ def _pattern(pts: list[tuple[float, float]]) -> tuple[str, Any]:
     return "list", pts
 
 
+def _on_pcd(c: V, pcd: V, fn: str, a: float, v: float) -> V:
+    lead = "" if c.prec == 9 and not _is_name(c.src) and c.val == 0 else f"{c.src} + "
+    return V(f"{lead}{pcd.src} / 2 * math.{fn}(math.radians({_g(a)}))", c.val + pcd.val / 2 * v, 1)
+
+
 def _pos_exprs(S: Script, pts: list[tuple[float, float]], pre: str, group: str, what: str, ax: str,
-               centre: tuple[V, V] | None = None) -> list[tuple[V, V]]:
+               centre: tuple[V, V] | None = None, pcd: float | None = None) -> list[tuple[V, V]]:
     """Hole centres as expressions of a few parameters (pattern centre and pitches, or a PCD)."""
     u_n, v_n = {"z": ("X", "Y"), "y": ("X", "Z"), "x": ("Y", "Z")}[ax]
     kind, d = _pattern(pts)
@@ -314,38 +327,37 @@ def _pos_exprs(S: Script, pts: list[tuple[float, float]], pre: str, group: str, 
             return [(V.of(p[0]), V.of(p[1])) for p in pts]
         ang = [_r(math.degrees(math.atan2(p[1] - cy, p[0] - cx)) % 360) for p in pts]
         if centre is None:
-            centre = (S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_slug(what)} centre {u_n}",
+            centre = (S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_cap(_slug(what))} centre {u_n}",
                           lo=cx - 50, hi=cx + 50),
-                      S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_slug(what)} centre {v_n}",
+                      S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_cap(_slug(what))} centre {v_n}",
                           lo=cy - 50, hi=cy + 50))
-        pcd = S.p(f"{pre}_PCD", 2 * rs[0], f"{what}: pitch circle Ø, mm", group, f"{_slug(what)} PCD")
+        pv = pcd if pcd is not None and abs(pcd - 2 * rs[0]) < 0.05 else _r(2 * rs[0])
+        pcd = S.p(f"{pre}_PCD", pv, f"{what}: pitch circle Ø, mm", group, f"{_cap(what)} PCD")
         out = []
+        ang = [float(round(a)) if abs(a - round(a)) < 0.05 else a for a in ang]
         for a in ang:
             ca, sa = math.cos(math.radians(a)), math.sin(math.radians(a))
-            out.append((V(f"{centre[0].src} + {pcd.src} / 2 * math.cos(math.radians({_g(a)}))", centre[0].val
-                          + pcd.val / 2 * ca, 1),
-                        V(f"{centre[1].src} + {pcd.src} / 2 * math.sin(math.radians({_g(a)}))", centre[1].val
-                          + pcd.val / 2 * sa, 1)))
+            out.append((_on_pcd(centre[0], pcd, "cos", a, ca), _on_pcd(centre[1], pcd, "sin", a, sa)))
         return out
     if kind == "grid":
         cx, cy, px, py = d
-        X = S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_slug(what)} centre {u_n}",
+        X = S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_cap(_slug(what))} centre {u_n}",
                 lo=cx - 50, hi=cx + 50) if cx else V.of(0.0)
-        Y = S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_slug(what)} centre {v_n}",
+        Y = S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_cap(_slug(what))} centre {v_n}",
                 lo=cy - 50, hi=cy + 50) if cy else V.of(0.0)
         PX = S.p(f"{pre}_PITCH_{u_n}", px, f"{what}: hole spacing along {u_n}, mm", group,
-                 f"{_slug(what)} spacing {u_n}")
+                 f"{_cap(_slug(what))} spacing {u_n}")
         PY = S.p(f"{pre}_PITCH_{v_n}", py, f"{what}: hole spacing along {v_n}, mm", group,
-                 f"{_slug(what)} spacing {v_n}")
+                 f"{_cap(_slug(what))} spacing {v_n}")
         return [(X + PX / 2 if p[0] > cx else X - PX / 2, Y + PY / 2 if p[1] > cy else Y - PY / 2) for p in pts]
     if kind == "pair":
         cx, cy, pp, along = d
-        X = S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_slug(what)} centre {u_n}",
+        X = S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_cap(_slug(what))} centre {u_n}",
                 lo=cx - 50, hi=cx + 50) if cx else V.of(0.0)
-        Y = S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_slug(what)} centre {v_n}",
+        Y = S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_cap(_slug(what))} centre {v_n}",
                 lo=cy - 50, hi=cy + 50) if cy else V.of(0.0)
         nm = u_n if along == "x" else v_n
-        P = S.p(f"{pre}_PITCH", pp, f"{what}: hole spacing along {nm}, mm", group, f"{_slug(what)} spacing")
+        P = S.p(f"{pre}_PITCH", pp, f"{what}: hole spacing along {nm}, mm", group, f"{_cap(_slug(what))} spacing")
         if along == "x":
             return [(X + P / 2 if p[0] > cx else X - P / 2, Y) for p in pts]
         return [(X, Y + P / 2 if p[1] > cy else Y - P / 2) for p in pts]
@@ -415,11 +427,15 @@ def kind_of(doc: dict[str, Any], item: str, name: str, desc: str) -> str | None:
     gk = g.get("kind")
     role = it.get("role")
     if role == "block" and it.get("shape") == "box":
-        if it.get("cavity"):
+        cav = it.get("cavity") or {}
+        if cav and cav.get("wall") is not None and any(
+                f["kind"] == "bearing_seat" and f["a"]["item"] == item for f in doc["icd"]["interfaces"]):
             return "housing"
         if gk == "cover" or (_LIDDY.search(name) and _host_cavity(doc, item) is not None):
             return "cover"
-        if gk == "bracket" or (_BRACKETY.search(name) and gk not in ("plate", "housing")):
+        if _BRACKETY.search(name) and gk not in ("plate", "housing"):
+            return "bracket"
+        if gk == "bracket" and not cav and _foot_only(doc, item):
             return "bracket"
         return "plate"
     if role == "hub" and it.get("shape") == "cylinder":
@@ -431,8 +447,29 @@ def kind_of(doc: dict[str, Any], item: str, name: str, desc: str) -> str | None:
             return "pulley"
         if _COUPLY.search(name):
             return "coupling"
+        if gk in ("hub", "spacer") or _HUBBY.search(name):
+            return "hub"
         return None
     return None
+
+
+_HUBBY = re.compile(r"\b(hub|tube|drum|roller|wheel|disc|disk|flange|bush(?:ing)?|sleeve|boss|ring)s?\b", re.IGNORECASE)
+
+
+def _foot_only(doc: dict[str, Any], item: str) -> bool:
+    """Every interface feature of a block is on its bottom face (an L bracket can carry them on its foot)."""
+    sk = doc["skeleton"]
+    H = float(sk["items"][item]["size"][2])
+    for x in icd.item_features(sk, doc["icd"]["interfaces"], item):
+        if x.get("ax"):
+            return False
+        if x["type"] == "face" and not (abs(float(x["z"]) + H / 2) < 0.01 and int(x["n"]) < 0):
+            return False
+        if x["type"] == "hole" and x.get("z0") is not None:
+            return False
+        if x["type"] not in ("face", "hole"):
+            return False
+    return True
 
 
 def _host_cavity(doc: dict[str, Any], item: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -450,7 +487,7 @@ def _host_cavity(doc: dict[str, Any], item: str) -> tuple[dict[str, Any], dict[s
 _SHAPE_WORDS = re.compile(r"\b(lugs?|clevis|ribs?|bosses|boss|pockets?|slots?|slotted|counter ?bored?|counter ?sunk|"
                           r"countersinks?|steps?|stepped|grooves?|tabs?|ears?|forks?|yoke|windows?|cut-?outs?|notch(?:es)?|"
                           r"t-?slots?|dovetails?|spigots?|fins?|webs?|chamfer(?:ed|s)?|fillet(?:ed|s)?|radius(?:ed)?|"
-                          r"rounded|knurl\w*|engrav\w*|text|logo|hinges?|knuckles?)\b", re.IGNORECASE)
+                          r"rounded|knurl\w*|engrav\w*|logo|knuckles?)\b", re.IGNORECASE)
 _CORNER = re.compile(r"\b(two|four|2|4)\s+[ØⲐ⌀]\s*(\d+(?:\.\d+)?)\s*(?:mm\s*)?(?:corner|mounting|fixing)\s+holes?\b",
                      re.IGNORECASE)
 
@@ -604,7 +641,7 @@ def block_spec(kind: str, cx: Ctx) -> dict[str, Any]:
                 raise Undetermined(f"the cap screws of the {other} are not round a bearing seat")
             k = seat["k"]
             grp, pre = f"Seat {k}", f"CAP_{k}"
-            what = f"{other} screws"
+            what = f"cap screws round seat {k}"
             DIA = S.p("CAP_TAP_D", dia, f"cap screw tap drill Ø, mm (M{d['fastener_size']}, ISO 2306)", "Cap screws",
                       "Cap screw tap drill")
             thread = f"M{d['fastener_size']}x{_pitch(int(d['fastener_size'])):g}"
@@ -646,19 +683,19 @@ def block_spec(kind: str, cx: Ctx) -> dict[str, Any]:
                 depth = S.p("CAP_TAP_DEPTH", ds.pop(), "cap screw hole depth, mm (2.5 d + 3)", "Cap screws",
                             "Cap screw hole depth")
             elif len(ds) == 1:
-                depth = S.p(f"{pre}_DEPTH", ds.pop(), f"hole depth, mm ({what})", grp, f"{_slug(what)} depth")
+                depth = S.p(f"{pre}_DEPTH", ds.pop(), f"hole depth, mm ({what})", grp, f"{_cap(_slug(what))} depth")
         centre = None
         if pre.startswith("CAP_"):
             s = next(s for s in seat_axes if s["k"] == int(pre.split("_")[1]))
             centre = (s["U"], s["V"])
         if len(pts) == 1 and not centre:
             u_n, v_n = {"z": ("X", "Y"), "y": ("X", "Z"), "x": ("Y", "Z")}[ax]
-            P = [(S.p(f"{pre}_{u_n}", pts[0][0], f"{what}: {u_n}, mm", grp, f"{_slug(what)} {u_n}", lo=pts[0][0] - 50,
+            P = [(S.p(f"{pre}_{u_n}", pts[0][0], f"{what}: {u_n}, mm", grp, f"{_cap(_slug(what))} {u_n}", lo=pts[0][0] - 50,
                       hi=pts[0][0] + 50) if abs(pts[0][0]) > 1e-9 else V.of(0.0),
-                  S.p(f"{pre}_{v_n}", pts[0][1], f"{what}: {v_n}, mm", grp, f"{_slug(what)} {v_n}", lo=pts[0][1] - 50,
+                  S.p(f"{pre}_{v_n}", pts[0][1], f"{what}: {v_n}, mm", grp, f"{_cap(_slug(what))} {v_n}", lo=pts[0][1] - 50,
                       hi=pts[0][1] + 50) if abs(pts[0][1]) > 1e-9 else V.of(0.0))]
         else:
-            P = _pos_exprs(S, pts, pre, grp, what, ax, centre)
+            P = _pos_exprs(S, pts, pre, grp, what, ax, centre, float(d["pcd"]) if d.get("pcd") else None)
         nm = {"DOWEL": "Dowel holes"}.get(pre, None) or (f"Cap screw holes ({other})" if pre.startswith("CAP_")
                                                           else f"{what[0].upper()}{what[1:]}")
         for x, p in zip(xs, P, strict=True):
@@ -877,6 +914,14 @@ def _plate_extras(cx: Ctx, ctx: dict[str, Any]) -> None:
     LENGTH, WIDTH = EXT["x"], EXT["y"]
     L, W = ctx["L"], ctx["W"]
     ctx["allowed"] = {"a hole"} | ({"a thread"} if any(c.get("thread") for c, _w in ctx["cuts"]) else set())
+    cav = cx.it.get("cavity")
+    if cav:
+        mn = tuple(V.of(float(v)) for v in cav["min"])
+        mx = tuple(V.of(float(v)) for v in cav["max"])
+        ctx["pockets"].append(({"name": "Slot", "min": mn, "max": mx}, str(cav.get("note") or "the ICD's opening")))
+        ctx["lines"].insert(0, f"opening X {_g(cav['min'][0])} to {_g(cav['max'][0])}, Y {_g(cav['min'][1])} to "
+                               f"{_g(cav['max'][1])}, Z {_g(cav['min'][2])} to {_g(cav['max'][2])} (the ICD's)")
+        ctx["known"] |= {_r(float(cav["max"][k]) - float(cav["min"][k])) for k in range(3)}
     m = _CORNER.search(cx.desc or "")
     if m:
         n = 4 if m.group(1).lower() in ("four", "4") else 2
@@ -948,7 +993,8 @@ _KIND_RX = {"housing": re.compile(r"housing|casing|\bcase\b|gear ?box|\bbase\b",
             "bracket": re.compile(r"\bbrackets?\b", re.IGNORECASE),
             "pulley": re.compile(r"\bpulleys?\b|\bsprockets?\b|\bsheaves?\b", re.IGNORECASE),
             "coupling": re.compile(r"\bcouplings?\b", re.IGNORECASE),
-            "collar": re.compile(r"\bcollars?\b", re.IGNORECASE)}
+            "collar": re.compile(r"\bcollars?\b", re.IGNORECASE),
+            "hub": re.compile(r"\bhubs?\b|\btubes?\b|\bdrums?\b|\bwheels?\b|\bflanges?\b", re.IGNORECASE)}
 _HOLE_CLAUSE = re.compile(r"\bholes?\b|\bbores?\b", re.IGNORECASE)
 _THREAD_M = re.compile(r"(?<![\w.])M(\d{1,2})(?:\s*[x×]\s*\d+(?:\.\d+)?)?\b")
 
@@ -982,6 +1028,24 @@ def interface_numbers(desc: str, hole_ds: set[float], m_sizes: set[int]) -> set[
     return out
 
 
+_FASTENER_AFTER = re.compile(r"\s*(?:head\s*|socket\s*|flange\s*)?(?:bolts?|nuts?|screws?|keys?|heads?|sockets?|"
+                             r"washers?|cap screws?)\b", re.IGNORECASE)
+
+
+def _exempt(what: str, m: re.Match[str], src: str, allowed: set[str], m_ok: set[int], threaded: bool) -> bool:
+    """A match of an extras pattern that is not an extra: an M size of the ICD's own fasteners, a thread word on a
+    part whose ICD holes are tapped, "hex" naming a bolt or nut, or a feature this generator makes."""
+    word = m.group(0)
+    if what == "a thread":
+        mm = re.fullmatch(r"M(\d{1,2})(?:\s*[x×]\s*\d+(?:\.\d+)?)?", word.strip())
+        if mm:
+            return int(mm.group(1)) in m_ok or bool(_FASTENER_AFTER.match(src[m.end():]))
+        return threaded
+    if what == "a hex or square":
+        return bool(_FASTENER_AFTER.match(src[m.end():]))
+    return what in allowed
+
+
 def extras(kind: str, spec: dict[str, Any], name: str, desc: str, program: str,
            allow_words: tuple[str, ...] = ()) -> list[str]:
     """What the brief asks for beyond what this generator builds (each sends the part to the design agent)."""
@@ -991,19 +1055,14 @@ def extras(kind: str, spec: dict[str, Any], name: str, desc: str, program: str,
     allowed = set(spec.get("allowed") or ())
     out: list[str] = []
     m_ok = set(spec.get("m_sizes") or ())
+    threaded = any(c.get("thread") for c, _w in spec.get("cuts") or [])
     for rx, what, in_program in direct._EXTRAS:
-        hit = rx.search(text) or (in_program and program and rx.search(program))
-        if not hit:
-            continue
-        if what == "a thread" and "a thread" in allowed:
-            ms = {int(m) for m in _THREAD_M.findall(text)}
-            threaded = any(c.get("thread") for c, _w in spec.get("cuts") or [])
-            if (ms and ms <= m_ok) or (not ms and threaded):
-                continue
-        elif what in allowed:
-            continue
-        out.append(f"the brief asks for {what}")
-    for m in _SHAPE_WORDS.finditer(text):
+        srcs = [text] + ([program] if in_program and program else [])
+        for src in srcs:
+            if any(not _exempt(what, m, src, allowed, m_ok, threaded) for m in rx.finditer(src)):
+                out.append(f"the brief asks for {what}")
+                break
+    for m in _SHAPE_WORDS.finditer(desc or ""):
         w = m.group(1).lower()
         if any(w.startswith(a) for a in allow_words):
             continue
@@ -1024,10 +1083,10 @@ def extras(kind: str, spec: dict[str, Any], name: str, desc: str, program: str,
 DEFAULT_MATERIAL = {"housing": "Aluminium 6061-T6", "cover": "Aluminium 6061-T6", "cap": "Steel 1018 (low carbon)",
                     "plate": "Steel 1018 (low carbon)", "bracket": "Steel 1018 (low carbon)",
                     "pulley": "Aluminium 6061-T6", "coupling": "Steel 1045 (medium carbon)",
-                    "collar": "Steel 1045 (medium carbon)"}
+                    "collar": "Steel 1045 (medium carbon)", "hub": "Steel 1045 (medium carbon)"}
 ALLOW_WORDS = {"housing": ("chamfer",), "cover": (), "plate": (), "bracket": ("fillet", "radius", "rounded"),
                "cap": ("spigot", "chamfer", "recess"), "pulley": ("groove", "web", "chamfer", "step"),
-               "coupling": ("chamfer", "step"), "collar": ("chamfer",)}
+               "coupling": ("chamfer", "step"), "collar": ("chamfer",), "hub": ("chamfer",)}
 
 
 def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -> dict[str, Any]:
@@ -1037,7 +1096,7 @@ def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -
 
     cx = Ctx(doc, item, name, desc)
     builder = {"housing": block_spec, "cover": block_spec, "plate": block_spec}.get(kind)
-    other = {"cap": cap_spec, "bracket": bracket_spec, "pulley": pulley_spec, "coupling": coupling_spec,
+    other = {"cap": cap_spec, "bracket": bracket_spec, "pulley": pulley_spec, "coupling": coupling_spec, "hub": hub_spec,
              "collar": collar_spec}.get(kind)
     if builder is not None:
         spec = builder(kind, cx)
@@ -1047,7 +1106,7 @@ def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -
         raise Undetermined("this kind of part needs the designer")
     material = direct._material(desc) or _graph_material(cx) or DEFAULT_MATERIAL[kind]
     writer = {"housing": block_script, "cover": block_script, "plate": block_script, "cap": cap_script,
-              "bracket": bracket_script, "pulley": pulley_script, "coupling": coupling_script,
+              "bracket": bracket_script, "pulley": pulley_script, "coupling": coupling_script, "hub": coupling_script,
               "collar": collar_script}[kind]
     script = writer(spec, name, material, cx.icd_version)
     ex = extras(kind, spec, name, desc, program_sentences(str(doc.get("brief") or ""), kind), ALLOW_WORDS.get(kind, ()))
@@ -1066,7 +1125,7 @@ def _graph_material(cx: Ctx) -> str | None:
 
 
 # ============================================================================ bearing caps (open and blind)
-_SEAL_TXT = re.compile(r"(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:mm\s*)?(?:[\w-]+\s+){0,2}"
+_SEAL_TXT = re.compile(r"(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:mm\s*)?(?:\w+[\s-]+){0,2}"
                        r"seal", re.IGNORECASE)
 _SEALY = re.compile(r"\bseal(?:ed|s|ing)?\b|\blip\b", re.IGNORECASE)
 _SPIGOT = re.compile(r"\bspigot\b", re.IGNORECASE)
@@ -1111,7 +1170,7 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
     T = S.p("THICKNESS", H, "flange thickness, mm (ICD envelope)", "Cap", "Thickness", lo=4)
     HD = S.p("HOLE_D", float(d["d"]), f"clearance hole Ø, mm (M{d['fastener_size']}, ISO 273)", "Holes", "Hole Ø")
     pts = [(float(x["c"][0]), float(x["c"][1])) for x in holes]
-    P = _pos_exprs(S, pts, "HOLE", "Holes", "cap screw holes", "z", (V.of(0.0), V.of(0.0)))
+    P = _pos_exprs(S, pts, "HOLE", "Holes", "cap screw holes", "z", (V.of(0.0), V.of(0.0)), float(d["pcd"]))
     cuts: list[tuple[dict[str, Any], str]] = []
     for x, p in zip(holes, P, strict=True):
         cuts.append(({"name": f"Cap screw holes M{d['fastener_size']}", "ax": "z", "c": p, "d": HD, "span": None},
@@ -1173,7 +1232,7 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
             known |= {seal[0], seal[1]}
             if not any(n.startswith("Seal:") for n in notes):
                 notes.append(f"Seal: a {_g(shaft)} × {_g(seal[0])} × {_g(seal[1])} lip seal recess from the outer face "
-                             f"({src}; {SEALS_SOURCE if src == 'DIN 3760' else 'sized for the shaft that passes'}).")
+                             f"({SEALS_SOURCE if src == 'DIN 3760' else src + ' size for the shaft that passes'}).")
             _ = rd
         else:
             notes.append("Seal: no recess (no standard seal for this shaft Ø fits the cap); add one if the brief needs "
@@ -1240,9 +1299,10 @@ def bracket_spec(cx: Ctx) -> dict[str, Any]:
         raise Undetermined("a bracket is built here with its foot holes only (the ICD puts holes elsewhere)")
     if any(x.get("ax") or not (abs(float(x["z"]) + H / 2) < 0.01 and int(x["n"]) < 0) for x in faces):
         raise Undetermined("a bracket is built here when it mounts by its foot (the ICD names another face)")
-    m = _FOOT_T.search(desc)
+    prog = program_sentences(str(cx.doc.get("brief") or ""), "bracket")
+    m = _FOOT_T.search(desc) or _FOOT_T.search(prog)
     tf = float(m.group(1)) if m else None
-    m = _UP_T.search(desc)
+    m = _UP_T.search(desc) or _UP_T.search(prog)
     tu = float(m.group(1)) if m else None
     rule = float(max(5, round(0.12 * min(L, W))))
     notes: list[str] = []
@@ -1250,7 +1310,7 @@ def bracket_spec(cx: Ctx) -> dict[str, Any]:
         notes.append(f"Thickness: {'foot' if tf is None else 'upright'}{' and upright' if tf is None and tu is None else ''}"
                      f" {_g(rule)} mm (a design choice: 0.12 × the smaller side, at least 5).")
     tf, tu = tf or rule, tu or rule
-    m = _UP_H.search(desc)
+    m = _UP_H.search(desc) or _UP_H.search(prog)
     known: set[float] = {L, W, H, tf, tu}
     if m:
         h = float(m.group(1))
@@ -1283,9 +1343,9 @@ def bracket_spec(cx: Ctx) -> dict[str, Any]:
     LENGTH = S.p("LENGTH", L, "mm along X (ICD envelope)", "Bracket", "Length", lo=10)
     WIDTH = S.p("WIDTH", W, "mm along Y (ICD envelope)", "Bracket", "Width", lo=10)
     HEIGHT = S.p("HEIGHT", H, "mm along Z (ICD envelope)", "Bracket", "Height", lo=10)
-    FT = S.p("FOOT_T", tf, "foot thickness, mm" + (" (the brief's)" if _FOOT_T.search(desc) else ""), "Bracket",
+    FT = S.p("FOOT_T", tf, "foot thickness, mm" + (" (the brief's)" if _FOOT_T.search(desc + prog) else ""), "Bracket",
              "Foot thickness", lo=2)
-    UT = S.p("UPRIGHT_T", tu, "upright thickness, mm" + (" (the brief's)" if _UP_T.search(desc) else ""), "Bracket",
+    UT = S.p("UPRIGHT_T", tu, "upright thickness, mm" + (" (the brief's)" if _UP_T.search(desc + prog) else ""), "Bracket",
              "Upright thickness", lo=2)
     ax = 1 if side[1] == "Y" else 0
     sgn = 1 if side[0] == "+" else -1
@@ -1309,7 +1369,7 @@ def bracket_spec(cx: Ctx) -> dict[str, Any]:
         known.add(dia)
         lines.append(f"{f['id']}  {len(holes)} holes Ø{_g(dia)} through the foot for the {cx.other(f)}; the upright "
                      f"clears their washers (Ø{_g(washer)})")
-    m = _UP_HOLE.search(desc)
+    m = _UP_HOLE.search(desc) or _UP_HOLE.search(prog)
     if m:
         hd, hz = float(m.group(1)), float(m.group(2))
         UD = S.p("UPRIGHT_HOLE_D", hd, "hole through the upright, Ø mm (the brief's)", "Upright hole", "Upright hole Ø")
@@ -1482,7 +1542,8 @@ def pulley_spec(cx: Ctx) -> dict[str, Any]:
                          f"{_g(tw)} wide (0.93 × the chain's inner width {_g(b1)}, ISO 606, verify).")
         else:
             belt = next((k for k in sorted(BELTS, key=len, reverse=True)
-                         if re.search(rf"(?<![\w.]){re.escape(k).replace(' ', r'\s*')}(?![\w.])", text, re.IGNORECASE)),
+                         if re.search(r"(?<![\w.])" + r"\s*".join(map(re.escape, k.split())) + r"(?![\w.])", text,
+                                   re.IGNORECASE)),
                         None)
             if belt is None:
                 raise Undetermined("a timing pulley needs its belt profile (GT2, HTD 5M, T5, XL, ...)")
@@ -1575,17 +1636,31 @@ def pulley_script(spec: dict[str, Any], name: str, material: str, icd_version: i
     return "\n".join(out)
 
 
-def coupling_spec(cx: Ctx) -> dict[str, Any]:
+def hub_spec(cx: Ctx) -> dict[str, Any]:
+    """A plain turned hub, tube, drum or flange: the envelope cylinder with the ICD's bores and hub keyways."""
+    spec = coupling_spec(cx, what="hub")
+    OD, H = float(cx.it["size"][0]), float(cx.it["size"][2])
+    spec["notes"] = [("Form: a plain turned part to the envelope (bored and keyed as the ICD says); turn it down or "
+                     "hollow it in the Studio if it should be lighter.")]
+    spec["summary"] = spec["summary"].replace("rigid sleeve coupling", "turned hub")
+    spec["kind"] = "hub"
+    spec["allowed"] = {"a hole", "a flange"}
+    spec["what"] = "turned hub"
+    _ = (OD, H)
+    return spec
+
+
+def coupling_spec(cx: Ctx, what: str = "coupling") -> dict[str, Any]:
     it = cx.it
     OD, H = float(it["size"][0]), float(it["size"][2])
     text = f"{cx.name}. {cx.desc}"
-    fm = _FLEX.search(text)
+    fm = _FLEX.search(text) if what == "coupling" else None
     if fm:
         raise Undetermined(f"a {fm.group(1).lower()} coupling needs the designer (rigid sleeves are built from the "
                            "interfaces)")
-    hf = _hub_features(cx, "coupling")
+    hf = _hub_features(cx, what)
     if not hf["bores"]:
-        raise Undetermined("the coupling has no bore in its interfaces")
+        raise Undetermined(f"the {what} has no bore in its interfaces")
     S = Script()
     lines: list[str] = []
     notes = ["Form: a rigid sleeve coupling (one piece), bored for each shaft."]
@@ -1594,6 +1669,11 @@ def coupling_spec(cx: Ctx) -> dict[str, Any]:
     WID = S.p("WIDTH", H, "length along the axis, mm (ICD envelope)", "Coupling", "Length", lo=2)
     cuts: list[tuple[dict[str, Any], str]] = []
     bore_names: dict[float, V] = {}
+    if len({float(b["d"]) for b in hf["bores"]}) > 1 and all(b.get("z0") is None for b in hf["bores"]):
+        # the ICD states each bore through the whole hub: a stepped bore can't be (each step ends at the other), so
+        # the conformance review would refuse any model; said instead of built (finding for the layout)
+        raise Undetermined("the interfaces give bores of two sizes, each through the whole coupling (a stepped bore "
+                           "needs each bore's depth)")
     for n, x in enumerate(sorted(hf["bores"], key=lambda b: float(b.get("z0") or -1e9)), start=1):
         d = float(x["d"])
         if d not in bore_names:
@@ -1621,13 +1701,14 @@ def coupling_spec(cx: Ctx) -> dict[str, Any]:
                                                                 else ""))
     return {"kind": "coupling", "S": S, "cuts": cuts, "key_rows": key_rows, "lines": lines, "notes": notes,
             "known": known, "m_sizes": set(), "n_features": len(hf["bores"]) + len(hf["keys"]) + len(hf["faces"]),
-            "summary": summary, "allowed": {"a hole"}, "keyways": hf["keys"]}
+            "summary": summary, "allowed": {"a hole"}, "keyways": hf["keys"], "what": "rigid sleeve coupling"}
 
 
 def coupling_script(spec: dict[str, Any], name: str, material: str, icd_version: int) -> str:
     S: Script = spec["S"]
     cuts = [(_clean(c), w) for c, w in spec["cuts"]]
-    out = [header(name, "rigid sleeve coupling", icd_version, spec["lines"], spec["notes"]), *_imports(False),
+    out = [header(name, spec.get("what") or "rigid sleeve coupling", icd_version, spec["lines"], spec["notes"]),
+           *_imports(False),
            f'NAME = "{name}"', f'MATERIAL = "{material}"', "", *S.block(), "", *_rows("cuts", cuts), "",
            'part, info = fw_std.machined(("disc", OD, WIDTH), cuts=cuts, name=NAME)', 'volume = info["volume"]',
            *spec["key_rows"], "", "result = part", 'EXPECTED = {"bbox": info["bbox"], "volume": volume, "solids": 1}',
