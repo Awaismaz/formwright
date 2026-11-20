@@ -10,6 +10,7 @@ import { FileButtons } from "@/components/NativeExport";
 import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE, useHome } from "./api";
 import { fmtEta } from "./model";
+import { TemplatesPanel } from "./Templates";
 import type { InboxItem, ProgramSummary, RosterAgent } from "./types";
 
 export const STATUS_LABEL: Record<string, string> = {
@@ -204,6 +205,7 @@ export default function OfficeHome() {
                 : d.inbox.slice(0, 8).map(i => <InboxRow key={`${i.kind}-${i.program_id}-${i.ticket_id ?? ""}`} i={i} canEdit={d.can_edit} />)}
             </Card>
           </section>
+          <TemplatesPanel />
           <section>
             <h2 className="label mb-3 flex items-center gap-1.5"><Coins className="h-3.5 w-3.5" />Token spend vs budget</h2>
             <Card className="p-4">

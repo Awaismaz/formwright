@@ -1009,7 +1009,9 @@ class Runner:
                 service.move(self.root, d, tid, "in_design", service.agent_actor(code))
             prev = tt.get("direct") or {}
             if dp is not None and not prev:
-                tt["direct"] = {"path": "agent", "reasons": dp["reasons"], "seeded": seeded, "at": store.now()}
+                tt["direct"] = {"path": "agent", "reasons": dp["reasons"], "seeded": seeded, "at": store.now(),
+                                **({"seed_kind": dp["seed"]["kind"]} if dp.get("seed") else {}),
+                                **({"template": dp["template"]} if dp.get("template") else {})}
             elif prev.get("path") == "direct" and not prev.get("superseded"):
                 tt["direct"] = {**prev, "superseded": True}  # the agent works on it from here (findings, comments)
             pending = [c for c in tt["comments"] if c["id"] in (tt.get("inbox") or [])]
@@ -1116,7 +1118,18 @@ class Runner:
             st = await self.env.part_state(t["project_id"])
             if direct.sha(st.get("source") or "") != prev.get("sha"):
                 return None  # edited in the Design Studio since: never overwrite the engineer's work
-        return direct.plan(doc, t)
+        dp = direct.plan(doc, t)
+        if dp["path"] == "agent" and not prev:  # a workspace template of the same family (WORKLIST 48)
+            from aicad.office import templates
+
+            try:
+                tp = templates.plan(self.root, doc, t, dp)
+            except (KeyError, TypeError, ValueError, OSError):
+                log.exception("template lookup failed")
+                tp = None
+            if tp is not None:
+                dp = tp
+        return dp
 
     async def _direct(self, tid: str, dp: dict[str, Any]) -> str | None:
         """Build the part from its interfaces: the script ``direct.plan`` wrote, through the same build and check
@@ -1145,15 +1158,24 @@ class Runner:
             tt = service.ticket(d, tid)
             a = service.agent_actor(code)
             if res.get("ok"):
-                tt["direct"] = {"path": "direct", "label": direct.LABEL, "kind": dp["kind"], "sha": dp["sha"],
-                                "summary": dp["summary"], "material": dp["material"], "features": dp["features"],
-                                "icd_version": dp["icd_version"], "version": dp["version"], "seconds": secs,
-                                "build_s": res.get("build_s"), "checks_s": res.get("checks_s"), "at": store.now()}
+                tt["direct"] = {"path": "direct", "label": dp.get("label") or direct.LABEL, "kind": dp["kind"],
+                                "sha": dp["sha"], "summary": dp["summary"], "material": dp["material"],
+                                "features": dp["features"], "icd_version": dp["icd_version"],
+                                "version": dp["version"], "seconds": secs, "build_s": res.get("build_s"),
+                                "checks_s": res.get("checks_s"), "at": store.now(),
+                                **({"generator": dp["generator"]} if dp.get("generator") else {}),
+                                **({"notes": dp["notes"]} if dp.get("notes") else {}),
+                                **({"template": dp["template"]} if dp.get("template") else {})}
+                if dp.get("template"):
+                    from aicad.office import templates
+
+                    templates.note_use(self.root, dp["template"]["id"])
                 for m in ("first_build", "gates_pass", "self_review"):
                     if m not in tt["milestones"]:
                         service.set_milestone(self.root, d, tid, m, True, a)
-                service.emit(self.root, d, "ticket.direct", f"{lbl} built {service._label(tt)} from the interface "
-                             f"spec in {secs:.1f} s (no AI, 0 tokens): {dp['summary']}.", a, tid, seconds=secs)
+                src = "a workspace template" if dp.get("template") else "the interface spec"
+                service.emit(self.root, d, "ticket.direct", f"{lbl} built {service._label(tt)} from {src} "
+                             f"in {secs:.1f} s (no AI, 0 tokens): {dp['summary']}.", a, tid, seconds=secs)
                 if tt.get("taken_over") or tt.get("paused"):
                     return "design"  # _halt records why (a resumed direct build is the same script again)
                 if tt.get("inbox") or tt.get("icd_delta") or tt.get("cr_notes"):

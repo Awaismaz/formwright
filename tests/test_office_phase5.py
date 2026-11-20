@@ -403,6 +403,9 @@ def test_deliverables_release_timeline_and_calibration(office: Any, monkeypatch:
     from test_office_orchestrator import _program
 
     from aicad.assembly import locks
+    from aicad.office import direct
+
+    monkeypatch.setenv(direct.ENV, "0")  # calibration learns from design-agent turns (a direct build teaches nothing)
 
     held: list[str] = []
     real_hold = locks.hold

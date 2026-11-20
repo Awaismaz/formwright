@@ -82,7 +82,7 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
             {t.kind === "deliverable" && <Tip content={t.deliverable === "dfm" ? "Program deliverable: Smithy's manufacturing review" : "Program deliverable: Ortho's drawings and the assembly BOM"}>
               <span className="rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success">deliverable</span></Tip>}
             {t.qty > 1 && <span>×{t.qty}</span>}
-            {t.direct?.path === "direct" && !t.direct.superseded && <Tip content={`Built from the interface spec in ${t.direct.seconds ?? "?"} s, without AI (0 tokens)`}>
+            {t.direct?.path === "direct" && !t.direct.superseded && <Tip content={`Built from ${t.direct.template ? "a workspace template" : "the interface spec"} in ${t.direct.seconds ?? "?"} s, without AI (0 tokens)`}>
               <span className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded bg-success/10 px-1 text-[9.5px] font-semibold text-success" data-direct><Ruler className="h-2.5 w-2.5" />no AI</span></Tip>}
             {t.priority === "high" && <Tip content="High priority"><ArrowUp className="h-3 w-3 text-danger" /></Tip>}
             {(t.relaxed ?? []).length > 0 && <Tip content={`A check was relaxed by Archie (not passed): ${(t.relaxed ?? [])[0]?.reason ?? ""}`}>
