@@ -52,7 +52,8 @@ WASHER_OD = {3: 7.0, 4: 9.0, 5: 10.0, 6: 12.0, 8: 16.0, 10: 20.0, 12: 24.0, 16: 
 GAP = 12.0          # mm between stations on a block's top face
 MARGIN = 10.0       # mm from a block's edge to its first station
 MAX_COPIES = 8      # copies of one part laid out in the skeleton (the rest are noted)
-PLAN_SLACK = 1.5    # a laid-out envelope may grow to this multiple of the planned one (its own features), no more
+PLAN_SLACK = 1.5    # past this multiple of the planned envelope the gate WARNS (outgrown): the plan was an estimate
+GROW_CAP = 4.0      # autofix grows an envelope up to this multiple of the planned one (a sanity cap, not the brief)
 PAD_GAP = 2.0       # mm between joint pads when a host's planned size can't take its children side by side
 SLENDER = 4.0       # a turned part at least this many diameters long (planned envelope) is a rod: a shaft role
 POS_TOL = 0.1       # mm: default position tolerance of interface features
@@ -2571,10 +2572,16 @@ def outgrown(it: dict[str, Any]) -> str | None:
     worst = max(range(3), key=lambda k: size[k] / pl[k] if pl[k] else 0.0)
     if not pl[worst] or size[worst] <= PLAN_SLACK * pl[worst] + 1e-6:
         return None
-    return (f"{it['name']}: laid out at {_dims_text(it['shape'], size)} mm, {size[worst] / pl[worst]:.1f} times its "
-            f"planned {_dims_text(it['shape'], pl)} mm in one direction (at most {PLAN_SLACK:g} times). What it "
-            "carries or the bolts it needs don't fit the planned size: use smaller or fewer bolts, mount the parts "
-            "elsewhere, or resize it on purpose.")
+    return (f"{it['name']}: laid out at {_dims_text(it['shape'], size)} mm, {size[worst] / pl[worst]:.1f} times the "
+            f"{_dims_text(it['shape'], pl)} mm first planned for it, because what it carries or the bolts it needs "
+            "take that room. The planned size was a starting estimate, so this is shown for review and does not "
+            "block the gate; resize it on purpose if the space is limited.")
+
+
+def _hole_words(h: dict[str, Any]) -> str:
+    """A hole as the engineer reads it: its label without the running number, and its diameter."""
+    lbl = re.sub(r"^(hole|tapped hole|dowel hole|clearance opening) \d+", r"\1", str(h.get("label") or "hole"))
+    return lbl if "Ø" in lbl else f"{lbl} Ø{float(h['d']):g}"
 
 
 def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2593,8 +2600,9 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
         ``layout_conflict``  the design graph's connections can't all hold (an over-constrained or inconsistent loop,
                              a part no connection reaches): it names the parts and connections
       geometry (a part can't be made):
-        ``outgrown``, ``hole_diameter``, ``hole_edge``, ``rim``, ``cavity_breach``, ``hole_overlap``, ``keyway_rim``,
+        ``hole_diameter``, ``hole_edge``, ``rim``, ``cavity_breach``, ``hole_overlap``, ``keyway_rim``,
         ``washer_overlap``, ``fit_unknown``, ``bearing_depth``, ``bearing_wall``, ``bearing_bore``
+        ``outgrown`` (warning) a part laid out well past its planned envelope (the plan was an estimate)
         ``ligament`` (warning) a bearing cap's tapped holes leave less than max(3 mm, 0.5 d) of wall to the seat
     """
     out: list[dict[str, Any]] = []
@@ -2605,8 +2613,8 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
 
     for i, it in skel["items"].items():
         big = outgrown(it)
-        if big:
-            add("outgrown", big, [i])
+        if big:  # a warning (founder rule 2026-11-20): the planned envelope is Archie's guess, not the brief's limit
+            warn.append({"code": "outgrown", "items": [i], "interfaces": [], "text": big})
         L, _W, _H = it["size"]
         feats = item_features(skel, ifs, i)
         holes = [f for f in feats if f["type"] in ("hole", "seat")]
@@ -2654,9 +2662,21 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                     continue  # concentric: a seat over a clearance bore, a bore that is also a hole
                 gap = math.hypot(a["c"][0] - b["c"][0], a["c"][1] - b["c"][1]) - (a["d"] + b["d"]) / 2
                 if gap < 1.0:
-                    add("hole_overlap", f"{it['name']}: holes at ({a['c'][0]:g}, {a['c'][1]:g}) and ({b['c'][0]:g}, "
-                        f"{b['c'][1]:g}) are {gap:.1f} mm apart (at least 1 mm needed).", [i],
-                        [x["if"] for x in (a, b) if x.get("if")])
+                    wa, wb = _hole_words(a), _hole_words(b)
+                    if gap < 0:  # the holes run into each other: say how, never a negative distance
+                        dist = math.hypot(a["c"][0] - b["c"][0], a["c"][1] - b["c"][1])
+                        inside = dist + min(a["d"], b["d"]) / 2 <= max(a["d"], b["d"]) / 2 + 1e-6
+                        big, small = (a, b) if a["d"] >= b["d"] else (b, a)
+                        how = (f"the {_hole_words(small)} lies inside the {_hole_words(big)}" if inside else
+                               f"they overlap by {-gap:.1f} mm")
+                        text = (f"{it['name']}: the {wa} at ({a['c'][0]:g}, {a['c'][1]:g}) and the {wb} at "
+                                f"({b['c'][0]:g}, {b['c'][1]:g}) run into each other ({how}); they need at least "
+                                "1 mm of material between them.")
+                    else:
+                        text = (f"{it['name']}: the {wa} at ({a['c'][0]:g}, {a['c'][1]:g}) and the {wb} at "
+                                f"({b['c'][0]:g}, {b['c'][1]:g}) leave {gap:.1f} mm of material between them (at "
+                                "least 1 mm needed).")
+                    add("hole_overlap", text, [i], [x["if"] for x in (a, b) if x.get("if")])
         for k in (f for f in feats if f["type"] == "keyway" and f["on"] == "hub"):
             outer = (it["module"] * it["teeth"] / 2 - 1.25 * it["module"]) if it["role"] == "gear" else L / 2
             rim = outer - (k["d"] / 2 + k["depth"])

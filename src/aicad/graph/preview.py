@@ -235,6 +235,9 @@ def scene(skel: dict[str, Any], ifs: list[dict[str, Any]], *, plan: dict[str, An
             kind, g = "box", {"s": size}
             if it.get("cavity"):
                 g["open"] = True
+        elif role == "gear" and it.get("internal") and it.get("module") and it.get("teeth"):
+            # an internal ring gear: drawn as its rim, open to the tooth tips m (z - 2)
+            kind, g = "cyl", {"d": size[0], "L": size[2], "bore": _r(float(it["module"]) * (int(it["teeth"]) - 2))}
         elif role == "gear" and it.get("module") and it.get("teeth"):
             m, z = float(it["module"]), int(it["teeth"])
             kind, g = "gear", {"tip": _r(m * (z + 2)), "pitch": _r(m * z), "width": size[2], "m": m, "z": z,
@@ -395,7 +398,9 @@ def scene(skel: dict[str, Any], ifs: list[dict[str, Any]], *, plan: dict[str, An
         pa = icd.point3(ax, d["axis_a"], float(d.get("plane_a") or 0))
         pb = icd.point3(ax, d["axis_b"], float(d.get("plane_a") or 0))
         a = float(d.get("centre_distance") or math.dist(pa, pb))
-        note = (f"a = m (z1 + z2) / 2 = {_fmt(d.get('module') or 0)} × ({d.get('teeth_a')} + {d.get('teeth_b')}) / 2"
+        note = (f"a = m (z_ring - z_planet) / 2 = {_fmt(d.get('module') or 0)} × ({d.get('teeth_b')} - "
+                f"{d.get('teeth_a')}) / 2" if d.get("internal") else
+                f"a = m (z1 + z2) / 2 = {_fmt(d.get('module') or 0)} × ({d.get('teeth_a')} + {d.get('teeth_b')}) / 2"
                 if f["kind"] == "gear_mesh" else "C = D1 + D2 unless stated (layout rule)")
         dims.append({"id": f"cd:{f['id']}", "kind": "linear", "a": _v(pa), "b": _v(pb), "value": _r(a),
                      "text": _fmt(a), "label": f"Centre distance {f['a']['name']} / {f['b']['name']}",

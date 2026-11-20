@@ -63,8 +63,9 @@ def _clear_m(d: float) -> int | None:
 
 
 class _Build:
-    def __init__(self, m: dict[str, Any], parts: list[dict[str, Any]], brief: str, ov: dict[str, Any] | None):
-        self.m, self.parts, self.brief = m, parts, brief
+    def __init__(self, m: dict[str, Any], parts: list[dict[str, Any]], brief: str, ov: dict[str, Any] | None,
+                 plan: dict[str, Any] | None = None):
+        self.m, self.parts, self.brief, self.plan = m, parts, brief, plan
         self.ov = ov or {}
         self.iov: dict[str, dict[str, Any]] = self.ov.get("items") or {}
         self.fov: dict[str, dict[str, Any]] = self.ov.get("interfaces") or {}
@@ -84,6 +85,37 @@ class _Build:
                               "items": list(items or []), "interfaces": []})
 
     # ------------------------------------------------------------------ 1. bodies to plan parts
+    def hosts(self) -> None:
+        """What carries each part in the design graph (when the plan has one): a hub's shaft, a bearing's or pin's
+        host, a bolted part's base. The master's contacts say what touches; the graph says what carries."""
+        self.graph_host: dict[str, str] = {}
+        gd = (((self.plan or {}).get("graph") or {}).get("data")) or {}
+        names = ((self.plan or {}).get("graph") or {}).get("components") or {}
+        if not gd or not names:
+            return
+        pid_of = {_norm(p["name"]): p["id"] for p in self.parts if p["family"] != "standard"}
+        comp_pid = {cid: pid_of.get(_norm(n)) for cid, n in names.items()}
+        carrying = ("keyed_hub", "hub_fit", "mounted_on", "bolted_joint", "rod_support", "slide", "pin_joint")
+        for c in gd.get("connections") or []:
+            if c.get("kind") not in carrying:
+                continue
+            h, g = comp_pid.get(c.get("host")), comp_pid.get(c.get("guest"))
+            if h and g and h != g and g not in self.graph_host:
+                self.graph_host[g] = h
+        for c in gd.get("connections") or []:  # a part on a bought-out bearing rides on what carries the bearing
+            if c.get("kind") != "mounted_on":
+                continue
+            g = comp_pid.get(c.get("guest"))
+            if not g or g in self.graph_host:
+                continue
+            via = c.get("host")
+            for c2 in gd.get("connections") or []:
+                if c2.get("guest") == via and c2.get("kind") in ("bearing_journal", "bearing_seat"):
+                    h = comp_pid.get(c2.get("host"))
+                    if h and h != g:
+                        self.graph_host[g] = h
+                        break
+
     def match(self) -> None:
         designed = {_norm(p["name"]): p for p in self.parts if p["family"] != "standard"}
         standard = {_norm(p["name"]): p for p in self.parts if p["family"] == "standard"}
@@ -196,8 +228,13 @@ class _Build:
                     resized = resized or abs(float(o[key]) - size[n]) > SIZE_TOL
                     size[n] = float(o[key])
             par = self.parent.get(ks[0])
+            host = self.item_of[par][0] if par is not None else None
+            if o.get("parent") in self.copies and o["parent"] != pid:  # a host the engineer chose (a revision)
+                host = o["parent"]
+            elif host is not None and self.graph_host.get(pid) in self.copies:
+                host = self.graph_host[pid]  # what carries it in the design, not merely what it touches
             it: dict[str, Any] = {"name": p["name"], "role": "block", "shape": "box", "size": [_r2(x) for x in size],
-                                  "sub": p["sub"], "parent": self.item_of[par][0] if par is not None else None,
+                                  "sub": p["sub"], "parent": host,
                                   "copies": [self.P(self.bodies[k]["centre"]) for k in ks], "qty": p["qty"],
                                   "source": "master"}
             pk = b0.get("pocket")
@@ -431,6 +468,7 @@ class _Build:
 
     # ------------------------------------------------------------------ the run
     def run(self) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        self.hosts()
         self.match()
         self.frame()
         self.tree()
@@ -478,8 +516,9 @@ class _Build:
 
 
 def build(measured: dict[str, Any], parts: list[dict[str, Any]], brief: str = "",
-          overrides: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    return _Build(measured, parts, brief, overrides).run()
+          overrides: dict[str, Any] | None = None, plan: dict[str, Any] | None = None
+          ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    return _Build(measured, parts, brief, overrides, plan).run()
 
 
 def build_for_doc(doc: dict[str, Any], overrides: dict[str, Any] | None
@@ -489,7 +528,7 @@ def build_for_doc(doc: dict[str, Any], overrides: dict[str, Any] | None
     lp = (doc.get("plan") or {}).get("layout_path") or {}
     if lp.get("path") != "master" or not mm.get("measure"):
         return None
-    return build(mm["measure"], icd.parts_from(doc), str(doc.get("brief") or ""), overrides)
+    return build(mm["measure"], icd.parts_from(doc), str(doc.get("brief") or ""), overrides, doc.get("plan"))
 
 
 # ----------------------------------------------------------------------------- what was measured, as a design graph

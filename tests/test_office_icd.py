@@ -143,7 +143,7 @@ def test_edit_values_validation() -> None:
     assert icd.problems(sk4, ifs4) == [("IF-01: Ø9 holes take M8 bolts, whose washers (Ø16) overlap at 13.6 mm "
                                         "between hole centres.")]
     sk5, ifs5 = icd.build(_parts(), "", icd.apply_values(frozen, f, {"d": 16.0}))
-    assert any("apart" in p for p in icd.problems(sk5, ifs5))
+    assert any("run into each other (they overlap by" in p for p in icd.problems(sk5, ifs5))  # never "-2.4 mm apart"
 
 
 # ----------------------------------------------------------------------------- conformance on fixture parts

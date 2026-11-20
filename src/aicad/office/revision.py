@@ -42,7 +42,10 @@ CLASSES = ("unchanged", "moved", "redesign", "added", "removed")
 CLASS_LABEL = {"unchanged": "kept as built", "moved": "kept, re-placed", "redesign": "redesigned",
                "added": "added", "removed": "removed"}
 GEOMETRY_KEYS = ("role", "shape", "size", "bore", "module", "teeth", "cavity")
-PLACEMENT_KEYS = ("copies", "rot", "phase", "ax")
+PLACEMENT_KEYS = ("copies", "rot", "phase", "ax", "parent")  # parent: which part carries it (a re-host moves it)
+CARRYING = ("keyed_hub", "hub_fit", "mounted_on", "bolted_joint", "bearing_seat", "bearing_journal", "rod_support",
+            "slide", "pin_joint", "shoulder_stop", "ring_retained")  # connections that say what carries a part
+STRUCTURAL = ("relayout", "mount", "base", "size", "add", "remove", "qty")
 # estimates shown with the impact list (PD-153): a redesign by the design agent is "a change" (~26 tokens measured,
 # docs/CONTEXT.md token economics), a new part a warm new part (~45); a part built from the interface spec costs none
 REDESIGN_TOKENS = 26
@@ -205,8 +208,76 @@ def revised_plan(doc: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, An
     if not plan["subassemblies"]:
         raise OfficeInputError("The revised plan would be empty.")
     _sync_graph(plan, ops)
+    _leave_master(doc, plan, ops)
     plan["edited"] = True
     return plan
+
+
+def _graph_envelopes(plan: dict[str, Any], keep: set[str]) -> None:
+    """The plan's envelopes as the design graph sizes them (``graph.compile.part``), except the parts in ``keep``
+    (sized by this revision). A master model wrote its measured boxes into the plan; once the connection solver lays
+    the program out again those boxes (a gear's 20 x 60 x 60 lying on its side) are not the parts' envelopes."""
+    from aicad.graph import layout
+    from aicad.graph.compile import part as graph_part
+
+    g = layout.graph_of(plan)
+    if g is None:
+        return
+    by_name = {c.name: c for c in g.components}
+    for _s, p in plan_parts(plan):
+        c = by_name.get(p["name"])
+        if c is None or _key(p["name"]) in keep:
+            continue
+        try:
+            fresh = graph_part(g, c)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if fresh.get("envelope"):
+            p["envelope"] = [float(x) for x in fresh["envelope"]]
+        else:
+            p.pop("envelope", None)
+        for k in ("module", "teeth"):
+            if k in fresh:
+                p[k] = fresh[k]
+
+
+def _leave_master(doc: dict[str, Any], plan: dict[str, Any], ops: list[dict[str, Any]]) -> None:
+    """A program laid out from its master model places every part where its body was modelled, so a change of host,
+    size or base can't move anything there (the founder's Planetary Gearbox, 2026-11-20: "the revised layout is the
+    same as the one the program has"). When a structural change is asked and the connection solver can lay the
+    revised design out with no conflict and no gate problem now, the revision leaves the master path: the plan's
+    envelopes come from the design graph again (the sizes this revision asks for kept) and the layout path says why.
+    Otherwise the master path stays (its measured layout takes the host and size changes as overrides)."""
+    from aicad.master import decide as mdecide
+
+    lp = plan.get("layout_path") or {}
+    if lp.get("path") != "master" or not any(o["op"] in STRUCTURAL for o in ops):
+        return
+    trial_plan = copy.deepcopy(plan)
+    trial_plan["layout_path"] = {"path": "fast"}
+    _graph_envelopes(trial_plan, {_key(o["part"]) for o in ops if o["op"] == "size"})
+    try:
+        tr = mdecide.trial(trial_plan, str(doc.get("brief") or ""), str(doc.get("name") or ""))
+    except Exception:  # noqa: BLE001 - a trial that fails keeps the master path (said by the candidate)
+        return
+    if tr.get("unsupported") or tr.get("conflicts") or tr.get("unreachable") or tr.get("problems"):
+        return
+    for _s, p in plan_parts(trial_plan):
+        hit = _find(plan, p["name"])
+        if hit is None:
+            continue
+        q = hit[1]
+        if "envelope" in p:
+            q["envelope"] = p["envelope"]
+        else:
+            q.pop("envelope", None)
+        for k in ("module", "teeth"):
+            if k in p:
+                q[k] = p[k]
+    plan["layout_path"] = {"path": "fast", "reasons": [], "mode": lp.get("mode") or mdecide.mode(), "trial": tr,
+                           "from_master": True, "at": lp.get("at"),
+                           "words": "Laid out by the connection solver (the revision: it lays this structure out "
+                                    "now, so the master model's placement is no longer used)"}
 
 
 def _sync_graph(plan: dict[str, Any], ops: list[dict[str, Any]]) -> None:
@@ -235,7 +306,11 @@ def _sync_graph(plan: dict[str, Any], ops: list[dict[str, Any]]) -> None:
             host = by_name.get(_key(o["on"]))
             if host is None:
                 continue
-            mine = [c for c in data.get("connections") or [] if c.get("guest") == cid]
+            # only what carries the part changes host (never a gear mesh or a belt it takes part in)
+            mine = [c for c in data.get("connections") or [] if c.get("guest") == cid
+                    and c.get("kind") in CARRYING]
+            if any(c.get("host") == host for c in mine):
+                continue
             if mine:
                 for c in mine[:1]:
                     c["host"] = host
@@ -308,6 +383,18 @@ def derive(doc: dict[str, Any], plan: dict[str, Any], ops: list[dict[str, Any]] 
     sep = {i: v for i, v in (old_ov.get("separate") or {}).items() if i in keep}
     if sep:
         ov["separate"] = sep
+    if ((plan.get("layout_path") or {}).get("path")) == "master":
+        # a measured layout keeps its positions: a size or a host the revision asks for is an override on it
+        ids = {_key(p["name"]): f"i_{s['id']}_{p['id']}" for s, p in plan_parts(plan)}
+        for o in ops:
+            i = ids.get(_key(o.get("part")))
+            if i is None:
+                continue
+            if o["op"] == "size":
+                ov["items"].setdefault(i, {}).update(dict(zip(("L", "W", "H"), (float(x) for x in o["envelope"]),
+                                                              strict=True)))
+            elif o["op"] == "mount" and ids.get(_key(o["on"])):
+                ov["items"].setdefault(i, {})["parent"] = ids[_key(o["on"])]
     sk, ifs = interfaces._rebuild(d2, ov)
     old_ifs = {f["id"]: f for f in (doc.get("icd") or {}).get("interfaces") or []}
     by_joint = {_joint(f): f["id"] for f in ifs}
