@@ -38,7 +38,7 @@ from typing import Any
 import numpy as np
 
 from aicad import toolbox
-from aicad.assembly import librarian, service, store, xform
+from aicad.assembly import fixings, librarian, service, store, xform
 
 HUB_GAP = 2.0       # mm between two hubs on one shaft
 BEARING_GAP = 5.0   # mm from a hub to a bearing that no shoulder or shaft end locates
@@ -54,7 +54,8 @@ BASE_R = np.column_stack([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])  
 def item_role(it: dict[str, Any]) -> str | None:
     """gear | shaft | bearing | hub from a plan item (Toolbox code, else the part's name)."""
     if it.get("source") == "toolbox":
-        return {"spur_gear": "gear", "shaft": "shaft", "bearing": "bearing"}.get(str(it.get("code")))
+        return {"spur_gear": "gear", "shaft": "shaft", "bearing": "bearing", "parallel_key": "key",
+                "retaining_ring": "ring"}.get(str(it.get("code")))
     if it.get("source") == "project":
         toks = set(librarian._tok(str(it.get("title") or "")))
         if toks & GEAR_WORDS:
@@ -101,11 +102,14 @@ class Train:
         return [u for u in self.units if u.role == role]
 
 
-def select(root: Path, doc: dict[str, Any], items: list[dict[str, Any]]) -> Train | None:
+def select(root: Path, doc: dict[str, Any], items: list[dict[str, Any]], only_shafts: list[str] | None = None
+           ) -> Train | None:
     """The items Fitz assembles as shaft lines / a gear train, or None (the ordinary seat / mount path applies).
 
-    A train needs a new shaft with something to put on it, two gears or more, or a gear / hub plus a shaft (new or
-    already in the assembly, carrying nothing). Bearings join a train; on their own they keep the seat path."""
+    A train needs a new shaft with something to put on it, two gears or more, or a gear / hub / key / ring plus a
+    shaft (new or already in the assembly, carrying nothing). Bearings, keys and retaining rings join a train;
+    bearings on their own keep the seat path. ``only_shafts``: the free shafts already in the assembly that may
+    carry the items (the assembly agent re-places one line at a time); None = every free shaft."""
     tr = Train()
     for it in items:
         if not it.get("enabled", True) or it.get("source") == "new" or it.get("action") == "design" or it.get("inst"):
@@ -120,8 +124,13 @@ def select(root: Path, doc: dict[str, Any], items: list[dict[str, Any]]) -> Trai
                                  params=dict(it["params"]) if it.get("params") else None, code=it.get("code")))
     new_shafts = len(tr.of("shaft"))
     drives = len(tr.of("gear")) + len(tr.of("hub"))
-    existing = _free_shafts(root, doc) if drives else []
-    if not (new_shafts and (drives or tr.of("bearing")) or len(tr.of("gear")) >= 2 or drives and existing):
+    fix = len(tr.of("key")) + len(tr.of("ring"))
+    if only_shafts is not None:   # the caller names the shafts, in order (the first one is the line's base)
+        existing = [s for s in only_shafts if any(i["id"] == s for i in doc["instances"])] if drives or fix else []
+    else:
+        existing = _free_shafts(root, doc) if drives or fix else []
+    if not (new_shafts and (drives or fix or tr.of("bearing")) or len(tr.of("gear")) >= 2
+            or (drives or fix) and existing):
         return None
     tr.units = [Unit(None, "shaft", service.display_names(doc)[i], inst=i) for i in existing] + tr.units
     return tr
@@ -165,12 +174,18 @@ def shaft_geom(root: Path, key: str) -> dict[str, Any] | None:
     hi_end = max(((t, f) for t, f, c in planes if c > 0), default=None)
     part = store.part(root, key) or {}
     key_c = None
+    kseats = fixings.keyseats(root, key, p, v, seats)
     if part.get("kind") == "toolbox" and part.get("code") == "shaft":
         key_c = float(part["params"]["L"]) / 2 - float(p @ v)  # keyway centred at mid-length (z = L / 2)
+    elif kseats:
+        key_c = max(kseats, key=lambda k: k["length"])["t_c"]  # a recognised keyseat on the user's shaft
     t_lo = min([s["lo"] for s in seats] + ([lo_end[0]] if lo_end else []))
     t_hi = max([s["hi"] for s in seats] + ([hi_end[0]] if hi_end else []))
-    return {"p": p, "v": v, "seats": seats, "lo_end": lo_end, "hi_end": hi_end, "key_c": key_c, "t_lo": t_lo,
-            "t_hi": t_hi, "d": max(s["d"] for s in seats)}
+    grooves = fixings.grooves(seats)
+    gseats = {id(g["seat"]) for g in grooves}
+    return {"p": p, "v": v, "seats": [s for s in seats if id(s) not in gseats], "lo_end": lo_end, "hi_end": hi_end,
+            "key_c": key_c, "t_lo": t_lo, "t_hi": t_hi, "d": max(s["d"] for s in seats), "keyseats": kseats,
+            "grooves": grooves}
 
 
 def elem_geom(root: Path, key: str) -> dict[str, Any] | None:
@@ -193,8 +208,10 @@ def elem_geom(root: Path, key: str) -> dict[str, Any] | None:
         hi = service._tb_ref(root, key, "plane", z=w, nz=1.0)
         if b is None or lo is None or hi is None:
             return None
+        kw = fixings.hub_keyway(root, key, np.zeros(3), [0.0, 0.0, 1.0], bore) if gear else None
         return {"p": np.zeros(3), "v": np.array([0.0, 0.0, 1.0]), "x": np.array([1.0, 0.0, 0.0]), "bore": bore,
-                "bore_face": b["id"], "lo": 0.0, "hi": w, "lo_face": lo["id"], "hi_face": hi["id"], "w": w, "gear": gear}
+                "bore_face": b["id"], "lo": 0.0, "hi": w, "lo_face": lo["id"], "hi_face": hi["id"], "w": w, "gear": gear,
+                "keyway": kw}
     info = part.get("info") or {}
     comp = info.get("component") or {}
     bb = info.get("bbox") or [0, 0, 0, 0, 0, 0]
@@ -235,7 +252,8 @@ def elem_geom(root: Path, key: str) -> dict[str, Any] | None:
     if comp.get("kind") == "spur_gear" and cp.get("teeth") and cp.get("module"):
         gear = {"module": float(cp["module"]), "teeth": int(cp["teeth"]), "phase_known": False}
     return {"p": p, "v": v, "x": xform.perp(v), "bore": float(best["d"]), "bore_face": int(best["faces"][0]),
-            "lo": lo, "hi": hi, "lo_face": lo_f, "hi_face": hi_f, "w": hi - lo, "gear": gear}
+            "lo": lo, "hi": hi, "lo_face": lo_f, "hi_face": hi_f, "w": hi - lo, "gear": gear,
+            "keyway": fixings.hub_keyway(root, key, p, v, float(best["d"]))}
 
 
 # ----------------------------------------------------------------------------- pure layout helpers
@@ -291,17 +309,39 @@ def stack(sg: dict[str, Any], hubs: list[dict[str, Any]], n_bearings: int, beari
             return {"hubs": [], "bearings": [], "problems": [("bore_mismatch", f"no Ø{hubs[0]['bore']:g} seat")],
                     "centre": None}
         kc = sg.get("key_c")
-        c = kc if kc is not None and seat["lo"] + W / 2 - 1e-6 <= kc <= seat["hi"] - W / 2 + 1e-6 else \
-            (seat["lo"] + seat["hi"]) / 2
+        # a shoulder closing the seat locates the hubs (design graph: shoulder_stop), else the keyway, else the seat
+        ends = seat.get("ends") or {}
+        sh_side = next((e for e in ("hi", "lo") if (ends.get(e) or {}).get("shoulder")), None)
+        if sh_side is not None:
+            sh = ends[sh_side]
+            c = sh["t"] - W / 2 if sh_side == "hi" else sh["t"] + W / 2
+        elif kc is not None and seat["lo"] + W / 2 - 1e-6 <= kc <= seat["hi"] - W / 2 + 1e-6:
+            c = kc
+        else:
+            c = (seat["lo"] + seat["hi"]) / 2
         if W > seat["length"] + 1e-6:
             probs.append(("hub_overhangs_seat", (f"the hubs ({W:g} mm) are longer than the Ø{seat['d']:g} seat "
                                                 f"({seat['length']:.4g} mm)")))
-        t = c - W / 2
-        for h in hubs:
+        # the first hub sits against the shoulder (when there is one), the next ones beside it, HUB_GAP apart
+        starts: list[float] = []
+        if sh_side == "hi":
+            t_end = c + W / 2
+            for h in hubs:
+                starts.append(t_end - h["w"])
+                t_end -= h["w"] + HUB_GAP
+        else:
+            t = c - W / 2
+            for h in hubs:
+                starts.append(t)
+                t += h["w"] + HUB_GAP
+        for k, (h, t) in enumerate(zip(hubs, starts, strict=True)):
             s_h = next((s for s in sg["seats"] if abs(s["d"] - h["bore"]) < 1e-3 and s["lo"] - 1e-6 <= t + h["w"] / 2
                         <= s["hi"] + 1e-6), seat)
-            out_h.append({"t0": t, "seat": s_h})
-            t += h["w"] + HUB_GAP
+            row: dict[str, Any] = {"t0": t, "seat": s_h}
+            if k == 0 and sh_side is not None:
+                # ``side`` as for bearings: a hub below a shoulder at the seat's high end has its high face on it
+                row.update(how="shoulder", face=ends[sh_side]["face"], side="lo" if sh_side == "hi" else "hi")
+            out_h.append(row)
         h0, h1 = c - W / 2, c + W / 2
     else:
         c = (sg["t_lo"] + sg["t_hi"]) / 2
@@ -359,8 +399,8 @@ def prepare(root: Path, doc: dict[str, Any], tr: Train) -> dict[str, Any]:
     probs: list[tuple[Unit, str, str]] = []
     geo: dict[int, dict[str, Any] | None] = {}
     for u in tr.units:
-        if u.role == "gear" and u.code == "spur_gear":
-            continue
+        if u.role == "gear" and u.code == "spur_gear" or u.role in ("key", "ring"):
+            continue  # Toolbox gears get their bore below; keys and rings are placed by ``fixings``
         key = _key_of(doc, u)
         if u.role == "shaft":
             geo[id(u)] = shaft_geom(root, key) if key else None
@@ -413,7 +453,59 @@ def prepare(root: Path, doc: dict[str, Any], tr: Train) -> dict[str, Any]:
     it = iter(bearings)
     for ln in lines:
         ln["bearings"] = [b for b in (next(it, None), next(it, None)) if b is not None]
+        ln["keys"], ln["rings"] = [], []
+    # keys into keyseats, rings into grooves, line by line in order (design graph: keyed_hub, ring_retained)
+    for u in tr.of("key"):
+        tgt = next((ln for ln in lines if len(ln["keys"]) < len((ln["sg"] or {}).get("keyseats") or [])), None)
+        if tgt is None:
+            probs.append((u, "no_keyseat", f"{u.title}: no free keyseat on a shaft of the line"))
+        else:
+            tgt["keys"].append(u)
+    for u in tr.of("ring"):
+        tgt = next((ln for ln in lines if len(ln["rings"]) < len((ln["sg"] or {}).get("grooves") or [])), None)
+        if tgt is None:
+            probs.append((u, "no_groove", f"{u.title}: no free retaining-ring groove on a shaft of the line"))
+        else:
+            tgt["rings"].append(u)
     return {"lines": lines, "loose": loose, "problems": probs, "spare": list(it), "geo": geo}
+
+
+def size_fixings(lay: dict[str, Any]) -> None:
+    """Keys and rings Hex left without a size ("a key", "a circlip") take it from the keyseat / groove they go in:
+    a DIN 6885 key for the seat Ø as long as the keyseat (the nearest standard length not longer), a DIN 471 ring
+    for the groove."""
+    for ln in lay["lines"]:
+        sg = ln["sg"] or {}
+        for u, ks in zip(ln.get("keys") or [], sg.get("keyseats") or [], strict=False):
+            if u.code == "parallel_key" and not u.params:
+                L = max((x for x in toolbox.KEY_LENGTHS if x <= ks["length"] + 1e-6), default=None)
+                if L is not None:
+                    u.params = toolbox.normalize("parallel_key", {"D": ks["d"], "L": L})
+        for u, gr in zip(ln.get("rings") or [], sg.get("grooves") or [], strict=False):
+            if u.code == "retaining_ring" and not u.params:
+                u.params = toolbox.normalize("retaining_ring", {"D": gr["d1"]})
+
+
+def _keyed_x(Ts: np.ndarray, sg: dict[str, Any], g: dict[str, Any], t0: float, X: np.ndarray
+             ) -> tuple[np.ndarray, dict[str, Any] | None]:
+    """The x reference that turns a keyed hub so its keyway faces the keyseat under it (world, the shaft placed at
+    Ts), and that keyseat; (X, None) when either has none."""
+    kw = g.get("keyway")
+    ks = next((k for k in sg.get("keyseats") or [] if k["lo"] < t0 + g["w"] - 1e-6 and k["hi"] > t0 + 1e-6), None)
+    if not kw or ks is None:
+        return X, None
+    R = Ts[:3, :3]
+    V = xform.unit(R @ np.asarray(sg["v"], dtype=float))
+    K = xform.unit(R @ np.asarray(ks["k"], dtype=float))
+    alpha = fixings.signed_angle(g["x"], kw["k"], g["v"])
+    return xform.unit(xform.rot(V, -alpha) @ K), ks
+
+
+def _keyed_x_local(sg: dict[str, Any], g: dict[str, Any], t0: float) -> np.ndarray:
+    """In the shaft's own frame: the x reference of a keyed hub at t0 whose keyway faces the keyseat under it."""
+    X, ks = _keyed_x(np.eye(4), sg, g, t0, xform.perp(np.asarray(sg["v"], dtype=float)))
+    del ks
+    return X
 
 
 # ----------------------------------------------------------------------------- run: place and mate
@@ -421,6 +513,81 @@ def _mate(root: Path, doc: dict[str, Any], t: str, a: tuple[str, int], b: tuple[
           flip: bool = False) -> dict[str, Any]:
     return service.make_mate(root, doc, {"type": t, "a": {"inst": a[0], "kind": "face", "id": a[1]},
                                          "b": {"inst": b[0], "kind": "face", "id": b[1]}, "value": value, "flip": flip})
+
+
+def _how(row: dict[str, Any]) -> dict[str, Any]:
+    """The axial mate of a hub row from ``stack``: against its shoulder when it has one."""
+    return {k: row[k] for k in ("how", "face", "side")} if row.get("how") == "shoulder" else {}
+
+
+def _where(sg: dict[str, Any], row: dict[str, Any], t0: float, ks: dict[str, Any] | None, from_end: Any) -> str:
+    bits = []
+    if ks is not None:
+        bits.append("keyway on the keyseat")
+    elif sg.get("key_c") is not None:
+        bits.append("on the keyway")
+    bits.append("against the shoulder" if row.get("how") == "shoulder" else from_end(sg, t0))
+    return ", ".join(bits)
+
+
+def _fixings_on_line(root: Path, doc: dict[str, Any], res: dict[str, Any], ln: dict[str, Any], sid: str,
+                     sg: dict[str, Any], spans: list[tuple[float, float]], add: Any, outcome: Any, say: Any
+                     ) -> list[str]:
+    """Keys into the line's keyseats and retaining rings into its grooves (``fixings``). Returns the instances that
+    turn with the shaft."""
+    out: list[str] = []
+    free = list(sg.get("keyseats") or [])
+    for u in ln.get("keys") or []:
+        if not u.key:
+            continue
+        ks = next((k for k in free if fixings.key_geom(root, u.key) and
+                   abs(fixings.key_geom(root, u.key)["b"] - k["b"]) < 0.05), None)  # type: ignore[index]
+        if ks is None:
+            iid = add(u, None)
+            res["loose"] += 1
+            outcome("key_mismatch", u, iid, f"{service.display_names(doc)[iid]} placed beside the assembly: no keyseat "
+                                            f"of its width on {service.display_names(doc)[sid]}")
+            continue
+        free.remove(ks)
+        iid, text, code = fixings.place_key(root, doc, sid, sg, ks, u.key)
+        if iid is None:
+            iid = add(u, None)
+            res["loose"] += 1
+            outcome(code or "key_mismatch", u, iid, f"{service.display_names(doc)[iid]} placed beside the assembly: {text}")
+            continue
+        if u.item:
+            res["made"].setdefault(u.item, []).append(iid)
+        res["mated"] += 1
+        out.append(iid)
+        say(text)
+    gfree = list(sg.get("grooves") or [])
+    for u in ln.get("rings") or []:
+        if not u.key:
+            continue
+        rg = fixings.ring_geom(root, u.key)
+        gr = next((g for g in gfree if rg and abs(g["d2"] - rg["d2"]) < 0.06), None)
+        if gr is None:
+            iid = add(u, None)
+            res["loose"] += 1
+            outcome("ring_mismatch", u, iid, f"{service.display_names(doc)[iid]} placed beside the assembly: no groove "
+                                             f"of its size on {service.display_names(doc)[sid]}")
+            continue
+        gfree.remove(gr)
+        # the ring holds whatever sits next to its groove: it bears on the groove wall away from that part
+        near = min(spans, key=lambda s: min(abs(s[0] - gr["hi"]), abs(s[1] - gr["lo"])), default=None)
+        away = "lo" if near is None or near[0] >= gr["hi"] - 1e-6 else "hi"
+        iid, text, code = fixings.place_ring(root, doc, sid, sg, gr, u.key, away)
+        if iid is None:
+            iid = add(u, None)
+            res["loose"] += 1
+            outcome(code or "ring_mismatch", u, iid, f"{service.display_names(doc)[iid]} placed beside the assembly: {text}")
+            continue
+        if u.item:
+            res["made"].setdefault(u.item, []).append(iid)
+        res["mated"] += 1
+        out.append(iid)
+        say(text)
+    return out
 
 
 def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> dict[str, Any]:
@@ -461,6 +628,9 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
     for u, code, text in lay["problems"]:
         if code in ("gear_without_shaft", "gear_not_recognised", "gear_bore_too_large"):
             continue  # reported where the part is placed
+        if u.role in ("key", "ring") and not u.key:   # a key or ring with no size to take: nothing to insert
+            outcome(code, u, None, f"{u.title} not inserted: {text.split(': ', 1)[-1]}")
+            continue
         beside(u, code, text.split(": ", 1)[-1])
 
     placed_gears: list[tuple[Unit, str, float]] = []   # (unit, instance, tooth phase in degrees)
@@ -569,7 +739,7 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
         for h in hubs:
             beside(h, code, why)
         beside(ln["shaft"], code, why)
-        for b in ln["bearings"]:
+        for b in ln["bearings"] + [x for x in ln.get("keys", []) + ln.get("rings", []) if x.key]:
             beside(b, code, why)
 
     for n, ln in enumerate(lines):
@@ -581,6 +751,7 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
                    {"w": bgeo["w"], "bore": bgeo["bore"]} if bgeo else None)
         sname = "the input shaft" if n == 0 else f"shaft {n + 1}"
         hub_ids: list[str] = []
+        spans: list[tuple[float, float]] = []   # what sits on the shaft, along its axis (for the rings' grooves)
         if hubs and not st["hubs"]:   # no seat for the hubs' bore
             for h in hubs:
                 beside(h, "bore_mismatch", f"its Ø{geo[id(h)]['bore']:g} bore fits no seat of {su.title}")
@@ -602,13 +773,14 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
             P, V = xform.pt(Ts, sg["p"]), xform.unit(Ts[:3, :3] @ sg["v"])
             for k, (h, g) in enumerate(zip(hubs, hg, strict=True)):
                 t0 = st["hubs"][k]["t0"]
-                eid = add(h, place_on_axis(P, V, e1, g, t0))
+                Xh, ks = _keyed_x(Ts, sg, g, t0, e1)
+                eid = add(h, place_on_axis(P, V, Xh, g, t0))
                 hub_ids.append(eid)
-                on_shaft(sid, sg, eid, g, st["hubs"][k]["seat"], t0)
-                say(f"Fitz put {nm(eid)} on {nm(sid)}: concentric, "
-                    f"{'on the keyway, ' if sg.get('key_c') is not None else ''}{from_end(sg, t0)}")
+                on_shaft(sid, sg, eid, g, st["hubs"][k]["seat"], t0, **_how(st["hubs"][k]))
+                say(f"Fitz put {nm(eid)} on {nm(sid)}: concentric, " + _where(sg, st["hubs"][k], t0, ks, from_end))
                 if h.role == "gear":
-                    placed_gears.append((h, eid, 0.0))
+                    placed_gears.append((h, eid, round(math.degrees(fixings.signed_angle(e1, Xh, A)), 9)))
+                spans.append((t0, t0 + g["w"]))
         else:
             if not hubs:
                 drop_line(ln, [], "no_part_to_mount_shaft", f"no gear or hub goes on {sname}, so nothing locates it")
@@ -631,19 +803,24 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
             mesh_mates(hubs[0], gid, hg[0], partner)
             placed_gears.append((hubs[0], gid, ph))
             t0 = st["hubs"][0]["t0"]
-            G_loc = place_on_axis(sg["p"], sg["v"], xform.perp(sg["v"]), hg[0], t0)
+            # the shaft turns about its own axis so its keyseat lies under the gear's keyway (a plain gear: as before)
+            G_loc = place_on_axis(sg["p"], sg["v"], _keyed_x_local(sg, hg[0], t0), hg[0], t0)
             Ts = xform.orthonormalize(Tg @ xform.inv(G_loc))
             sid = add(su, Ts)
             hub_ids.append(gid)
-            on_shaft(sid, sg, gid, hg[0], st["hubs"][0]["seat"], t0)
-            say(f"Fitz put {nm(sid)} through {nm(gid)}: parallel to the input shaft, the gear {from_end(sg, t0)}")
+            on_shaft(sid, sg, gid, hg[0], st["hubs"][0]["seat"], t0, **_how(st["hubs"][0]))
+            say(f"Fitz put {nm(sid)} through {nm(gid)}: parallel to the input shaft, the gear "
+                + ("against the shoulder" if st["hubs"][0].get("how") == "shoulder" else from_end(sg, t0)))
+            spans.append((t0, t0 + hg[0]["w"]))
             P, V = xform.pt(Ts, sg["p"]), xform.unit(Ts[:3, :3] @ sg["v"])
             for k in range(1, len(hubs)):
                 t0 = st["hubs"][k]["t0"]
-                eid = add(hubs[k], place_on_axis(P, V, e1, hg[k], t0))
+                Xh, ks = _keyed_x(Ts, sg, hg[k], t0, e1)
+                eid = add(hubs[k], place_on_axis(P, V, Xh, hg[k], t0))
                 hub_ids.append(eid)
                 on_shaft(sid, sg, eid, hg[k], st["hubs"][k]["seat"], t0)
                 say(f"Fitz put {nm(eid)} on {nm(sid)} beside its gear: concentric, {from_end(sg, t0)}")
+                spans.append((t0, t0 + hg[k]["w"]))
         for b, pos in zip(ln["bearings"], st["bearings"], strict=False):
             bg = geo[id(b)]
             eid = add(b, place_on_axis(P, V, e1, bg, pos["t0"]))
@@ -651,6 +828,8 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
             where = {"shoulder": "against the shoulder", "end": "flush with the shaft end",
                      "gap": f"{BEARING_GAP:g} mm from the hub"}[pos["how"]]
             say(f"Fitz seated {nm(eid)} on the Ø{pos['seat']['d']:g} journal of {nm(sid)}, {where}")
+            spans.append((pos["t0"], pos["t0"] + bg["w"]))
+        turns_with = _fixings_on_line(root, doc, res, ln, sid, sg, spans, add, outcome, say)
         bprobs = [p for p in st["problems"] if p[0] in ("no_journal_for_bearing", "no_room_for_bearing")]
         for k, b in enumerate(ln["bearings"][len(st["bearings"]):]):
             code, text = bprobs[min(k, len(bprobs) - 1)] if bprobs else ("no_journal_for_bearing", "no journal for it")
@@ -662,8 +841,8 @@ def build(root: Path, doc: dict[str, Any], tr: Train, lay: dict[str, Any]) -> di
             nb = len(ln["bearings"])
             outcome("bearings_short", None, sid, f"{nm(sid)} has {nb or 'no'} bearing{'s' if nb != 1 else ''}: a shaft "
                                                  "needs two to be carried (add more bearings)", "info")
-        # motion: the shaft and its hubs turn about its axis; bearings stay with the ground
-        mine = [sid] + hub_ids
+        # motion: the shaft and its hubs (with their keys and rings) turn about its axis; bearings stay with the ground
+        mine = [sid] + hub_ids + turns_with
         jid = add_joint({"type": "revolute", "name": "Input shaft" if n == 0 else f"Shaft {n + 1}",
                          "p": [float(x) for x in P], "dir": [float(x) for x in V], "insts": mine})
         for i in mine:

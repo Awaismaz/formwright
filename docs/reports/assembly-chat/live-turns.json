@@ -1,0 +1,313 @@
+{
+ "aid": "a5be8be39ec0",
+ "shown_after_reload": [
+  "user",
+  "agent",
+  "user",
+  "agent",
+  "user",
+  "agent",
+  "user",
+  "agent",
+  "user",
+  "agent"
+ ],
+ "turns": [
+  {
+   "text": "make a stepped shaft Ø20 with a keyseat, then bring a spur gear m2 z40 and a key, then assemble them",
+   "wall_s": 22.689,
+   "server_s": 22.6,
+   "tokens": 3,
+   "offline": false,
+   "say": "I'll make a Ø20 stepped shaft with a keyseat, bring an m2 z40 spur gear and a parallel key sized from that shaft, then assemble the gear and key on its seat.",
+   "steps": [
+    {
+     "label": "Made Shaft Ø20",
+     "status": "ok",
+     "lines": [
+      "Made Shaft Ø20 as a new part in your workspace: built from its dimensions (no AI geometry) and passed the part checks",
+      "Assumed: journal length 16 mm (bearing 6204 width 14 + 2 mm); seat Ø 25 mm (assumed: a 2.5 mm shoulder for the bearing); collar Ø 30 mm (assumed: a 2.5 mm shoulder for the hub); hub width 20 mm (assumed); seat length 30 mm (hub width + 10 mm (assumed)); collar length 8 mm (assumed); end chamfer 1 mm (assumed); keyseat length 16 mm (DIN 6885 length, 4 mm shorter than the hub)",
+      "It is the base part, fixed at the origin."
+     ]
+    },
+    {
+     "label": "Brought Spur gear m2 z40, keyed 8×3.3",
+     "status": "ok",
+     "lines": [
+      "From the Toolbox, sized for Shaft Ø20: bore Ø25 = the shaft's keyed seat; hub keyway 8 × 3.3 (DIN 6885) for the keyseat; face width 20 covers the 16 mm key with 2 mm each side",
+      "Unplaced until it is mated."
+     ]
+    },
+    {
+     "label": "Brought Parallel key DIN 6885 A 8×7×16",
+     "status": "ok",
+     "lines": [
+      "From the Toolbox, sized for Shaft Ø20: 8 mm wide for the shaft's keyseat, 16 long",
+      "Unplaced until it is mated."
+     ]
+    },
+    {
+     "label": "Assembled 3 parts",
+     "status": "ok",
+     "lines": [
+      "Fitz put Spur gear m2 z40, keyed 8×3.3 on Shaft Ø20: concentric, keyway on the keyseat, against the shoulder",
+      "Fitz put Parallel key DIN 6885 A 8×7×16 in the 8×4 keyseat of Shaft Ø20: on the floor, centred on the keyseat",
+      "Shaft Ø20 has no bearings: a shaft needs two to be carried (add more bearings)"
+     ]
+    }
+   ],
+   "questions": [],
+   "state": "3 parts; 5 mates, all satisfied by the solver; nothing unplaced; clash check not run since the last change"
+  },
+  {
+   "text": "bring two 6204 bearings for that shaft and put them on",
+   "wall_s": 5.675,
+   "server_s": 5.4,
+   "tokens": 2,
+   "offline": false,
+   "say": "I'll bring two 6204 bearings sized for the Ø20 shaft journals and put them on the shaft.",
+   "steps": [
+    {
+     "label": "Brought 2 × Ball bearing 6204",
+     "status": "ok",
+     "lines": [
+      "From the Toolbox",
+      "Unplaced until they are mated."
+     ]
+    },
+    {
+     "label": "Mated 2 parts to Shaft Ø20",
+     "status": "ok",
+     "lines": [
+      "Fitz put Spur gear m2 z40, keyed 8×3.3 on Shaft Ø20: concentric, keyway on the keyseat, against the shoulder",
+      "Fitz seated Ball bearing 6204 #1 on the Ø20 journal of Shaft Ø20, against the shoulder",
+      "Fitz seated Ball bearing 6204 #2 on the Ø20 journal of Shaft Ø20, against the shoulder",
+      "Fitz put Parallel key DIN 6885 A 8×7×16 in the 8×4 keyseat of Shaft Ø20: on the floor, centred on the keyseat"
+     ]
+    }
+   ],
+   "questions": [],
+   "state": "5 parts; 9 mates, all satisfied by the solver; nothing unplaced; clash check not run since the last change"
+  },
+  {
+   "text": "make the gear 2 mm wider",
+   "wall_s": 20.512,
+   "server_s": 19.2,
+   "tokens": 1,
+   "offline": false,
+   "say": "I'll increase the gear's face width by 2 mm, from 20 to 22, keeping its mates, then recheck for clashes.",
+   "steps": [
+    {
+     "label": "Resized Spur gear m2 z40, keyed 8×3.3",
+     "status": "ok",
+     "lines": [
+      "Spur gear m2 z40, keyed 8×3.3: face width 20 → 22 mm, the part's own parameter; its mates are kept (2 references followed)"
+     ]
+    },
+    {
+     "label": "Checked the assembly",
+     "status": "ok",
+     "lines": [
+      "Interference: no clashes among 5 pairs (exact check on nominal geometry)",
+      "Clearance: 5 pairs in contact (seated faces)"
+     ]
+    }
+   ],
+   "questions": [],
+   "state": "5 parts; 9 mates, all satisfied by the solver; nothing unplaced; 0 clashes (exact check)"
+  },
+  {
+   "text": "check it for clashes and turn it through its range",
+   "wall_s": 7.654,
+   "server_s": 7.2,
+   "tokens": 1,
+   "offline": false,
+   "say": "I'll run the interference check and then turn the shaft through its range of motion.",
+   "steps": [
+    {
+     "label": "Checked the assembly",
+     "status": "ok",
+     "lines": [
+      "Interference: no clashes among 5 pairs (exact check on nominal geometry)",
+      "Motion: 24 steps through the range, no collisions"
+     ]
+    }
+   ],
+   "questions": [],
+   "state": "5 parts; 9 mates, all satisfied by the solver; nothing unplaced; 0 clashes (exact check)"
+  },
+  {
+   "text": "what is in it now, and is anything not held?",
+   "wall_s": 6.578,
+   "server_s": 6.3,
+   "tokens": 1,
+   "offline": false,
+   "say": "I'll describe what's in the assembly and how each part is held.",
+   "steps": [
+    {
+     "label": "The assembly now",
+     "status": "info",
+     "lines": [
+      "Shaft Ø20: fixed at the origin (the base)",
+      "Spur gear m2 z40, keyed 8×3.3: on Shaft Ø20",
+      "Parallel key DIN 6885 A 8×7×16: on Shaft Ø20",
+      "Ball bearing 6204 #1: on Shaft Ø20",
+      "Ball bearing 6204 #2: on Shaft Ø20",
+      "5 parts; 9 mates, all satisfied by the solver; nothing unplaced; 0 clashes (exact check)"
+     ]
+    }
+   ],
+   "questions": [],
+   "state": "5 parts; 9 mates, all satisfied by the solver; nothing unplaced; 0 clashes (exact check)"
+  }
+ ],
+ "instances": [
+  {
+   "id": "i1",
+   "name": "Shaft Ø20<1>",
+   "T": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+   ]
+  },
+  {
+   "id": "i2",
+   "name": "Spur gear m2 z40, keyed 8×3.3<1>",
+   "T": [
+    0,
+    -1,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    24.000000000002
+   ]
+  },
+  {
+   "id": "i3",
+   "name": "Parallel key DIN 6885 A 8×7×16<1>",
+   "T": [
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    8.5,
+    1,
+    0,
+    0,
+    36
+   ]
+  },
+  {
+   "id": "i12",
+   "name": "Ball bearing 6204<1>",
+   "T": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "id": "i13",
+   "name": "Ball bearing 6204<2>",
+   "T": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    54
+   ]
+  }
+ ],
+ "mates": [
+  {
+   "type": "concentric",
+   "a": "Shaft Ø20<1>",
+   "b": "Spur gear m2 z40, keyed 8×3.3<1>",
+   "status": "ok"
+  },
+  {
+   "type": "coincident",
+   "a": "Shaft Ø20<1>",
+   "b": "Spur gear m2 z40, keyed 8×3.3<1>",
+   "status": "ok"
+  },
+  {
+   "type": "concentric",
+   "a": "Shaft Ø20<1>",
+   "b": "Ball bearing 6204<1>",
+   "status": "ok"
+  },
+  {
+   "type": "coincident",
+   "a": "Shaft Ø20<1>",
+   "b": "Ball bearing 6204<1>",
+   "status": "ok"
+  },
+  {
+   "type": "concentric",
+   "a": "Shaft Ø20<1>",
+   "b": "Ball bearing 6204<2>",
+   "status": "ok"
+  },
+  {
+   "type": "coincident",
+   "a": "Shaft Ø20<1>",
+   "b": "Ball bearing 6204<2>",
+   "status": "ok"
+  },
+  {
+   "type": "coincident",
+   "a": "Shaft Ø20<1>",
+   "b": "Parallel key DIN 6885 A 8×7×16<1>",
+   "status": "ok"
+  },
+  {
+   "type": "coincident",
+   "a": "Shaft Ø20<1>",
+   "b": "Parallel key DIN 6885 A 8×7×16<1>",
+   "status": "ok"
+  },
+  {
+   "type": "concentric",
+   "a": "Shaft Ø20<1>",
+   "b": "Parallel key DIN 6885 A 8×7×16<1>",
+   "status": "ok"
+  }
+ ],
+ "analysis": 0
+}

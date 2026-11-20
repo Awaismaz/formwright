@@ -53,13 +53,13 @@ export function Section({ title, children, right, className }: { title: ReactNod
 }
 
 export function mm(v: number | null | undefined, digits = 2): string {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—";
+  if (v === null || v === undefined || Number.isNaN(v)) return "n/a";
   const s = v.toFixed(digits);
   return s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
 }
 
 export function grams(v: number | null | undefined): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "n/a";
   return v >= 1000 ? `${(v / 1000).toFixed(3)} kg` : `${v.toFixed(1)} g`;
 }
 

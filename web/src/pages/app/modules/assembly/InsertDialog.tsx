@@ -66,7 +66,7 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
                   </div>
                   <div className="p-2.5">
                     <div className="truncate text-[13px] font-semibold">{p.name}</div>
-                    <div className="flex items-center gap-1 truncate text-[11.5px] text-muted">{!p.verified && <Lock className="h-3 w-3" />}{p.verified ? (p.material ?? "—") : "No verified build"}</div>
+                    <div className="flex items-center gap-1 truncate text-[11.5px] text-muted">{!p.verified && <Lock className="h-3 w-3" />}{p.verified ? (p.material ?? "material not set") : "No verified build"}</div>
                   </div>
                 </button>
               ))}
@@ -82,7 +82,7 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
                     {list.map(c => (
                       <button key={c.code} type="button" onClick={() => pick(c)} data-tb={c.code}
                         className={cx("block w-full rounded px-2 py-1.5 text-left text-[13px]", code === c.code ? "bg-primary-soft font-medium text-primary" : "hover:bg-text/5")}>
-                        {c.name}<span className="ml-1 text-[11px] text-muted">{c.standard !== "—" ? c.standard : ""}</span>
+                        {c.name}<span className="ml-1 text-[11px] text-muted">{/^\w/.test(c.standard) ? c.standard : ""}</span>
                       </button>
                     ))}
                   </div>

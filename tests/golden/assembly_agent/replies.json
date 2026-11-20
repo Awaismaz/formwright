@@ -1,0 +1,251 @@
+{
+  "_note": "Recorded replies of the assembly agent (role assembly_agent), replayed by tests/test_assembly_agent.py through the stub provider, keyed by what the engineer says. The live conversation's per-turn results are in docs/reports/assembly-chat/live-turns.json.",
+  "make a stepped shaft Ø20 with a keyseat, then bring a spur gear m2 z40 and a key, then assemble them": {
+    "say": "I'll make the shaft with Ø20 journals and a keyed seat, bring a matching m2 z40 gear and its key, then put them together.",
+    "actions": [
+      {
+        "do": "make",
+        "kind": "shaft",
+        "name": "Stepped shaft",
+        "spec": {
+          "journal_d": 20,
+          "keyseat": true,
+          "groove": false,
+          "seat_d": null,
+          "collar_d": null,
+          "hub_width": null
+        },
+        "as": "$shaft"
+      },
+      {
+        "do": "bring",
+        "code": "spur_gear",
+        "params": {
+          "M": 2,
+          "Z": 40
+        },
+        "for": "$shaft",
+        "as": "$gear"
+      },
+      {
+        "do": "bring",
+        "code": "parallel_key",
+        "params": {},
+        "for": "$shaft",
+        "as": "$key"
+      },
+      {
+        "do": "assemble",
+        "parts": [
+          "$shaft",
+          "$gear",
+          "$key"
+        ]
+      }
+    ],
+    "questions": []
+  },
+  "bring two 6204 bearings for that shaft and put them on": {
+    "say": "Two 6204 bearings for the shaft's Ø20 journals, one on each side of the gear.",
+    "actions": [
+      {
+        "do": "bring",
+        "code": "bearing",
+        "params": {
+          "SERIES": 6204
+        },
+        "qty": 2,
+        "for": "i1",
+        "as": "$bearings"
+      },
+      {
+        "do": "mate",
+        "part": "$bearings",
+        "to": "i1",
+        "how": "bearing_journal"
+      }
+    ],
+    "questions": []
+  },
+  "make the gear 2 mm wider": {
+    "say": "I'll widen the gear by 2 mm; it stays against the collar.",
+    "actions": [
+      {
+        "do": "resize",
+        "part": "i2",
+        "param": "face width",
+        "by": 2
+      },
+      {
+        "do": "check",
+        "what": [
+          "interference"
+        ]
+      }
+    ],
+    "questions": []
+  },
+  "make a stepped shaft Ø20 with a keyseat and a circlip groove, and bring a gear m2 z40, a key, two 6204 bearings and a circlip for it": {
+    "say": "I'll make the shaft and bring the gear, key, bearings and circlip sized for it.",
+    "actions": [
+      {
+        "do": "make",
+        "kind": "shaft",
+        "name": "Output shaft",
+        "spec": {
+          "journal_d": 20,
+          "keyseat": true,
+          "groove": true
+        },
+        "as": "$s"
+      },
+      {
+        "do": "bring",
+        "code": "spur_gear",
+        "params": {
+          "M": 2,
+          "Z": 40
+        },
+        "for": "$s"
+      },
+      {
+        "do": "bring",
+        "code": "parallel_key",
+        "params": {},
+        "for": "$s"
+      },
+      {
+        "do": "bring",
+        "code": "bearing",
+        "params": {},
+        "qty": 2,
+        "for": "$s"
+      },
+      {
+        "do": "bring",
+        "code": "retaining_ring",
+        "params": {},
+        "for": "$s"
+      }
+    ],
+    "questions": []
+  },
+  "assemble everything": {
+    "say": "I'll assemble everything where it belongs and check for clashes.",
+    "actions": [
+      {
+        "do": "assemble",
+        "parts": "all"
+      },
+      {
+        "do": "check",
+        "what": [
+          "interference"
+        ]
+      }
+    ],
+    "questions": []
+  },
+  "bring two Ø20 shafts and a spur gear m2 z30": {
+    "say": "Two Ø20 shafts and an m2 z30 gear.",
+    "actions": [
+      {
+        "do": "bring",
+        "code": "shaft",
+        "params": {
+          "D": 20,
+          "L": 120
+        },
+        "qty": 2
+      },
+      {
+        "do": "bring",
+        "code": "spur_gear",
+        "params": {
+          "M": 2,
+          "Z": 30,
+          "BORE": 20
+        }
+      }
+    ],
+    "questions": []
+  },
+  "put the gear on a shaft": {
+    "say": "There are two shafts it could go on.",
+    "actions": [],
+    "questions": [
+      {
+        "id": "q1",
+        "question": "Which shaft does the gear go on?",
+        "options": [
+          "Shaft Ø20×120 with keyway #1",
+          "Shaft Ø20×120 with keyway #2"
+        ],
+        "default": null
+      }
+    ]
+  },
+  "Which shaft does the gear go on? Shaft Ø20×120 with keyway #2": {
+    "say": "On the second shaft, centred on its keyway.",
+    "actions": [
+      {
+        "do": "mate",
+        "part": "i3",
+        "to": "i2",
+        "how": "hub_fit"
+      }
+    ],
+    "questions": []
+  },
+  "make a spacer between the first bearing and the gear": {
+    "say": "I'll make a spacer that fills the gap between the first bearing and the gear, then check.",
+    "actions": [
+      {
+        "do": "make",
+        "kind": "spacer",
+        "spec": {
+          "bore": null,
+          "length": null,
+          "od": null
+        },
+        "between": [
+          "the first bearing",
+          "the gear"
+        ]
+      },
+      {
+        "do": "check",
+        "what": [
+          "interference"
+        ]
+      }
+    ],
+    "questions": []
+  },
+  "make a motor bracket that holds this shaft line": {
+    "say": "A bracket needs real design work: I'll hand it to the design agent with the sizes I know.",
+    "actions": [
+      {
+        "do": "make",
+        "kind": "other",
+        "name": "Motor bracket",
+        "brief": "A steel L-bracket 80 x 60 x 40 mm, 6 mm thick, with a 47 mm bore for a 6204 bearing in the upright leg and two M6 clearance holes in the base leg.",
+        "for": "i1"
+      }
+    ],
+    "questions": []
+  },
+  "Which shaft does Spur gear m2 z30 go on? Shaft Ø20×120 with keyway #1": {
+    "say": "On the first shaft, then.",
+    "actions": [
+      {
+        "do": "assemble",
+        "parts": "all",
+        "on": {
+          "Spur gear m2 z30": "Shaft Ø20×120 with keyway #1"
+        }
+      }
+    ],
+    "questions": []
+  }
+}
