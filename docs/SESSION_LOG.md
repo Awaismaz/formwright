@@ -4,7 +4,7 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
-## 2026-11-20 (c) — Assembly Studio as a one-window operation (ASM-OW-1..5, PD-240..244)
+## 2026-11-20 (c) — Assembly Studio as a one-window operation (ASM-028..5, PD-240..244)
 
 Founder complaint: "stepped splined shaft and a spur gear on it" made only the shaft; the gear went to the Design
 Studio, which asked its questions there; the gear then "failed verification because the fit on the spline can't be
