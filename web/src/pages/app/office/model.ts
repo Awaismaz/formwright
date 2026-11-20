@@ -18,14 +18,39 @@ export function fmtMinutes(min: number): string {
   return hh ? `${d} d ${hh} h` : `${d} d`;
 }
 
-/** An ETA range, never a single promise: "20–46 min", or "done" when nothing remains. */
+/** A range of minutes in words, never a single promise: "3 to 9 s", "20 to 46 min", "40 s to 2 min". */
+export function fmtRange(lo: number, hi: number): string {
+  const a = fmtMinutes(lo), b = fmtMinutes(hi);
+  if (a === b) return `about ${b}`;
+  const unit = (x: string) => /^\d+ (s|min)$/.exec(x)?.[1];
+  return unit(a) && unit(a) === unit(b) ? `${a.split(" ")[0]} to ${b}` : `${a} to ${b}`;
+}
+
+/** An ETA range, never a single promise: "20 to 46 min", or "done" when nothing remains. */
 export function fmtEta(e: { low_min: number; high_min: number } | null | undefined): string {
-  if (!e) return "—";
+  if (!e) return "not estimated";
   if (e.high_min <= 0) return "done";
-  const lo = fmtMinutes(e.low_min), hi = fmtMinutes(e.high_min);
-  if (lo === hi) return `≈ ${hi}`;
-  const m = /^(\d+) min$/.exec(lo);
-  return m && hi.endsWith(" min") && !hi.includes(" h ") ? `${m[1]}–${hi}` : `${lo}–${hi}`;
+  return fmtRange(e.low_min, e.high_min);
+}
+
+export type BuildPath = "toolbox" | "direct" | "template" | "agent";
+
+/** Mirrors estimates.estimate_range: [low, high] minutes for one ticket on its build path (the paths with no AI turn
+ * take seconds; the AI designer, assembly, drawing and DFM steps are complexity x rate, spread around it). */
+export function estimateRange(family: Family, complexity: number, path: BuildPath | null | undefined, k: Constants): [number, number] {
+  const fixed = path && path !== "agent" ? k.path_minutes?.[path] : undefined;
+  if (fixed) return [fixed[0], fixed[1]];
+  const mid = estimateMinutes(family, complexity, k);
+  const [a, b] = k.agent_spread ?? [1, 1];
+  return [Math.round(a * mid * 1000) / 1000, Math.round(b * mid * 1000) / 1000];
+}
+
+/** The build path of a plan part: the server's decision (``plan_estimate.paths``), else Toolbox for a standard part
+ * and the AI designer for the rest (until the interfaces are drawn). */
+export function partPath(p: { id: string; family: Family }, paths?: Record<string, string | null> | null): BuildPath {
+  const known = paths?.[p.id];
+  if (known === "toolbox" || known === "direct" || known === "template" || known === "agent") return known;
+  return p.family === "standard" ? "toolbox" : "agent";
 }
 
 export function clampComplexity(c: number, k: Constants): number {
@@ -75,27 +100,42 @@ export function workByAgent(tickets: Pick<Ticket, "specialist" | "estimate_min" 
   return out;
 }
 
-/** What approving this plan creates: ticket count, total estimate, the ETA range (nothing done yet) and the work per
- * agent. ``spec`` maps a part family to its designer (the server's `families`). */
-export function planPreview(plan: Plan, k: Constants, concurrency: number, threads?: Threads | null, spec?: (f: Family) => string) {
-  let total = 0, cpMax = 0, tickets = 0;
-  const work: Record<string, number> = {}, parts: Record<string, number> = {};
-  const add = (c: string, m: number, part = false) => { work[c] = (work[c] ?? 0) + m; if (part) parts[c] = (parts[c] ?? 0) + 1; };
+/** What approving this plan creates: ticket count, total estimate (a range), the ETA range (nothing done yet) and the
+ * work per agent. ``spec`` maps a part family to its designer (the server's `families`); ``paths`` is the server's
+ * build path per plan part (``plan_estimate.paths``). Mirrors service.plan_estimate. */
+export function planPreview(plan: Plan, k: Constants, concurrency: number, threads?: Threads | null, spec?: (f: Family) => string,
+  paths?: Record<string, string | null> | null) {
+  const tot = [0, 0], cpMax = [0, 0];
+  let tickets = 0;
+  const work: [Record<string, number>, Record<string, number>] = [{}, {}];
+  const parts: Record<string, number> = {};
+  const add = (c: string, r: [number, number]) => { for (const e of [0, 1]) work[e]![c] = (work[e]![c] ?? 0) + r[e]!; };
   for (const s of plan.subassemblies) {
-    let sub = 0, longest = 0;
+    const sub = [0, 0], longest = [0, 0];
     for (const p of s.parts) {
-      const est = p.family === "standard" ? estimateMinutes("standard", 1, k) : estimateMinutes(p.family, p.complexity, k);
-      sub += est; longest = Math.max(longest, est); tickets += 1;
-      add(spec ? spec(p.family) : "mill", est, true);
+      const r = estimateRange(p.family, p.family === "standard" ? 1 : p.complexity, partPath(p, paths), k);
+      for (const e of [0, 1]) { sub[e]! += r[e]!; longest[e] = Math.max(longest[e]!, r[e]!); }
+      tickets += 1;
+      const who = spec ? spec(p.family) : "mill";
+      add(who, r); parts[who] = (parts[who] ?? 0) + 1;
     }
-    const integ = estimateMinutes("integration", integrationComplexity(s.parts.length, k), k);
-    total += sub + integ; tickets += 1; add("fitz", integ);
-    cpMax = Math.max(cpMax, integ + longest);
+    const integ = estimateRange("integration", integrationComplexity(s.parts.length, k), null, k);
+    for (const e of [0, 1]) { tot[e]! += sub[e]! + integ[e]!; cpMax[e] = Math.max(cpMax[e]!, integ[e]! + longest[e]!); }
+    tickets += 1; add("fitz", integ);
   }
-  const final = estimateMinutes("integration", integrationComplexity(plan.subassemblies.length, k), k);
-  total += final; tickets += 1; add("fitz", final);
-  const cp = final + cpMax;
-  return { tickets, estimate_min: Math.round(total * 10) / 10, eta: etaRange(cp, total, work, concurrency, threads, k), work, parts };
+  const final = estimateRange("integration", integrationComplexity(plan.subassemblies.length, k), null, k);
+  for (const e of [0, 1]) tot[e]! += final[e]!;
+  add("fitz", final);
+  tickets += 1;
+  const lo = etaRange(final[0] + cpMax[0]!, tot[0]!, work[0], concurrency, threads, k);
+  const hi = etaRange(final[1] + cpMax[1]!, tot[1]!, work[1], concurrency, threads, k);
+  const mid: Record<string, number> = {};
+  for (const c of new Set([...Object.keys(work[0]), ...Object.keys(work[1])])) mid[c] = ((work[0][c] ?? 0) + (work[1][c] ?? 0)) / 2;
+  return {
+    tickets, estimate_min: Math.round((tot[0]! + tot[1]!) / 2 * 10) / 10,
+    estimate_lo: Math.round(tot[0]! * 100) / 100, estimate_hi: Math.round(tot[1]! * 100) / 100,
+    eta: { low_min: lo.low_min, high_min: hi.high_min }, work: mid, parts,
+  };
 }
 
 export interface Lane { item: Item | null; id: string; name: string; tickets: Ticket[] }

@@ -45,6 +45,12 @@ class MatchIn(BaseModel):
     prompt: str
 
 
+class TemplateIn(BaseModel):
+    template_id: str
+    values: dict[str, float] = {}
+    name: str | None = None
+
+
 class StepIn(BaseModel):
     filename: str
     data_b64: str
@@ -100,7 +106,7 @@ async def install_model(p: Project, ctx: Ctx, source: str, strict: bool, note: s
     notify_revision(ctx.db, p, rev, ctx.user, note.replace("**", ""))
     schedule_finalize(p, ws, rev)
     if s:
-        s.publish({"type": "text", "text": f"{note} (revision {rev}, no AI used)."})
+        s.publish({"type": "text", "text": f"{note.replace('**', '')} (revision {rev}, no AI used)."})
     return {"ok": True, "status_ok": st.get("ok"), "revision": rev, "build_s": st.get("timings_s", {}).get("total_s"),
             "checks": st.get("checks", [])}
 
@@ -116,6 +122,48 @@ async def insert_toolbox(project_id: str, body: InsertIn, ctx: Ctx = Depends(ver
     res = await install_model(p, ctx, src, strict=True, note=f"Created **{title}** from the Toolbox")
     audit(ctx.db, "project.toolbox_inserted", ctx.user, p.org_id, target=p.id, code=body.code)
     track(ctx.db, "toolbox_used", ctx.user, p.org_id, code=body.code)
+    ctx.db.commit()
+    return {**res, "title": title}
+
+
+# ----------------------------------------------------------------------------- workspace part templates (WORKLIST 48)
+def _office_root(ctx: Ctx) -> Path:
+    """The organisation's Design Office root, where its part templates are kept (tenant scoped by the org id)."""
+    from aicad.office import store as ostore
+    from aicad.platform.config import get_settings
+
+    return ostore.org_root(get_settings().data_dir, ctx.require_org().id)
+
+
+@router.get("/part-templates")
+def part_templates(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The workspace's part templates for the Studio Toolbox (kept in the Design Office from parts that passed), with
+    their editable parameters. Only this organisation's."""
+    from aicad.office import templates
+
+    return {"items": [templates.studio_view(r) for r in templates.load_all(_office_root(ctx))]}
+
+
+@router.post("/projects/{project_id}/part-template")
+async def insert_part_template(project_id: str, body: TemplateIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Start a Studio part from a workspace template: its model script with the engineer's values, built and checked
+    like a Toolbox part (no AI). The previous model stays in the revision history."""
+    from aicad.office import templates
+
+    p = _project(ctx, project_id)
+    root = _office_root(ctx)
+    rec = templates.get(root, body.template_id)
+    if rec is None:
+        raise HTTPException(404, "Template not found")
+    title = (body.name or rec["name"]).strip()[:120] or rec["name"]
+    try:
+        src = templates.studio_source(rec, body.values, title)
+    except templates.TemplateError as e:
+        raise HTTPException(422, str(e)) from None
+    res = await install_model(p, ctx, src, strict=True, note=f"Started from the workspace template **{rec['name']}**")
+    templates.note_use(root, rec["id"])
+    audit(ctx.db, "project.template_inserted", ctx.user, p.org_id, target=p.id, template=rec["id"])
+    track(ctx.db, "template_used", ctx.user, p.org_id, family=rec.get("family"))
     ctx.db.commit()
     return {**res, "title": title}
 

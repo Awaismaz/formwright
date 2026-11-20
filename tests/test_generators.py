@@ -218,12 +218,25 @@ def test_pulleys_coupling_and_pillow_blocks(tmp_path: Path) -> None:
     assert st["fingerprint"]["volume"] == pytest.approx(v, rel=1e-6)
     for name in ("Drive pillow block", "Base plate"):
         assert direct.plan(doc, _t(doc, name))["path"] == "direct"
-    # the motor coupling: the layout states the Ø20 and Ø14 bores each through the whole coupling, which no stepped
-    # bore can satisfy: said, not built (a layout finding); with one bore size it is a rigid sleeve, built direct
+    # the motor coupling (finding G1, fixed in office-polish2): the layout gives each bore its own half, Ø20 from one
+    # end face to the middle of the gap and Ø14 from the other end to the middle, so the stepped coupling is built
+    # direct and passes conformance. Coupling Ø50 x 62 (2 x 30 engagement + 2 gap): by hand
+    # V = π (25² x 62 - 10² x 31 - 7² x 31) = π x 34131
     md = _graph_doc(G2 / "motor_drive.json")
+    cid = _id(md, "Coupling")
+    spans = sorted((f["data"]["d"], f["data"]["bore_z"]) for f in md["icd"]["interfaces"]
+                   if f["kind"] == "shaft_bore" and f["a"]["item"] == cid)
+    assert [d for d, _z in spans] == [14.0, 20.0] and spans[0][1][1] == spans[1][1][0]  # they meet in the middle
+    c = direct.plan(md, _t(md, "Coupling"))
+    assert c["path"] == "direct" and "bores Ø20 / Ø14" in c["summary"], c.get("reasons")
+    st, _res, _src = _gate(tmp_path, md, "Coupling")
+    assert st["fingerprint"]["volume"] == pytest.approx(math.pi * (25 ** 2 * 62 - 10 ** 2 * 31 - 7 ** 2 * 31), rel=1e-6)
+    # an older ICD that still states both bores through: said, not built (the generator's guard stays)
+    md = _graph_doc(G2 / "motor_drive.json")
+    for f in md["icd"]["interfaces"]:
+        f["data"].pop("bore_z", None)
     c = direct.plan(md, _t(md, "Coupling"))
     assert c["path"] == "agent" and "bores of two sizes" in c["reasons"][0]
-    cid = _id(md, "Coupling")
     for f in md["icd"]["interfaces"]:
         if f["kind"] == "shaft_bore" and cid in (f["a"]["item"], f["b"]["item"]):
             f["data"]["d"] = 20.0

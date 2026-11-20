@@ -203,7 +203,8 @@ function LooksCard({ looks }: { looks: NonNullable<LiveAssembly["looks"]> }) {
   return <Card className="p-3" data-program-looks>
     {looks.length > 1 && <div className="mb-2 flex flex-wrap gap-1">{looks.map((l, k) => (
       <button key={`${l.level}-${k}`} onClick={() => setSel(k)} className={cx("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]",
-        k === sel ? "border-primary/50 bg-primary-soft" : "border-border text-muted hover:text-text")}>{l.name.replace(/^Assemble /, "")}<VerdictBadge v={l.verdict} /></button>))}</div>}
-    <VisualCheck rec={cur} image={cur.image} compact />
+        k === sel ? "border-primary/50 bg-primary-soft" : "border-border text-muted hover:text-text")} data-look-superseded={l.superseded ? "1" : undefined}>{l.name.replace(/^Assemble /, "")}{l.superseded ? <Badge tone="neutral">Superseded</Badge> : <VerdictBadge v={l.verdict} />}</button>))}</div>}
+    {cur.superseded && <p className="mb-1.5 rounded border border-border bg-panel2 px-2 py-1 text-[11.5px] text-muted" data-look-superseded-note>{cur.superseded}</p>}
+    <VisualCheck rec={cur.superseded ? { ...cur, verdict: null } : cur} image={cur.image} compact />
   </Card>;
 }

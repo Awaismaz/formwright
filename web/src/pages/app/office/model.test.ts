@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, etaRange, fixLines, fmtEta, fmtMinutes, laneBound, orchestratorLabel, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
+import { assignable, boardLanes, budgetTone, canDrop, estimateMinutes, estimateRange, etaRange, fixLines, fmtEta, fmtMinutes, laneBound, orchestratorLabel, partPath, planPreview, progressAfterMove, recentHandoffs, runChip } from "./model";
 import type { Constants, Item, Plan, Ticket } from "./types";
 
 // Same numbers as src/aicad/office/estimates.py (the server sends them as `constants`).
 const K: Constants = {
-  minutes_per_unit: { machined: 4, turned: 3.5, gear: 4, sheet: 4.5, plastic: 5, standard: 0.5, integration: 3, drawings: 0.5, dfm: 0.5 },
+  minutes_per_unit: { machined: 1.2, turned: 1.1, gear: 1.2, sheet: 1.4, plastic: 1.5, standard: 0.05, integration: 0.25, drawings: 0.1, dfm: 0.1 },
   complexity: [1, 5], default_concurrency: 3, eta_factors: [0.8, 1.3],
+  path_minutes: { toolbox: [0.02, 0.1], direct: [0.05, 0.15], template: [0.1, 0.35] }, agent_spread: [0.6, 1.5],
   milestones: [{ code: "brief_read", label: "Brief read", weight: 5 }, { code: "first_build", label: "First build", weight: 35 },
     { code: "gates_pass", label: "Gating checks pass", weight: 70 }, { code: "self_review", label: "Self-review", weight: 85 },
     { code: "approved", label: "Approved", weight: 100 }],
@@ -21,17 +22,25 @@ describe("formatting", () => {
     expect(fmtMinutes(60 * 27)).toBe("1 d 3 h");
   });
   it("formats ETA ranges", () => {
-    expect(fmtEta({ low_min: 20, high_min: 45.7 })).toBe("20–46 min");
+    expect(fmtEta({ low_min: 20, high_min: 45.7 })).toBe("20 to 46 min");
+    expect(fmtEta({ low_min: 0.3, high_min: 1.8 })).toBe("18 s to 2 min");
+    expect(fmtEta({ low_min: 0.05, high_min: 0.15 })).toBe("3 to 9 s");
     expect(fmtEta({ low_min: 0, high_min: 0 })).toBe("done");
-    expect(fmtEta(null)).toBe("—");
+    expect(fmtEta(null)).toBe("not estimated");
   });
 });
 
 describe("plan preview mirrors the server", () => {
   it("estimates per ticket", () => {
-    expect(estimateMinutes("machined", 3, K)).toBe(12);
-    expect(estimateMinutes("turned", 2, K)).toBe(7);
-    expect(estimateMinutes("machined", 9, K)).toBe(20);
+    expect(estimateMinutes("machined", 3, K)).toBe(3.6);
+    expect(estimateMinutes("turned", 2, K)).toBe(2.2);
+    expect(estimateMinutes("machined", 9, K)).toBe(6);
+    // the build path decides the range: seconds from the Toolbox and the interfaces, minutes for the AI designer
+    expect(estimateRange("machined", 3, "direct", K)).toEqual([0.05, 0.15]);
+    expect(estimateRange("standard", 1, "toolbox", K)).toEqual([0.02, 0.1]);
+    expect(estimateRange("machined", 3, "agent", K)).toEqual([2.16, 5.4]);
+    expect(partPath({ id: "p9", family: "standard" }, null)).toBe("toolbox");
+    expect(partPath({ id: "p1", family: "machined" }, { p1: "direct" })).toBe("direct");
   });
   it("matches service.plan_estimate on the same plan", () => {
     const plan: Plan = { source: "standard", summary: "", assumptions: [], subassemblies: [
@@ -40,8 +49,12 @@ describe("plan preview mirrors the server", () => {
         { id: "p2", name: "Bolt", family: "standard", complexity: 1, qty: 4, description: "" }] },
       { id: "s2", name: "B", description: "", parts: [{ id: "p3", name: "Shaft", family: "turned", complexity: 2, qty: 1, description: "" }] },
     ] };
-    // server: {'tickets': 6, 'estimate_min': 28.5, 'eta': {'low_min': 14.4, 'high_min': 35.8}}
-    expect(planPreview(plan, K, 3)).toMatchObject({ tickets: 6, estimate_min: 28.5, eta: { low_min: 14.4, high_min: 35.8 } });
+    // server, direct path off: {'tickets': 6, 'estimate_lo': 3.95, 'estimate_hi': 9.93, 'eta': {'low_min': 2.0, 'high_min': 12.3}}
+    expect(planPreview(plan, K, 3)).toMatchObject({ tickets: 6, estimate_lo: 3.95, estimate_hi: 9.93, eta: { low_min: 2, high_min: 12.3 } });
+    // server, direct path on: the plate and the shaft are built from the interfaces (paths from plan_estimate)
+    const d = planPreview(plan, K, 3, null, undefined, { p1: "direct", p2: "toolbox", p3: "direct" });
+    expect(d).toMatchObject({ tickets: 6, estimate_lo: 0.57, eta: { low_min: 0.3, high_min: 1.8 } });
+    expect(d.estimate_hi).toBeCloseTo(1.525, 1);  // the server rounds 1.525 to 1.52, this side to 1.53
   });
 });
 

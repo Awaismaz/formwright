@@ -151,15 +151,18 @@ def layout_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, An
     return text, acts
 
 
-async def layout_look(root: Path, pid: str, *, org_id: str, user_id: str, god: bool, mode: str) -> dict | None:
+async def layout_look(root: Path, pid: str, *, org_id: str, user_id: str, god: bool, mode: str,
+                      revised: str | None = None) -> dict | None:
     """(a) Look at the drafted layout and tell the engineer in the program chat. ``mode``: "ai" (a metered visual
     check), "simulated" (development: free, from the quick checks) or "none" (no AI for this account: the measured
-    checks still speak). Never raises."""
+    checks still speak). ``revised``: the revision (``REV-n``) whose new layout this is; the ICD may be approved then,
+    and the look replaces the one taken at the gate (which is superseded). Never raises."""
     from aicad.assembly import render, visual
 
     try:
         doc = store.load(root, pid)
-        if doc is None or not doc.get("skeleton") or (doc.get("icd") or {}).get("status") != "draft":
+        if doc is None or not doc.get("skeleton") or (
+                (doc.get("icd") or {}).get("status") != "draft" and not revised):
             return None
         sk, ifs = doc["skeleton"], doc["icd"]["interfaces"]
         q = await asyncio.to_thread(visual.quick_skeleton, sk, ifs)
@@ -173,10 +176,11 @@ async def layout_look(root: Path, pid: str, *, org_id: str, user_id: str, god: b
             notes = [f["text"] for f in q["findings"] if f["severity"] == "note"]
             rec = await visual.look(scene, rels, folder, brief=doc["brief"], notes=notes,
                                     budget_usd=None if budget is False else budget, simulated=simulated, quick=q)
-            rec.update(quick=q["findings"], level="layout", name="Layout")
+            rec.update(quick=q["findings"], level="layout", name="Layout",
+                       icd_version=int((doc.get("icd") or {}).get("version") or 1), revision=revised)
             visual.store_record(folder, rec)
             _charge(root, pid, org_id, user_id, int(rec.get("tokens") or 0), god, "Archie's look at the layout")
-        text, acts = layout_message(doc, q, rec)
+        text, acts = revised_message(doc, q, rec, revised) if revised else layout_message(doc, q, rec)
         with store.lock(pid):
             d = store.load(root, pid)
             if d is not None and d.get("icd"):
@@ -193,6 +197,99 @@ async def layout_look(root: Path, pid: str, *, org_id: str, user_id: str, god: b
     except Exception:
         log.warning("layout look failed", exc_info=True)
         return None
+
+
+def revised_message(doc: dict[str, Any], quick: dict[str, Any], rec: dict[str, Any] | None, rid: str
+                    ) -> tuple[str, list[dict[str, Any]]]:
+    """Archie's words after looking at the layout a revision made (pure). No offers: the revision is the change, and
+    the levels are looked at again as Fitz assembles them."""
+    from aicad.assembly import visual
+
+    v = int((doc.get("icd") or {}).get("version") or 1)
+    tag = f"{rid}, ICD v{v}" if rid.startswith("REV-") else f"ICD v{v}"
+    found = [f["text"] for f in quick.get("findings") or [] if f.get("severity") == "block"]
+    verdict = (rec or {}).get("verdict")
+    vline = visual.summary_line(verdict) if verdict else ""
+    if not found and (verdict is None or verdict["overall"] == "looks_assembled"):
+        return (f"I looked at the revised layout of {doc['name']} ({tag}): the parts are placed where they "
+                "connect and the placement checks pass." + (f" {vline}" if vline else "")
+                + " The look taken at the interfaces gate is superseded.", [])
+    lines = found[:5] + ([vline] if vline and verdict and verdict["overall"] != "looks_assembled" else [])
+    return (f"I looked at the revised layout of {doc['name']} ({tag}). It doesn't look right yet:\n"
+            + "\n".join(f"- {x}" for x in lines)
+            + "\n\nAsk me in the chat to revise it again, or tell me what should carry what.", [])
+
+
+def _layout_superseded(doc: dict[str, Any], rec: dict[str, Any]) -> str | None:
+    """Why the layout look no longer describes the program (None while it does): it was taken on an older ICD
+    version (a revision made a new layout). Records from before the version stamp compare their time with the
+    latest revision's."""
+    v = int((doc.get("icd") or {}).get("version") or 1)
+    revs = [r for r in doc.get("revisions") or [] if r.get("status") in ("applied", "undone")]
+    rv = rec.get("icd_version")
+    if rv is not None:
+        if int(rv) == v:
+            return None
+    elif not revs or str(rec.get("at") or "") >= str(revs[-1].get("at") or ""):
+        return None
+    last = revs[-1] if revs else None
+    by = f"{last['id']} (ICD v{v})" if last else f"ICD v{v}"
+    return f"Superseded by {by}: this look is of the earlier layout."
+
+
+def _intent_changed(doc: dict[str, Any], t: dict[str, Any], rec: dict[str, Any]) -> bool:
+    """The level's look was judged against a relation today's layout no longer states (a revision, or a relation
+    that never applied: "the other parts mount on Table top" for a level holding the table top alone)."""
+    from aicad.assembly import visual
+
+    then = {str(r.get("text")) for r in rec.get("relations_in") or [] if isinstance(r, dict)}
+    if not then:
+        return False
+    now = {r["text"] for r in visual.relations_from_skeleton(_level_skeleton(doc, t), _level_ifaces(doc, t),
+                                                             str(doc.get("brief") or ""))}
+    return bool(then - now)
+
+
+def looks(root: Path, aroot: Path, pid: str, doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """The latest visual check of the layout and of each integration level (advisory, PD-73), newest level last.
+    A look that no longer describes the program is marked ``superseded`` (with the reason) and never shows its
+    old verdict as current: the layout look after a revision (a new one is taken of the revised layout), and a
+    level's look once the level runs again (revision, retry, reopen) or its assembly changed since the look."""
+    from aicad.assembly import service as aservice
+    from aicad.assembly import store as astore
+    from aicad.assembly import visual
+
+    out: list[dict[str, Any]] = []
+    raw = visual.load_record(store.program_dir(root, pid) / "visual" / "layout")
+    lay = visual.public(raw)
+    if lay and raw is not None:
+        out.append({**lay, "level": "layout", "name": "Layout (interfaces gate)" if not raw.get("revision")
+                    else f"Layout ({raw['revision']})", "superseded": _layout_superseded(doc, raw),
+                    "image": f"/api/office/programs/{pid}/visual/layout.png" if lay.get("status") == "done" else None})
+    for t in doc.get("tickets") or []:
+        if t["kind"] != "integration" or not t.get("assembly_id"):
+            continue
+        raw = visual.load_record(astore.doc_dir(aroot, t["assembly_id"]) / "visual")
+        rec = visual.public(raw)
+        if not rec or raw is None:
+            continue
+        sup = None
+        if not t.get("look"):  # the level runs again (or never finished its look): the old picture is history
+            running = (t.get("run") or {}).get("status") == "integrating"
+            sup = (f"Superseded: {t['title'].removeprefix('Assemble ')} is being assembled again"
+                   if running else f"Superseded: {t['title'].removeprefix('Assemble ')} runs again") \
+                + "; Fitz looks again once it is assembled."
+        elif _intent_changed(doc, t, raw):
+            sup = ("Superseded: this look judged the level against relations the program no longer has; Fitz "
+                   "looks again when the level next runs.")
+        elif raw.get("signature"):
+            adoc = astore.load(aroot, t["assembly_id"])
+            if adoc is not None and adoc.get("instances") and aservice.geometry_signature(adoc) != raw["signature"]:
+                sup = "Superseded: the assembly changed since this look."
+        out.append({**rec, "level": t["item_id"], "name": t["title"], "superseded": sup,
+                    "image": f"/api/m/assembly/assemblies/{t['assembly_id']}/visual.png"
+                    if rec.get("status") == "done" else None})
+    return out
 
 
 # ----------------------------------------------------------------------------- (b) after an integration step
@@ -217,7 +314,8 @@ async def level_look(root: Path, pid: str, tid: str, aroot: Path, aid: str, *, o
         simulated = mode == "simulated"
         budget = _budget(org_id, god) if mode == "ai" else None
         folder = astore.doc_dir(aroot, aid) / "visual"
-        if visual.enabled() and mode != "none" and (simulated or budget is not False):
+        if visual.enabled() and mode != "none" and (simulated or budget is not False) and rels:
+            # (no relations: one part alone in its level, nothing to judge; the quick checks still speak)
             scene = await asyncio.to_thread(render.scene_from_doc, aroot, adoc, t["title"])
             rec = await visual.look(scene, rels, folder, brief=doc["brief"], simulated=simulated, quick=q,
                                     budget_usd=None if budget is False else budget)

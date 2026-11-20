@@ -10,6 +10,7 @@ Callers hold ``store.lock(program_id)`` around load -> change -> save.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import re
 import threading
@@ -17,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from aicad.office import OfficeInputError, estimates, planner, roster, store
+
+log = logging.getLogger("aicad.office.service")
 
 COLUMNS: list[tuple[str, str]] = [
     ("backlog", "Backlog"), ("ready", "Ready"), ("in_design", "In design"), ("in_review", "In review"),
@@ -172,12 +175,82 @@ def gate(doc: dict[str, Any], code: str) -> dict[str, Any]:
 
 
 def plan_estimate(plan: dict[str, Any], concurrency: int, rates: dict[str, float] | None = None,
-                  threads: dict[str, int] | None = None) -> dict[str, Any]:
-    """Estimates for a plan that has no tickets yet (plan review shows what approval will create)."""
-    items, tickets = _build(plan, "Program", "P", rates=rates)
+                  threads: dict[str, int] | None = None, brief: str = "", direct_on: bool = True) -> dict[str, Any]:
+    """Estimates for a plan that has no tickets yet (plan review shows what approval will create), each part on the
+    build path it will take (``paths``: plan part id -> toolbox / direct / agent)."""
+    items, tickets = _build(plan, "Program", "P", brief, rates=rates, direct_on=direct_on)
     total = sum(t["estimate_min"] for t in tickets)
+    by_item = {f"i_{sb['id']}_{q['id']}": q["id"] for sb in plan.get("subassemblies") or [] for q in sb["parts"]}
+    paths = {by_item[t["item_id"]]: t.get("estimate_path") for t in tickets if t["item_id"] in by_item}
     return {"tickets": len(tickets), "estimate_min": round(total, 1),
-            "eta": estimates.eta(items, tickets, "root", concurrency, threads)}
+            "estimate_lo": round(sum(float(t.get("estimate_lo") or t["estimate_min"]) for t in tickets), 2),
+            "estimate_hi": round(sum(float(t.get("estimate_hi") or t["estimate_min"]) for t in tickets), 2),
+            "paths": paths, "eta": estimates.eta(items, tickets, "root", concurrency, threads)}
+
+
+_PATH_CACHE: dict[str, dict[str, str]] = {}
+
+
+def decided_paths(plan: dict[str, Any], name: str, brief: str, items: list[dict[str, Any]],
+                  tickets: list[dict[str, Any]]) -> dict[str, str]:
+    """{item id: "direct" | "agent"} for the designed parts, from the direct builder's own decision on the layout this
+    plan gives (``interfaces._rebuild`` as drafted, ``direct.plan``): the build path a part will really take, before
+    the engineer approves anything. {} when the layout can't be drafted yet. Cached per plan and brief."""
+    import hashlib
+    import json
+
+    from aicad.office import direct, interfaces
+
+    key = hashlib.sha1(json.dumps([plan, brief], sort_keys=True, default=str).encode()).hexdigest()
+    if key in _PATH_CACHE:
+        return _PATH_CACHE[key]
+    tmp: dict[str, Any] = {"name": name, "brief": brief, "plan": plan, "items": items, "tickets": tickets}
+    out: dict[str, str] = {}
+    try:
+        sk, ifs = interfaces._rebuild(tmp, {})
+        tmp.update(skeleton=sk, icd={"version": 1, "status": "approved", "interfaces": ifs, "overrides": {}})
+        for t in tickets:
+            if t["kind"] == "part":
+                out[t["item_id"]] = "direct" if direct.plan(tmp, t)["path"] == "direct" else "agent"
+    except Exception:  # a plan the layout can't draft yet: the paths stay predicted
+        log.debug("decided paths: layout not drafted", exc_info=True)
+        out = {}
+    if len(_PATH_CACHE) > 256:
+        _PATH_CACHE.clear()
+    _PATH_CACHE[key] = out
+    return out
+
+
+def reestimate(root: Path | None, doc: dict[str, Any]) -> int:
+    """At ICD approval: every part ticket not started yet gets the estimate of the path the office will really
+    take (Toolbox, built from the interfaces, a workspace template, or the AI designer). Returns how many changed."""
+    from aicad.office import direct
+
+    rates = rates_of(doc)
+    on = direct.enabled(doc)
+    n = 0
+    for t in doc.get("tickets") or []:
+        if t["kind"] not in ("part", "standard") or t["column"] not in ("ready", "backlog") or \
+                (t.get("run") or {}).get("status"):
+            continue
+        path = "toolbox" if t["kind"] == "standard" else "agent"
+        if t["kind"] == "part" and on:
+            try:
+                dp = direct.plan(doc, t)
+                path = "direct" if dp["path"] == "direct" else "agent"
+                if path == "agent" and root is not None:
+                    from aicad.office import templates
+
+                    tp = templates.plan(root, doc, t, dp)
+                    if tp is not None and tp.get("path") == "direct":
+                        path = "template"
+            except Exception:  # an incomplete ICD entry: the designer path, as the office would
+                log.debug("re-estimate: direct plan failed", exc_info=True)
+                path = "agent"
+        before = (t.get("estimate_path"), t.get("estimate_min"))
+        estimates.apply_estimate(t, path, rates)
+        n += before != (t.get("estimate_path"), t.get("estimate_min"))
+    return n
 
 
 def default_threads() -> dict[str, int]:
@@ -210,7 +283,8 @@ def _ticket_brief(program: str, brief: str, sub: str, part: dict[str, Any]) -> s
 
 
 def _build(plan: dict[str, Any], name: str, prefix: str, brief: str = "",
-           rates: dict[str, float] | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+           rates: dict[str, float] | None = None, direct_on: bool | None = None
+           ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     items: list[dict[str, Any]] = [{"id": "root", "parent_id": None, "kind": "program", "name": name}]
     tickets: list[dict[str, Any]] = []
     seq = [0]
@@ -249,6 +323,24 @@ def _build(plan: dict[str, Any], name: str, prefix: str, brief: str = "",
            estimates.integration_complexity(len(plan["subassemblies"])), 1,
            f"Bring the sub-assemblies of {name} together and check the whole product for clashes.", "backlog",
            sub_integrations)
+    # each ticket's estimate on the path it will take (PD-190): the direct builder's decision on the drafted layout
+    # where it can be drafted, else the prediction from the part; the ICD approval sets the final one
+    if direct_on is None:
+        from aicad.office import direct
+
+        direct_on = direct.enabled({})
+    decided = decided_paths(plan, name, brief, items, tickets) if direct_on else {}
+    meta = {it["id"]: it for it in items}
+    for t in tickets:
+        if t["kind"] == "part":
+            it = meta.get(t["item_id"]) or {}
+            path = decided.get(t["item_id"]) or estimates.predict_path(
+                t["family"], str(it.get("name") or t["title"]), str(it.get("description") or ""), direct_on)
+        elif t["kind"] == "standard":
+            path = "toolbox"
+        else:
+            path = None
+        estimates.apply_estimate(t, path, rates)
     return items, tickets
 
 
@@ -374,6 +466,8 @@ def add_deliverables(root: Path, doc: dict[str, Any]) -> list[dict[str, Any]]:
              "deliverable": code, "title": title, "brief": brief, "family": code,
              "specialist": roster.specialist_for(code), "complexity": cx,
              "estimate_min": estimates.estimate_minutes(code, cx, rates_of(doc)), "qty": 1, "column": "ready",
+             "estimate_lo": estimates.estimate_range(code, cx, None, rates_of(doc))[0],
+             "estimate_hi": estimates.estimate_range(code, cx, None, rates_of(doc))[1],
              "milestones": [], "progress": 0, "project_id": None, "assembly_id": None,
              "depends_on": [final["id"]] if final else [], "comments": [], "checks": None, "tokens": 0, "run": None,
              "created_at": store.now(), "updated_at": store.now()}
@@ -483,7 +577,8 @@ def update(root: Path, doc: dict[str, Any], tid: str, actor: dict[str, Any], *, 
     if complexity is not None:
         cx = estimates.clamp_complexity(complexity)
         if cx != t["complexity"]:
-            t["complexity"], t["estimate_min"] = cx, estimates.estimate_minutes(t["family"], cx, rates_of(doc))
+            t["complexity"] = cx
+            estimates.apply_estimate(t, t.get("estimate_path"), rates_of(doc))
             changes.append(f"complexity {cx} ({t['estimate_min']:g} min estimate)")
     if changes:
         _refresh(t)
@@ -642,7 +737,10 @@ def view(doc: dict[str, Any]) -> dict[str, Any]:
     out["threads"] = threads_of(doc)
     out["ecns"] = doc.get("ecns") or []
     if doc.get("plan") and doc["status"] == "plan_review":
-        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc), threads_of(doc))
+        from aicad.office import direct
+
+        out["plan_estimate"] = plan_estimate(doc["plan"], doc["concurrency"], rates_of(doc), threads_of(doc),
+                                             str(doc.get("brief") or ""), direct.enabled(doc))
     out["constants"] = estimates.constants(rates_of(doc))
     out["families"] = [{"code": f, "label": lbl, "specialist": s} for f, (lbl, s) in roster.FAMILIES.items()]
     return out

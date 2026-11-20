@@ -160,8 +160,8 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
         if gears and shafts:
             out.append("each gear sits on its own shaft (" + ", ".join(shafts) + ")")
         blocks = [it["name"] for it in items.values() if it.get("role") == "block"]
-        if blocks:
-            out.append(f"the other parts mount on {blocks[0]}")
+        if blocks and len(items) > 1:  # a level of one part has nothing else to mount (founder's TEST Project: "Top:
+            out.append(f"the other parts mount on {blocks[0]}")  # Looks wrong" for the Table top alone, 2026-11-20)
     journals = [f for f in ifaces if f["kind"] in ("bearing_journal", "bearing_seat")]
     if skel.get("layout") == "shaft_line" and len(shafts) > 1 and journals:
         out.insert(0, "each shaft runs in two bearings, one either side of its gear; the shafts are parallel and "
@@ -180,7 +180,7 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
                 out.append(f"{st.get('qty', 1)} × {nm} carry the shafts (typically two per shaft, one either side of "
                            "its gear)")
     out = mesh + out
-    if not out and brief and not (kept and not items):  # a kit of separate parts: nothing is meant to be assembled
+    if not out and brief and len(items) > 1:  # a kit of separate parts, or one part alone: nothing to assemble
         out.append("the parts are assembled as the brief describes")
     return [{"id": f"R{k + 1}", "text": t} for k, t in enumerate(out[:12])]
 

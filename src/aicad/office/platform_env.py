@@ -692,15 +692,15 @@ class PlatformEnv(orchestrator.Env):
         finally:
             db.close()
         if (doc.get("assembly") or {}).get("status") != "ready" and doc.get("icd") and doc.get("skeleton"):
-            # a program with an ICD: its assembly is being built (at ICD approval); a level integrated before it is
-            # ready would be laid out on the bench instead (a fastener kit's parts in a row: golden R3)
-            import asyncio
-
-            for _ in range(240):
-                await asyncio.sleep(0.5)
-                doc = store.load(root, pid) or doc
-                if (doc.get("assembly") or {}).get("status") in ("ready", "failed"):
-                    break
+            # a program with an ICD integrates on its program assembly, never on the bench (a level integrated
+            # before it is ready would lay its parts out in a row: golden R3, program-revision report). Queue
+            # behind the build in flight; with none (a restart, a failed build) build it now, once.
+            doc = await self._assembly_ready(root, pid, doc)
+            if (doc.get("assembly") or {}).get("status") != "ready":
+                why = str((doc.get("assembly") or {}).get("summary") or "").strip()
+                return {"blocked": "Fitz can't assemble this yet: the program assembly isn't built"
+                                   + (f" ({why.rstrip('.')})" if why else "")
+                                   + ". Rebuild it from the Assembly tab, then retry this step."}
         if (doc.get("assembly") or {}).get("status") == "ready":
             return await self._integrate_program(root, pid, tid)
         kids = children(doc, t)
@@ -754,6 +754,19 @@ class PlatformEnv(orchestrator.Env):
         except (AssemblyInputError, aservice.WorkerError) as e:
             return {"blocked": f"Fitz couldn't assemble this: {e}", "assembly_id": adoc["id"]}
         return {**res, "assembly_id": adoc["id"], "children": [k["id"] for k in kids]}
+
+    async def _assembly_ready(self, root: Path, pid: str, doc: dict[str, Any]) -> dict[str, Any]:
+        """The program document once its assembly build is over: waits for a build in flight (no cap but a long
+        safety net), and builds it here when nothing is building it."""
+        for _ in range(3600):  # 30 min safety net; the build ends long before (placeholders take seconds)
+            if not orchestrator.assembly_building(pid):
+                break
+            await asyncio.sleep(0.5)
+        doc = store.load(root, pid) or doc
+        if (doc.get("assembly") or {}).get("status") not in ("ready", "unavailable"):
+            await build_program_assembly(root, pid, self.org_id, self.user_id, self.god_paywall)
+            doc = store.load(root, pid) or doc
+        return doc
 
     async def look_level(self, root: Path, pid: str, tid: str, res: dict[str, Any]) -> dict[str, Any] | None:
         """PD-73: Fitz looks at the level he just integrated (quick placement checks + the visual check)."""
@@ -1095,6 +1108,32 @@ async def build_program_assembly(root: Path, pid: str, org_id: str, user_id: str
                                  keep_subs: set[str] | None = None) -> None:
     """At ICD approval: Fitz assembles the program from placeholders (mates by interface name). Also after a program
     revision (``office/revision.py``): kept parts go in as built at their new places, ``keep_subs`` stay as they are."""
+    orchestrator.mark_assembly_build(pid, True)  # (the caller may have marked it already: counted, not a flag)
+    try:
+        await _build_program_assembly(root, pid, org_id, user_id, god_paywall, keep_subs)
+    finally:
+        orchestrator.mark_assembly_build(pid, False)
+
+
+def spawn_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool = False,
+                           keep_subs: set[str] | None = None) -> Any:
+    """Start ``build_program_assembly`` in the background, marked as in flight at once: an integration claimed in
+    the same second (Run right after the gate) already queues behind it."""
+    orchestrator.mark_assembly_build(pid, True)
+
+    async def run() -> None:
+        try:
+            await build_program_assembly(root, pid, org_id, user_id, god_paywall, keep_subs)
+        finally:
+            orchestrator.mark_assembly_build(pid, False)
+    task = asyncio.get_running_loop().create_task(run())
+    _ADVISORY.add(task)
+    task.add_done_callback(_ADVISORY.discard)
+    return task
+
+
+async def _build_program_assembly(root: Path, pid: str, org_id: str, user_id: str, god_paywall: bool,
+                                  keep_subs: set[str] | None) -> None:
     from aicad.agent import worker
 
     # parts built from the interfaces (office.direct) start as soon as Run is pressed: have the engine warm by then
