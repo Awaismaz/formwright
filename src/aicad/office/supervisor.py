@@ -1023,8 +1023,17 @@ def classify(doc: dict[str, Any], a: dict[str, Any]) -> tuple[str, str]:
             return "minor", "it only re-places parts, and you approved the plan change"
         # founder 2026-11-20: the plan is Archie's own; a revision that redoes no modelled work and drops no part the
         # brief names stays within the brief, so he makes it and tells (it is undoable from the Archie log)
+        # The founder's rule wins over that (PD-98..106, PD-150..159): redesigning or removing a part someone has
+        # already worked on (approved, integrated, built: any column past Ready, or a run) is MAJOR and asked first.
+        # "started" comes with the impact view; an older logged impact without it is read from the part's column.
         brief = (doc.get("brief") or "").lower()
-        rework = any(r.get("started") and r.get("class") in ("redesign", "removed") for r in imp.get("parts") or [])
+
+        def worked(r: dict[str, Any]) -> bool:
+            if "started" in r and r["started"] is not None:
+                return bool(r["started"])
+            return bool(r.get("column")) and r.get("column") not in ("backlog", "ready")
+
+        rework = any(worked(r) and r.get("class") in ("redesign", "removed") for r in imp.get("parts") or [])
         named = [r for r in imp.get("parts") or [] if r.get("class") == "removed"
                  and str(r.get("name") or "").lower() in brief]
         if imp and not rework and not named:

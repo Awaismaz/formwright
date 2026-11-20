@@ -417,11 +417,24 @@ def test_adding_or_removing_parts_after_work_started_is_a_revision_not_a_new_pro
     # laying it out again with the same layout changes nothing: refused, not asked
     ok, why = supervisor.check(doc, {"tool": "revise_program", "why": "again", "changes": [{"op": "relayout"}]})
     assert ok is None and why == "The revised layout is the same as the one the program has"
-    # re-placing only is minor once the engineer asked for the plan change; Archie's own proposal is asked
+    # re-placing only is minor once the engineer asked for the plan change
     rp = {"tool": "revise_program", "impact": {"replace_only": True, "major_why": []}}
     assert supervisor.classify(doc, {**rp, "engineer_asked": True}) == (
         "minor", "it only re-places parts, and you approved the plan change")
-    assert supervisor.classify(doc, rp)[0] == "major"
+    # Archie's own pure re-placement redoes no modelled work: minor since the copilot work (founder 2026-11-20,
+    # CD-050: the plan is Archie's own, only the brief binds), done and told, undoable from the Archie log
+    assert supervisor.classify(doc, rp)[0] == "minor"
+    # the founder's rule (PD-98..106, PD-150..159) still holds: redesigning or removing a part someone has worked on
+    # is major and asked first, also for an impact logged before "started" was in the view (read from its column)
+    for row in ({"name": "Base plate", "class": "redesign", "started": True},
+                {"name": "Base plate", "class": "redesign", "column": "integrated"},
+                {"name": "Spacer", "class": "removed", "column": "approved"}):
+        imp = {"replace_only": False, "parts": [row], "major_why": ["it reopens parts already worked on"]}
+        assert supervisor.classify(doc, {"tool": "revise_program", "impact": imp})[0] == "major", row
+    # a change to a part nobody has worked on yet stays Archie's own (minor)
+    imp = {"replace_only": False, "parts": [{"name": "Spacer", "class": "redesign", "column": "ready"}],
+           "major_why": ["it changes the interfaces of parts"]}
+    assert supervisor.classify(doc, {"tool": "revise_program", "impact": imp})[0] == "minor"
     # the instructions never send the engineer to a new program (only the rule that forbids it names one)
     for txt in (archie_chat.CHAT_INSTRUCTIONS.replace("Never tell the manager to start a new program", ""),
                 supervisor.SUPERVISOR_INSTRUCTIONS.replace("Never tell the engineer to start a new program", "")):

@@ -267,3 +267,32 @@ Regression, same run: b gear-pair PASS 29 s, c reducer PASS 73 s, R2 r-shaft-gea
 - **Founder's A1 program**: with this branch, restarting the office on it heals the blocked input shaft and pins
   to Fitz (refit). Their swap then keeps the ring overlap as a note. The planet bearing stays 6204 until the
   program is re-planned (the rim rule runs at graph resolution).
+
+## Follow-up: the 5 `test_program_revision` failures on main (master's request)
+
+**Cause.** The copilot work (216e99c, CD-050) added a rule to `supervisor.classify` for `revise_program`. A revision that redoes no modelled work, and removes no part the brief names, is Archie's own plan change, so it is minor (done and told). The rule decided "redoes modelled work" from `impact.parts[].started`. But the impact reaching `classify` is `revision.view(cand)`, and `view` copied only name, class, why, ticket, column, qty and add/remove, never `started`. So every revision read as "nothing modelled is redone" and became minor, including ones that reopen approved or integrated parts. That broke the founder's rule (PD-98..106, PD-150..159), and nobody had meant to relax it.
+
+**Fix.**
+- `revision.view` now carries `started`.
+- `classify` reads it. For an impact logged before this fix, it falls back to the part's column: anything past Ready counts as worked on.
+- The copilot's deliberate part is kept: Archie's own pure re-placement, and changes to parts nobody has worked on yet, stay minor.
+
+**The 5 tests:**
+- `test_table_revision_archie_proposes_without_ai_...`: fixed by the code. The table revision redesigns three parts already worked on, so it is major and asked. Before, it was "minor ... nothing modelled is redone".
+- `test_archie_proposes_the_revision_asks_with_the_impact_list_and_applies_it`: fixed by the code. Archie's proposal reopens worked parts, so it is asked (1 question, 0 done). The "expected 1, got 0" was the asked list: the minor misclassification had applied the revision directly.
+- `test_a_live_reply_that_only_describes_the_fix_...[actions0]` and `[actions1]`: fixed by the code, same cause. The live reply's revision is asked (1 question) instead of applied.
+- `test_adding_or_removing_parts_after_work_started_...`: the first expectation is fixed by the code: removing a bracket after work started is major, "it adds or removes parts and it reopens parts already worked on". One expectation was genuinely changed. Archie's own **pure re-placement** (`replace_only`, no engineer request) expected major; it is now minor. That is the copilot's intended rule (founder 2026-11-20: the plan is Archie's own, only the brief binds), and it fits the rule you stated: pure re-placement may be minor. I added assertions that keep the founder's rule:
+  - a redesign of a started or integrated part is major;
+  - a removal of an approved part is major;
+  - a change to a Ready part is minor.
+
+**Tests, in pairs:**
+
+| Files | Result |
+|---|---|
+| `test_program_revision` + `test_office_supervisor` | 36 passed |
+| `test_office_orchestrator` + `test_office_copilot` | 29 passed |
+
+`ruff` is clean.
+
+**Parked:** PD-268, minor/major for revisions. A revision is major when it redesigns or removes a part past Ready, or removes a part the brief names. It is minor for pure re-placement and for changes to parts not started. Alternative: every Archie-initiated revision asked (the pre-copilot behaviour).

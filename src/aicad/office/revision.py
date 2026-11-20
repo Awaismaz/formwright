@@ -791,7 +791,7 @@ def view(cand: dict[str, Any]) -> dict[str, Any]:
             "summary": summary_line(imp), "lines": impact_lines(imp), "counts": imp["counts"],
             "estimate": imp["estimate"], "replace_only": imp["replace_only"], "major_why": imp["major_why"],
             "parts": [{k: r.get(k) for k in ("name", "class", "why", "ticket", "column", "qty_before", "qty_after",
-                                             "remove", "add")} for r in imp["parts"]],
+                                             "remove", "add", "started")} for r in imp["parts"]],
             "levels": imp["levels"], "placement": cand["placement"], "problems": cand["new_problems"]}
 
 
