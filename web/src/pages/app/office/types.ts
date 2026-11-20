@@ -286,6 +286,8 @@ export interface ArchieAction {
   by?: Actor; at?: string;
   /** A proposal the program has moved past (nothing left to apply): shown as "No longer needed". */
   stale?: boolean;
+  /** Copilot actions (navigate, point, studio_request): where to go and what to show. */
+  to?: string; highlight?: string; target?: string; note?: string; project?: string; text?: string;
 }
 export interface ArchieMessage {
   id: string; role: "user" | "archie"; text: string; t: string; by?: Actor;

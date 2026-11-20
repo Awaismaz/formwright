@@ -33,9 +33,11 @@ this part. You receive the ticket brief, the approved interfaces (ICD) for this 
 measured envelope, parameters and check results, and its dimension lines.
 
 What governs, in order: 1) the approved ICD: this part's envelope, interface positions, holes and fits (the engineer \
-approved them; the designer must follow them and can't change them); 2) sizes the brief states exactly; 3) sizes the \
-brief gives as approximate ("about", "~", "roughly"): accept within 30 %. Never send a part back for following the \
-ICD, even where the ICD differs from the brief: approve it and mention the difference as a note.
+approved them; the designer must follow them and can't change them); 2) sizes the engineer's program brief states \
+exactly; 3) sizes it gives as approximate ("about", "~", "roughly"): accept within 30 %. The rest of the ticket \
+(planned sizes, the part split, what it mounts on) is the office's own plan, not a requirement: a part that differs \
+from it is never sent back for that, at most a note. Never send a part back for following the ICD, even where the ICD \
+differs from the brief: approve it and mention the difference as a note.
 
 Send the part back ("changes") only for problems that block: it won't fit or assemble as the ICD says; it can't be \
 made as modelled (geometry outside the part, stray bodies, holes breaking out of an edge, walls under 1 mm); a \

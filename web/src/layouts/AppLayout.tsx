@@ -18,6 +18,8 @@ import {
 import { Icon } from "@/components/icons";
 import GodPanel from "@/components/GodPanel";
 import CommandPalette from "@/components/CommandPalette";
+import ArchieChat, { openArchie } from "@/pages/app/office/ArchieChat";
+import { AgentAvatar } from "@/pages/app/office/Avatars";
 import { APP_TOUR, runTour } from "@/lib/tour";
 import { Building2 } from "lucide-react"; // Design Office nav entry
 import { useOnline } from "@/lib/pwa";
@@ -315,6 +317,12 @@ export default function AppLayout() {
                   </Link>
                 </Tip>
               )}
+              <Tip content="Ask Archie anything (Ctrl J)" side="bottom">
+                <button onClick={openArchie} data-copilot="ask-archie" aria-label="Ask Archie"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-panel2 pl-1 pr-3 text-[13px] font-medium hover:border-primary/40">
+                  <AgentAvatar code="archie" size={22} still /> <span className="max-sm:hidden">Ask Archie</span>
+                </button>
+              </Tip>
               <Notifications />
               <Tip content="Help, guides and tours" side="bottom">
                 <Link to="/app/help" data-tour="help" className="rounded p-2 text-muted hover:bg-text/5 hover:text-text" aria-label="Help"><CircleHelp className="h-[18px] w-[18px]" /></Link>
@@ -347,6 +355,7 @@ export default function AppLayout() {
         </div>
       </div>
       {install.sheetEl}
+      <ArchieChat />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} modules={catalog.data?.modules ?? []} />
     </div>
   );

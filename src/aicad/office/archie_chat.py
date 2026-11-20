@@ -25,22 +25,26 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from aicad.office import roster, service, store
+from aicad.office import copilot, roster, service, store
 
 MAX_MESSAGES = 200
 MAX_TEXT = 2000
-CHAT_MAX_TOKENS = 150  # hard cap (platform tokens) for one AI chat turn; the "Status report" chip costs none
+CHAT_MAX_TOKENS = 400  # hard cap (platform tokens) for one AI chat turn, every round together; status is free
 HISTORY_TURNS = 8
+MAX_ROUNDS = 3  # Archie proposes, the office checks every proposal, Archie corrects what didn't hold (PD-226)
 
 ACTION_TYPES = ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority", "pause_program",
                 "resume_program", "interface_change", "budget", "replan", "ecn", "fix_icd", "resize_part", "retry_blocked",
-                "revise_plan", "keep_separate", "revise_program")
+                "revise_plan", "keep_separate", "revise_program", "amend_brief")
+BRIEF_RULE = "What is fixed and what is yours (founder rule): only the engineer's original brief is a requirement. The plan, the part split, planned sizes, hosts, the layout and draft interfaces are your own working assumptions: change any of them freely when a check fails, as long as the whole product still meets the brief. \"Safe\" means \"within the brief\", not \"close to the current plan\". When the brief itself asks for something that can't work mechanically, say so plainly and propose amend_brief with the smallest change that makes it feasible."
 
 CHAT_INSTRUCTIONS = """You are Archie, the Chief Designer of a mechanical design office. The engineering manager \
 talks to you while a program is planned or in work. You see the program state below. Answer in plain engineering \
 language. When asked why something happens, diagnose it from the evidence below (review findings, blocked \
 reasons, interfaces, recent events): name the tickets, the cause and the fix, then propose the actions that fix it. \
 Keep it under eight sentences. Never mention files, tools, code, models or how you work inside.
+
+""" + BRIEF_RULE + """
 
 If the manager asks for a change, do not claim it is done. Propose the concrete actions that would make it, in \
 exactly one fenced block (omit the block when no action is needed):
@@ -82,7 +86,9 @@ removed before Apply. Changes: {"op": "base", "part": "name"}, {"op": "mount", "
 "family", "qty", "description", "envelope", "mounts_on"}}, {"op": "remove", "part": "name"}, {"op": "describe", \
 "part": "name", "description": "..."}, {"op": "relayout"}. Use it when the layout leaves a part or a copy floating, \
 when parts must be added or removed after work started, or when the base part is wrong.
-Never tell the manager to start a new program: propose a revision of this one."""
+- {"type": "amend_brief", "change": "the amended requirement, in the engineer's words", "reason": "why the \
+original can't work mechanically"}: only when the brief itself is infeasible; the engineer approves it.
+Prefer a revision of this program; only when the manager wants to start over from a different prompt (a different product, or a brief that changes most parts) propose restart_program."""
 
 _BLOCK = re.compile(r"```fw-office-actions\s*\n(.*?)\n?```", re.DOTALL)
 _STATUS = re.compile(r"\b(status|progress|report|update|how(?:'s| is| are)? (?:it|things|we) going|where are we|"
@@ -427,8 +433,10 @@ def chat_prompt(root: Path, doc: dict[str, Any], hist: list[dict[str, Any]], tex
     return "\n\n".join(lines)
 
 
-def parse_actions(doc: dict[str, Any], text: str) -> tuple[str, list[dict[str, Any]]]:
-    """Archie's prose (block removed) and the valid actions in his block; anything invalid is dropped."""
+def parse_actions(doc: dict[str, Any], text: str, known: dict[str, Any] | None = None,
+                  page: dict[str, Any] | None = None) -> tuple[str, list[dict[str, Any]]]:
+    """Archie's prose (block removed) and the valid actions in his block; anything invalid is dropped. ``known``
+    and ``page`` (the copilot's view of the app) make app actions strict (copilot.normalise)."""
     acts: list[dict[str, Any]] = []
     for m in _BLOCK.finditer(text or ""):
         try:
@@ -436,7 +444,12 @@ def parse_actions(doc: dict[str, Any], text: str) -> tuple[str, list[dict[str, A
         except ValueError:
             continue
         for a in raw if isinstance(raw, list) else [raw]:
-            ok = normalise(doc, a)
+            if isinstance(a, dict) and a.get("type") in copilot.APP_ACTION_TYPES:
+                ok = copilot.normalise(a, known, page)
+                if ok is not None and known is not None:
+                    ok = copilot.with_names(ok, known)
+            else:
+                ok = normalise(doc, a)
             if ok is not None and ok not in acts:
                 acts.append(ok)
     prose = " ".join(_BLOCK.sub("", text or "").split())[:MAX_TEXT]
@@ -445,6 +458,8 @@ def parse_actions(doc: dict[str, Any], text: str) -> tuple[str, list[dict[str, A
 
 def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
     """One proposed action, checked against the program; None when it can't apply."""
+    if isinstance(a, dict) and a.get("type") in copilot.APP_ACTION_TYPES:
+        return copilot.normalise(a)
     if not isinstance(a, dict) or a.get("type") not in ACTION_TYPES:
         return None
     typ = a["type"]
@@ -542,6 +557,10 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
         return out if len(out) > 1 else None
     if typ == "replan":
         return {"type": typ, "notes": txt} if st == "plan_review" and txt else None
+    if typ == "amend_brief":
+        change = " ".join(str(a.get("change") or "").split())[:MAX_TEXT]
+        why = " ".join(str(a.get("reason") or "").split())[:600]
+        return {"type": typ, "change": change, "reason": why} if len(change) >= 8 and why else None
     if typ == "ecn":
         if not doc.get("released") or not txt:
             return None
@@ -551,8 +570,146 @@ def normalise(doc: dict[str, Any], a: Any) -> dict[str, Any] | None:
     return None
 
 
+def explain(doc: dict[str, Any], a: Any) -> str:
+    """Why a proposed program action can't apply, in words Archie can act on (the agentic loop feeds it back)."""
+    if not isinstance(a, dict):
+        return "an action must be an object with a type"
+    typ = str(a.get("type") or "")
+    if typ not in ACTION_TYPES:
+        return f"'{typ}' is not one of your actions"
+    st = doc["status"]
+    icd = doc.get("icd") or {}
+    if typ in ("instruct", "reopen", "pause_ticket", "resume_ticket", "priority"):
+        if st not in ("active", "complete"):
+            return f"tickets can't be changed while the program is {st}"
+        t = find_ticket(doc, str(a.get("ticket") or ""))
+        if t is None:
+            return f"there is no ticket '{a.get('ticket')}' (use the keys exactly as listed)"
+        if typ in ("instruct", "reopen") and t["kind"] not in ("part", "standard"):
+            return f"{t['key']} is a {t['kind']} ticket: instruct or reopen a part ticket"
+        return "the text is missing" if typ in ("instruct", "reopen") else "the priority must be high, normal or low"
+    if typ == "revise_program":
+        from aicad.office import OfficeInputError, revision
+
+        if st not in ("active", "complete") or not icd:
+            return f"a revision needs an approved plan with interfaces (the program is {st})"
+        try:
+            cand = revision.candidate(doc, a.get("changes") or [])
+        except OfficeInputError as e:
+            return str(e)
+        bits = [cand["why"] or "it can't be built"]
+        if cand.get("dropped"):
+            bits.append("changes dropped: " + "; ".join(str(x) for x in cand["dropped"][:4]))
+        if cand.get("problems"):
+            bits.append("the revised layout would have these problems: " + "; ".join(cand["problems"][:6]))
+        return ". ".join(bits)
+    if typ == "resize_part":
+        from aicad.office import interfaces
+
+        if icd.get("status") != "draft":
+            return "parts are resized only before the interfaces are approved; after that use revise_program"
+        name = str(a.get("part") or "").strip().lower()
+        hit = [it for it in (doc.get("skeleton") or {}).get("items", {}).values() if it["name"].lower() == name]
+        if len(hit) != 1:
+            return f"there is no single part named '{a.get('part')}' (use the names as listed)"
+        return f"a {hit[0]['role']} part takes sizes {', '.join(interfaces.RESIZABLE.get(hit[0]['role'], ()))} in mm"
+    if typ == "interface_change":
+        i = next((x for x in icd.get("interfaces", []) if x["id"] == a.get("interface")), None)
+        if i is None:
+            return f"there is no interface '{a.get('interface')}' (use the ids as listed)"
+        return f"interface {i['id']} can change only {', '.join(_editable(i)) or 'nothing'}, and a reason is needed"
+    if typ in ("fix_icd", "keep_separate"):
+        return "only while the interfaces wait for approval" + (" and have problems" if typ == "fix_icd" else
+                                                                " and those parts have no interface")
+    if typ == "revise_plan":
+        return "the plan goes back for review only while the interfaces wait for approval and no part work started"
+    if typ in ("pause_program", "resume_program", "retry_blocked"):
+        return "the office isn't in a state where that applies" + (" (no part is blocked)" if typ == "retry_blocked"
+                                                                   else "")
+    if typ == "replan":
+        return ("re-planning with notes works only while the plan waits for approval; afterwards use revise_program "
+                "or restart_program")
+    if typ == "ecn":
+        return "an engineering change needs a released program, a reason and part tickets"
+    if typ == "amend_brief":
+        return "say the amended requirement (change) and why the original can't work (reason)"
+    return f"it doesn't apply now (the program is {st}, interfaces {icd.get('status') or 'none'})"
+
+
+_PROMISE = re.compile(r"\b(i propose|i'll|i will|i would|let me|revis(e|ing)|re-?host|resiz|re-?plan|restart)\b",
+                      re.IGNORECASE)
+
+
+def review(doc: dict[str, Any] | None, text: str, known: dict[str, Any] | None = None,
+           page: dict[str, Any] | None = None) -> tuple[str, list[dict[str, Any]], list[str]]:
+    """Archie's reply checked like the office would apply it: (prose, valid actions, notes). A note says what was
+    rejected and why, or that a change was described and not proposed; the loop gives the notes back to Archie."""
+    acts: list[dict[str, Any]] = []
+    notes: list[str] = []
+    blocks = list(_BLOCK.finditer(text or ""))
+    for m in blocks:
+        try:
+            raw = json.loads(m.group(1))
+        except ValueError:
+            notes.append("your action block is not valid JSON")
+            continue
+        for a in raw if isinstance(raw, list) else [raw]:
+            typ = a.get("type") if isinstance(a, dict) else None
+            if typ in copilot.APP_ACTION_TYPES:
+                ok = copilot.normalise(a, known, page)
+                if ok is None:
+                    notes.append(f"{typ}: {copilot.why_not(a, known, page)}")
+                    continue
+                ok = copilot.with_names(ok, known) if known is not None else ok
+            elif doc is None:
+                notes.append(f"{typ}: open the program first (navigate to it) to change it")
+                continue
+            else:
+                ok = normalise(doc, a)
+                if ok is None:
+                    notes.append(f"{typ}: {explain(doc, a)}")
+                    continue
+            if ok not in acts:
+                acts.append(ok)
+    prose = " ".join(_BLOCK.sub("", text or "").split())[:MAX_TEXT]
+    if not blocks and _PROMISE.search(prose):
+        notes.append("you described a change but proposed no action: put it in the action block, or say plainly "
+                     "that nothing can be done and why")
+    return prose, acts[:6], notes
+
+
+async def agentic_turn(call: Any, folder: Path, prompt: str, budget_usd: float | None,
+                       check: Any) -> tuple[str, list[dict[str, Any]], float | None, int]:
+    """Archie works like an engineer at the board: he proposes, the office checks each proposal exactly as Apply
+    would (a revision is laid out and its interfaces checked), and anything that doesn't hold goes back to him with
+    the reason, up to MAX_ROUNDS. Returns (prose, actions, usd spent, rounds). ``check(text)`` is review()."""
+    total: float | None = None
+    convo = prompt
+    prose: str = ""
+    acts: list[dict[str, Any]] = []
+    for n in range(1, MAX_ROUNDS + 1):
+        left = None if budget_usd is None else budget_usd - (total or 0.0)
+        if left is not None and left <= 0:
+            return prose, acts, total, n - 1
+        out, usd = await call(folder, convo, left)
+        if usd is not None:
+            total = (total or 0.0) + usd
+        p2, a2, notes = check(out)
+        if p2 or a2:
+            prose, acts = p2, a2
+        if not notes or n == MAX_ROUNDS:
+            return prose, acts, total, n
+        convo = (f"{convo}\n\nYour draft answer:\n{out}\n\nThe office checked your draft before showing it to the "
+                 "engineer:\n" + "\n".join(f"- {x}" for x in notes) +
+                 "\nCorrect it: keep what held, fix or replace what didn't (use the evidence above), and answer again "
+                 "in full. If nothing can clear it, say exactly what the engineer must decide.")
+    return prose, acts, total, MAX_ROUNDS
+
+
 def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
     """The action in one line, for the Apply card."""
+    if a.get("type") in copilot.APP_ACTION_TYPES:
+        return copilot.describe(a)
     t = find_ticket(doc, a.get("ticket", "")) if a.get("ticket") else None
     lbl = f"{t['key']} {t['title']}" if t else a.get("ticket", "")
     typ = a["type"]
@@ -614,6 +771,8 @@ def describe(doc: dict[str, Any], a: dict[str, Any]) -> str:
         return f"Send the plan back to you for review: {a['notes']}"
     if typ == "ecn":
         return f"Raise an engineering change on {', '.join(a['tickets'])}: {a['reason']}"
+    if typ == "amend_brief":
+        return f"Amend your brief: {a['change']} (because {a['reason']})"
     if typ == "revise_program":
         from aicad.office import revision
 

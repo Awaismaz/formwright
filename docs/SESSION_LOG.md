@@ -4,6 +4,39 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-20 (a) — Archie: whole-app copilot, agentic loop, the brief is the reference (CD-049, CD-050, PD-226..229)
+
+Founder asks: Archie's powers must not be limited to Design Office (navigate, point at buttons, fix things, re-plan
+from a new prompt); Archie must work as an agentic loop (the gearbox program: he diagnosed the failed checks but his
+revision "was the same layout"); "safe" means within the original brief, not close to Archie's own plan.
+
+Done:
+- **Copilot everywhere** (CD-049): Archie drawer on every page (header "Ask Archie", Ctrl J). The app sends the page
+  path and its visible controls; Archie sees pages, the engineer's programs and projects. App actions
+  (`office/copilot.py`): navigate, point (driver.js spotlight), studio_request (opens a part with the request typed
+  into its design chat), new_part, new_program, restart_program (old program paused and kept), heal_program
+  (requeue half-done work when no runner holds it, heal review blocks, retry blocked, run), rebuild_assembly,
+  run_program, stop_studio_agent. Navigation and pointing run at once; everything else is Apply. On a program page
+  the program's own chat is used with the same powers; elsewhere a per-user thread (`<org>/_copilot/<user>.json`,
+  `routers/copilot.py`: GET/POST `/api/copilot`, POST `/api/copilot/actions`).
+- **Agentic loop** (CD-050, PD-226): every chat turn is propose -> office checks each action exactly as Apply would
+  (a revision is laid out and its interfaces checked) -> rejected actions go back to Archie with the reason
+  (`archie_chat.explain`, `copilot.why_not`) -> he corrects, up to 3 rounds; a change described without an action is
+  sent back too. The supervisor does the same (2 correction rounds within its hourly call cap). Chat turn cap
+  150 -> 400 platform tokens for all rounds together (PD-227).
+- **The brief is the reference** (PD-228): prompts for chat, copilot and supervisor say only the original brief is a
+  requirement; plan, split, planned sizes, hosts, layout and draft interfaces are Archie's own and may change while
+  the product meets the brief. Gage: planned sizes and hosts are never a finding. Supervisor: a revision that redoes
+  no modelled part and drops no part the brief names is minor (Archie does it and tells; undoable). New
+  `amend_brief` chat action when the brief itself can't work mechanically (engineer applies; history kept) (PD-229).
+- Gearbox root cause (layout/ICD side: gears hosted on the housing, round parts as blocks, housing too small, the
+  1.5x planned-envelope cap) is with a parallel branch `wip/gearbox-layout`; not merged yet.
+
+Verified: tests/test_office_copilot.py (7 new), test_office_archie_chat.py, test_office_supervisor.py: 33 passed;
+ruff clean; tsc clean; vitest lib + office 72 passed; server restarted, SPA rebuilt, `/api/copilot` live.
+Not done: browser walkthrough; Gage still sees amended briefs only through new or reopened tickets (ticket briefs
+are built at planning).
+
 ## 2026-11-20: Architecture v2 begins; Archie supervises; agents cheaper and faster; site revamp
 
 Founder (night of 11-19 to 11-20): fix the Design Office on his real programs, make it as reliable as the Studio,

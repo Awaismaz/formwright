@@ -191,6 +191,7 @@ class CommentIn(BaseModel):
 
 class ArchieIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
+    page: dict[str, Any] | None = None  # the copilot's view of the screen: path, title, visible controls
 
 
 class ArchieActIn(BaseModel):
@@ -1483,12 +1484,19 @@ async def archie_say(pid: str, body: ArchieIn, ctx: Ctx = Depends(verified_ctx))
     reply = None
     ai, cap = (False, 0) if archie_chat.is_status(text) else _chat_ai(ctx, doc)
     if ai:
+        from aicad.office import copilot
+        from aicad.platform.routers.copilot import known
+
         god = ctx.god_on("bypass_tokens")
-        out, usd = "", None
+        page = copilot.clean_page(body.page)
+        k = known(ctx)
+        prompt = (archie_chat.chat_prompt(root, doc, hist[:-1], text) + "\n\n"
+                  + "\n\n".join(copilot.context_lines(page, k)) + copilot.system(True))
+        out, acts, usd = "", [], None
         try:
-            out, usd = await archie_chat.run_chat(store.program_dir(root, pid) / "archie",
-                                                  archie_chat.chat_prompt(root, doc, hist[:-1], text),
-                                                  None if god else cap * metering.USD_PER_TOKEN)
+            out, acts, usd, _n = await archie_chat.agentic_turn(
+                archie_chat.run_chat, store.program_dir(root, pid) / "archie", prompt,
+                None if god else cap * metering.USD_PER_TOKEN, lambda o: archie_chat.review(doc, o, k, page))
         except Exception:  # any failure: the office reader answers instead
             log.exception("Archie chat turn failed")
         tokens = min(cap, metering.tokens_for_usd(usd)) if usd else 0
@@ -1503,9 +1511,8 @@ async def archie_say(pid: str, body: ArchieIn, ctx: Ctx = Depends(verified_ctx))
                 d["budget"]["planning_tokens"] = int(d["budget"].get("planning_tokens", 0)) + tokens
                 store.save(root, d)
                 doc = d
-        prose, acts = archie_chat.parse_actions(doc, out)
-        if prose or acts:
-            reply = archie_chat.archie_message(prose or "Here is what I would do.", acts, kind="ai", tokens=tokens)
+        if out or acts:
+            reply = archie_chat.archie_message(out or "Here is what I would do.", acts, kind="ai", tokens=tokens)
     if reply is None:
         t, acts, kind = archie_chat.offline_reply(doc, text, root)
         reply = archie_chat.archie_message(t, acts, kind=kind)
@@ -1563,6 +1570,17 @@ async def _apply_action(ctx: Ctx, pid: str, doc: dict[str, Any], a: dict[str, An
                 continue  # an agent picked it up meanwhile
         if (_load(ctx, pid).get("orchestrator") or {}).get("state") != "running":
             await run_program(pid, ctx)
+    elif typ == "amend_brief":
+        def fn(root: Path, d: dict[str, Any]) -> None:
+            d.setdefault("brief_history", []).append({"brief": d["brief"], "at": store.now(), "by": _actor(ctx),
+                                                      "change": a["change"], "reason": a["reason"]})
+            d["brief"] = (f"{d['brief'].rstrip()}\n\nAmended {store.now()[:10]} by {ctx.user.name or 'the engineer'}: "
+                          f"{a['change']} (the original could not work: {a['reason']})")[:20000]
+            service.emit(root, d, "program.brief_amended", f"{ctx.user.name or 'Someone'} amended the brief: "
+                         f"{a['change'][:160]}", _actor(ctx))
+        _mutate(ctx, pid, fn)
+        audit(ctx.db, "office.brief_amended", ctx.user, doc["org_id"], target=pid)
+        ctx.db.commit()
     elif typ == "ecn":
         items = [x["item_id"] for k in a["tickets"] if (x := archie_chat.find_ticket(doc, k)) is not None]
         await raise_ecn(pid, EcnIn(reason=a["reason"], items=items), ctx)
@@ -1779,7 +1797,14 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
             raise HTTPException(409, "The program has moved on: this proposal no longer applies. Ask Archie again.")
         if cur["type"] == "retry_blocked":  # the label says what was done, not what is blocked afterwards
             done["count"] = len(archie_chat.blocked(doc))
-        await _apply_action(ctx, pid, doc, cur)
+        from aicad.office import copilot
+
+        if cur["type"] in copilot.APP_ACTION_TYPES:
+            from aicad.platform.routers import copilot as copilot_routes
+
+            done.update(await copilot_routes.apply(ctx, cur))
+        else:
+            await _apply_action(ctx, pid, doc, cur)
         status = "applied"
     with archie_chat.chat_lock(pid):
         hist = archie_chat.history(root, pid)
@@ -1789,7 +1814,8 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
                     if y["id"] == body.action:
                         y.update(status=status, by=_actor(ctx), at=store.now(), **done)
         archie_chat.save_history(root, pid, hist)
-    return {**_chat_view(ctx, pid), "program": _view(_load(ctx, pid))}
+    return {**_chat_view(ctx, pid), "program": _view(_load(ctx, pid)),
+            **({"navigate": done["navigate"]} if done.get("navigate") else {})}
 
 
 # ----------------------------------------------------------------------------- workspace templates (WORKLIST 48)

@@ -141,13 +141,17 @@ def test_archie_ai_turn_is_metered_and_only_valid_actions_survive(app_client: An
     assert [a["type"] for a in m["actions"]] == ["budget"]
     assert m["actions"][0]["label"] == "Set token budget 6,000 and Molly 3 threads"
     assert "Can we finish sooner?" in seen[0] and "Tickets (key, title" in seen[0]
+    # agentic loop (PD-226): the rejected proposals went back to Archie with the reasons, up to MAX_ROUNDS
+    assert len(seen) == archie_chat.MAX_ROUNDS
+    assert "'delete_everything' is not one of your actions" in seen[1] and "no ticket 'NOPE-9'" in seen[1]
+    seen.clear()
     v = c.get(f"/api/office/programs/{pid}").json()
     assert v["budget"]["planning_tokens"] == m["tokens"]
     out = c.post(f"/api/office/programs/{pid}/archie/actions", json={"message": m["id"], "action": "a1"}).json()
     assert out["program"]["threads"]["molly"] == 3 and out["program"]["budget"]["tokens"] == 6000
     # a status question never spends tokens, even with AI available
     r = c.post(f"/api/office/programs/{pid}/archie", json={"text": "status?"}).json()
-    assert r["messages"][-1]["kind"] == "status" and len(seen) == 1
+    assert r["messages"][-1]["kind"] == "status" and not seen
 
 
 # ------------------------------------------------------------------ the ICD gate is never a dead end (CD-028)

@@ -120,6 +120,14 @@ Pre-production: don't run the full suite (pytest, npm test, vite build) before e
 targeted tests for touched code; build web/dist only when the served SPA must change. This overrides the
 "run pytest… before the final commit" step in CLAUDE.md until the founder says otherwise.
 
+## Founder rule: the brief is the reference; Archie is the copilot (2026-11-20, PD-226..229)
+
+Only the engineer's original brief is a hard requirement. Archie's plan, part split, planned sizes, hosts, layout and
+draft interfaces are his own working assumptions: any fix that keeps the product within the brief is "safe". The
+brief changes only when it is mechanically infeasible, by amend_brief which the engineer applies. Archie is the
+copilot for the whole app (every page, Ctrl J) and works as an agentic loop: the office checks each proposal as
+Apply would and gives the reasons back until it holds.
+
 ## Founder rule: parts are checked, assemblies are placed (2026-11-19, PD-71)
 
 Assembling must be quicker than modelling. Parts are quality-checked (Gage, swap-in); Design Office assembly steps place

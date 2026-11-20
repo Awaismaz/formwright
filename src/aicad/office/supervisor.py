@@ -171,7 +171,11 @@ interface) comes from the layout or the plan, or to add, remove or re-size parts
 "mounts_on"}}, {"op": "remove", "part": "name"}, {"op": "describe", "part": "name", "description": "..."}, \
 {"op": "relayout"} (only lay it out again). The office computes what it keeps, re-places, redesigns, adds and \
 removes, and asks the engineer with that list.
-Never tell the engineer to start a new program: revise this one. Use an empty list when nothing should be done, \
+Only the engineer's original brief (Brief in the state) is a requirement. The plan, part split, planned sizes, \
+hosts, layout and draft interfaces are your own working assumptions: change them freely when a check fails, as long \
+as the whole product still meets the brief; "safe" means "within the brief", not "close to the current plan". When \
+the brief itself can't work mechanically, say so in "say" (the engineer amends it in the chat). Prefer revising \
+this program to starting a new one. Use an empty list when nothing should be done, \
 and say why. At most three actions. Never mention files, code, models, prompts or how you work inside."""
 
 _BLOCK = re.compile(r"```fw-supervisor\s*\n(.*?)\n?```", re.DOTALL)
@@ -992,6 +996,14 @@ def classify(doc: dict[str, Any], a: dict[str, Any]) -> tuple[str, str]:
         imp = a.get("impact") or {}
         if imp.get("replace_only") and a.get("engineer_asked"):
             return "minor", "it only re-places parts, and you approved the plan change"
+        # founder 2026-11-20: the plan is Archie's own; a revision that redoes no modelled work and drops no part the
+        # brief names stays within the brief, so he makes it and tells (it is undoable from the Archie log)
+        brief = (doc.get("brief") or "").lower()
+        rework = any(r.get("started") and r.get("class") in ("redesign", "removed") for r in imp.get("parts") or [])
+        named = [r for r in imp.get("parts") or [] if r.get("class") == "removed"
+                 and str(r.get("name") or "").lower() in brief]
+        if imp and not rework and not named:
+            return "minor", "it changes only my own plan (layout, sizes, hosts) within your brief; nothing modelled is redone"
         mw = list(imp.get("major_why") or []) or ["it changes the plan and the interfaces"]
         return "major", " and ".join(mw)
     if tool in ("remove_part", "add_part"):
@@ -1425,9 +1437,14 @@ async def _facts(doc: dict[str, Any], env: Any, triggers: list[dict[str, Any]]) 
     return out
 
 
+FIX_ROUNDS = 2  # a proposal the office can't apply goes back to Archie with the reason this many times (PD-226)
+
+
 async def diagnose(root: Path, doc: dict[str, Any], triggers: list[dict[str, Any]],
-                   facts: dict[str, dict[str, Any]], wallet: int | None) -> tuple[dict[str, Any], str, int]:
-    """(plan, how: "ai" | "simulated" | "rules", tokens). The model when it may be called, else the rules."""
+                   facts: dict[str, dict[str, Any]], wallet: int | None,
+                   feedback: tuple[str, list[str]] | None = None) -> tuple[dict[str, Any], str, int]:
+    """(plan, how: "ai" | "simulated" | "rules", tokens). The model when it may be called, else the rules.
+    ``feedback``: (his previous reply, why each of its actions could not apply): he corrects it (agentic loop)."""
     how = mode(doc)
     god = bool((doc.get("orchestrator") or {}).get("god_tokens"))
     if how == "ai" and calls_last_hour(doc) >= MAX_CALLS_PER_HOUR:
@@ -1450,6 +1467,11 @@ async def diagnose(root: Path, doc: dict[str, Any], triggers: list[dict[str, Any
                    + (" Suggested: " + "; ".join(describe(doc, n) for a in hint["actions"]
                                                   if (n := check(doc, a, facts, wallet)[0]) is not None)
                       if hint["actions"] else ""))
+    if feedback is not None:
+        prompt += ("\n\nYour previous answer:\n" + feedback[0] + "\n\nThe office checked it before acting and these "
+                   "actions could not apply:\n" + "\n".join(f"- {x}" for x in feedback[1]) +
+                   "\nCorrect them using the evidence above (other hosts, sizes or a different action) and answer "
+                   "again in full. If nothing can clear it, say exactly what the engineer must decide.")
     text, usd = "", None
     try:
         text, usd = await run_supervisor(store.program_dir(root, doc["id"]) / "archie" / "supervisor", prompt,
@@ -1463,7 +1485,7 @@ async def diagnose(root: Path, doc: dict[str, Any], triggers: list[dict[str, Any
     plan = parse_reply(text)
     if plan is None:
         return {**hint, "usd": usd}, "rules", tokens
-    return {**plan, "usd": usd}, "ai", tokens  # metered tokens (charged unless God mode bypasses tokens)
+    return {**plan, "usd": usd, "raw": text}, "ai", tokens  # metered tokens (charged unless God mode bypasses tokens)
 
 
 def _entry(doc: dict[str, Any], **kw: Any) -> dict[str, Any]:
@@ -1496,6 +1518,19 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
         facts = await _facts(doc, env, triggers)
         wallet = None if (doc.get("orchestrator") or {}).get("god_tokens") else wallet_left(doc["org_id"])
         plan, how, tokens = await diagnose(root, doc, triggers, facts, wallet)
+        for _round in range(FIX_ROUNDS):  # agentic: what the office can't apply goes back to Archie with the reason
+            if how != "ai":
+                break
+            bad = [f"{a.get('tool')}: {why}" for a in plan.get("actions") or []
+                   if (why := check(doc, a, facts, wallet)[1]) and check(doc, a, facts, wallet)[0] is None]
+            if not bad or calls_last_hour(store.load(root, pid) or doc) >= MAX_CALLS_PER_HOUR:
+                break
+            plan2, how2, t2 = await diagnose(root, doc, triggers, facts, wallet,
+                                             feedback=(str(plan.get("raw") or ""), bad))
+            tokens += t2
+            if how2 != "ai":
+                break
+            plan = {**plan2, "usd": (plan.get("usd") or 0) + (plan2.get("usd") or 0)}
         doc = store.load(root, pid) or doc
         done: list[dict[str, Any]] = []
         asked: list[dict[str, Any]] = []

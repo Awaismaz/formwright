@@ -16,7 +16,7 @@ import Interfaces from "./Interfaces";
 import PlanReview, { Planning } from "./PlanReview";
 import TicketDrawer, { ActorBadge } from "./TicketDrawer";
 import TimelineView from "./TimelineView";
-import ArchieChat, { TalkToArchieButton } from "./ArchieChat";
+import { openArchie, TalkToArchieButton } from "./ArchieChat";
 import ArchieLog from "./ArchieLog";
 import SpeedPanel from "./SpeedPanel";
 import Tree from "./Tree";
@@ -201,12 +201,6 @@ export default function ProgramPage() {
   const [confirm, setConfirm] = useState(false);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [speedOpen, setSpeedOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  useEffect(() => {  // "Answer Archie in the chat" from the Interfaces tab
-    const open = () => setChatOpen(true);
-    window.addEventListener("fw-open-archie", open);
-    return () => window.removeEventListener("fw-open-archie", open);
-  }, []);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
   const handoffs = recentHandoffs(recent, now);
@@ -255,7 +249,7 @@ export default function ProgramPage() {
         </div>
         <div className="flex items-center gap-3">
           <LiveStrip recent={recent} live={live} />
-          <TalkToArchieButton onClick={() => setChatOpen(true)} programId={p.id} />
+          <TalkToArchieButton programId={p.id} />
           {canEdit && <Menu><MenuTrigger asChild><Button variant="ghost" size="sm" aria-label="Program actions"><MoreHorizontal className="h-4 w-4" /></Button></MenuTrigger>
             <MenuContent><MenuItem icon={<FileDown />} onSelect={() => { void saveNative(`/api/native/programs/${p.id}/export`, `${p.name}.fwprog`, "fwprog"); }}>Save as file (.fwprog)</MenuItem>
             <MenuItem icon={<Coins />} onSelect={() => setBudgetOpen(true)}>Program settings…</MenuItem>
@@ -289,7 +283,7 @@ export default function ProgramPage() {
           <TabPanel value="deliverables"><Deliverables program={p} /></TabPanel>
           <TabPanel value="timeline"><TimelineView program={p} onOpen={setOpen} /></TabPanel>
           <TabPanel value="tree"><Tree program={p} onOpen={setOpen} /></TabPanel>
-          <TabPanel value="archie"><ArchieLog program={p} onTalk={() => setChatOpen(true)} /></TabPanel>
+          <TabPanel value="archie"><ArchieLog program={p} onTalk={openArchie} /></TabPanel>
           <TabPanel value="activity"><Activity program={p} /></TabPanel>
           <TabPanel value="brief">
             <Card className="space-y-3 p-5 text-[13px]">
@@ -306,7 +300,6 @@ export default function ProgramPage() {
       <Modal open={speedOpen} onOpenChange={setSpeedOpen} title="Speed and budget" description="Change them any time; the office picks the new numbers up with its next ticket.">
         <SpeedPanel program={p} />
       </Modal>
-      <ArchieChat program={p} open={chatOpen} onOpenChange={setChatOpen} />
       <Modal open={confirm} onOpenChange={setConfirm} title={`Delete ${p.name}?`}
         description="The program, its board and its history are removed. Design Studio parts and assemblies opened from tickets stay in Projects."
         footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>Cancel</Button><Button variant="danger" onClick={del}>Delete program</Button></>} />
