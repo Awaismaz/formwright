@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -394,3 +395,41 @@ def test_the_benchmark_case_loads_and_its_planetary_rows_hold_on_the_hand_layout
             c["params"]["designation"]["value"] = 6204
     rim = next(r for r in golden.planetary_rows(1, spec, insts, {"graph": data}) if r["id"].endswith(".rim"))
     assert rim["ok"] is False and rim["got"].startswith("4 mm = 2 m")
+
+
+# ============================================================================ benchmark A2: rounding in a fit
+A2_FIT = [{"id": "IF-19", "kind": "shaft_bore", "a": {"item": "car", "copy": 0}, "b": {"item": "pin", "copy": 2},
+           "data": {"d": 20.0, "length": 20.0, "z": [-2.5, 17.5]}}]
+
+
+def _a2_adoc() -> dict[str, Any]:
+    return {"instances": [{"id": "i24", "part": "p_car", "office": {"item": "car", "copy": 0}},
+                          {"id": "i19", "part": "p_pin", "office": {"item": "pin", "copy": 2}},
+                          {"id": "i18", "part": "p_pin", "office": {"item": "pin", "copy": 1}},
+                          {"id": "i9", "part": "p_ring", "office": {"item": "ring", "copy": 0}}]}
+
+
+def test_a2_pin_in_its_carrier_bore_a_micron_off_is_the_fit_not_a_clash() -> None:
+    ad = _a2_adoc()
+    # A2: 0.579 mm³ for a 0.0015 mm offset of a Ø20 x 20 press fit (d e L = 20 x 0.0015 x 20 = 0.6)
+    assert program_assembly.fit_rounding(ad, A2_FIT, {"a": "i19", "b": "i24", "volume_mm3": 0.579})
+    assert program_assembly.fit_rounding(ad, A2_FIT, {"a": "i24", "b": "i19", "volume_mm3": 4.0})  # e = 0.01: the band
+    assert not program_assembly.fit_rounding(ad, A2_FIT, {"a": "i19", "b": "i24", "volume_mm3": 4.1})  # beyond it
+    # another copy of the pin is not mated by IF-19, and a part with no fit interface is always a clash
+    assert not program_assembly.fit_rounding(ad, A2_FIT, {"a": "i18", "b": "i24", "volume_mm3": 0.579})
+    assert not program_assembly.fit_rounding(ad, A2_FIT, {"a": "i9", "b": "i24", "volume_mm3": 0.01})
+    an = {"interference": {"pairs": [{"a": "i19", "b": "i24", "kind": "interference", "volume_mm3": 0.579},
+                                     {"a": "i9", "b": "i24", "kind": "interference", "volume_mm3": 12.0}]}}
+    assert [(c["a"], c["b"]) for c in program_assembly._clashes(an, ad, A2_FIT)] == [("i9", "i24")]
+    assert len(program_assembly._clashes(an)) == 2  # without the ICD nothing is excused
+
+
+def test_planet_positions_are_exact_so_pins_sit_on_the_carrier_pattern() -> None:
+    _sk, ifs = _icd(_graph())
+    pins = [f for f in ifs if f["kind"] == "shaft_bore" and "pressed into the carrier" in f["name"]]
+    assert len(pins) == 3
+    za = pins[0]["data"]["axis"][1] - 60.0  # the first planet straight above the axis, a = 60
+    for f, k in zip(pins, range(3)):
+        th = math.pi / 2 + 2 * math.pi * k / 3
+        x, z = f["data"]["axis"]
+        assert abs(x - 60 * math.cos(th)) < 1e-8 and abs(z - za - 60 * math.sin(th)) < 1e-8

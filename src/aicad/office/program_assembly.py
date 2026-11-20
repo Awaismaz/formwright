@@ -316,7 +316,7 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
         await _placed(aroot, final)
         an = await aservice.analyse(aroot, org_id, final)
         astore.save(aroot, final)
-    clashes = _clashes(an)
+    clashes = _clashes(an, final, ifaces)
     n_mates = len(final["mates"])
     n_ph = sum(1 for v in parts.values() if v["kind"] == "placeholder")
     summary = (f"Fitz assembled {prog['name']} from {n_ph} placeholder{'s' if n_ph != 1 else ''}"
@@ -329,10 +329,11 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
             "icd_version": prog["icd"]["version"]}
 
 
-def _clashes(an: dict[str, Any]) -> list[dict[str, Any]]:
+def _clashes(an: dict[str, Any], adoc: dict[str, Any] | None = None,
+             ifaces: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     return [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
              "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in an["interference"]["pairs"]
-            if c["kind"] == "interference"]
+            if c["kind"] == "interference" and not (adoc is not None and ifaces and fit_rounding(adoc, ifaces, c))]
 
 
 async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str, str],
@@ -405,7 +406,8 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                 keep = [c for c in clashes if _item_of(final, c["a"]) not in items and _item_of(final, c["b"]) not in items]
                 try:
                     fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
-                    fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)]
+                    fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)
+                             and not fit_rounding(final, ifaces, c)]
                     real: list[dict[str, Any]] = []
                     for c in fresh:
                         c = {**c, "volume_mm3": round(float(c["volume_mm3"]), 3)}
@@ -525,6 +527,37 @@ def _envelope_mesh(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[s
     if not any(f["kind"] == "gear_mesh" and {f["a"]["item"], f["b"]["item"]} == {ia, ib} for f in ifaces):
         return False
     return str(a.get("part", "")).startswith("h_") != str(b.get("part", "")).startswith("h_")
+
+
+FIT_BAND = 0.01  # mm: the axis offset below which an overlap in a mated fit is that fit, not a clash
+_FIT_KINDS = ("shaft_bore", "bearing_seat")
+
+
+def fit_rounding(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[str, Any]) -> bool:
+    """An overlap between two parts the ICD mates in a cylindrical fit (a pin pressed into its bore, a shaft in its
+    bearing seat) that is only the fit itself, a few microns off: equivalent axis offset V / (d L) at most
+    ``FIT_BAND``, a tenth of the position tolerance. Rounding in one part's pattern and the other's placement made
+    exactly this (benchmark A2, 2026-11-21: Planet pin #3 in the carrier, 0.58 mm³ for a 0.0015 mm offset). It is
+    not a clash and must never send a correct part back."""
+    by = {i["id"]: i for i in adoc["instances"]}
+    a, b = by.get(c["a"]), by.get(c["b"])
+    if a is None or b is None:
+        return False
+    oa, ob = a.get("office") or {}, b.get("office") or {}
+    pair = {(oa.get("item"), int(oa.get("copy") or 0)), (ob.get("item"), int(ob.get("copy") or 0))}
+    vol = float(c.get("volume_mm3") or 0)
+    for f in ifaces:
+        if f.get("kind") not in _FIT_KINDS:
+            continue
+        if {(f["a"]["item"], int(f["a"].get("copy") or 0)), (f["b"]["item"], int(f["b"].get("copy") or 0))} != pair:
+            continue
+        d = f["data"]
+        z = d.get("z") or [0, 0]
+        length = float(d.get("length") or abs(float(z[1]) - float(z[0])) or 0)
+        dia = float(d.get("d") or 0)
+        if dia > 0 and length > 0 and vol <= FIT_BAND * dia * length:
+            return True
+    return False
 
 
 def placeholder_side(adoc: dict[str, Any], c: dict[str, Any], swapped: set[str] | None = None) -> str | None:
@@ -1001,7 +1034,7 @@ async def advisory_check(aroot: Path, org_id: str, prog: dict[str, Any]) -> dict
     from aicad.assembly import service as aservice
 
     an = await aservice.analyse(aroot, org_id, final, clearance=False)
-    clashes = _clashes(an)
+    clashes = _clashes(an, final, (prog.get("icd") or {}).get("interfaces") or [])
     n = len(clashes)
     if n:
         top = "; ".join(f"{c['a_name']} ↔ {c['b_name']} {c['volume_mm3']:.1f} mm³" for c in clashes[:5])
@@ -1044,7 +1077,8 @@ def view(aroot: Path, prog: dict[str, Any]) -> dict[str, Any] | None:
     stale = analysis.get("signature") != aservice.geometry_signature(adoc)
     clashes = [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
                 "volume_mm3": c["volume_mm3"], "mesh": c.get("mesh")}
-               for c in (analysis.get("interference") or {}).get("pairs") or [] if c.get("kind") == "interference"]
+               for c in (analysis.get("interference") or {}).get("pairs") or [] if c.get("kind") == "interference"
+               and not fit_rounding(adoc, (prog.get("icd") or {}).get("interfaces") or [], c)]
     return {"assembly_id": adoc["id"], "rev": adoc["rev"], "instances": insts, "parts": pview,
             "explode": aservice.explode(aroot, adoc), "clashes": [] if stale else clashes,
             "solve": (adoc.get("solve") or {}).get("status"), "envelope": sk["envelope"],

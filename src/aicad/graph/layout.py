@@ -1504,7 +1504,9 @@ class _Layout:
         self.planet_at: list[list[float]] = []
         for k in range(n):
             th = math.pi / 2 + 2 * math.pi * k / n
-            self.planet_at.append([_r2(a * math.cos(th)), _r2(za + a * math.sin(th))])
+            # exact (9 places), not 0.01: the carrier's holes are a pitch-circle pattern at whole-degree angles,
+            # so a pin placed at 51.96 for 60 cos 30° = 51.9615 overlapped its bore by 0.58 mm³ (benchmark A2)
+            self.planet_at.append([round(a * math.cos(th), 9) + 0.0, round(za + a * math.sin(th), 9) + 0.0])
         sp["ax"] = "y"
         self.at[pl] = [[c[0], _r2(ym), c[1]] for c in self.planet_at]
         self.at[pin] = [[c[0], _r2((py0 + yc_car1) / 2), c[1]] for c in self.planet_at][:self.ncopies(pin)]

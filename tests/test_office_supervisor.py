@@ -743,3 +743,74 @@ def test_fix_with_archie_on_unconnected_parts_asks_and_never_looks_idle(tmp_path
         assert r2["archie"]["ran"] is False and r2["archie"]["open"]
 
     asyncio.run(go())
+
+
+# ============================================================================ benchmark A2: no retry loop around a question
+A2_WHY = ("Output shaft still clashes in the program assembly after 2 rounds: Clash: Output shaft<1> ↔ Planet "
+          "carrier<1>, 0.6 mm³ of overlap")
+
+
+def _a2_block(root: Path, pid: str, rounds: int = 2) -> None:
+    with store.lock(pid):
+        d = store.load(root, pid)
+        t = next(x for x in d["tickets"] if x["title"] == "Output shaft")
+        orchestrator._set_run(t, status="fitting", next="fit")
+        r = orchestrator.Runner.__new__(orchestrator.Runner)
+        r.root, r.pid = root, pid
+        r._fail(d, t["id"], A2_WHY.replace("2 rounds", f"{rounds} rounds"))
+        store.save(root, d)
+
+
+def test_a2_archie_never_retries_around_his_own_question_nor_asks_it_twice(tmp_path: Path) -> None:
+    root, doc = _program(tmp_path)
+    pid = doc["id"]
+    key = _ticket(root, pid, "Output shaft")["key"]
+    n = {"i": 0}
+
+    def reply(_req: Any) -> str:  # A2's pattern: a major relaxation (worded differently each pass) and a retry
+        n["i"] += 1
+        return _reply({"cause": "measurement", "diagnosis": "A pressed fit read as a clash.", "say": "Relax it.",
+                       "actions": [{"tool": "relax_rule", "rule": "clash", "ticket": key,
+                                    "expiry": "rebuild" if n["i"] == 1 else {"kind": "reviews", "n": n["i"]},
+                                    "why": f"variant {n['i']}"},
+                                   {"tool": "retry", "ticket": key, "why": "try again"}]})
+
+    stub = StubProvider(responder=reply)
+
+    async def go() -> None:
+        _a2_block(root, pid)
+        with llm.use_provider(stub, roles=("supervisor",)):
+            res = await supervisor.run_pass(root, pid, None)
+        assert len(res["asked"]) == 1 and not res["done"]  # asked, and no unchanged retry around the question
+        assert any("waits for the question" in s for s in res["skipped"])
+        assert _ticket(root, pid, "Output shaft")["run"]["status"] == "blocked"
+        _a2_block(root, pid, 3)  # a new trigger on the same ticket, the question still open
+        with llm.use_provider(stub, roles=("supervisor",)):
+            res = await supervisor.run_pass(root, pid, None, force=True)
+        assert not res.get("asked") and not res.get("done")
+        log = store.load(root, pid)["supervisor"]["log"]
+        assert sum(1 for e in log if e["status"] == "asking") == 1
+        assert not any(e["tool"] == "retry" and e["status"] == "applied" for e in log)
+
+    asyncio.run(go())
+
+
+def test_a2_a_retry_that_stopped_the_same_way_is_not_repeated_until_something_changes() -> None:
+    t = {"id": "t1", "key": "K-1", "item_id": "pin", "run": {"status": "blocked", "blocked": A2_WHY}}
+    doc: dict[str, Any] = {"assembly": {"parts": {"pin": {"key": "p1"}, "car": {"key": "p2"}}}, "tickets": [t],
+                           "supervisor": {"log": []}}
+    assert supervisor.futile_retry(doc, t) is None  # the first retry is fair
+    assert supervisor.block_sig(A2_WHY) == supervisor.block_sig(A2_WHY.replace("2 rounds", "7 rounds"))
+    doc["supervisor"]["log"].append({"status": "applied", "tool": "retry", "ticket": "K-1",
+                                     "action": {"tool": "retry", "ticket": "K-1", "block": supervisor.block_sig(A2_WHY),
+                                                "asm": supervisor.asm_sig(doc)}})
+    t["run"]["blocked"] = A2_WHY.replace("2 rounds", "3 rounds")
+    assert "retried once already" in (supervisor.futile_retry(doc, t) or "")
+    doc["assembly"]["parts"]["car"] = {"key": "p3"}  # the carrier was rebuilt: a retry may help now
+    assert supervisor.futile_retry(doc, t) is None
+    # a question about an interface of its part holds the retry too (A2 asked on IF-19, not on the ticket)
+    doc["icd"] = {"interfaces": [{"id": "IF-19", "a": {"item": "car"}, "b": {"item": "pin"}}]}
+    doc["supervisor"]["log"].append({"status": "asking", "tool": "relax_rule", "ticket": None,
+                                     "action": {"tool": "relax_rule", "rule": "clash",
+                                                "scope": {"kind": "interface", "interface": "IF-19"}}})
+    assert "waiting for the engineer" in (supervisor.futile_retry(doc, t) or "")

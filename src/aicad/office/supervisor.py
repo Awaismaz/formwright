@@ -803,6 +803,65 @@ def _no_hard_findings(t: dict[str, Any], facts: dict[str, dict[str, Any]]) -> st
     return None
 
 
+_ROUNDS = re.compile(r"\bafter \d+ rounds?\b|\b\d+ rounds?\b")
+
+
+def block_sig(text: Any) -> str:
+    """A ticket's stop reason without the round count (which grows on every retry)."""
+    return " ".join(_ROUNDS.sub("", str(text or "")).split())
+
+
+def asm_sig(doc: dict[str, Any]) -> str:
+    """Which part snapshot each item has in the program assembly: a retry after any part changed may help."""
+    parts = (doc.get("assembly") or {}).get("parts") or {}
+    return _sig(sorted((k, (v or {}).get("key")) for k, v in parts.items()))
+
+
+def futile_retry(doc: dict[str, Any], t: dict[str, Any]) -> str | None:
+    """Why a retry of this blocked ticket would change nothing, else None.
+    - A question about this ticket is waiting for the engineer: retrying around it repeats the stop.
+    - The supervisor already retried it once and it stopped again for the same reason: the build is deterministic,
+      so something must change first (a fix, a relaxed rule, the engineer).
+    Benchmark A2 (2026-11-21): Archie asked to relax the clash rule on IF-19 and, every pass, also retried the pin
+    unchanged: 7 identical stops and 6 copies of the same question in four minutes."""
+    log = (doc.get("supervisor") or {}).get("log") or []
+    key = t["key"]
+    if any(e.get("status") == "asking" and concerns(doc, e.get("action") or {}, t, e.get("ticket")) for e in log):
+        return f"a decision about {key} is waiting for the engineer; a retry before it would stop the same way"
+    sig = block_sig((t.get("run") or {}).get("blocked"))
+    asm = asm_sig(doc)
+    if sig and any(e.get("status") == "applied" and e.get("tool") == "retry" and e.get("ticket") == key
+                   and (e.get("action") or {}).get("block") == sig and (e.get("action") or {}).get("asm") == asm
+                   for e in log):
+        return (f"{key} was retried once already and stopped again for the same reason; a retry changes nothing "
+                "in the design, so something else must change first")
+    return None
+
+
+def concerns(doc: dict[str, Any], action: dict[str, Any], t: dict[str, Any], key: str | None = None) -> bool:
+    """Whether a (normalised) action is about this ticket: on it, or on an interface of its part."""
+    sc = action.get("scope") or {}
+    if t["key"] in (key, action.get("ticket"), sc.get("key")) or sc.get("ticket") == t["id"]:
+        return True
+    if sc.get("kind") == "interface" and t.get("item_id"):
+        f = next((x for x in (doc.get("icd") or {}).get("interfaces") or [] if x["id"] == sc.get("interface")), None)
+        return f is not None and t["item_id"] in (f["a"]["item"], f["b"]["item"])
+    return False
+
+
+def _same_question(doc: dict[str, Any], norm: dict[str, Any]) -> bool:
+    """The same question is already waiting for the engineer: the same action on the same ticket or scope (a rule
+    relaxation on the same rule and scope, whatever its expiry or wording: A2 asked six variants of one)."""
+    def core(a: dict[str, Any]) -> Any:
+        if a.get("tool") == "relax_rule":
+            return ("relax_rule", a.get("rule"), json.dumps(a.get("scope"), sort_keys=True), a.get("feature"))
+        return json.dumps({k: v for k, v in a.items() if k not in ("why", "asm", "block")}, sort_keys=True)
+
+    want = core(norm)
+    return any(e.get("status") == "asking" and core(e.get("action") or {}) == want
+               for e in (doc.get("supervisor") or {}).get("log") or [])
+
+
 def check(doc: dict[str, Any], a: dict[str, Any], facts: dict[str, dict[str, Any]] | None = None,
           wallet: int | None = None) -> tuple[dict[str, Any] | None, str]:
     """One proposed action against the program as it is now: (normalised action, "") or (None, why not)."""
@@ -829,7 +888,13 @@ def check(doc: dict[str, Any], a: dict[str, Any], facts: dict[str, dict[str, Any
         if tool == "retry":
             if not busy and r.get("status") not in ("blocked", "retry", "waiting_capacity"):
                 return None, f"{t['key']} isn't blocked"
+            if not busy and r.get("status") == "blocked":
+                why_not = futile_retry(doc, t)
+                if why_not:
+                    return None, why_not
             base["interrupt"] = busy
+            base["block"] = block_sig(r.get("blocked"))
+            base["asm"] = asm_sig(doc)
             return base, ""
         if tool == "pause":
             return (base, "") if not t.get("paused") else (None, f"{t['key']} is already paused")
@@ -1594,6 +1659,13 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
         # alternatives (one problem, several ways to clear it): the engineer picks one, so a group with any major
         # option is asked as a whole
         major_groups = {a["alt"] for a, _n, c, _w in checked if a.get("alt") and c == "major"}
+        # a ticket this pass asks the engineer about is not also retried unchanged around the question (A2)
+        asks = [n for a, n, c, _w in checked if c == "major" and not a.get("alt")]
+        for a, n, c, _w in list(checked):
+            t = _ticket(doc, n.get("ticket")) if n["tool"] == "retry" else None
+            if t is not None and any(concerns(doc, q, t) for q in asks):
+                checked.remove((a, n, c, _w))
+                skipped.append(f"retry: {n['ticket']} waits for the question about it")
         for a, norm, cls, cls_why in checked:
             if a.get("alt") in major_groups and cls == "minor":
                 cls, cls_why = "major", "it is one of several ways to clear the problem: your choice"
@@ -1616,6 +1688,9 @@ async def run_pass(root: Path, pid: str, env: Any = None, *, force: bool = False
                                                                          outcome=f"Not done: {ex}"))
                 done.append(e)
             else:
+                if _same_question(doc, norm):  # asked already and still waiting: never ask twice
+                    skipped.append(f"{norm['tool']}: the same question is already waiting for the engineer")
+                    continue
                 if a.get("alt"):
                     base["group"] = f"{ptok}:{a['alt']}"
                 e = _edit(root, pid, lambda d, b=base: _entry(d, **b, status="asking",
