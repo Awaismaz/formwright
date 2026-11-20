@@ -35,6 +35,7 @@ DIST_TOL_MM = 1e-4
 MASS_REL_TOL = 1e-4
 COM_TOL_MM = 1e-3
 INTERFERENCE_VOL_TOL = 1e-6   # mm³; same as the Assembly Studio check
+VOL_REL_TOL = 1e-5            # CHK-05 relative volume (spline involute flanks, see below)
 
 
 @dataclass(frozen=True)
@@ -208,8 +209,10 @@ def run(fx: Fixture, workdir: Path, *, motion: bool = True) -> dict[str, Any]:
         r = checks.check_bbox(s, p.bbox)
         out.append(_check(f"{key}/{r.id}", f"{p.name}: {r.name}", r.passed, **r.detail))
         rel = abs(s.volume - p.volume) / p.volume
-        out.append(_check(f"{key}/CHK-05", f"{p.name}: volume vs hand sum", rel <= 1e-6, got_mm3=s.volume,
-                          hand_mm3=p.volume, rel_err=rel, tol=1e-6))
+        # 1e-5 (was 1e-6): Toolbox v3 gears have spline involute flanks fitted through points of the exact curve, whose
+        # volume differs from the exact hand integral by ~1.6e-6 (polyline flanks matched a polygon exactly)
+        out.append(_check(f"{key}/CHK-05", f"{p.name}: volume vs hand sum", rel <= VOL_REL_TOL, got_mm3=s.volume,
+                          hand_mm3=p.volume, rel_err=rel, tol=VOL_REL_TOL))
         f = workdir / f"{key}.step"
         export_step(s, str(f))
         steps[key] = f
