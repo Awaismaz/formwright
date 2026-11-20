@@ -377,11 +377,11 @@ def dfm_csv(s: dict[str, Any]) -> str:
 def readme(doc: dict[str, Any], rel: dict[str, Any], files: list[str], parts: list[dict[str, Any]],
            b: dict[str, Any], dfm: dict[str, Any] | None) -> str:
     lines = [f"FORMWRIGHT PROGRAM RELEASE: {doc['name']} · REV {rel['rev']}",
-             f"Released {rel.get('date', '')} by {rel.get('by') or '—'} · ICD v{(doc.get('icd') or {}).get('version', '—')}",
-             f"Note: {rel.get('note') or '—'}", "",
+             f"Released {rel.get('date', '')} by {rel.get('by') or '-'} · ICD v{(doc.get('icd') or {}).get('version', '-')}",
+             f"Note: {rel.get('note') or '-'}", "",
              "Parts released (each tagged in its Design Studio project):"]
     for p in parts:
-        lines.append(f"  {p['key']}  {p['title']}  rev {p['rev']}  (model revision {p.get('model_rev') or '—'}, "
+        lines.append(f"  {p['key']}  {p['title']}  rev {p['rev']}  (model revision {p.get('model_rev') or '-'}, "
                      f"tag \"{p['tag']}\")")
     lines += ["", (f"Bill of materials: {len(b['rows'])} lines, {b['total_qty']} pieces ({b['make']} make, "
                   f"{b['buy']} buy), {b['total_mass_g']:,.1f} g known mass")]

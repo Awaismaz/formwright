@@ -1256,7 +1256,7 @@ async def assembly_drawing(root: Path, pid: str, org_id: str, user_name: str, re
     out = dest or store.program_dir(root, pid) / "deliverables" / "assembly"
     meta = {"title": doc["name"], "drawing_no": f"FW-{doc['key']}-ASM", "drawn_by": user_name,
             "date": local_date(None, None), "rev": rev or "DRAFT",
-            "source": f"ICD v{(doc.get('icd') or {}).get('version', '—')} · {len(final['instances'])} instances"}
+            "source": f"ICD v{(doc.get('icd') or {}).get('version', '-')} · {len(final['instances'])} instances"}
     try:
         res = await dworker.assembly(org_id, nodes, b["rows"], out, meta)
     except Exception as e:

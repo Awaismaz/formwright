@@ -104,7 +104,7 @@ describe("labels and editing", () => {
     const m = { min: 60, max: 400, unit: "mm", label: "Length" };
     expect(checkEdit("150", false, m)).toEqual({ ok: true, value: 150 });
     expect(checkEdit(" 72,5 ", false, m)).toEqual({ ok: true, value: 72.5 });
-    expect(checkEdit("500", false, m)).toEqual({ ok: false, error: "Length must be 60–400 mm" });
+    expect(checkEdit("500", false, m)).toEqual({ ok: false, error: "Length must be 60 to 400 mm" });
     expect(checkEdit("abc", false, m).ok).toBe(false);
     expect(checkEdit("4.5", true, { label: "Holes" })).toEqual({ ok: false, error: "Holes must be a whole number" });
   });

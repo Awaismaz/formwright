@@ -268,7 +268,7 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
       <ModuleHeader code="drawings" icon={<Ruler className="h-4 w-4" />} title="Drawing Studio" projectId={pid} projectName={st.project.name}
         projects={projects.data?.items.map(p => ({ id: p.id, name: p.name, disabled: !p.verified }))} onSwitch={id => id ? onSwitch(id) : onBack()}
         actions={<DrawingActions pid={pid} rec={rec} canEdit={st.can_edit} verified={st.project.verified} stale={st.stale} busy={busy}
-            onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "—"}` : "Drawing regenerated from the latest build")} />}>
+            onRegenerate={() => void generate(opts, st.stale ? `Drawing updated to model rev ${st.current_rev ?? "-"}` : "Drawing regenerated from the latest build")} />}>
         {rec && <div className="flex items-center gap-1.5" data-testid="drawing-toolbar">
           <Badge className="whitespace-nowrap">{rec.sheet.size} · {rec.sheet.scale}</Badge>
           {chk && <CheckBadge chk={chk} />}
@@ -277,14 +277,14 @@ function Workspace({ pid, onBack, onSwitch }: { pid: string; onBack: () => void;
       {st.stale && rec && !busy && (
         <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px]" data-testid="stale-banner">
           <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
-          <span>Model changed since this sheet (model rev {st.made_from_rev ?? rec.model_rev ?? "—"} → {st.current_rev ?? "—"}). The sheet still shows the earlier model.</span>
-          {st.can_edit && <button className="link ml-1 font-medium" onClick={() => void generate(opts, `Drawing updated to model rev ${st.current_rev ?? "—"}`)}>Update drawing</button>}
+          <span>Model changed since this sheet (model rev {st.made_from_rev ?? rec.model_rev ?? "-"} → {st.current_rev ?? "-"}). The sheet still shows the earlier model.</span>
+          {st.can_edit && <button className="link ml-1 font-medium" onClick={() => void generate(opts, `Drawing updated to model rev ${st.current_rev ?? "-"}`)}>Update drawing</button>}
         </div>
       )}
       {rec?.imported && (
         <div className="flex items-center gap-2 border-b border-warning/30 bg-warning/10 px-4 py-2 text-[12.5px]" data-testid="inferred-banner">
           <AlertTriangle className="h-4 w-4 shrink-0 text-warning" />
-          <span><b>Dimensions inferred from imported geometry — verify.</b> This part came from a STEP file, so no value on the sheet is a design intent{rec.imported.component ? ` (recognised as ${rec.imported.component})` : ""}{rec.imported.unrecognised_faces ? `; ${rec.imported.unrecognised_faces} face(s) were not recognised and are drawn but not dimensioned` : ""}.</span>
+          <span><b>Dimensions inferred from imported geometry: verify.</b> This part came from a STEP file, so no value on the sheet is a design intent{rec.imported.component ? ` (recognised as ${rec.imported.component})` : ""}{rec.imported.unrecognised_faces ? `; ${rec.imported.unrecognised_faces} face(s) were not recognised and are drawn but not dimensioned` : ""}.</span>
         </div>
       )}
       {st.release && !st.stale && (
@@ -568,7 +568,7 @@ function TitlePanel({ rec, edits, disabled, onSave }: { rec: DrawingRecord; edit
                 className="rounded p-0.5 text-muted hover:bg-text/5 hover:text-danger"><X className="h-3.5 w-3.5" /></button></li>))}
         </ol>}
         <div className="flex gap-1.5">
-          <Input value={note} maxLength={160} disabled={disabled} placeholder="e.g. Break sharp edges 0.2–0.5 mm" className="h-8 text-[13px]"
+          <Input value={note} maxLength={160} disabled={disabled} placeholder="e.g. Break sharp edges 0.2 to 0.5 mm" className="h-8 text-[13px]"
             onChange={e => setNote(e.target.value)} onKeyDown={e => { if (e.key === "Enter") addNote(); }} />
           <Button size="sm" variant="secondary" disabled={disabled || !note.trim()} icon={<Plus className="h-3.5 w-3.5" />} onClick={addNote}>Add</Button>
         </div>
@@ -621,7 +621,7 @@ function RevPanel({ rec }: { rec: DrawingRecord }) {
       {issued.length === 0 ? <p className="mb-4 text-[12px] text-muted">None yet. The sheet is a draft until you issue a release from the Design Studio; the issue freezes this sheet, the model and the reports as Rev A.</p>
         : <ol className="mb-4 space-y-1.5">{[...issued].reverse().map(r => (
           <li key={r.rev} className="rounded border border-border p-2 text-[12.5px]"><div className="flex justify-between"><span className="font-semibold">Rev {r.rev}</span><span className="text-[11px] text-muted">{r.date}</span></div>
-            <div>{r.change}</div><div className="text-[11px] text-muted">by {r.by || "—"}</div></li>))}</ol>}
+            <div>{r.change}</div><div className="text-[11px] text-muted">by {r.by || "-"}</div></li>))}</ol>}
       <div className="label mb-2 flex items-center gap-1.5"><History className="h-3.5 w-3.5" />Model builds drawn</div>
       <p className="mb-3 text-[11.5px] text-muted">Each verified build that was drawn. These are working drafts, not revisions of the drawing.</p>
       <ol className="space-y-2">
@@ -629,7 +629,7 @@ function RevPanel({ rec }: { rec: DrawingRecord }) {
           <li key={`${h.build_id}-${i}`} className="rounded border border-border p-2 text-[12.5px]">
             <div className="flex items-center justify-between"><span className="font-semibold">Model rev {h.rev}</span><span className="text-[11px] text-muted">{h.date}</span></div>
             <div className="mt-0.5">{h.change}</div>
-            <div className="text-[11px] text-muted">by {h.by || "—"}</div>
+            <div className="text-[11px] text-muted">by {h.by || "-"}</div>
           </li>
         ))}
       </ol>

@@ -138,7 +138,7 @@ def stress_hints(rec: dict[str, Any], sharp: list[dict[str, Any]]) -> list[dict[
                       "title": f"{n} × Ø{d:g} {'hole' if n == 1 else 'holes'} near an edge (edge distance {e:.1f} mm "
                                f"= {ratio:.2f} × d)",
                       "detail": "A hole close to a free edge concentrates stress in the ligament and can tear out "
-                                "under bolt or pin load. Common practice keeps the edge distance at 1.5–2 × d or more "
+                                "under bolt or pin load. Common practice keeps the edge distance at 1.5 to 2 × d or more "
                                 "(heuristic threshold used here: 2 × d).",
                       "location": g["locations"][0], "locations": g["locations"], "count": n,
                       "suggestion": "Check bearing and tear-out of the ligament (pin/bolt calculators), or move the "
@@ -224,7 +224,7 @@ def checklist(model: dict[str, Any], hints: list[dict[str, Any]], load_cases: li
             ["bolted_joint", "pin_shear", "thread_engagement"],
             [{"what": "Preload, separation and bearing checks per bolt", "why": "Joint separation and slip are the "
               "usual failure modes of bolted joints."},
-             {"what": "Torque–tension test on the actual fasteners and finish",
+             {"what": "Torque-tension test on the actual fasteners and finish",
               "why": "The nut factor scatters ±25 % or more."}],
             [f"{p['count']} × Ø{p['d']} {p['kind']}" for p in patterns])
     if slender:

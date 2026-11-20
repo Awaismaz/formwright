@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine, ArrowLeftRight, ArrowRightToLine, ArrowUpFromLine, Check, Circle as CircleIcon, CircleDashed, CopyPlus, Equal, FlipHorizontal2,
-  Grid2x2, Hexagon, Lock, MousePointer2, Pencil, Pill, Radius, RectangleHorizontal, Redo2, RotateCw, Ruler, Scissors, SeparatorVertical, Spline,
+  Grid2x2, Hexagon, Lock, Minus, MousePointer2, Pencil, Pill, Radius, RectangleHorizontal, Redo2, RotateCw, Ruler, Scissors, SeparatorVertical, Spline,
   Fence, PanelBottom, SquareDashed, Trash2, TriangleRight, Undo2, X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -118,7 +118,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
 
   const commit = (next: Sketch, resolve = true) => {
     setHist(h => [...h.slice(-80), sk]); setFut([]);
-    if (resolve) { const r = solve(next); setSk(r.sketch); setStatus({ ok: r.ok, dof: r.dof }); if (!r.ok) toast.warning("Constraints conflict — the sketch is over-defined. Undo or remove a relation."); }
+    if (resolve) { const r = solve(next); setSk(r.sketch); setStatus({ ok: r.ok, dof: r.dof }); if (!r.ok) toast.warning("Constraints conflict: the sketch is over-defined. Undo or remove a relation."); }
     else setSk(next);
   };
   useEffect(() => { const r = solve(sk); setStatus({ ok: r.ok, dof: r.dof }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -313,7 +313,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
   const curves = selEnts.filter(e => e.type !== "line");
   const rel = (k: NoId<SConstraint>) => { const s = clone(sk); s.constraints.push({ ...k, id: uid("k") } as SConstraint); commit(s); };
   const relations: { label: string; icon: React.ReactNode; can: boolean; run: () => void }[] = [
-    { label: "Horizontal", icon: <span className="text-[13px] font-bold">—</span>, can: lines.length >= 1, run: () => lines.forEach(l => rel({ type: "horizontal", line: l.id })) },
+    { label: "Horizontal", icon: <Minus className="h-4 w-4" />, can: lines.length >= 1, run: () => lines.forEach(l => rel({ type: "horizontal", line: l.id })) },
     { label: "Vertical", icon: <span className="text-[13px] font-bold">|</span>, can: lines.length >= 1, run: () => lines.forEach(l => rel({ type: "vertical", line: l.id })) },
     { label: "Parallel", icon: <span className="text-[13px] font-bold">∥</span>, can: lines.length === 2, run: () => rel({ type: "parallel", l1: lines[0]!.id, l2: lines[1]!.id }) },
     { label: "Perpendicular", icon: <span className="text-[13px] font-bold">⊥</span>, can: lines.length === 2, run: () => rel({ type: "perpendicular", l1: lines[0]!.id, l2: lines[1]!.id }) },
@@ -374,7 +374,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
       const t = Number(smT), r = Number(smR), k = Number(smK), ratio = Number(smRatio);
       if (!(t > 0)) { toast.error("Enter a positive sheet thickness"); return; }
       if (!(r >= 0)) { toast.error("Enter a bend radius of 0 or more"); return; }
-      if (!(k >= 0 && k <= 1)) { toast.error("The K-factor is between 0 and 1 (0.3–0.5 is usual)"); return; }
+      if (!(k >= 0 && k <= 1)) { toast.error("The K-factor is between 0 and 1 (0.3 to 0.5 is usual)"); return; }
       feature = { op: "sm_base", ...common, profiles: prof.loops, t, r, k, relief: { type: smRelief, ratio: ratio > 0 ? ratio : 0.5 }, corner: { type: smCorner, gap: Math.max(0, Number(smCGap) || 0) }, reverse };
     } else if (kind === "rib") {
       const t = Number(ribT); if (!(t > 0)) { toast.error("Enter a positive rib thickness"); return; }
@@ -415,7 +415,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
     if (tool === "circle") { const [x1, y1] = scr([a.x, a.y]); return <circle cx={x1} cy={y1} r={Math.hypot(q[0] - a.x, q[1] - a.y) * view.s} className="fill-none stroke-primary" strokeDasharray="4 3" />; }
     return null;
   })();
-  const defined = status.ok ? (status.dof === 0 ? "Fully defined" : `Under defined · ${status.dof} DOF`) : "Over defined — conflicting relations";
+  const defined = status.ok ? (status.dof === 0 ? "Fully defined" : `Under defined · ${status.dof} DOF`) : "Over defined: conflicting relations";
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-[#f7f9fc] dark:bg-[#161a21]">
@@ -529,7 +529,7 @@ export default function SketchEditor({ project, topo, plane, faceId, editing, pr
         {kind === "sketch" ? null : kind === "sheet" ? <>
           <label className="flex items-center gap-1.5 text-[12.5px]">Thickness<Input value={smT} onChange={e => setSmT(e.target.value)} className="h-8 w-16 text-right" inputMode="decimal" aria-label="Sheet thickness" />mm</label>
           <Tip content="Default inside bend radius for the part's flanges" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">Bend R<Input value={smR} onChange={e => setSmR(e.target.value)} className="h-8 w-14 text-right" inputMode="decimal" aria-label="Bend radius" />mm</label></Tip>
-          <Tip content="Neutral fibre position as a fraction of the thickness: bend allowance = angle × (R + K × T). Ask your fabricator for theirs (0.3–0.5 is usual)" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">K-factor<Input value={smK} onChange={e => setSmK(e.target.value)} className="h-8 w-14 text-right" inputMode="decimal" aria-label="K-factor" /></label></Tip>
+          <Tip content="Neutral fibre position as a fraction of the thickness: bend allowance = angle × (R + K × T). Ask your fabricator for theirs (0.3 to 0.5 is usual)" side="top"><label className="flex items-center gap-1.5 text-[12.5px]">K-factor<Input value={smK} onChange={e => setSmK(e.target.value)} className="h-8 w-14 text-right" inputMode="decimal" aria-label="K-factor" /></label></Tip>
           <select value={smRelief} onChange={e => setSmRelief(e.target.value as typeof smRelief)} className="h-8 rounded border border-border bg-panel px-1.5 text-[12.5px]" aria-label="Bend relief">
             <option value="rect">Rectangular relief</option><option value="obround">Obround relief</option><option value="none">No relief (tear)</option>
           </select>

@@ -124,7 +124,7 @@ export function ModulePage() {
           {m.status === "preview" && (
             <div className="mt-5 flex items-start gap-3 rounded-lg border border-accent/30 bg-accent/5 p-4 text-sm">
               <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-              <div><b>This module is in preview.</b> The screens below illustrate the planned workflow with sample data. It isn't generating results from your projects yet — join early access and we'll invite you as soon as it does.</div>
+              <div><b>This module is in preview.</b> The screens below illustrate the planned workflow with sample data. It isn't generating results from your projects yet. Join early access and we'll invite you as soon as it does.</div>
             </div>
           )}
           {m.status === "live" && (

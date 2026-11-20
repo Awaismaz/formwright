@@ -633,7 +633,7 @@ def probe(instances: list[dict[str, Any]], target: dict[str, Any]) -> dict[str, 
     """Measure the clamped stack along one hole's axis.
 
     instances: [{id, name, step, T, bbox, material, holes}] (holes in part-local coordinates, from info.json).
-    target: {inst, hole} — the picked hole (index into that instance's holes).
+    target: {inst, hole}, the picked hole (index into that instance's holes).
     Returns the probe dict consumed by ``fasteners.propose`` plus world placement data for inserting the stack.
     """
     by_id = {i["id"]: i for i in instances}

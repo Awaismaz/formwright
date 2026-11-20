@@ -210,7 +210,7 @@ def gate(ws: Path, has_drawings: bool = True, leave_out: tuple[str, ...] | list[
     elif not cur.get("step_sha256"):
         blocking.append({"kind": "model", "text": "The model's export files are still being written. Try again in a moment."})
     else:
-        include.append({"kind": "model", "text": f"Model rev {cur.get('model_rev') or '—'}: STEP, STL, 3MF"})
+        include.append({"kind": "model", "text": f"Model rev {cur.get('model_rev') or '-'}: STEP, STL, 3MF"})
     if rel and deliverables.same_build(rel.get("build"), cur):
         blocking.append({"kind": "release", "text": f"Rev {rel['rev']} already is this exact model. Change the design to issue a new revision."})
 
@@ -221,7 +221,7 @@ def gate(ws: Path, has_drawings: bool = True, leave_out: tuple[str, ...] | list[
         else:
             notes.append("No drawing: Drawing Studio is not in this workspace's plan.")
     elif d["state"] == "stale":
-        blocking.append({"kind": "drawings", "text": f"The drawing shows model rev {d.get('made_from_rev') or '—'}. "
+        blocking.append({"kind": "drawings", "text": f"The drawing shows model rev {d.get('made_from_rev') or '-'}. "
                                                      "Update it in Drawing Studio and review it before issuing."})
     elif not d.get("check_passed"):
         blocking.append({"kind": "drawings", "text": "The drawing fails its consistency check (CHK-12). Fix it in Drawing Studio."})
@@ -236,7 +236,7 @@ def gate(ws: Path, has_drawings: bool = True, leave_out: tuple[str, ...] | list[
             notes.append("Manufacturability report left out (analysis is from an earlier model).")
         else:
             blocking.append({"kind": "manufacturing", "leavable": "dfm",
-                             "text": f"The manufacturability analysis is from model rev {m.get('made_from_rev') or '—'}. Re-analyse it, or leave it out."})
+                             "text": f"The manufacturability analysis is from model rev {m.get('made_from_rev') or '-'}. Re-analyse it, or leave it out."})
 
     e = mods["engineering"]
     if e.get("model_changed"):
@@ -279,7 +279,7 @@ def plan(ws: Path) -> dict[str, Any]:
     drw = _json(ws / "drawings" / "drawing.json")
     if drw:
         stale = deliverables.freshness(drw.get("build") or {"build_id": drw.get("build_id")}, ws, cur)["state"] != "current"
-        items.append({"kind": "drawing", "label": f"Drawing (model rev {drw.get('model_rev') or '—'})", "ok": not stale,
+        items.append({"kind": "drawing", "label": f"Drawing (model rev {drw.get('model_rev') or '-'})", "ok": not stale,
                       "stale": stale, "check": (drw.get("check") or {}).get("passed")})
     else:
         items.append({"kind": "drawing", "label": "Drawing", "missing": True, "where": "drawings"})
@@ -353,22 +353,22 @@ def build_pack(ws: Path, project_name: str, user: str | None = None, include_sta
         files["CHANGE_NOTICE.txt"] = notice_text(n).encode("utf-8")
     fp = st.get("fingerprint") or {}
     m = materials.get(materials.guess(st.get("material")))
-    mass = f"{float(fp['volume']) * float(m['density_g_cm3']) / 1000:,.1f} g ({m['name']}, typical density)" if m and fp.get("volume") else "—"
+    mass = f"{float(fp['volume']) * float(m['density_g_cm3']) / 1000:,.1f} g ({m['name']}, typical density)" if m and fp.get("volume") else "-"
     gating = [c["id"] for c in st.get("checks") or [] if c.get("gating") and not c.get("passed")]
     if release:
         head = [f"FORMWRIGHT RELEASE: {project_name} · REV {release['rev']}",
-                (f"Issued {release.get('date', '')} by {release.get('by') or '—'} · model rev {rev if rev is not None else '—'}"
+                (f"Issued {release.get('date', '')} by {release.get('by') or '-'} · model rev {rev if rev is not None else '-'}"
                 f" · build {str(st.get('build_id', ''))[-8:]}"),
-                f"Change: {release.get('note') or '—'}"]
+                f"Change: {release.get('note') or '-'}"]
     else:
         head = [f"FORMWRIGHT SHOP HANDOFF: {project_name}",
-                f"Revision {rev if rev is not None else '—'} · build {str(st.get('build_id', ''))[-8:]} · "
+                f"Revision {rev if rev is not None else '-'} · build {str(st.get('build_id', ''))[-8:]} · "
                 f"{datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}" + (f" · prepared by {user}" if user else "")]
     readme = "\n".join([
         *head,
         "",
         f"Part:      {st.get('part') or project_name}",
-        f"Material:  {st.get('material') or '—'}",
+        f"Material:  {st.get('material') or '-'}",
         f"Envelope:  {' × '.join(f'{v:g}' for v in fp.get('bbox', []))} mm",
         f"Volume:    {fp.get('volume', 0):,.1f} mm³",
         f"Mass:      {mass}",

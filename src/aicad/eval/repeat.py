@@ -219,22 +219,22 @@ def markdown(report: dict[str, Any]) -> str:
     lines += ["", "| Run | Built | Gates | Volume mm³ | Size mm | Faces | Features | Builds | Time s |"
               + (" Render sim (advisory) |" if rs else ""),
               "|---|---|---|---|---|---|---|---|---|" + ("---|" if rs else "")]
-    yn = {True: "yes", False: "no", None: "–"}
+    yn = {True: "yes", False: "no", None: "-"}
     for i, r in enumerate(report["runs"], 1):
-        size = " × ".join(f"{r[k]:g}" for k in ("bbox_x", "bbox_y", "bbox_z")) if r.get("built") else "–"
-        vol = f"{r['volume']:.3f}" if r.get("volume") is not None else "–"
+        size = " × ".join(f"{r[k]:g}" for k in ("bbox_x", "bbox_y", "bbox_z")) if r.get("built") else "-"
+        vol = f"{r['volume']:.3f}" if r.get("volume") is not None else "-"
         lines.append(f"| {i} | {yn[r.get('built')]} | {yn[r.get('gates_ok')]} | {vol} | {size} | "
-                     f"{r.get('faces') if r.get('faces') is not None else '–'} | "
-                     f"{r.get('features') if r.get('features') is not None else '–'} | {r.get('builds', 0)} | "
-                     f"{r.get('duration_s', '–')} |"
+                     f"{r.get('faces') if r.get('faces') is not None else '-'} | "
+                     f"{r.get('features') if r.get('features') is not None else '-'} | {r.get('builds', 0)} | "
+                     f"{r.get('duration_s', '-')} |"
                      + (f" {_sim(r.get('render_similarity'))} |" if rs else ""))
     return "\n".join(lines) + "\n"
 
 
 def _sim(r: dict[str, Any] | None) -> str:
     if not r:
-        return "–"
-    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "–")
+        return "-"
+    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "-")
 
 
 def fake_cassette(reference: str) -> dict[str, Any]:

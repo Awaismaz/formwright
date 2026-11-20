@@ -127,12 +127,12 @@ function CompareVariants({ open, onClose, project, data, onCompare, onChanged }:
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {row("Material", c => c.s.material ?? "—", new Set(cols.map(c => c.s.material)).size > 1)}
-            {row("Envelope (mm)", c => c.s.bbox?.map(v => +v.toFixed(2)).join(" × ") ?? "—", new Set(cols.map(c => JSON.stringify(c.s.bbox))).size > 1)}
-            {row("Volume (mm³)", c => c.s.volume != null ? <>{num(c.s.volume, 0)}{delta(c.s.volume, ref?.volume)}</> : "—", new Set(cols.map(c => c.s.volume?.toFixed(3))).size > 1)}
-            {row("Mass (g)", c => c.s.mass_g != null ? <>{num(c.s.mass_g, 1)}{delta(c.s.mass_g, ref?.mass_g)}</> : "—", new Set(cols.map(c => c.s.mass_g?.toFixed(3))).size > 1)}
+            {row("Material", c => c.s.material ?? "-", new Set(cols.map(c => c.s.material)).size > 1)}
+            {row("Envelope (mm)", c => c.s.bbox?.map(v => +v.toFixed(2)).join(" × ") ?? "-", new Set(cols.map(c => JSON.stringify(c.s.bbox))).size > 1)}
+            {row("Volume (mm³)", c => c.s.volume != null ? <>{num(c.s.volume, 0)}{delta(c.s.volume, ref?.volume)}</> : "-", new Set(cols.map(c => c.s.volume?.toFixed(3))).size > 1)}
+            {row("Mass (g)", c => c.s.mass_g != null ? <>{num(c.s.mass_g, 1)}{delta(c.s.mass_g, ref?.mass_g)}</> : "-", new Set(cols.map(c => c.s.mass_g?.toFixed(3))).size > 1)}
             {row("Checks", c => c.s.ok ? <span className="text-success">Passed</span> : <span className="text-danger">Failing</span>)}
-            {pkeys.map(k => row(k, c => { const v = c.s.params?.[k]; return v === undefined ? <span className="text-muted">—</span> : String(v); }, differs(k)))}
+            {pkeys.map(k => row(k, c => { const v = c.s.params?.[k]; return v === undefined ? <span className="text-muted">-</span> : String(v); }, differs(k)))}
             {hidden > 0 && <tr><td colSpan={cols.length + 1} className="px-3 py-2 text-[12px]">
               <button onClick={() => setAllParams(!allParams)} className="link">{allParams ? "Hide identical parameters" : `Show ${hidden} identical parameter${hidden > 1 ? "s" : ""}`}</button></td></tr>}
             {cols.some(c => c.v?.note) && row("Note", c => <span className="whitespace-pre-wrap text-[12px] text-muted">{c.v?.note || ""}</span>)}

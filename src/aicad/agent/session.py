@@ -180,11 +180,11 @@ def friendly_result(name: str, text: str, is_error: bool) -> str:
         if t.startswith("Overall gating checks: PASS"):
             return "All checks passed"
         if t.startswith("Overall gating checks: FAIL"):
-            return "Some checks failed — revising"
+            return "Some checks failed, revising"
         if t.startswith("BUILD FAILED") or is_error:
-            return "Build error — fixing it"
+            return "Build error, fixing it"
         return ""
-    return "Couldn't complete this step — trying another way" if is_error else ""
+    return "Couldn't complete this step, trying another way" if is_error else ""
 
 
 _SCRUB = [
@@ -546,7 +546,7 @@ class AgentSession:
             failed = True
             logging.getLogger("aicad.agent").exception("agent run failed")
             self.publish({"type": "error", "text": "The design agent hit a problem and stopped. Your model and files are "
-                                                   "unchanged — please try again."})
+                                                   "unchanged. Please try again."})
         finally:
             if not self._result_seen and self.run_spent_usd > 0:
                 self._cost_base += self.run_spent_usd  # the next cumulative report includes it

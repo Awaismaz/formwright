@@ -50,7 +50,7 @@ export default function StepImport({ project, onClose, onDone, onAgentPrompt }: 
     setBusy("agent");
     try {
       await api.post(`/api/projects/${project.id}/recognition/rebuild`);
-      onAgentPrompt?.(""); toast.success("The design agent is rebuilding it — follow along in the chat"); onDone();
+      onAgentPrompt?.(""); toast.success("The design agent is rebuilding it. Follow along in the chat"); onDone();
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Could not start the agent"); }
     finally { setBusy(""); }
   };

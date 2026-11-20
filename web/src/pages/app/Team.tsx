@@ -104,7 +104,7 @@ export default function Team() {
             {invites.map(i => (
               <tr key={i.id} className="bg-panel2/40">
                 <td className="px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full border border-dashed border-border"><MailPlus className="h-4 w-4 text-muted" /></span><div><div className="font-medium">{i.email}</div><div className="text-xs text-muted">Invitation pending · expires {date(i.expires_at)}</div></div></div></td>
-                <td className="px-4 py-3"><Badge className="capitalize">{i.role}</Badge></td><td className="px-4 py-3 text-muted">—</td><td className="px-4 py-3 text-muted">{date(i.created_at)}</td>
+                <td className="px-4 py-3"><Badge className="capitalize">{i.role}</Badge></td><td className="px-4 py-3 text-muted">-</td><td className="px-4 py-3 text-muted">{date(i.created_at)}</td>
                 <td className="px-4 py-3 text-right">{manage && <button className="rounded p-1.5 text-muted hover:bg-text/5 hover:text-danger" aria-label="Revoke invitation" onClick={() => call(() => api.del(`/api/team/invites/${i.id}`), "Invitation revoked")}><Trash2 className="h-4 w-4" /></button>}</td>
               </tr>
             ))}

@@ -105,13 +105,13 @@ def _s(v: Any, n: int = 160) -> str:
 
 
 # colour-legend tags a reader copies from a sheet's legend, e.g. "(red: INFERRED)", "[blue = SPEC]", "- green: REF"
-_LEGEND = re.compile(r"\s*(?:[(\[]\s*|[-–—,;]\s*)?\b(?:red|blue|green|black|orange|grey|gray|amber|purple)\s*[:=]\s*"
+_LEGEND = re.compile(r"\s*(?:[(\[]\s*|[-\u2013\u2014,;]\s*)?\b(?:red|blue|green|black|orange|grey|gray|amber|purple)\s*[:=]\s*"
                      r"[A-Z][A-Z ]{1,20}?\b\s*[)\]]?", re.IGNORECASE)
 
 
 def clean_describes(text: Any) -> str | None:
     """What a dimension measures, without colour-legend tags copied from the sheet."""
-    s = _LEGEND.sub("", _s(text, 160)).strip(" ,;-–—")
+    s = _LEGEND.sub("", _s(text, 160)).strip(" ,;-\u2013\u2014")
     return s[:100] or None
 
 

@@ -27,7 +27,7 @@ export function SignBanner({ s }: { s: CalcSet }) {
       <div className="flex items-start gap-3 rounded-lg border border-warning/50 bg-warning/5 px-4 py-3 text-[13px]" data-signoff="model_changed">
         <RefreshCw className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
         <div><div className="font-semibold text-warning">Model changed since sign-off: re-check. Not for release.</div>
-          <div className="mt-0.5 text-muted">Signed by {s.signoff.name} on {new Date(s.signoff.at).toLocaleString()} against model rev {st.signed_on_rev ?? "—"}; the part is now rev {st.current_rev ?? "—"}. Results are back to preliminary estimates until the calculations are updated from the current model and signed again. The earlier signature stays in the history.</div></div>
+          <div className="mt-0.5 text-muted">Signed by {s.signoff.name} on {new Date(s.signoff.at).toLocaleString()} against model rev {st.signed_on_rev ?? "-"}; the part is now rev {st.current_rev ?? "-"}. Results are back to preliminary estimates until the calculations are updated from the current model and signed again. The earlier signature stays in the history.</div></div>
       </div>);
   }
   if (st.state === "invalidated") {
@@ -152,7 +152,7 @@ function SetDetail({ s, pid, cat, sys, lcs, refresh, openCalc, onDeleted }: { s:
                     <div className="truncate text-[11.5px] text-muted">{r.outputs.filter(o => o.primary).slice(0, 3).map(o => { const d = display(o, sys, k => cat.units[k]?.label ?? ""); return `${o.label} ${d.value} ${d.unit}`; }).join(" · ")}</div></div>
                 </button>
                 {(it.unconfirmed?.length ?? 0) > 0 && <span title={`Example values: ${it.unconfirmed!.map(e => e.label).join(", ")}. Replace or keep them deliberately before signing.`}><Badge tone="warning"><AlertTriangle className="h-3 w-3" />example loads</Badge></span>}
-                {it.model_changed && <span title={`Calculated on model rev ${it.build?.model_rev ?? "—"}; the part has changed since.`}><Badge tone="warning">earlier model</Badge></span>}
+                {it.model_changed && <span title={`Calculated on model rev ${it.build?.model_rev ?? "-"}; the part has changed since.`}><Badge tone="warning">earlier model</Badge></span>}
                 {r.checks.length > 0 && <Badge tone={fails ? "danger" : "success"}>{fails ? `${fails} below requirement` : "all checks met"}</Badge>}
                 {r.safety_factor && <span className="hidden text-[11px] text-muted md:inline" title={r.safety_factor.source}>SF {fmt(r.safety_factor.required)} · {r.safety_factor.source.slice(0, 28)}{r.safety_factor.source.length > 28 ? "…" : ""}</span>}
                 {!ro && <button aria-label="Edit inputs" title="Edit inputs" className="rounded p-1.5 text-muted hover:bg-text/5" onClick={() => openCalc(it.calc_id, it.raw_inputs, it.source, { setId: s.id, itemId: it.id, title: it.title, confirmed: it.confirmed ?? [] })}><Pencil className="h-4 w-4" /></button>}

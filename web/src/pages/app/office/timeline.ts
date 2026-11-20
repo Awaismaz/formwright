@@ -44,7 +44,7 @@ export function bar(start: number, end: number, ppm: number, minPx = 3): { left:
 
 /** Estimate error for people: "on estimate" within 5 %, else "+25 %" / "−85 %". */
 export function fmtError(pct: number | null | undefined): string {
-  if (pct === null || pct === undefined || !Number.isFinite(pct)) return "—";
+  if (pct === null || pct === undefined || !Number.isFinite(pct)) return "-";
   if (Math.abs(pct) < 5) return "on estimate";
   return `${pct > 0 ? "+" : "−"}${Math.round(Math.abs(pct))} %`;
 }

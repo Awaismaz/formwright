@@ -73,7 +73,7 @@ async def install_model(p: Project, ctx: Ctx, source: str, strict: bool, note: s
         raise HTTPException(403)
     s = _sessions.get(p.id)
     if s and s.busy:
-        raise HTTPException(409, "The design agent is working on this project — wait for it to finish")
+        raise HTTPException(409, "The design agent is working on this project; wait for it to finish")
     ws = workspace_for(p)
     ws.mkdir(parents=True, exist_ok=True)
     await wait_finalized(p.id)

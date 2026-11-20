@@ -267,10 +267,10 @@ function ProjectLink({ model, loading }: { model: ModelInfo | undefined; loading
       <div className="mb-2 flex items-center gap-1.5 font-semibold"><Box className="h-4 w-4 text-primary" />{model.part}</div>
       <dl className="space-y-1">
         <Row k="Material" v={model.material?.name ?? "not set"} />
-        <Row k="Mass" v={m?.mass_kg ? `${fmt(m.mass_kg * 1000)} g` : "—"} />
-        <Row k="Weight" v={m?.weight_N ? `${fmt(m.weight_N)} N` : "—"} />
-        <Row k="CoG" v={m?.com_mm ? m.com_mm.map(x => fmt(x, 3)).join(", ") + " mm" : "—"} />
-        <Row k="Bounding box" v={model.bbox ? model.bbox.map(x => fmt(x, 4)).join(" × ") + " mm" : "—"} />
+        <Row k="Mass" v={m?.mass_kg ? `${fmt(m.mass_kg * 1000)} g` : "-"} />
+        <Row k="Weight" v={m?.weight_N ? `${fmt(m.weight_N)} N` : "-"} />
+        <Row k="CoG" v={m?.com_mm ? m.com_mm.map(x => fmt(x, 3)).join(", ") + " mm" : "-"} />
+        <Row k="Bounding box" v={model.bbox ? model.bbox.map(x => fmt(x, 4)).join(" × ") + " mm" : "-"} />
         {m?.inertia_kg_mm2 && <Row k="Ixx, Iyy, Izz" v={[0, 1, 2].map(i => fmt(m.inertia_kg_mm2![i]![i], 3)).join(", ") + " kg·mm²"} />}
       </dl>
       <div className="mt-2 text-[10.5px] text-muted">{model.material_source}. {model.mechanical ? `Strengths: ${model.mechanical.source} (${model.mechanical.basis}; verify against the certificate).` : "No cited strengths for this material: enter them in each calculator."}</div>

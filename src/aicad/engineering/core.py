@@ -398,7 +398,7 @@ def sf(vals: dict[str, Any]) -> tuple[float | None, str]:
 def g(x: float, n: int = 4) -> str:
     """Engineering formatting for shown working: n significant figures, no scientific notation for normal ranges."""
     if x is None:
-        return "—"
+        return "-"
     if isinstance(x, str):
         return x
     if x == 0:

@@ -177,7 +177,7 @@ def suggestions(info: dict[str, Any]) -> list[dict[str, Any]]:
             mate = {"t": _q(t), "E": _q(E, "GPa") if E else _q(207, "GPa"), "material": "Mating part (assumed)"}
             prov = {"size": f"{label}: Ø{p['d']:g} is the ISO 273 {bolt['series']} clearance for {bolt['size']}",
                     "layers": f"Layer 1 = this part, thickness {t:g} mm from the hole depth; layer 2 = mating part "
-                              "ASSUMED identical — edit it",
+                              "ASSUMED identical; edit it",
                     "L": f"Grip {grip:g} mm + nut height ≈ 0.9·d, rounded up to 5 mm (edit to the bolt you use)"}
             if E:
                 prov["E"] = f"Member modulus from {msrc}"

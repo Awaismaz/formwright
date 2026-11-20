@@ -81,7 +81,7 @@ export interface ParamDiff { [k: string]: { from: number | null; to: number | nu
 export interface FeatureChange { id: string; name: string; op: string | null; change: "added" | "removed" | "edited"; fields: string[] }
 
 export function fmtNum(v: number | null | undefined, unit?: string | null): string {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "-";
   const s = Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000);
   return unit ? `${s} ${unit}` : s;
 }

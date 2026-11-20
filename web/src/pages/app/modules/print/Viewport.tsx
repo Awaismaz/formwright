@@ -104,7 +104,7 @@ export function PrintViewport({ src, report, orient }: { src: Src; report: Repor
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: rgb(thickColor(scale.min / 2, scale)) }} />&lt; {scale.min} mm</span>
             <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: rgb(thickColor((scale.min + scale.warn) / 2, scale)) }} />&lt; {scale.warn} mm</span>
-            <span className="flex items-center gap-1"><span className="h-3 w-8 rounded-sm" style={{ background: `linear-gradient(90deg, ${rgb(thickColor(scale.warn, scale))}, ${rgb(thickColor(scale.cap * 0.999, scale))})` }} />{scale.warn}–{scale.cap} mm</span>
+            <span className="flex items-center gap-1"><span className="h-3 w-8 rounded-sm" style={{ background: `linear-gradient(90deg, ${rgb(thickColor(scale.warn, scale))}, ${rgb(thickColor(scale.cap * 0.999, scale))})` }} />{scale.warn} to {scale.cap} mm</span>
             <span className="flex items-center gap-1"><span className="h-3 w-3 rounded-sm" style={{ background: rgb(thickColor(-1, scale)) }} />≥ {scale.cap} mm</span>
           </div>
         </div>}

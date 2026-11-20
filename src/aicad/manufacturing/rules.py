@@ -351,7 +351,7 @@ def r_envelope(c: Ctx) -> list[Finding]:
     mills = c.shop.mills()
     if not mills:
         return [Finding("DFM-CNC-08", "cnc_milling", "info", "No milling machine in the shop profile",
-                        "—", "—", "The envelope could not be checked against a milling machine.",
+                        "-", "-", "The envelope could not be checked against a milling machine.",
                         "Add your milling machines to the shop profile.", "Shop profile", [], None)]
     fits = [m for m in mills if m.travel_mm and all(a <= b + 1e-6 for a, b in zip(dims, sorted(m.travel_mm,
                                                                                                reverse=True)))]
@@ -583,7 +583,7 @@ def r_turn_envelope(c: Ctx) -> list[Finding]:
     t = c.turn
     lathes = c.shop.lathes()
     if not lathes:
-        return [Finding("TRN-05", "cnc_turning", "info", "No lathe in the shop profile", "—", "—",
+        return [Finding("TRN-05", "cnc_turning", "info", "No lathe in the shop profile", "-", "-",
                         "The turning envelope could not be checked.", "Add your lathes to the shop profile.",
                         "Shop profile", [], None)]
     fits = [m for m in lathes if (m.max_diameter_mm or 0) >= t.max_d - 1e-6 and (m.max_length_mm or 0)
@@ -656,7 +656,7 @@ def r_sheet_scope(c: Ctx) -> list[Finding]:
     return [Finding(
         "SHM-00", "sheet_metal", "info", f"Screening only: {f2(t)} mm sheet, bends checked",
         f"constant {f2(t)} mm thickness over {f2(100 * sh.frac, 0)} % of the surface",  # type: ignore[union-attr]
-        "—", "Inside bend radius against the material table and the formed outer radius are checked. "
+        "-", "Inside bend radius against the material table and the formed outer radius are checked. "
         + ("The flat pattern and bend count come from the sheet-metal model (SHM-03); bend reliefs, hole-to-bend "
            "distances, grain direction and springback are not analysed." if sh.model else  # type: ignore[union-attr]
            "The flat pattern, bend reliefs, hole-to-bend distances, grain direction and springback are not analysed."),
@@ -727,7 +727,7 @@ def r_flat_pattern(c: Ctx) -> list[Finding]:
     return [Finding(
         "SHM-03", "sheet_metal", "info", f"Flat pattern {f2(fl['size'][0])} × {f2(fl['size'][1])} mm, {n} bend{'s' if n != 1 else ''}",
         f"{f2(t)} mm sheet, K = {f2(float(sm['k_factor']), 3)}, blank area {f2(float(fl['area_mm2']), 0)} mm², "
-        f"cut length {f2(float(fl['perimeter_mm']), 0)} mm", "—",
+        f"cut length {f2(float(fl['perimeter_mm']), 0)} mm", "-",
         "The flat pattern is developed from the sheet-metal model with bend allowance BA = angle × (R + K × T). The "
         "real allowance depends on the press brake, tooling and material, so the flat size is as good as the K-factor.",
         "Send the flat-pattern DXF with the K-factor to your fabricator and ask them to confirm it.",
@@ -755,7 +755,7 @@ def r_flange_length(c: Ctx) -> list[Finding]:
         "A flange has to rest on both shoulders of the press-brake die while it bends; flanges shorter than about "
         "four thicknesses slip into the die and come out short or twisted.",
         f"Lengthen the flange to at least {f2(lim)} mm, or ask your fabricator about their minimum for this tooling.",
-        "Common press-brake practice (die opening about 6–8 × T)", [], worst,
+        "Common press-brake practice (die opening about 6 to 8 × T)", [], worst,
         target={"kind": "length", "to": S.nice_up(lim), "why": f"≥ {f2(lim)} mm flange"})]
 
 
@@ -784,7 +784,7 @@ def _pull_vec(c: Ctx) -> np.ndarray:
 def r_mould_scope(c: Ctx) -> list[Finding]:
     return [Finding(
         "MLD-00", "moulding_casting", "info", f"Screening only: two-part mould pulled along ±{c.pull}",
-        f"pull direction ±{c.pull} (fewest undercut faces)", "—",
+        f"pull direction ±{c.pull} (fewest undercut faces)", "-",
         "Only draft, undercuts and wall thickness are checked. Parting line, gates, shrinkage, cooling and flow are "
         "not analysed.", "Ask your moulder or foundry to review before tooling.", S.MOULD_SOURCE, [], None)]
 

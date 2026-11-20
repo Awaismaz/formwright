@@ -1,7 +1,7 @@
 """Static checks of every Python file in an imported package, BEFORE anything runs.
 
 Every file (model, helper modules, every revision's model) goes through the runner's import tripwire, the same one
-the design agent's scripts pass (R-SEC-05). Files from another workspace — or whose signature does not verify — also
+the design agent's scripts pass (R-SEC-05). Files from another workspace (or whose signature does not verify) also
 pass a strict allow-list (``strict=True``):
 
 - imports only from build123d (top level), ``aicad.fw`` / ``aicad.toolbox``, a short list of pure standard-library

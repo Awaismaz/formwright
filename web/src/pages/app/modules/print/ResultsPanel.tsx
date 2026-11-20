@@ -16,7 +16,7 @@ const ICON: Record<Status, JSX.Element> = {
 };
 const TONE: Record<Status, "success" | "warning" | "danger" | "neutral"> = { pass: "success", warn: "warning", fail: "danger", info: "neutral" };
 
-export const f = (n: number | null | undefined, d = 1) => n === null || n === undefined || !Number.isFinite(n) ? "—"
+export const f = (n: number | null | undefined, d = 1) => n === null || n === undefined || !Number.isFinite(n) ? "-"
   : n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 export function dur(s: number) {
   const m = Math.round(s / 60);
@@ -214,10 +214,10 @@ export function ResultsPanel({ src, report, orient, selected, onSelect, settings
               <Metric label="Part volume" value={`${f(est.volume_mm3 / 1000, 2)} cm³`} />
               <Metric label="Surface area" value={`${f(est.area_mm2 / 100, 1)} cm²`} />
               <Metric label="Bounding box" value={est.bbox_mm.map(x => f(x, 1)).join(" × ") + " mm"} />
-              <Metric label="Solid mass" value={est.mass_solid_g !== null ? `${f(est.mass_solid_g, 1)} g` : "—"} />
+              <Metric label="Solid mass" value={est.mass_solid_g !== null ? `${f(est.mass_solid_g, 1)} g` : "-"} />
               {e && <>
-                <Metric label="Printed part" value={e.part_mass_g !== null ? `${f(e.part_mass_g, 1)} g` : "—"} />
-                <Metric label="Supports" value={e.support_mass_g !== null ? `${f(e.support_mass_g, 1)} g` : "—"} />
+                <Metric label="Printed part" value={e.part_mass_g !== null ? `${f(e.part_mass_g, 1)} g` : "-"} />
+                <Metric label="Supports" value={e.support_mass_g !== null ? `${f(e.support_mass_g, 1)} g` : "-"} />
                 <Metric label="Print time" value={dur(e.time_s)} />
                 <Metric label="Layers" value={orient!.layers.toLocaleString()} />
               </>}

@@ -392,7 +392,7 @@ def assumptions(read: dict[str, Any], review: dict[str, Any], dims: list[dict[st
             not any("TOLERANCE" in k for k in (read.get("title") or {})):
         out.append("No tolerances were read: the model is built at nominal sizes.")
     gt = next((v for k, v in (read.get("title") or {}).items() if "TOLERANCE" in k), None)
-    if gt and re.fullmatch(r"(?i)\s*(not specified|none|n/?a|[-—–]+)\s*", gt):
+    if gt and re.fullmatch(r"(?i)\s*(not specified|none|n/?a|[-\u2014\u2013]+)\s*", gt):
         out.append("No tolerances are specified on the drawing: the model is built at nominal sizes.")
     elif gt:
         out.append(f"General tolerances on the drawing: {gt}. The model is built at nominal sizes.")

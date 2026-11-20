@@ -170,7 +170,7 @@ function DimProps({ doc, d, canEdit, upd }: { doc: DraftDoc; d: Dim; canEdit: bo
   const tol = d.tol;
   const kind = tol?.kind ?? "none";
   const setTol = (t: Tol | undefined) => upd(x => ({ ...x, dims: x.dims.map(y => { if (y.id !== d.id) return y; const n = { ...y } as Dim; if (t) n.tol = t; else delete n.tol; return n; }) }));
-  const text = v === null ? "—" : (() => { const r = dimText(doc, d, v); return [r.main, ...r.stack].join(" "); })();
+  const text = v === null ? "-" : (() => { const r = dimText(doc, d, v); return [r.main, ...r.stack].join(" "); })();
   return (
     <Sec title={DIM_LABEL[d.type]} hint="The value is measured from the geometry and follows it when the geometry changes. Tolerances and fits are printed exactly as you enter them.">
       <div className="flex items-baseline justify-between text-[12.5px]"><span className="text-muted">Prints</span><b className="tabular-nums" data-testid="dim-text">{text}</b></div>

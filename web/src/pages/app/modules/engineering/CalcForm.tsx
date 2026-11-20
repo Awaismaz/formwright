@@ -29,7 +29,7 @@ function UnitInput({ value, onChange, units, disabled, label }: { value: { value
           onChange={e => onChange({ ...value, unit: e.target.value })}>
           {units.map(u => <option key={u.unit} value={u.unit}>{u.label}</option>)}
         </select>
-      ) : <span className="inline-flex h-8 min-w-[42px] items-center justify-center rounded-r border border-l-0 border-border bg-panel2 px-2 text-[12px] text-muted">{units[0]?.label || "–"}</span>}
+      ) : <span className="inline-flex h-8 min-w-[42px] items-center justify-center rounded-r border border-l-0 border-border bg-panel2 px-2 text-[12px] text-muted">{units[0]?.label || "-"}</span>}
     </div>
   );
 }
@@ -165,7 +165,7 @@ export function ResultView({ r, cat, sys, compact, levelLabel, selfCheck }: { r:
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">{c.label}</div>
                   <div className="text-[11.5px] text-muted">{c.basis}</div>
-                  {c.required !== null && <div className="mt-0.5 text-[11.5px]"><span className="text-muted">Required factor {fmt(c.required)} · source: </span><span className="font-medium">{c.source || "—"}</span></div>}
+                  {c.required !== null && <div className="mt-0.5 text-[11.5px]"><span className="text-muted">Required factor {fmt(c.required)} · source: </span><span className="font-medium">{c.source || "-"}</span></div>}
                 </div>
                 {c.achieved !== null && <div className="text-right tabular-nums"><div className="font-semibold">{c.required !== null ? `n = ${fmt(c.achieved, 3)}` : fmt(c.achieved, 3)}</div>
                   {c.passed !== null && <div className={cx("text-[11px]", c.passed ? "text-success" : "text-danger")}>{c.passed ? (c.required !== null ? "meets required factor" : "met") : (c.required !== null ? "below required factor" : "not met")}</div>}</div>}

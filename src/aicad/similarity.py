@@ -108,7 +108,7 @@ def _fmt_dims(d: list[float]) -> str:
 
 
 def compare(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-    """Score 0–100 plus reasons, comparing signature `b` against the reference `a`."""
+    """Score 0 to 100 plus reasons, comparing signature `b` against the reference `a`."""
     size = _size_sim(a["dims"], b["dims"])
     shape = _shape_sim(a, b)
     holes, shared = _cyl_sim(a.get("cyl", {}), b.get("cyl", {}))

@@ -104,7 +104,7 @@ def test_cached_equals_uncached_and_the_old_check(gearbox: tuple[Path, dict[str,
     for r in old_c["rows"]:
         assert rows[(r["a"], r["b"])]["distance_mm"] == pytest.approx(r["distance_mm"], abs=1e-6)
         assert rows[(r["a"], r["b"])]["why"] == r["why"]
-    # the pin in the Ø8 bore: overlap π (5² − 4²) × 10 (the gear face width) — exact, by hand
+    # the pin in the Ø8 bore: overlap π (5² − 4²) × 10 (the gear face width), exact, by hand
     pp = next(v for (a, b), v in inter.items() if {names[a], names[b]} == {"Pinion", "Pin"})
     assert pp["volume_mm3"] == pytest.approx(math.pi * (25 - 16) * 10, rel=1e-6)
 

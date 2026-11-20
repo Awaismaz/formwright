@@ -160,7 +160,7 @@ register(Calculator(
               show_if={"se_mode": ["estimate"]}),
     ],
     func=_shaft, safety_factor=True,
-    references=[(f"{SHIGLEY_REF}, §7-4 Eqs. (7-3)–(7-8), (7-15), (7-16); §6-9 Marin factors (Eqs. 6-8, 6-18–6-20, "
+    references=[(f"{SHIGLEY_REF}, §7-4 Eqs. (7-3) to (7-8), (7-15), (7-16); §6-9 Marin factors (Eqs. 6-8, 6-18 to 6-20, "
                 "Tables 6-2, 6-5); Eq. (6-32)")],
     assumptions=["Steel shaft, infinite-life (endurance-limit) approach", "Solid round section", ("Axial load "
                  "neglected"), "Kt and q taken from charts by the user", "Distortion-energy (von Mises) combination"],
@@ -254,8 +254,8 @@ register(Calculator(
         Param("X", "Radial factor X", "ratio", 1.0, min=0, group="Load", show_if={"load_mode": ["xy"]}),
         Param("Y", "Axial factor Y", "ratio", 0.0, min=0, group="Load", show_if={"load_mode": ["xy"]}),
         Param("af", "Application factor af", "ratio", 1.0, min=1, max=3, group="Load",
-              help="Load-application factor (Shigley Table 11-5): 1.0–1.1 precision gearing, 1.2–1.3 "
-                   "commercial gearing, 1.0–1.2 rotating machinery without impact."),
+              help="Load-application factor (Shigley Table 11-5): 1.0 to 1.1 precision gearing, 1.2 to 1.3 "
+                   "commercial gearing, 1.0 to 1.2 rotating machinery without impact."),
         Param("n", "Speed n", "speed", 1500.0, min=0, exclusive_min=True, group="Operation"),
         Param("reliability", "Reliability", "enum", "90", group="Operation",
               options=[{"value": k, "label": f"{k} %"} for k in std.BEARING_A1]),
@@ -264,7 +264,7 @@ register(Calculator(
         Param("target_h", "Target life", "time", 20000.0, min=0, exclusive_min=True, group="Operation", optional=True),
     ],
     func=_bearing,
-    references=["ISO 281:2007 Rolling bearings — Dynamic load ratings and rating life, Eqs. (1), (2), Table 12",
+    references=["ISO 281:2007 Rolling bearings: Dynamic load ratings and rating life, Eqs. (1), (2), Table 12",
                 f"{SHIGLEY_REF}, §11-3, §11-4 Eq. (11-3), Table 11-5"],
     assumptions=["Constant load and speed (use a cubic-mean equivalent for duty cycles)", ("Standard bearing "
                  "steel and conventional operating conditions per ISO 281")],
@@ -314,7 +314,7 @@ def _spring(v: dict[str, Any]) -> Work:
     w.out("Na", "Active coils Na", Na, "count")
     w.out("Ls", "Solid length Ls", Ls, "length")
     if C < 4 or C > 12:
-        w.warnings.append(f"Spring index C = {g(C)} is outside the preferred 4–12 range (Shigley §10-5).")
+        w.warnings.append(f"Spring index C = {g(C)} is outside the preferred 4 to 12 range (Shigley §10-5).")
     if v["wire"] == "custom":
         Sut = v["Sut"]
         if not Sut:
@@ -325,7 +325,7 @@ def _spring(v: dict[str, Any]) -> Work:
         mat = std.SPRING_WIRE[v["wire"]]
         lo, hi = mat["d_range"]
         if not lo <= d <= hi:
-            w.warnings.append(f"d = {g(d)} mm is outside the {mat['name']} range {lo}–{hi} mm of Table 10-4.")
+            w.warnings.append(f"d = {g(d)} mm is outside the {mat['name']} range {lo} to {hi} mm of Table 10-4.")
         Sut = mat["A"] / d ** mat["m"]
         ssy_f = mat["ssy"]
         w.step("Wire tensile strength", "Sut = A / d^m", f"{g(mat['A'])} / {g(d)}^{g(mat['m'])} ({mat['name']})", Sut,
@@ -402,7 +402,7 @@ register(Calculator(
         Param("F", "Working load", "force", None, min=0, exclusive_min=True, group="Load", optional=True),
     ],
     func=_spring, safety_factor=True,
-    references=[(f"{SHIGLEY_REF}, §10-2 – §10-8: Eqs. (10-1), (10-5), (10-7), (10-9), (10-13), (10-14); "
+    references=[(f"{SHIGLEY_REF}, §10-2 to §10-8: Eqs. (10-1), (10-5), (10-7), (10-9), (10-13), (10-14); "
                 "Tables 10-1, 10-2, 10-4, 10-5, 10-6")],
     assumptions=["Round wire, constant pitch, static load", "Set not removed (Ssy fractions of Table 10-6)",
                  "Buckling criterion for steel springs"],

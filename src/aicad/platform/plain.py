@@ -26,7 +26,7 @@ _FILLET = re.compile(r"Failed creating a fillet with radius of (?P<r>[\d.]+)", r
 
 def _clean(msg: str) -> str:
     msg = re.sub(r"`?\b[A-Za-z_][\w.]*\(\)`?", "", msg)  # function names such as max_fillet()
-    msg = re.sub(r"\s+", " ", msg).strip(" .;:,—-")
+    msg = re.sub(r"\s+", " ", msg).strip(" .;:,\u2014-")
     return msg
 
 

@@ -833,7 +833,7 @@ def _parent(ws: Path, n: int) -> int | None:
 async def _go_to(p: Project, ws: Path, ctx: Ctx, n: int, note: str) -> dict[str, Any]:
     s = _sessions.get(p.id)
     if s and s.busy:
-        raise HTTPException(409, "The agent is working — try again when it finishes")
+        raise HTTPException(409, "The agent is working; try again when it finishes")
     await wait_finalized(p.id)
     shutil.copy2(ws / "revisions" / str(n) / "model.py", ws / "model.py")
     st = await _rebuild(p, ws, determinism=False, fast=True)
@@ -1048,7 +1048,7 @@ async def agent_chat(project_id: str, body: ChatIn, ctx: Ctx = Depends(verified_
     files = save_attachments(ws, body.attachments)
     if files:
         text += ("\n\n[Reference image(s) attached by the user: " + ", ".join(files) +
-                 ". Read them before modelling. Treat them as references: do not assume a scale — ask for at least "
+                 ". Read them before modelling. Treat them as references: do not assume a scale; ask for at least "
                  "one real dimension if none is given, and state what you inferred versus what you were told.]")
     mode = "discuss" if body.mode == "discuss" else "build"
     shown = getattr(body, "shown", None)  # module hand-offs only (image2cad): the chat shows a summary, not the brief

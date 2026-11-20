@@ -413,7 +413,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
                   "drawn_by": row.get("by", "") if issue is None else (issue.get("by") or row.get("by", "")),
                   "date": row.get("date", "") if issue is None else issue.get("date", ""), "rev": rev,
                   "tolerance": tol_txt,
-                  "source": f"Model rev {row.get('rev', '—')} · build {str(row.get('build_id', ''))[-8:]}"}
+                  "source": f"Model rev {row.get('rev', '-')} · build {str(row.get('build_id', ''))[-8:]}"}
     notes = ["DIMENSIONS IN MILLIMETRES. DO NOT SCALE.",
              "NOT APPROVED FOR MANUFACTURE: A QUALIFIED ENGINEER MUST REVIEW AND APPROVE THIS DRAWING."]
     if tol["mode"] == "none":
@@ -429,7 +429,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     notes += [n.upper() for n in notes_extra]
     recog = _recognition(out_dir.parent) if imported else None
     if imported:
-        notes.append("DIMENSIONS INFERRED FROM IMPORTED GEOMETRY — VERIFY BEFORE USE.")
+        notes.append("DIMENSIONS INFERRED FROM IMPORTED GEOMETRY: VERIFY BEFORE USE.")
         comp = (recog or {}).get("component") or {}
         if comp.get("name"):
             notes.append(f"RECOGNISED AS: {str(comp['name']).upper()} (INFERRED).")
@@ -437,7 +437,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
         if unrec:
             notes.append(f"{unrec} FACE(S) NOT RECOGNISED: SHOWN IN THE VIEWS, NOT DIMENSIONED.")
     if cen_threads := [h for h in cen["holes"] + cen["outer"] if h.get("thread")]:
-        notes.append("THREADS ARE COSMETIC (ISO 6410-1); TAP DRILL SIZES ARE COMMON PRACTICE — VERIFY FOR YOUR TAP."
+        notes.append("THREADS ARE COSMETIC (ISO 6410-1); TAP DRILL SIZES ARE COMMON PRACTICE; VERIFY FOR YOUR TAP."
                      if any(h["thread"].get("internal") for h in cen_threads) else
                      "THREADS ARE COSMETIC (ISO 6410-1).")
     for d in dims:
@@ -450,7 +450,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
                                                meta.get("spec") or {}, hidden)
     gdt_rec["notes"] = gdt_notes  # for the panel (a datum letter the interface spec already uses)
     if gdt_rec["icd_interfaces"]:
-        notes.append(f"DATUMS AND GEOMETRIC TOLERANCES FROM THE INTERFACE SPEC (ICD v{gdt_rec['icd_version'] or '—'}: "
+        notes.append(f"DATUMS AND GEOMETRIC TOLERANCES FROM THE INTERFACE SPEC (ICD v{gdt_rec['icd_version'] or '-'}: "
                      f"{', '.join(gdt_rec['icd_interfaces'])}). VERIFY.")
     if any(f["source"] == "user" for f in gdt_rec["frames"]):
         notes.append("GEOMETRIC TOLERANCES SHOWN WITHOUT AN ICD REFERENCE ARE ENTERED BY THE USER.")
@@ -463,7 +463,7 @@ def generate(out_dir: Path, dest: Path, options: dict[str, Any], meta: dict[str,
     check = chk12(sheet, dims, callouts, mapping, cen, expected, hidden=hidden,
                   gdt={"items": gdt_items, "record": gdt_rec})
     t_layout = time.perf_counter() - t0 - t_geo
-    doc_title = f"{sheet_meta['title']} — drawing {sheet_meta['drawing_no']} rev {rev}"
+    doc_title = f"{sheet_meta['title']}, drawing {sheet_meta['drawing_no']} rev {rev}"
     issue_copy = issue_sheet(sheet)
     if issue is None:
         (dest / "sheet.svg").write_text(to_svg(sheet, doc_title), encoding="utf-8", newline="\n")

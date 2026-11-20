@@ -96,7 +96,7 @@ export function assemblyRibbon(c: AsmRibbonCtx): Record<AsmRibbonTab, RibbonBtn[
     ]],
     View: [[
       { id: "fit", copilot: "asm-zoom-fit", label: "Zoom to Fit", icon: <Maximize className={I} />, tip: "Fit the assembly in the window (F)", onClick: c.onFit, disabled: !c.hasParts },
-      { id: "orient", copilot: "asm-view-orientation", label: "View Orientation", icon: <Rotate3d className={I} />, tip: "Standard views (Ctrl+1–7)", disabled: !c.hasParts,
+      { id: "orient", copilot: "asm-view-orientation", label: "View Orientation", icon: <Rotate3d className={I} />, tip: "Standard views (Ctrl+1 to 7)", disabled: !c.hasParts,
         menu: ASM_VIEWS.map((v, i) => ({ label: `${v}  · Ctrl+${i + 1}`, onSelect: () => c.onView(v) })) },
     ], [
       { id: "explode", copilot: "asm-explode", label: "Exploded View", icon: <Expand className={I} />, tip: c.explode > 0 ? "Collapse the exploded view (the slider under the view sets how far)" : "Explode the assembly (the slider under the view sets how far)",

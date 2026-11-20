@@ -125,7 +125,7 @@ def diff(prev: dict[str, Any], cur: dict[str, Any]) -> dict[str, Any]:
     material = None
     if ps.get("material") != cs.get("material"):
         material = {"from": ps.get("material"), "to": cs.get("material")}
-        lines.append(f"Material: {ps.get('material') or '—'} → {cs.get('material') or '—'}")
+        lines.append(f"Material: {ps.get('material') or '-'} → {cs.get('material') or '-'}")
     gating = lambda st: sorted(c["id"] for c in st.get("checks") or [] if c.get("gating") and not c.get("passed"))
     checks = {"from_ok": bool(ps.get("ok")), "to_ok": bool(cs.get("ok")), "failing": gating(cs)}
     if not lines:

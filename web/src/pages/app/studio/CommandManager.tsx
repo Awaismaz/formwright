@@ -106,7 +106,7 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     View: [[
       { id: "fit", label: "Zoom to Fit", icon: <Maximize className="h-5 w-5" />, tip: "Fit the model in the window, keeping the orientation (F)", onClick: () => viewer?.zoomToFit() },
       { id: "normal", label: "Normal To", icon: <Focus className="h-5 w-5" />, tip: canNormal ? "Look straight at the selected face" : "Select a flat face first (Select tool), then look straight at it", cmd: { kind: "normal" }, disabled: !canNormal },
-      { id: "orient", label: "View Orientation", icon: <Rotate3d className="h-5 w-5" />, tip: "Standard views (Ctrl+1–7)", menu: views.map((v, i) => ({ label: `${v}  · Ctrl+${i + 1}`, onSelect: () => viewer?.setView(v) })) },
+      { id: "orient", label: "View Orientation", icon: <Rotate3d className="h-5 w-5" />, tip: "Standard views (Ctrl+1 to 7)", menu: views.map((v, i) => ({ label: `${v}  · Ctrl+${i + 1}`, onSelect: () => viewer?.setView(v) })) },
     ], [
       { id: "display", label: "Display Style", icon: <Cuboid className="h-5 w-5" />, tip: "Shaded, edges, hidden lines, wireframe", menu: displays.map(([m, l]) => ({ label: l, on: viewer?.display === m, onSelect: () => viewer?.setDisplay(m) })) },
       { id: "ortho", label: viewer?.ortho ? "Perspective" : "Orthographic", icon: viewer?.ortho ? <Hexagon className="h-5 w-5" /> : <SquareDashed className="h-5 w-5" />, tip: viewer?.ortho ? "Switch to a perspective view" : "Switch back to the orthographic (CAD) view", onClick: () => viewer?.setOrtho(!viewer.ortho) },

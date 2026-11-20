@@ -75,7 +75,7 @@ function ReleaseDiffLine({ r }: { r: ProgramRelease }) {
   return (
     <div className="w-full pl-14 text-[11.5px] text-muted" data-diff={r.rev}>
       <span className="text-text">Against rev {d.from}:</span> {d.summary}
-      {d.parts.some(p => p.changed) && <> Revised: {d.parts.filter(p => p.changed).map(p => `${p.key} ${p.before ?? "—"} → ${p.after}`).join(", ")}.</>}
+      {d.parts.some(p => p.changed) && <> Revised: {d.parts.filter(p => p.changed).map(p => `${p.key} ${p.before ?? "-"} → ${p.after}`).join(", ")}.</>}
       {d.icd.changes.length > 0 && <> Interfaces: {d.icd.changes.slice(0, 3).join("; ")}{d.icd.changes.length > 3 ? "…" : ""}.</>}
     </div>
   );
@@ -98,7 +98,7 @@ function EcnLog({ ecns }: { ecns: Ecn[] }) {
   );
 }
 
-const g = (x: number | null | undefined) => (x === null || x === undefined ? "—" : x >= 1000 ? `${num(Math.round(x))} g` : `${Math.round(x * 10) / 10} g`);
+const g = (x: number | null | undefined) => (x === null || x === undefined ? "-" : x >= 1000 ? `${num(Math.round(x))} g` : `${Math.round(x * 10) / 10} g`);
 
 function ReleaseCard({ program, d }: { program: Program; d: D }) {
   const qc = useQueryClient();
@@ -223,9 +223,9 @@ function BomTable({ program, d }: { program: Program; d: D }) {
               <td className="py-1 tabular-nums">{r.item}</td><td className="tabular-nums">{r.qty}</td>
               <td><span className="font-medium">{r.part}</span><div className="text-[10.5px] text-muted">{r.description}</div></td>
               <td><Badge tone={r.make_buy === "make" ? "primary" : "neutral"}>{r.make_buy}</Badge></td>
-              <td>{r.designation ?? "—"}{r.standard && <span className="text-muted"> · {r.standard}</span>}</td>
-              <td>{r.material ?? "—"}</td><td className="text-right tabular-nums">{g(r.mass_each_g)}</td><td className="text-right tabular-nums">{g(r.mass_total_g)}</td>
-              <td className="pl-3 font-mono text-[11px] text-muted">{r.key ?? "—"}</td>
+              <td>{r.designation ?? "-"}{r.standard && <span className="text-muted"> · {r.standard}</span>}</td>
+              <td>{r.material ?? "-"}</td><td className="text-right tabular-nums">{g(r.mass_each_g)}</td><td className="text-right tabular-nums">{g(r.mass_total_g)}</td>
+              <td className="pl-3 font-mono text-[11px] text-muted">{r.key ?? "-"}</td>
             </tr>))}</tbody>
         </table>
       </div>
@@ -264,8 +264,8 @@ function Dfm({ program, d }: { program: Program; d: D }) {
                 <td className="min-w-[180px]">{p.relative_cost ? <div className="flex items-center gap-2">
                   <div className="h-2 w-28 rounded-full bg-panel2"><div className="h-2 rounded-full bg-primary/70" style={{ width: `${(100 * p.relative_cost) / maxRel}%` }} /></div>
                   <span className="tabular-nums">{p.relative_cost.toFixed(2)}×</span>
-                  {p.cost_share_pct !== null && p.cost_share_pct !== undefined && <span className="text-[11px] text-muted">{p.cost_share_pct} % of the batch</span>}</div> : "—"}</td>
-                <td className="max-w-[320px] text-[12px]">{top ? <Tip content={`${top.measured} (limit ${top.limit}). ${top.fix}`}><span><span className="font-mono text-[10.5px] text-muted">{top.rule}</span> {top.title}</span></Tip> : "—"}</td>
+                  {p.cost_share_pct !== null && p.cost_share_pct !== undefined && <span className="text-[11px] text-muted">{p.cost_share_pct} % of the batch</span>}</div> : "-"}</td>
+                <td className="max-w-[320px] text-[12px]">{top ? <Tip content={`${top.measured} (limit ${top.limit}). ${top.fix}`}><span><span className="font-mono text-[10.5px] text-muted">{top.rule}</span> {top.title}</span></Tip> : "-"}</td>
                 <td className="whitespace-nowrap pl-2 text-right">{pid && <Link className="inline-flex items-center gap-0.5 text-[12px] text-primary hover:underline"
                   to={`/app/modules/manufacturing?project=${pid}`}>Advisor<ExternalLink className="h-3 w-3" /></Link>}</td>
               </tr>);

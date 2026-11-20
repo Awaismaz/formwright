@@ -27,9 +27,9 @@ CSK_D = {3: 6.72, 4: 8.96, 5: 11.2, 6: 13.44, 8: 17.92, 10: 22.4, 12: 26.88, 16:
 
 SOURCES = {
     "clearance": "ISO 273 clearance holes (fine H12 / medium H13 / coarse H14)",
-    "tapped": "ISO 261 coarse pitch; tap drill ≈ d − P (common practice, cf. ISO 2306) — verify for your tap",
-    "cbore": "Counterbore Ø per DIN 974-1 for ISO 4762 cap screws; depth = head height k (ISO 4762) + 0.4 mm — verify",
-    "csk": "90° countersink to the ISO 10642 head Ø (theoretical) — verify for your screw",
+    "tapped": "ISO 261 coarse pitch; tap drill ≈ d − P (common practice, cf. ISO 2306); verify for your tap",
+    "cbore": "Counterbore Ø per DIN 974-1 for ISO 4762 cap screws; depth = head height k (ISO 4762) + 0.4 mm; verify",
+    "csk": "90° countersink to the ISO 10642 head Ø (theoretical); verify for your screw",
     "washer": "ISO 7089 plain washer outside Ø",
     "edge": "Edge distance guidance: at least 1.5 × d is a common design rule; EN 1993-1-8 Table 3.3 gives "
             "1.2 × hole Ø as the minimum for steel. Guidance only, not a strength check.",
@@ -44,9 +44,9 @@ def _size(v: Any) -> int:
     try:
         d = int(float(v))
     except (TypeError, ValueError):
-        raise HoleError("Choose a thread size (M3–M24)") from None
+        raise HoleError("Choose a thread size (M3 to M24)") from None
     if float(v) != d or d not in CLEARANCE:
-        raise HoleError(f"M{v} isn't in the hole tables; choose M3–M24")
+        raise HoleError(f"M{v} isn't in the hole tables; choose M3 to M24")
     return d
 
 
@@ -70,7 +70,7 @@ def resolve(spec: Any) -> dict[str, Any]:
         out["cbore"] = {"d": CBORE_D[d], "depth": round(toolbox.SHCS[d][1] + CBORE_ALLOWANCE, 3)}
     else:
         if d not in CSK_D:
-            raise HoleError(f"No ISO 10642 countersunk screw in M{d}; choose M3–M20")
+            raise HoleError(f"No ISO 10642 countersunk screw in M{d}; choose M3 to M20")
         out["d"] = clear
         out["csk"] = {"d": CSK_D[d], "angle": 90.0}
     out["spec"]["label"] = label(out)

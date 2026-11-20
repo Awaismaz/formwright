@@ -39,7 +39,7 @@ SOURCES = {
     "pitch": "ISO 261 / ISO 262 (coarse and fine pitches, selected sizes)",
     "basic": "ISO 724 basic dimensions (D1 = D − 1.082532 P, d3 = d − 1.226869 P)",
     "classes": "ISO 965-1 tolerance classes (6H / 6g medium)",
-    "tap_drill": "Tap drill ≈ d − P: common practice (cf. ISO 2306) — verify for your tap",
+    "tap_drill": "Tap drill ≈ d − P: common practice (cf. ISO 2306); verify for your tap",
     "drawing": "ISO 6410-1 thread representation: thin 3/4 circle at the root, thick line at the crest",
 }
 
@@ -78,7 +78,7 @@ def parse(text: str) -> dict[str, Any]:
                           "M10x1.25-6H)")
     size = _num(m.group(1))
     if size not in COARSE:
-        raise ThreadError(f"M{size:g} isn't in the ISO 262 thread table; choose M1–M64")
+        raise ThreadError(f"M{size:g} isn't in the ISO 262 thread table; choose M1 to M64")
     pitch = _num(m.group(2)) if m.group(2) else COARSE[size]
     return {"size": size, "pitch": pitch, "cls": m.group(3)}
 
@@ -104,9 +104,9 @@ def resolve(spec: Any, *, internal: bool, bore: float | None = None, length: flo
         try:
             size = _num(spec.get("size"))
         except (TypeError, ValueError):
-            raise ThreadError("Choose a thread size (M1–M64)") from None
+            raise ThreadError("Choose a thread size (M1 to M64)") from None
         if size not in COARSE:
-            raise ThreadError(f"M{size:g} isn't in the ISO 262 thread table; choose M1–M64")
+            raise ThreadError(f"M{size:g} isn't in the ISO 262 thread table; choose M1 to M64")
         base = {"size": size, "pitch": _num(spec["pitch"]) if spec.get("pitch") else COARSE[size], "cls": None}
     size, pitch = base["size"], base["pitch"]
     if pitch not in pitches(size):

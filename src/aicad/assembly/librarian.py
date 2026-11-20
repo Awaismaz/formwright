@@ -58,7 +58,7 @@ class Clause:
 
 # ----------------------------------------------------------------------------- splitting
 def _norm(t: str) -> str:
-    t = t.replace("×", "x").replace("⌀", "ø").replace("Ø", "ø").replace("–", "-").replace("—", "-")
+    t = t.replace("×", "x").replace("⌀", "ø").replace("Ø", "ø").replace("\u2013", "-").replace("\u2014", "-")
     return re.sub(r"\s+", " ", t).strip()
 
 
@@ -397,7 +397,7 @@ def _clean_project_name(name: str) -> str:
 
 def find_parts(query: str, candidates: list[dict[str, Any]], limit: int = 3) -> list[dict[str, Any]]:
     """Company parts matching a clause, best first. ``candidates``: [{id, name, description, sig}] (sig from
-    ``similarity.signature``; verified builds only). Score 0–1 from name words (and description words at half
+    ``similarity.signature``; verified builds only). Score 0 to 1 from name words (and description words at half
     weight), or from the envelope when the query is a size ("the 120x80 plate")."""
     q = [w for w in _tok(query) if w not in GENERIC]
     dims = similarity.parse_size_query(query)

@@ -268,7 +268,7 @@ function Workspace({ pid, opts, canEdit }: { pid: string; opts: Options; canEdit
                 <div className="text-[11.5px] text-muted">Part facts used: {d.facts.name}{d.facts.material ? ` · ${d.facts.material}` : ""}{d.facts.size_mm ? ` · ${d.facts.size_mm.join(" × ")} mm` : ""}{d.facts.features.length ? ` · ${d.facts.features.length} named features` : ""}</div>
                 <div className="mt-auto flex flex-wrap items-center gap-3">
                   <Button icon={<Wand2 className="h-4 w-4" />} loading={busy === "refine"} onClick={doRefine} data-action="refine">{refined ? "Refine again" : "Refine prompt"}</Button>
-                  <label className="flex items-center gap-1.5 text-[12.5px]"><input type="checkbox" checked={polishAI} onChange={e => setPolishAI(e.target.checked)} data-field="polish" />Polish with AI <span className="text-muted">(about 1–3 tokens)</span></label>
+                  <label className="flex items-center gap-1.5 text-[12.5px]"><input type="checkbox" checked={polishAI} onChange={e => setPolishAI(e.target.checked)} data-field="polish" />Polish with AI <span className="text-muted">(about 1 to 3 tokens)</span></label>
                 </div>
               </div>
             </div>

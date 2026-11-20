@@ -20,7 +20,7 @@ const STATUS: Record<SideStatus, { icon: JSX.Element; label: string }> = {
 const fmt = (v: unknown): string => {
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000);
   if (Array.isArray(v)) return v.every(x => Array.isArray(x)) ? (v as number[][]).map(p => `(${p.map(fmt).join(", ")})`).join(" ") : `(${v.map(fmt).join(", ")})`;
-  return v === null || v === undefined ? "—" : String(v);
+  return v === null || v === undefined ? "-" : String(v);
 };
 
 const DATA_ROWS: Record<Interface["kind"], [string, string][]> = {

@@ -128,7 +128,7 @@ export default function AnnotatePanel({ rec, edits, disabled, onSave, requestPic
           <select className={sel} value={mod} onChange={ev => setMod(ev.target.value as "" | "M" | "L")} aria-label="Material condition">
             <option value="">No modifier</option><option value="M">Ⓜ maximum material</option><option value="L">Ⓛ least material</option></select>
           <div className="flex gap-1">{refs.map((r, i) => <select key={i} className={sel} value={r} disabled={need === "none"} aria-label={`Datum reference ${i + 1}`}
-            onChange={ev => setRefs(x => x.map((y, j) => (j === i ? ev.target.value : y)))}><option value="">–</option>{allLetters.map(l => <option key={l}>{l}</option>)}</select>)}</div>
+            onChange={ev => setRefs(x => x.map((y, j) => (j === i ? ev.target.value : y)))}><option value="">-</option>{allLetters.map(l => <option key={l}>{l}</option>)}</select>)}</div>
         </div>
         <div className="mt-2">{attachSelect(fAttach, setFAttach, "Frame attached to")}</div>
         {need === "required" && !refs.some(Boolean) && <p className="mt-1 text-[11.5px] text-muted">This characteristic needs a datum reference.</p>}

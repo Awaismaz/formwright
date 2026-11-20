@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     threading.Thread(target=serve, args=(out, a.port), daemon=True).start()
     if not a.no_browser:
         webbrowser.open(f"http://127.0.0.1:{a.port}/")
-    print(f"watching {a.spec} — save it to rebuild; Ctrl+C to stop")
+    print(f"watching {a.spec}: save it to rebuild; Ctrl+C to stop")
     last = a.spec.stat().st_mtime
     try:
         while True:

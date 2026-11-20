@@ -4,7 +4,7 @@ Reads the exact B-rep and reports what a mechanical engineer would call features
 base stock (prismatic block or turned/cylindrical), holes (diameter, axis, depth, through/blind, entry point),
 hole patterns (linear / circular), cylindrical bosses, fillets and chamfers. The report drives:
 
-- a deterministic *parametric draft* (`draft_model`) — stock minus recognised holes, with every size a PARAM,
+- a deterministic *parametric draft* (`draft_model`): stock minus recognised holes, with every size a PARAM,
   verified against the reference by CHK-09 (symmetric-difference volume);
 - a structured prompt for the design agent to rebuild the remaining features faithfully.
 
@@ -603,7 +603,7 @@ def summary(rec: dict[str, Any]) -> list[str]:
         lines.append(f"{c['count']} × chamfer face(s) at {c['angle_deg']}°")
     for f in rec.get("features", []):
         if f["kind"] in ("gear_teeth", "circular_pattern"):
-            lines.append(f["name"] + " — " + ", ".join(f"{k} {v}" for k, v in f["params"].items()))
+            lines.append(f["name"] + ": " + ", ".join(f"{k} {v}" for k, v in f["params"].items()))
     for k, n in rec["unrecognised"].items():
         lines.append(f"Not recognised: {n} × {k}")
     return lines
@@ -634,7 +634,7 @@ def import_model(rec: dict[str, Any], name: str, reference: str, recognition: st
     annotated tree entries; recognised holes/patterns are editable parameters (fill-and-recut on the exact body).
     At default values the result is exactly the imported solid."""
     comp = rec.get("component")
-    lines = [f'"""Imported STEP{": " + filename if filename else ""} — exact solid with recognised features.',
+    lines = [f'"""Imported STEP{": " + filename if filename else ""}, exact solid with recognised features.',
              "",
              "The imported body is kept exactly (\"Imported blank\"); geometry that was not recognised stays part of it.",
              "Recognised: " + "; ".join(rec.get("summary", [])[:10]),
@@ -663,13 +663,13 @@ def import_model(rec: dict[str, Any], name: str, reference: str, recognition: st
         d0 = f["holes"][0]["d"]
         lines.append(f"{pid}_D = {d0}  # {f['name']}: diameter")
         params.append(f"{pid}_D")
-        meta.append(f'"{pid}_D": {{"min": 0.1, "unit": "mm", "group": "Recognised features", "label": "{f["name"]} — Ø"}}')
+        meta.append(f'"{pid}_D": {{"min": 0.1, "unit": "mm", "group": "Recognised features", "label": "{f["name"]} Ø"}}')
         args = f"d={pid}_D"
         pcd = f.get("params", {}).get("pcd")
         if pcd:
             lines.append(f"{pid}_PCD = {pcd}  # {f['name']}: pitch circle diameter")
             params.append(f"{pid}_PCD")
-            meta.append(f'"{pid}_PCD": {{"min": 0.1, "unit": "mm", "group": "Recognised features", "label": "{f["name"]} — PCD"}}')
+            meta.append(f'"{pid}_PCD": {{"min": 0.1, "unit": "mm", "group": "Recognised features", "label": "{f["name"]} PCD"}}')
             args += f", pcd={pid}_PCD"
         edits.append(f"part = fw.redefine_holes(part, RECOGNITION, {f['id']!r}, {args})")
         depth_sum = sum(h["depth"] for h in f["holes"])

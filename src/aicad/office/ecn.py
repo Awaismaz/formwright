@@ -250,7 +250,7 @@ def changes_txt(doc: dict[str, Any], rev: str, d: dict[str, Any]) -> str:
     lines.append(d["summary"])
     lines += ["", "Parts:"]
     for p in d["parts"]:
-        lines.append(f"  {p['key']}  {p['title']}  rev {p['before'] or '—'} -> {p['after']}"
+        lines.append(f"  {p['key']}  {p['title']}  rev {p['before'] or '-'} -> {p['after']}"
                      + ("  (revised)" if p["changed"] else "  (unchanged)"))
     b = d["bom"]
     lines += ["", "Bill of materials:"]
@@ -260,6 +260,6 @@ def changes_txt(doc: dict[str, Any], rev: str, d: dict[str, Any]) -> str:
     if not (b["added"] or b["removed"] or b["qty_changed"]):
         lines.append("  no line changes")
     i = d["icd"]
-    lines += ["", f"Interfaces (ICD v{i['before'] or '—'} -> v{i['after'] or '—'}):"]
+    lines += ["", f"Interfaces (ICD v{i['before'] or '-'} -> v{i['after'] or '-'}):"]
     lines += [f"  {x}" for x in i["changes"]] or ["  no interface changes"]
     return "\n".join(lines) + "\n"

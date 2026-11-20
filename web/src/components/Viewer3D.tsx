@@ -164,7 +164,7 @@ export default function Viewer3D(props: Props) {
         </Menu>
         <span className="mx-1 h-5 w-px bg-border" />
         <Popover.Root>
-          <Tip content={proj.ortho ? "Orthographic (CAD) — click for perspective options" : "Perspective — click for options"} side="bottom">
+          <Tip content={proj.ortho ? "Orthographic (CAD): click for perspective options" : "Perspective: click for options"} side="bottom">
             <Popover.Trigger asChild>
               <button className={cx("rounded px-2 py-1 text-[12px] font-medium", !proj.ortho ? "bg-primary text-white" : "text-muted hover:bg-text/5 hover:text-text")}>{proj.ortho ? "Ortho" : "Persp"}</button>
             </Popover.Trigger>
@@ -236,7 +236,7 @@ export default function Viewer3D(props: Props) {
             {(["X", "Y", "Z"] as Axis[]).map(a => <button key={a} onClick={() => setAxis(a)} className={cx("px-2 py-0.5 font-semibold", axis === a ? "bg-primary text-white" : "text-muted hover:bg-text/5")}>{a}</button>)}
           </span>
           <input type="range" min={0} max={1} step={0.002} value={secT} onChange={e => setSecT(+e.target.value)} aria-label="Section position" />
-          <span className="w-24 tabular-nums text-text">{axis} = {secMm !== null ? secMm.toFixed(2) : "—"} mm</span>
+          <span className="w-24 tabular-nums text-text">{axis} = {secMm !== null ? secMm.toFixed(2) : "-"} mm</span>
           <button onClick={() => setFlip(!flip)} className="rounded border border-border px-2 py-0.5 hover:bg-text/5" title="Keep the other side">Flip</button>
         </div>)}
 

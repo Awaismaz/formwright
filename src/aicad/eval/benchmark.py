@@ -249,20 +249,20 @@ def markdown(report: dict[str, Any]) -> str:
     lines += ["| Case | Family | Pass | Builds | First pass | Gates | Bbox | Volume | Census | Tokens | Time s | Notes |"
               + (" Render sim (advisory) |" if rs else ""),
               "|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|" if rs else "")]
-    yn = {True: "yes", False: "no", None: "–"}
+    yn = {True: "yes", False: "no", None: "-"}
     for r in report["rows"]:
         lines.append(f"| {r['id']} | {r['family']} | {yn[r.get('passed')]} | {r.get('builds', 0)} | "
                      f"{yn[r.get('first_pass')]} | {yn[r.get('gates_ok')]} | {yn[r.get('bbox_ok')]} | "
                      f"{yn[r.get('volume_ok')]} | {yn[r.get('census_ok')]} | {r.get('tokens_platform', 0)} | "
-                     f"{r.get('duration_s', '–')} | {'; '.join(r.get('notes') or [])} |"
+                     f"{r.get('duration_s', '-')} | {'; '.join(r.get('notes') or [])} |"
                      + (f" {_sim_cell(r.get('render_similarity'))} |" if rs else ""))
     return "\n".join(lines) + "\n"
 
 
 def _sim_cell(r: dict[str, Any] | None) -> str:
     if not r:
-        return "–"
-    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "–")
+        return "-"
+    return f"{r['score']:.3f}" if r.get("available") else str(r.get("reason") or "-")
 
 
 async def run(cases: list[dict[str, Any]], mode: str, out: Path, replay_dir: Path | None = None,

@@ -39,7 +39,7 @@ export default function RunMeter({ projectId, busy, meter, unlimited, balance, l
   return (
     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 text-[11px] text-muted">
       <span title={e.basis === "workspace" ? `Learned from ${e.samples} runs in this workspace` : "Measured on typical runs"}>
-        ≈ {num(e.typical)} tokens ({num(e.low)}–{num(e.high)}) · {e.kind === "new" ? "new part" : "change"}
+        ≈ {num(e.typical)} tokens ({num(e.low)} to {num(e.high)}) · {e.kind === "new" ? "new part" : "change"}
       </span>
       {stopAt !== null && <>·
         <Menu>

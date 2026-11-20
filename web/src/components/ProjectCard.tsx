@@ -31,7 +31,7 @@ export default function ProjectCard({ p, units }: { p: Project; units?: "mm" | "
       <div className="flex flex-1 flex-col gap-2 p-3.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0"><div className="truncate text-sm font-semibold">{p.name}</div>
-            <div className="truncate text-xs text-muted">{p.last_status?.material ?? (p.description || "—")}</div></div>
+            <div className="truncate text-xs text-muted">{p.last_status?.material ?? (p.description || "-")}</div></div>
         </div>
         <div className="mt-auto flex items-center justify-between gap-2 text-xs text-muted">
           <ProjectStatus p={p} />
