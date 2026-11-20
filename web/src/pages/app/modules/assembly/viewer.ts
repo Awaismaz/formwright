@@ -1,5 +1,5 @@
 /**
- * AssemblyViewer — many placed instances of exact B-rep parts (topo.json per part, shared geometry), Z-up and
+ * AssemblyViewer: many placed instances of exact B-rep parts (topo.json per part, shared geometry), Z-up and
  * orthographic like the Studio viewer. Instance placements are rigid 3x4 transforms; the exploded view adds a
  * per-instance offset. Picks report (instance, local face/edge id) so mates can reference exact part geometry.
  */

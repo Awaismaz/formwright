@@ -71,6 +71,11 @@ CODES = {
     "hub_overhangs_seat": "info: the hubs on a shaft are wider than its seat",
     "train_not_attached": "warn: nothing in the assembly carries the shaft line; it is assembled beside the rest",
     "shafts_not_held": "info: no housing: gear mesh mates keep the centre distances, the shafts can still swing",
+    # keys and retaining rings (fixings.py)
+    "no_keyseat": "warn: no free keyseat on the line's shafts for the key; placed beside (or not inserted)",
+    "key_mismatch": "warn: the key's width or length doesn't fit the keyseat; placed beside",
+    "no_groove": "warn: no free retaining-ring groove on the line's shafts; placed beside (or not inserted)",
+    "ring_mismatch": "warn: the ring's groove diameter doesn't match the shaft's groove; placed beside",
 }
 
 
@@ -459,6 +464,14 @@ def train_plan(root: Path, doc: dict[str, Any], items: list[dict[str, Any]]) -> 
                                  if shafts else "no shaft to put it on: placed beside")
             if not shafts:
                 codes[u.item].append("no_shaft_for_hub")
+    for u in tr.of("key"):
+        if u.item:
+            notes[u.item].append("in the keyseat under its hub: on the keyseat floor, centred, length along the shaft"
+                                 if shafts else "no shaft to put it in: placed beside")
+    for u in tr.of("ring"):
+        if u.item:
+            notes[u.item].append("in the shaft's circlip groove, against the groove wall away from the part it holds"
+                                 if shafts else "no shaft to put it on: placed beside")
     if bearings and bearings[0].item:
         item = bearings[0].item
         n_sh = len(shafts)
@@ -818,7 +831,7 @@ def fasten_targets(root: Path, doc: dict[str, Any], size: int | None, only: str 
 
 
 async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict[str, Any]],
-                  project_part: ProjectPart, check: bool = True) -> dict[str, Any]:
+                  project_part: ProjectPart, check: bool = True, shafts: list[str] | None = None) -> dict[str, Any]:
     """Insert, place and mate the approved items in order, then run the exact interference check (``check=False``:
     the caller schedules it, e.g. the visual-check policy in ``aicad.assembly.visual``).
 
@@ -851,18 +864,21 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
         return None
 
     async def key_for(it: dict[str, Any]) -> str:
+        if it.get("part_key") and store.part_ready(root, str(it["part_key"])):
+            return str(it["part_key"])   # a part already in the assembly, placed again (assembly agent)
         return await _toolbox_key(root, org_id, it) if it["source"] == "toolbox" else await project_part(it["project_id"])
 
     # shaft lines and gear trains first: they are built by construction around their own base
     t_train = time.perf_counter()
     in_train: set[str] = set()
-    tr = trains.select(root, doc, [it for it in items if it.get("enabled", True)])
+    tr = trains.select(root, doc, [it for it in items if it.get("enabled", True)], only_shafts=shafts)
     if tr is not None:
         by_id = {it["id"]: it for it in tr.items}
         keys: dict[str, str] = {}
         bad: set[str] = set()
         for u in tr.units:
-            if u.inst or u.item is None or u.role == "gear" and u.code == "spur_gear":
+            unsized = u.role in ("key", "ring") and not u.params   # sized from the keyseat / groove below
+            if u.inst or u.item is None or u.role == "gear" and u.code == "spur_gear" or unsized:
                 continue
             if u.item not in keys and u.item not in bad:
                 try:
@@ -873,6 +889,13 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
             u.key = keys.get(u.item)
         tr.units = [u for u in tr.units if u.item not in bad]
         lay = trains.prepare(root, doc, tr)
+        trains.size_fixings(lay)   # "a key", "a circlip": the size of the keyseat / groove they go in
+        for u in tr.units:
+            if u.role in ("key", "ring") and not u.key and u.params and u.code:
+                try:
+                    u.key = await service.ensure_toolbox_part(root, org_id, u.code, u.params)
+                except (AssemblyInputError, toolbox.ToolboxError) as e:
+                    say("Hex", f"{u.title}: {e}", "warn", "part_unavailable", by_id.get(u.item or ""))
         for u in tr.units:
             if u.role == "gear" and u.code == "spur_gear" and u.params:
                 u.key = await service.ensure_toolbox_part(root, org_id, "spur_gear", u.params)
@@ -1056,5 +1079,6 @@ async def execute(root: Path, org_id: str, doc: dict[str, Any], items: list[dict
     timings = {"total_s": round(time.perf_counter() - t_start, 3), "train_s": round(t_train, 3),
                "solve_s": round(t_solve, 3), "interference_s": round(t_check, 3)}
     return {"log": log, "summary": summary, "outcomes": outcomes, "timings": timings,
+            "made": made,
             "clashes": [{"a": c["a"], "b": c["b"], "a_name": c.get("a_name"), "b_name": c.get("b_name"),
                          "volume_mm3": c["volume_mm3"]} for c in clashes], **stats}

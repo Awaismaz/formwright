@@ -39,6 +39,7 @@ ROLES: tuple[str, ...] = (
     "assembly_check", # visual assembly check: one look at the 4-view picture (assembly/visual.ask, PD-73)
     "supervisor",     # Design Office: Archie supervising a running program (office/supervisor.run_supervisor), Opus
     "intent",         # design graph: a brief to a typed design graph (graph/intent.run, architecture v2)
+    "assembly_agent", # Assembly Studio chat: one turn of the assembly agent (assembly/agent.run_turn, WORKLIST 51)
 )
 
 # Capability names a provider declares (contract tests are gated on them).

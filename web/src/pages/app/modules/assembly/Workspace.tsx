@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, Move, Orbit, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
+  ArrowLeft, Boxes, Camera, ClipboardList, Download, FileBox, Link2, MessagesSquare, Move, Orbit, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -19,11 +19,12 @@ import { BomPanel, CheckPanel, plural } from "./CheckPanel";
 import { PairPanel } from "./PairPanel";
 import { InsertDialog } from "./InsertDialog";
 import { SmartPanel } from "./SmartPanel";
+import { AssemblyChat } from "./AssemblyChat";
 import { FileButtons } from "@/components/NativeExport";
 import { Segmented, SolveChip, mm } from "./bits";
 
 const BASE = "/api/m/assembly";
-type TabKey = "describe" | "mate" | "fasten" | "check" | "motion" | "bom";
+type TabKey = "chat" | "describe" | "mate" | "fasten" | "check" | "motion" | "bom";
 
 export default function Workspace({ aid, onClose }: { aid: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -33,7 +34,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const view = q.data;
   const setView = useCallback((v: AsmView) => qc.setQueryData(key, v), [qc, key]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabKey>("mate");
+  const [tab, setTab] = useState<TabKey>("chat");   // WORKLIST 51: the conversation is where an assembly starts
   const [tabSet, setTabSet] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [picks, setPicks] = useState<AsmPick[]>([]);
@@ -102,9 +103,10 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const describe = useCallback((p: AsmPick) => view ? describePick(view, p,
     (part, id) => topoCache.get(part)?.faces[id], (part, id) => topoCache.get(part)?.edges[id]) : "", [view]);
 
-  useEffect(() => {   // an empty assembly opens on "Describe": say what goes in and Fitz builds it
-    if (view && !tabSet) { setTabSet(true); if (view.instances.length === 0 && view.can_edit) setTab("describe"); }
+  useEffect(() => {   // a read-only assembly opens on the mates (the conversation is for people who can change it)
+    if (view && !tabSet) { setTabSet(true); if (!view.can_edit) setTab("mate"); }
   }, [view, tabSet]);
+  const reloadView = useCallback(() => { void qc.invalidateQueries({ queryKey: key }); }, [qc, key]);
   if (q.isLoading) return <PageLoader />;
   if (q.error || !view) {
     const e = q.error as ApiError | null;
@@ -409,7 +411,7 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             <div className="flex h-full items-center justify-center p-8">
               <EmptyState icon={<Boxes className="h-5 w-5" />} title="Empty assembly" body="Insert a verified project part (it comes in fixed at the origin), then Toolbox components or more parts."
                 action={view.can_edit ? <div className="flex flex-wrap justify-center gap-2"><Button icon={<Plus className="h-4 w-4" />} onClick={() => setInsertOpen(true)}>Insert component</Button>
-                  <Button variant="secondary" icon={<Sparkles className="h-4 w-4" />} onClick={() => setTab("describe")}>Describe what goes in</Button></div> : undefined} />
+                  <Button variant="secondary" icon={<MessagesSquare className="h-4 w-4" />} onClick={() => setTab("chat")}>Ask the assembly agent</Button></div> : undefined} />
             </div>
           ) : (
             <Viewport view={view} picking={picking} picks={picks} marks={marks} selected={selected} ghost={ghost}
@@ -426,9 +428,10 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
             {focusPair.a_name} ↔ {focusPair.b_name}: <b>{mm(focusPair.volume_mm3, 3)} mm³</b>{explode > 0 ? " (collapse the explode to see it)" : ""}</div>}
         </section>
         <aside className="min-h-0 overflow-y-auto border-l border-border bg-panel">
-          <Tabs value={tab} onValueChange={v => setTab(v as TabKey)}>
+          <Tabs value={tab} onValueChange={v => setTab(v as TabKey)} className={cx(tab === "chat" && "flex h-full flex-col")}>
             <TabList className="sticky top-0 z-10 gap-0 overflow-x-auto bg-panel px-1 [&_svg]:hidden">
-              <Tab value="describe" compact title="Add components by description: Hex finds them, Fitz mates them"><Sparkles className="h-3.5 w-3.5" />Describe</Tab>
+              <Tab value="chat" compact title="Talk to the assembly agent: one conversation that keeps the context"><MessagesSquare className="h-3.5 w-3.5" />Chat</Tab>
+              <Tab value="describe" compact title="Quick add: Hex finds components from a description, Fitz mates them"><Sparkles className="h-3.5 w-3.5" />Quick add</Tab>
               <Tab value="mate" compact><Link2 className="h-3.5 w-3.5" />Mate</Tab>
               <Tab value="fasten" compact><Wrench className="h-3.5 w-3.5" />Fasten</Tab>
               <Tab value="check" compact><ScanSearch className="h-3.5 w-3.5" />Check{view.analysis && !view.analysis.stale && view.analysis.interference.count > 0 &&
@@ -437,6 +440,9 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
                 <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">!</span>}</Tab>
               <Tab value="bom" compact><ClipboardList className="h-3.5 w-3.5" />BOM</Tab>
             </TabList>
+            <TabPanel value="chat" className="min-h-0 flex-1">
+              <AssemblyChat aid={aid} view={view} onChanged={reloadView} onSelect={setSel} />
+            </TabPanel>
             <TabPanel value="describe">
               <SmartPanel view={view} aid={aid} onRun={smartRun} busy={busy === "smart"} />
             </TabPanel>
