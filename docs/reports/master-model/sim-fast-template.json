@@ -1,0 +1,2105 @@
+[
+ {
+  "schema": 1,
+  "run_id": "6fbb21034a33",
+  "at": "2026-11-20T01:20:21Z",
+  "mode": "simulated",
+  "case": "hinge-arm",
+  "title": "Hinged arm on a clevis base",
+  "letter": "g",
+  "cap": null,
+  "flags": {
+   "FW_MASTER_MODEL": "0"
+  },
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 8.47,
+   "phases": {
+    "plan": 0.22,
+    "gate": 0.81,
+    "run": 7.43,
+    "check": 0.01
+   },
+   "tokens": 105,
+   "light": true,
+   "parts": 3,
+   "pieces": 3,
+   "subs": 1,
+   "tickets": 5,
+   "instances": 2,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 1,
+   "questions": 0,
+   "conformance": {
+    "ok": 10,
+    "total": 10
+   },
+   "direct": 0,
+   "no_ai": 0,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 3,
+   "looks_wrong": 0,
+   "path": "fast",
+   "path_words": "Laid out on the fast path (the master model is switched off)",
+   "path_forced": false,
+   "path_reasons": [],
+   "master_s": null,
+   "master_tokens": null,
+   "master_ok": null
+  },
+  "plan_fixed": true,
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "light",
+    "label": "Light path (one-step approval)",
+    "ok": true,
+    "got": true,
+    "want": true
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "instances",
+    "label": "Instances in the final assembly",
+    "ok": false,
+    "got": 2,
+    "want": 3
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": true,
+    "got": {
+     "support": 1,
+     "pin": 1
+    },
+    "want": {
+     "support": 1,
+     "pin": 1
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "10 of 10 features",
+    "want": "all"
+   },
+   {
+    "id": "touch.1",
+    "label": "pin touches arm",
+    "ok": false,
+    "got": null,
+    "want": 0,
+    "note": "not found"
+   },
+   {
+    "id": "touch.2",
+    "label": "pin touches clevis",
+    "ok": false,
+    "got": null,
+    "want": 0,
+    "note": "not found"
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": null,
+    "got": 105,
+    "want": "<= 120",
+    "note": "simulated metering, not spend"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 8.47,
+    "want": "<= 240 s"
+   }
+  ],
+  "passed": false,
+  "detail": {
+   "kinds": {
+    "support": 1,
+    "none": 1,
+    "pin": 1
+   },
+   "tickets": [
+    {
+     "title": "Clevis base",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Hinge arm",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Hinge pin",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Assemble Hinge",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Hinged arm on a clevis base",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [],
+   "warnings": [
+    "Hinge pin: no interface in this layout places it, so Fitz can't fit it in the assembly (it stays in the bill of materials and the parts bin). Say what it fits into, or remove it from the plan."
+   ],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Assemble Hinge",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Hinged arm on a clevis base",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "supervisor": [],
+   "instances": [
+    {
+     "name": "Clevis base<1>",
+     "box": [
+      -40.0,
+      -20.0,
+      -30.0,
+      40.0,
+      20.0,
+      0.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hinge arm<1>",
+     "box": [
+      -11.0,
+      -50.0,
+      0.0,
+      11.0,
+      50.0,
+      12.0
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 11.3,
+  "sha": "44d53c072f",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default",
+   "intent": "default",
+   "assembly_agent": "default"
+  },
+  "routing_id": "dde464",
+  "suite_id": "d9e6b41f"
+ },
+ {
+  "schema": 1,
+  "run_id": "0c6fb675ef97",
+  "at": "2026-11-20T01:20:33Z",
+  "mode": "simulated",
+  "case": "enclosure",
+  "title": "Electronics enclosure with a screwed lid",
+  "letter": "h",
+  "cap": null,
+  "flags": {
+   "FW_MASTER_MODEL": "0"
+  },
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 8.25,
+   "phases": {
+    "plan": 0.15,
+    "gate": 0.2,
+    "run": 7.89,
+    "check": 0.01
+   },
+   "tokens": 70,
+   "light": true,
+   "parts": 3,
+   "pieces": 6,
+   "subs": 1,
+   "tickets": 5,
+   "instances": 18,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 1,
+   "questions": 0,
+   "conformance": {
+    "ok": 10,
+    "total": 10
+   },
+   "direct": 0,
+   "no_ai": 0,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 2,
+   "looks_wrong": 0,
+   "path": "fast",
+   "path_words": "Laid out on the fast path (the master model is switched off)",
+   "path_forced": false,
+   "path_reasons": [],
+   "master_s": null,
+   "master_tokens": null,
+   "master_ok": null
+  },
+  "plan_fixed": true,
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 6,
+    "want": 6
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": true,
+    "got": {
+     "support": 1,
+     "cap": 1,
+     "fastener": 4
+    },
+    "want": {
+     "support": 1,
+     "cap": 1,
+     "fastener": 4
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "10 of 10 features",
+    "want": "all"
+   },
+   {
+    "id": "path",
+    "label": "Layout path (fast or master model)",
+    "ok": false,
+    "got": "fast",
+    "want": "master",
+    "note": "Laid out on the fast path (the master model is switched off)"
+   },
+   {
+    "id": "span.1",
+    "label": "enclosure base along Z",
+    "ok": true,
+    "got": [
+     -40.0,
+     0.0
+    ],
+    "want": [
+     -40.0,
+     0.0
+    ]
+   },
+   {
+    "id": "span.2",
+    "label": "enclosure lid along Z",
+    "ok": true,
+    "got": [
+     0.0,
+     3.0
+    ],
+    "want": [
+     0.0,
+     3.0
+    ]
+   },
+   {
+    "id": "within.1",
+    "label": "screw inside enclosure base along X",
+    "ok": true,
+    "got": [
+     [
+      -6.25,
+      -0.75
+     ],
+     [
+      0.75,
+      6.25
+     ],
+     [
+      -6.25,
+      -0.75
+     ],
+     [
+      0.75,
+      6.25
+     ]
+    ],
+    "want": [
+     [
+      -60.0,
+      60.0
+     ]
+    ]
+   },
+   {
+    "id": "within.2",
+    "label": "screw inside enclosure base along Y",
+    "ok": true,
+    "got": [
+     [
+      -35.95,
+      -30.45
+     ],
+     [
+      -35.95,
+      -30.45
+     ],
+     [
+      30.45,
+      35.95
+     ],
+     [
+      30.45,
+      35.95
+     ]
+    ],
+    "want": [
+     [
+      -40.0,
+      40.0
+     ]
+    ]
+   },
+   {
+    "id": "stacks.1",
+    "label": "shcs M3 fastener stacks",
+    "ok": true,
+    "got": 4,
+    "want": 4
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": null,
+    "got": 70,
+    "want": "<= 120",
+    "note": "simulated metering, not spend"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 8.25,
+    "want": "<= 240 s"
+   }
+  ],
+  "passed": false,
+  "detail": {
+   "kinds": {
+    "support": 1,
+    "cap": 1,
+    "fastener": 4
+   },
+   "tickets": [
+    {
+     "title": "Enclosure base",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Enclosure lid",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Lid screw M3x10",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "shcs",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Enclosure",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Electronics enclosure with a screwed lid",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 50,
+      "L_min": 47.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 43.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 7.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 50,
+      "L_min": 47.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 43.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 7.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 50,
+      "L_min": 47.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 43.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 7.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 50,
+      "L_min": 47.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 43.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 7.2
+     }
+    }
+   ],
+   "warnings": [],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Assemble Enclosure",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Electronics enclosure with a screwed lid",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "supervisor": [],
+   "instances": [
+    {
+     "name": "Enclosure base<1>",
+     "box": [
+      -60.0,
+      -40.0,
+      -40.0,
+      60.0,
+      40.0,
+      0.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Enclosure lid<1>",
+     "box": [
+      -60.0,
+      -40.0,
+      0.0,
+      60.0,
+      40.0,
+      3.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<1>",
+     "box": [
+      -7.0,
+      -36.7,
+      3.0,
+      0.0,
+      -29.7,
+      3.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×50<1>",
+     "box": [
+      -6.25,
+      -35.95,
+      -46.5,
+      -0.75,
+      -30.45,
+      6.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<2>",
+     "box": [
+      -7.0,
+      -36.7,
+      -40.5,
+      0.0,
+      -29.7,
+      -40.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<1>",
+     "box": [
+      -6.675426,
+      -35.95,
+      -42.9,
+      -0.324574,
+      -30.45,
+      -40.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<3>",
+     "box": [
+      0.0,
+      -36.7,
+      3.0,
+      7.0,
+      -29.7,
+      3.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×50<2>",
+     "box": [
+      0.75,
+      -35.95,
+      -46.5,
+      6.25,
+      -30.45,
+      6.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<4>",
+     "box": [
+      0.0,
+      -36.7,
+      -40.5,
+      7.0,
+      -29.7,
+      -40.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<2>",
+     "box": [
+      0.324574,
+      -35.95,
+      -42.9,
+      6.675426,
+      -30.45,
+      -40.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<5>",
+     "box": [
+      -7.0,
+      29.7,
+      3.0,
+      0.0,
+      36.7,
+      3.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×50<3>",
+     "box": [
+      -6.25,
+      30.45,
+      -46.5,
+      -0.75,
+      35.95,
+      6.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<6>",
+     "box": [
+      -7.0,
+      29.7,
+      -40.5,
+      0.0,
+      36.7,
+      -40.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<3>",
+     "box": [
+      -6.675426,
+      30.45,
+      -42.9,
+      -0.324574,
+      35.95,
+      -40.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<7>",
+     "box": [
+      0.0,
+      29.7,
+      3.0,
+      7.0,
+      36.7,
+      3.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×50<4>",
+     "box": [
+      0.75,
+      30.45,
+      -46.5,
+      6.25,
+      35.95,
+      6.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<8>",
+     "box": [
+      0.0,
+      29.7,
+      -40.5,
+      7.0,
+      36.7,
+      -40.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<4>",
+     "box": [
+      0.324574,
+      30.45,
+      -42.9,
+      6.675426,
+      35.95,
+      -40.5
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 8.7,
+  "sha": "44d53c072f",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default",
+   "intent": "default",
+   "assembly_agent": "default"
+  },
+  "routing_id": "dde464",
+  "suite_id": "d9e6b41f"
+ },
+ {
+  "schema": 1,
+  "run_id": "c10c4455d2e8",
+  "at": "2026-11-20T01:20:42Z",
+  "mode": "simulated",
+  "case": "motor-adapter",
+  "title": "Stepper motor on a custom adapter plate",
+  "letter": "i",
+  "cap": null,
+  "flags": {
+   "FW_MASTER_MODEL": "0"
+  },
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 8.35,
+   "phases": {
+    "plan": 0.15,
+    "gate": 0.31,
+    "run": 7.88,
+    "check": 0.01
+   },
+   "tokens": 105,
+   "light": false,
+   "parts": 5,
+   "pieces": 11,
+   "subs": 1,
+   "tickets": 7,
+   "instances": 3,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 2,
+   "questions": 0,
+   "conformance": {
+    "ok": 12,
+    "total": 12
+   },
+   "direct": 0,
+   "no_ai": 0,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 3,
+   "looks_wrong": 0,
+   "path": "fast",
+   "path_words": "Laid out on the fast path (the master model is switched off)",
+   "path_forced": false,
+   "path_reasons": [],
+   "master_s": null,
+   "master_tokens": null,
+   "master_ok": null
+  },
+  "plan_fixed": true,
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 5,
+    "want": 5
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 11,
+    "want": 11
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": true,
+    "got": {
+     "support": 1,
+     "plate": 1,
+     "motor": 1,
+     "fastener": 8
+    },
+    "want": {
+     "support": 1,
+     "plate": 1,
+     "motor": 1,
+     "fastener": 8
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "12 of 12 features",
+    "want": "all"
+   },
+   {
+    "id": "path",
+    "label": "Layout path (fast or master model)",
+    "ok": false,
+    "got": "fast",
+    "want": "master",
+    "note": "Laid out on the fast path (the master model is switched off)"
+   },
+   {
+    "id": "span.1",
+    "label": "bracket along Z",
+    "ok": true,
+    "got": [
+     -76.0,
+     0.0
+    ],
+    "want": [
+     -76.0,
+     0.0
+    ]
+   },
+   {
+    "id": "span.2",
+    "label": "adapter plate along Y",
+    "ok": false,
+    "got": [
+     -2.7,
+     2.7
+    ],
+    "want": [
+     11.0,
+     16.0
+    ]
+   },
+   {
+    "id": "span.3",
+    "label": "adapter plate along Z",
+    "ok": false,
+    "got": [
+     0.0,
+     60.0
+    ],
+    "want": [
+     -70.0,
+     -10.0
+    ]
+   },
+   {
+    "id": "span.4",
+    "label": "stepper motor along Y",
+    "ok": false,
+    "got": [
+     -21.15,
+     21.15
+    ],
+    "want": [
+     -37.0,
+     11.0
+    ]
+   },
+   {
+    "id": "span.5",
+    "label": "stepper motor along Z",
+    "ok": false,
+    "got": [
+     60.0,
+     108.0
+    ],
+    "want": [
+     -61.15,
+     -18.85
+    ]
+   },
+   {
+    "id": "stacks.1",
+    "label": "shcs M3 fastener stacks",
+    "ok": false,
+    "got": 0,
+    "want": 4
+   },
+   {
+    "id": "stacks.2",
+    "label": "shcs M4 fastener stacks",
+    "ok": false,
+    "got": 0,
+    "want": 4
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": null,
+    "got": 105,
+    "want": "<= 120",
+    "note": "simulated metering, not spend"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 8.35,
+    "want": "<= 300 s"
+   }
+  ],
+  "passed": false,
+  "detail": {
+   "kinds": {
+    "support": 1,
+    "plate": 1,
+    "motor": 1,
+    "fastener": 8
+   },
+   "tickets": [
+    {
+     "title": "Mounting bracket",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Motor adapter plate",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Stepper motor NEMA 17",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Motor screw M3x12",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "shcs",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Plate screw M4x16",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "shcs",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Motor mount",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Stepper motor on a custom adapter plate",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [],
+   "warnings": [],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Layout (interfaces gate)",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Assemble Motor mount",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Stepper motor on a custom adapter plate",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "supervisor": [],
+   "instances": [
+    {
+     "name": "Mounting bracket<1>",
+     "box": [
+      -40.0,
+      -30.0,
+      -76.0,
+      40.0,
+      30.0,
+      0.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Motor adapter plate<1>",
+     "box": [
+      -40.0,
+      -2.7,
+      0.0,
+      40.0,
+      2.7,
+      60.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Stepper motor NEMA 17<1>",
+     "box": [
+      -21.15,
+      -21.15,
+      60.0,
+      21.15,
+      21.15,
+      108.0
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 8.8,
+  "sha": "44d53c072f",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default",
+   "intent": "default",
+   "assembly_agent": "default"
+  },
+  "routing_id": "dde464",
+  "suite_id": "d9e6b41f"
+ },
+ {
+  "schema": 1,
+  "run_id": "25adf14d352b",
+  "at": "2026-11-20T01:20:50Z",
+  "mode": "simulated",
+  "case": "controller",
+  "title": "Handheld controller-style split housing",
+  "letter": "j",
+  "cap": null,
+  "flags": {
+   "FW_MASTER_MODEL": "0"
+  },
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 8.74,
+   "phases": {
+    "plan": 0.15,
+    "gate": 0.21,
+    "run": 8.37,
+    "check": 0.01
+   },
+   "tokens": 70,
+   "light": true,
+   "parts": 3,
+   "pieces": 6,
+   "subs": 1,
+   "tickets": 5,
+   "instances": 18,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 1,
+   "questions": 0,
+   "conformance": {
+    "ok": 10,
+    "total": 10
+   },
+   "direct": 0,
+   "no_ai": 0,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 2,
+   "looks_wrong": 0,
+   "path": "fast",
+   "path_words": "Laid out on the fast path (the master model is switched off)",
+   "path_forced": false,
+   "path_reasons": [],
+   "master_s": null,
+   "master_tokens": null,
+   "master_ok": null
+  },
+  "plan_fixed": true,
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 3,
+    "want": 3
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 6,
+    "want": 6
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "10 of 10 features",
+    "want": "all"
+   },
+   {
+    "id": "path",
+    "label": "Layout path (fast or master model)",
+    "ok": false,
+    "got": "fast",
+    "want": "master",
+    "note": "Laid out on the fast path (the master model is switched off)"
+   },
+   {
+    "id": "span.1",
+    "label": "lower shell along Z",
+    "ok": true,
+    "got": [
+     -18.0,
+     0.0
+    ],
+    "want": [
+     -18.0,
+     0.0
+    ]
+   },
+   {
+    "id": "span.2",
+    "label": "upper shell along Z",
+    "ok": true,
+    "got": [
+     0.0,
+     14.0
+    ],
+    "want": [
+     0.0,
+     14.0
+    ]
+   },
+   {
+    "id": "within.1",
+    "label": "screw inside lower shell along X",
+    "ok": true,
+    "got": [
+     [
+      -6.25,
+      -0.75
+     ],
+     [
+      0.75,
+      6.25
+     ],
+     [
+      -6.25,
+      -0.75
+     ],
+     [
+      0.75,
+      6.25
+     ]
+    ],
+    "want": [
+     [
+      -75.0,
+      75.0
+     ]
+    ]
+   },
+   {
+    "id": "stacks.1",
+    "label": "shcs M3 fastener stacks",
+    "ok": true,
+    "got": 4,
+    "want": 4
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": null,
+    "got": 70,
+    "want": "<= 120",
+    "note": "simulated metering, not spend"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 8.74,
+    "want": "<= 240 s"
+   }
+  ],
+  "passed": false,
+  "detail": {
+   "kinds": {
+    "none": 2,
+    "fastener": 4
+   },
+   "tickets": [
+    {
+     "title": "Lower shell",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Upper shell",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Shell screw M3x16",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "shcs",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Controller housing",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Handheld controller-style split housing",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 40,
+      "L_min": 36.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 32.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 4.6,
+      "protrusion_threads": 9.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 40,
+      "L_min": 36.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 32.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 4.6,
+      "protrusion_threads": 9.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 40,
+      "L_min": 36.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 32.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 4.6,
+      "protrusion_threads": 9.2
+     }
+    },
+    {
+     "style": "shcs",
+     "size": 3,
+     "length": {
+      "L": 40,
+      "L_min": 36.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 32.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 0.5
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 2.4
+       },
+       {
+        "label": "Protrusion 2 × P (P = 0.5)",
+        "mm": 1.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 4.6,
+      "protrusion_threads": 9.2
+     }
+    }
+   ],
+   "warnings": [],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Assemble Controller housing",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Handheld controller-style split housing",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "supervisor": [],
+   "instances": [
+    {
+     "name": "Lower shell<1>",
+     "box": [
+      -75.0,
+      -47.5,
+      -18.0,
+      75.0,
+      47.5,
+      0.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Upper shell<1>",
+     "box": [
+      -75.0,
+      -47.5,
+      0.0,
+      75.0,
+      47.5,
+      14.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<1>",
+     "box": [
+      -7.0,
+      -44.2,
+      14.0,
+      0.0,
+      -37.2,
+      14.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×40<1>",
+     "box": [
+      -6.25,
+      -43.45,
+      -25.5,
+      -0.75,
+      -37.95,
+      17.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<2>",
+     "box": [
+      -7.0,
+      -44.2,
+      -18.5,
+      0.0,
+      -37.2,
+      -18.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<1>",
+     "box": [
+      -6.675426,
+      -43.45,
+      -20.9,
+      -0.324574,
+      -37.95,
+      -18.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<3>",
+     "box": [
+      0.0,
+      -44.2,
+      14.0,
+      7.0,
+      -37.2,
+      14.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×40<2>",
+     "box": [
+      0.75,
+      -43.45,
+      -25.5,
+      6.25,
+      -37.95,
+      17.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<4>",
+     "box": [
+      0.0,
+      -44.2,
+      -18.5,
+      7.0,
+      -37.2,
+      -18.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<2>",
+     "box": [
+      0.324574,
+      -43.45,
+      -20.9,
+      6.675426,
+      -37.95,
+      -18.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<5>",
+     "box": [
+      -7.0,
+      37.2,
+      14.0,
+      0.0,
+      44.2,
+      14.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×40<3>",
+     "box": [
+      -6.25,
+      37.95,
+      -25.5,
+      -0.75,
+      43.45,
+      17.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<6>",
+     "box": [
+      -7.0,
+      37.2,
+      -18.5,
+      0.0,
+      44.2,
+      -18.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<3>",
+     "box": [
+      -6.675426,
+      37.95,
+      -20.9,
+      -0.324574,
+      43.45,
+      -18.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<7>",
+     "box": [
+      0.0,
+      37.2,
+      14.0,
+      7.0,
+      44.2,
+      14.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Socket head cap screw ISO 4762 M3×40<4>",
+     "box": [
+      0.75,
+      37.95,
+      -25.5,
+      6.25,
+      43.45,
+      17.5
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M3<8>",
+     "box": [
+      0.0,
+      37.2,
+      -18.5,
+      7.0,
+      44.2,
+      -18.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M3<4>",
+     "box": [
+      0.324574,
+      37.95,
+      -20.9,
+      6.675426,
+      43.45,
+      -18.5
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 9.2,
+  "sha": "44d53c072f",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default",
+   "intent": "default",
+   "assembly_agent": "default"
+  },
+  "routing_id": "dde464",
+  "suite_id": "d9e6b41f"
+ }
+]

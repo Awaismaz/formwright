@@ -67,6 +67,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from aicad.master import run as master_run
 from aicad.office import (
     OfficeInputError,
     archie_chat,
@@ -326,7 +327,10 @@ async def _plan_task(root: Path, pid: str, org_id: str, user_id: str, god_tokens
             service.set_plan(root, doc, std, archie,
                              note=f"{why}, so this is the standard breakdown. Edit it, or ask Archie again."
                              + (f" {scope_note}" if scope_note else ""))
+        need_master = master_run.route(root, doc)  # WORKLIST 50: the layout path, decided and recorded
         store.save(root, doc)
+    if need_master:
+        _spawn_master(root, pid, org_id, user_id, god_tokens)
 
 
 def _start_planning(ctx: Ctx, root: Path, doc: dict[str, Any], kind: str, notes: str = "") -> None:
@@ -345,6 +349,20 @@ def _start_planning(ctx: Ctx, root: Path, doc: dict[str, Any], kind: str, notes:
         doc["planner"] = "standard"
         std, scope_note = planner.finish(planner.standard_plan(doc["name"], doc["brief"]), doc["name"], doc["brief"])
         service.set_plan(root, doc, std, service.agent_actor("archie"), note=scope_note)
+        doc["_master_spawn"] = master_run.route(root, doc)
+
+
+def _spawn_master(root: Path, pid: str, org_id: str, user_id: str, god_tokens: bool) -> None:
+    """The master turn of the planning phase (WORKLIST 50), in the background."""
+    t = asyncio.create_task(master_run.task(root, pid, org_id, user_id, god_tokens))
+    _tasks.add(t)
+    t.add_done_callback(_tasks.discard)
+
+
+def _master_after(ctx: Ctx, root: Path, doc: dict[str, Any]) -> None:
+    """After a request saved a plan the master path needs: start the master turn."""
+    if doc.pop("_master_spawn", False):
+        _spawn_master(root, doc["id"], ctx.require_org().id, ctx.user.id, ctx.god_on("bypass_tokens"))
 
 
 def _spawn(ctx: Ctx, root: Path, doc: dict[str, Any], notes: str = "") -> None:
@@ -393,9 +411,12 @@ async def create_program(body: ProgramIn, ctx: Ctx = Depends(verified_ctx)) -> d
     service.emit(root, doc, "program.created", f"{ctx.user.name or 'Someone'} opened the program {name}.",
                  _actor(ctx))
     _start_planning(ctx, root, doc, kind)
+    spawn_master = bool(doc.pop("_master_spawn", False))
     store.save(root, doc)
     if kind == "archie":
         _spawn(ctx, root, doc)
+    elif spawn_master:
+        _spawn_master(root, doc["id"], org.id, ctx.user.id, ctx.god_on("bypass_tokens"))
     audit(ctx.db, "office.program_created", ctx.user, org.id, target=doc["id"], planner=kind)
     track(ctx.db, "office_program_created", ctx.user, org.id, planner=kind)
     ctx.db.commit()
@@ -414,6 +435,9 @@ def _view(doc: dict[str, Any]) -> dict[str, Any]:
     from aicad.office import fake_agents
 
     v = service.view(doc)
+    mm = (v.get("plan") or {}).get("master")
+    if isinstance(mm, dict) and "measure" in mm:  # the raw measurement stays server-side (it can be large)
+        v["plan"] = {**v["plan"], "master": {k: x for k, x in mm.items() if k != "measure"}}
     r = orchestrator.runner(doc["id"])
     v["orchestrator"] = {**v["orchestrator"], "active": len(r.tasks) if r else 0,
                          "simulated": fake_agents.enabled()}
@@ -482,10 +506,15 @@ async def replan(pid: str, body: ReplanIn, ctx: Ctx = Depends(verified_ctx)) -> 
             service.emit(root, doc, "gate.changes_requested", f"{ctx.user.name or 'Someone'} asked for changes to "
                          "the plan.", _actor(ctx), notes=body.notes.strip()[:2000])
         _start_planning(ctx, root, doc, kind, body.notes)
+        flag["master"] = bool(doc.pop("_master_spawn", False))
 
+    flag: dict[str, bool] = {}
     doc = _mutate(ctx, pid, fn)
     if kind == "archie":
         _spawn(ctx, _root(ctx), doc, body.notes)
+    elif flag.get("master"):
+        doc["_master_spawn"] = True
+        _master_after(ctx, _root(ctx), doc)
     return _view(doc)
 
 
@@ -512,6 +541,7 @@ async def answer_plan_questions(pid: str, body: PlanAnswersIn, ctx: Ctx = Depend
             p, note = planner.finish(out.plan, doc["name"], doc["brief"])
             design_graph.attach(p, out)
             service.set_plan(root, doc, p, archie, narrative=out.narrative, note=note)
+            again["master"] = "1" if master_run.route(root, doc) else ""
         elif notes:
             _start_planning(ctx, root, doc, "archie", notes)
             again["notes"] = notes
@@ -521,8 +551,11 @@ async def answer_plan_questions(pid: str, body: PlanAnswersIn, ctx: Ctx = Depend
                      _actor(ctx), answers={k: str(v)[:120] for k, v in body.answers.items()})
 
     doc = _mutate(ctx, pid, fn)
-    if again:
+    if again.get("notes"):
         _spawn(ctx, _root(ctx), doc, again["notes"])
+    elif again.get("master"):
+        doc["_master_spawn"] = True
+        _master_after(ctx, _root(ctx), doc)
     return _view(doc)
 
 

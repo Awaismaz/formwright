@@ -1,0 +1,119 @@
+{
+ "case": "j_controller",
+ "ok": true,
+ "error": null,
+ "wall_s": 54.6,
+ "seconds": {
+  "turn": 48.87,
+  "measure": 5.74,
+  "total": 54.63
+ },
+ "cost_usd": 0.1292956,
+ "tokens": 13,
+ "meta": {
+  "model": "default",
+  "calls": 4,
+  "subtype": "success"
+ },
+ "via": "agent",
+ "bodies": [
+  [
+   "Lower shell",
+   [
+    -75.0,
+    -47.5,
+    0.0
+   ],
+   [
+    75.0,
+    47.5,
+    18.0
+   ]
+  ],
+  [
+   "Upper shell",
+   [
+    -75.0,
+    -47.5,
+    18.0
+   ],
+   [
+    75.0,
+    47.5,
+    32.0
+   ]
+  ]
+ ],
+ "items": {
+  "Lower shell": {
+   "size": [
+    150.0,
+    95.0,
+    18.0
+   ],
+   "copies": [
+    [
+     0.0,
+     0.0,
+     -9.0
+    ]
+   ]
+  },
+  "Upper shell": {
+   "size": [
+    150.0,
+    95.0,
+    14.0
+   ],
+   "copies": [
+    [
+     0.0,
+     0.0,
+     7.0
+    ]
+   ]
+  }
+ },
+ "interfaces": [
+  {
+   "kind": "hole_pattern",
+   "a": "Upper shell",
+   "b": "Lower shell",
+   "fastener": "M3",
+   "count": 4,
+   "positions": [
+    [
+     -60.0,
+     35.0
+    ],
+    [
+     -55.0,
+     -27.5
+    ],
+    [
+     55.0,
+     -27.5
+    ],
+    [
+     60.0,
+     35.0
+    ]
+   ],
+   "plane_z": 0.0,
+   "normal": [
+    -0.0,
+    -0.0,
+    -1.0
+   ],
+   "tapped": {
+    "d": 2.5,
+    "depth": 7.0,
+    "thread": "M3"
+   },
+   "ax": null
+  }
+ ],
+ "problems": [],
+ "warnings": [],
+ "findings": []
+}

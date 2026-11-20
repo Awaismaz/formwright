@@ -1,0 +1,79 @@
+# (j) Master path: an ORIGINAL handheld-controller-style split housing (the founder's "Game Controller" kind of brief,
+# no product copied): two moulded shells meeting on a flat split line, four M3 screws from below into bosses in the
+# upper shell (WORKLIST 50). The fast path puts four through bolts with nuts near the middle. Hand values (master
+# frame: datum A on the top of the lower shell, the split line, Z = 18 in the master):
+#   lower shell 150 x 95 x 18: Z -18 .. 0; upper shell 150 x 95 x 14: Z 0 .. 14 (overall 110 between the lobe
+#   centres + 2 x 20 lobe radius = 150)
+#   screws at X ±40, Y ±30: Ø3.4 through the lower shell (Ø8 x 9 counterbore from below), Ø2.5 x 8 tapped in the
+#   upper bosses from the split face; the upper shell is side a (tapped), its face looking down (-Z) at the lower
+id = "controller"
+title = "Handheld controller-style split housing"
+letter = "j"
+source = "WORKLIST 50 master-path case: the founder's Game Controller kind of brief, an original design"
+brief = "An original handheld game-controller style housing (not a copy of any product): a moulded ABS lower shell 150 x 95 x 18 mm and an upper shell 150 x 95 x 14 mm, each with a rounded grip lobe at both ends, meeting on a flat split line and joined by four M3 x 16 socket head screws from below into bosses in the upper shell."
+
+[sim]
+plan = "j_controller.plan.json"
+master = "j_controller.master.py"
+intent = "j_controller.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+path = "master"
+complete = true
+parts = 3
+pieces = 6
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.span]]
+name = "(?i)lower shell"
+axis = "z"
+min = -18.0
+max = 0.0
+tol = 0.01
+
+[[expect.span]]
+name = "(?i)upper shell"
+axis = "z"
+min = 0.0
+max = 14.0
+tol = 0.01
+
+[[expect.within]]
+inner = { name = "(?i)screw" }
+outer = { name = "(?i)lower shell" }
+axis = "x"
+tol = 0.01
+
+[[expect.stacks]]
+style = "shcs"
+size = 3
+n = 4
+
+[[expect.span]]
+name = "(?i)cap screw"   # X ±(40 + 2.75 head radius), Y ±(30 + 2.75)
+axis = "x"
+min = -42.75
+max = 42.75
+tol = 0.05
+
+[[expect.span]]
+name = "(?i)cap screw"
+axis = "y"
+min = -32.75
+max = 32.75
+tol = 0.05
+
+[[expect.count]]
+name = "(?i)nut"         # into the tapped bosses of the upper shell: no nuts
+n = 0

@@ -111,6 +111,19 @@ def _sim_llm(intent: dict[str, Any] | None) -> Any:
     return complete
 
 
+def _replay_master(src: str | None) -> Any:
+    """Simulated runs: the case's recorded master model (WORKLIST 50), else no master (the office falls back to the
+    fast path and says so). Never a live turn."""
+    async def agent_turn(folder: Path, name: str, brief: str, plan: dict[str, Any], budget_usd: float | None = None,
+                         worker_key: str | None = None) -> Any:
+        from aicad.master.run import Turn
+
+        if src is None:
+            return Turn(None, error="no master model is recorded for this golden case")
+        return Turn(src, via="replay")
+    return agent_turn
+
+
 def graph_on(flags: dict[str, str] | None) -> bool:
     return str((flags or {}).get("FW_DESIGN_GRAPH", "")).lower() in ("1", "true", "yes", "on")
 
@@ -199,7 +212,7 @@ def drive(c: Any, case: dict[str, Any], mode: str, cap: int | None, log: Any, ou
         body["budget_tokens"] = cap
     v = _ok(c.post("/api/office/programs", json=body), "create the program")
     pid = out["pid"] = v["id"]
-    v = _poll(c, pid, lambda v: v["status"] != "planning", 600 if mode == "live" else 60)
+    v = _poll(c, pid, lambda v: v["status"] != "planning", 900 if mode == "live" else 300)
     phases["plan"] = round(time.time() - t, 2)
     if v["status"] != "plan_review":
         raise Stop(f"planning ended in '{v['status']}'")
@@ -208,11 +221,18 @@ def drive(c: Any, case: dict[str, Any], mode: str, cap: int | None, log: Any, ou
     if qs:  # design-graph plans (PD-110) ask before approval: the runner takes Archie's defaults, as a user may
         ans = {q["id"]: q["default"] for q in qs if q.get("default")}
         v = _ok(c.post(f"/api/office/programs/{pid}/plan/answers", json={"answers": ans}), "take Archie's defaults")
-        v = _poll(c, pid, lambda v: v["status"] != "planning", 600 if mode == "live" else 60)
+        v = _poll(c, pid, lambda v: v["status"] != "planning", 900 if mode == "live" else 300)
         if (((v.get("plan") or {}).get("graph") or {}).get("questions")):
             raise Stop("Archie still has questions after his defaults were taken")
+    lp = (v.get("plan") or {}).get("layout_path") or {}
+    mm = (v.get("plan") or {}).get("master") or {}
+    out["path"] = {"path": lp.get("path"), "words": lp.get("words"),
+                   "reasons": [r.get("code") for r in lp.get("reasons") or []], "forced": lp.get("mode") == "force",
+                   "master_s": (mm.get("seconds") or {}).get("total"), "master_tokens": mm.get("tokens"),
+                   "master_ok": mm.get("ok"), "master_errors": len(mm.get("errors") or []),
+                   "trial_s": (lp.get("trial") or {}).get("seconds")}
     log(f"  plan: {sum(len(s['parts']) for s in v['plan']['subassemblies'])} part lines "
-        f"({phases['plan']:.1f} s){', small program' if v.get('light') else ''}")
+        f"({phases['plan']:.1f} s){', small program' if v.get('light') else ''}; {lp.get('words') or 'no layout path'}")
 
     t = time.time()
     ran = False
@@ -355,6 +375,12 @@ def snapshot(c: Any, pid: str, drove: dict[str, Any]) -> dict[str, Any]:
         "supervisor_asking": sum(1 for e in sup if e.get("status") == "asking"),
         "ai_parts": sum(1 for t in tickets if t["kind"] == "part" and t["tokens"] > 0),
         "looks_wrong": sum(1 for x in looks if "wrong" in str(x["verdict"] or "")),
+        "path": (drove.get("path") or {}).get("path"), "path_words": (drove.get("path") or {}).get("words"),
+        "path_forced": bool((drove.get("path") or {}).get("forced")),
+        "path_reasons": (drove.get("path") or {}).get("reasons"),
+        "master_s": (drove.get("path") or {}).get("master_s"),
+        "master_tokens": (drove.get("path") or {}).get("master_tokens"),
+        "master_ok": (drove.get("path") or {}).get("master_ok"),
     }
     return {"status": v["status"], "stopped": drove.get("stopped"), "metrics": metrics, "kinds": kinds,
             "tickets": tickets, "instances": insts, "stacks": stacks,
@@ -384,7 +410,10 @@ def run_case(case: dict[str, Any], mode: str = "simulated", *, work: Path | None
     patches: list[tuple[Any, str, Any]] = []
     if sim:
         plan = (case.get("sim") or {}).get("plan_data")
+        from aicad.master import run as master_run
+
         patches += [(planner, "run_agent", _replay_planner(plan) if plan else _no_live_ai),
+                    (master_run, "agent_turn", _replay_master((case.get("sim") or {}).get("master_src"))),
                     (gage, "run_review", _no_live_ai),
                     (llm, "complete", _sim_llm((case.get("sim") or {}).get("intent_data") if graph_on(flags) else None))]
     rec: dict[str, Any] = {"schema": golden.SCHEMA, "run_id": uuid.uuid4().hex[:12], "at": _now(), "mode": mode,
@@ -461,8 +490,9 @@ def _now() -> str:
 
 # ----------------------------------------------------------------------------- the suite
 def table(recs: list[dict[str, Any]]) -> str:
-    head = "| Case | Result | Wall s (plan/gate/run/check) | Tokens | Clashes | Binned | Loose | Blocked | Failed expectations |"
-    out = [head, "|" + "---|" * 9]
+    head = ("| Case | Result | Path | Wall s (plan/gate/run/check) | Tokens | Clashes | Binned | Loose | Blocked | "
+            "Failed expectations |")
+    out = [head, "|" + "---|" * 10]
     for r in recs:
         m = r.get("metrics") or {}
         ph = m.get("phases") or {}
@@ -470,8 +500,9 @@ def table(recs: list[dict[str, Any]]) -> str:
                if x["ok"] is False]
         if r.get("error"):
             bad = [r["error"]]
+        ms = f" ({m['master_s']} s)" if m.get("master_s") else ""
         out.append(f"| {r.get('letter') or ''} {r['case']} | {'PASS' if r.get('passed') else 'FAIL'} | "
-                   f"{m.get('wall_s', '')} ({'/'.join(str(ph.get(k, '-')) for k in ('plan', 'gate', 'run', 'check'))}) | "
+                   f"{m.get('path') or ''}{ms} | {m.get('wall_s', '')} ({'/'.join(str(ph.get(k, '-')) for k in ('plan', 'gate', 'run', 'check'))}) | "
                    f"{m.get('tokens', '')} | {m.get('clashes', '')} | {m.get('binned', '')} | {m.get('loose', '')} | "
                    f"{m.get('blocked', '')} | {'; '.join(bad)[:400]} |")
     return "\n".join(out)

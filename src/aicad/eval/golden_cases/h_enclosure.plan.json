@@ -1,0 +1,11 @@
+{"source": "archie", "summary": "Electronics enclosure: an open base box with four corner screw bosses and a flat lid held by four M3 screws", "assumptions": [
+  "Bosses Ø8 in the inside corners, touching both walls; screws M3 x 10 socket head into tapped bosses."],
+ "subassemblies": [
+  {"name": "Enclosure", "description": "The base box with the lid screwed on top.", "parts": [
+    {"name": "Enclosure base", "family": "plastic", "complexity": 3, "qty": 1, "envelope": [120.0, 80.0, 40.0],
+     "description": "ABS base box 120 x 80 x 40 mm, 2.5 mm walls and floor, open at the top, four Ø8 screw bosses in the inside corners, each tapped M3 (Ø2.5 tap drill) 8 mm deep from the rim."},
+    {"name": "Enclosure lid", "family": "plastic", "complexity": 2, "qty": 1, "envelope": [120.0, 80.0, 3.0],
+     "mounts_on": "Enclosure base",
+     "description": "Flat ABS lid 120 x 80 x 3 mm with four Ø3.4 clearance holes over the bosses."},
+    {"name": "Lid screw M3x10", "family": "standard", "complexity": 1, "qty": 4, "toolbox": "shcs",
+     "description": "ISO 4762 socket head cap screw M3 x 10 through the lid into a boss."}]}]}

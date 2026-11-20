@@ -21,6 +21,13 @@ def _no_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FW_OFFICE_SUPERVISOR", "0")
 
 
+@pytest.fixture(autouse=True)
+def _no_master_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WORKLIST 50: a plan the fast path can't lay out gets a master-model turn (a design-agent turn). Existing tests
+    assert the fast path and never spend, so it is off unless a test turns it on (``tests/test_master_model.py``)."""
+    monkeypatch.setenv("FW_MASTER_MODEL", "0")
+
+
 @pytest.fixture(autouse=True, scope="module")
 def _reap_cad_workers() -> Iterator[None]:
     """Each test app keeps warm CAD workers (~300-500 MB each) keyed by project or org; across a session they piled up

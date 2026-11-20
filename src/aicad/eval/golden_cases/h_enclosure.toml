@@ -1,0 +1,86 @@
+# (h) Master path: a small electronics enclosure, a base box with four corner screw bosses and a screwed lid
+# (WORKLIST 50). The fast path lays it out with no problem flagged but wrong: four through bolts in the middle of the
+# base (template grid), nuts the plan doesn't have, nothing in the bosses. Hand values (master frame: datum A on the
+# top of the base envelope, so the base spans Z -40 .. 0 and the lid Z 0 .. 3):
+#   bosses Ø8 touching both 2.5 mm walls: centres X = ±(60 - 2.5 - 4) = ±53.5, Y = ±(40 - 2.5 - 4) = ±33.5
+#   M3 tap drill Ø2.5 (ISO 2306), 8 deep from the rim; lid clearance Ø3.4 (ISO 273 medium)
+#   four M3 socket head screws, each within the base's footprint: |X| <= 53.5 + 2.75 (head radius) < 60
+id = "enclosure"
+title = "Electronics enclosure with a screwed lid"
+letter = "h"
+source = "WORKLIST 50 master-path case (hand-written reference plan and master)"
+brief = "A small electronics enclosure: a 120 x 80 x 40 mm ABS base box with 2.5 mm walls, open at the top, four Ø8 mm screw bosses in the inside corners, and a flat 120 x 80 x 3 mm lid held by four M3 x 10 socket head screws into the bosses."
+
+[sim]
+plan = "h_enclosure.plan.json"
+master = "h_enclosure.master.py"
+intent = "h_enclosure.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
+
+[limits]
+tokens = 120
+wall_simulated_s = 240
+wall_live_s = 900
+
+[expect]
+path = "master"
+complete = true
+parts = 3
+pieces = 6
+kinds = { support = 1, cap = 1, fastener = 4 }
+no_extras = true
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.span]]
+name = "(?i)enclosure base"
+axis = "z"
+min = -40.0
+max = 0.0
+tol = 0.01
+
+[[expect.span]]
+name = "(?i)enclosure lid"
+axis = "z"
+min = 0.0                # the lid sits on the rim
+max = 3.0
+tol = 0.01
+
+[[expect.within]]
+inner = { name = "(?i)screw" }
+outer = { name = "(?i)enclosure base" }
+axis = "x"
+tol = 0.01
+
+[[expect.within]]
+inner = { name = "(?i)screw" }
+outer = { name = "(?i)enclosure base" }
+axis = "y"
+tol = 0.01
+
+[[expect.stacks]]
+style = "shcs"
+size = 3
+n = 4                    # one per boss, no nuts
+
+[[expect.span]]
+name = "(?i)cap screw"   # the heads over the bosses: X ±(53.5 + 2.75 head radius), Y ±(33.5 + 2.75)
+axis = "x"
+min = -56.25
+max = 56.25
+tol = 0.05
+
+[[expect.span]]
+name = "(?i)cap screw"
+axis = "y"
+min = -36.25
+max = 36.25
+tol = 0.05
+
+[[expect.count]]
+name = "(?i)nut"         # screws into the tapped bosses: no nuts (the fast path bolts through the base with nuts)
+n = 0
