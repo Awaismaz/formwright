@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import json
 import math
+import re
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -377,6 +378,11 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
             await _placed(aroot, adoc)
             astore.save(aroot, adoc)
     clashes: list[dict[str, Any]] = state.get("clashes") or []
+    # overlaps with a part that is still a placeholder (an envelope, not the part): noted, re-checked when that part
+    # is built, never a reason to send the built part back (benchmark A1, 2026-11-21)
+    pending: list[dict[str, Any]] = list(state.get("pending_clashes") or [])
+    deferred: list[dict[str, Any]] = []
+    names = {i: sk["items"][i]["name"] for i in sk["items"]}
     checked = False  # the swapped parts' clash check ran (only then may anyone say "0 clashes")
     async with locks.hold(state["final"], locks.OFFICE):
         final = astore.load(aroot, state["final"])
@@ -400,7 +406,17 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
                 try:
                     fresh = await aservice.stack_clashes(aroot, org_id, final, ids)
                     fresh = [c for c in fresh if not _envelope_mesh(final, ifaces, c)]
-                    clashes = keep + [{**c, "volume_mm3": round(float(c["volume_mm3"]), 3)} for c in fresh]
+                    real: list[dict[str, Any]] = []
+                    for c in fresh:
+                        c = {**c, "volume_mm3": round(float(c["volume_mm3"]), 3)}
+                        w = placeholder_side(final, c, items)
+                        if w is None:
+                            real.append(c)
+                        else:
+                            deferred.append({**c, "until": w, "until_name": names.get(w, w)})
+                    clashes = keep + real
+                    pending = [c for c in pending if _item_of(final, c["a"]) not in items
+                               and _item_of(final, c["b"]) not in items] + deferred
                 except aservice.WorkerError:
                     checked = False
                     problems.append("Fitz's clash check on these parts didn't finish in time; the final assembly's "
@@ -413,11 +429,14 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     state["summary"] = summarize(parts, final)
     state.update(parts=parts, clashes=clashes, at=astore.now(), problems=problems[:20],
                  solve=((final or {}).get("solve") or {}).get("status"), mates=len((final or {}).get("mates") or []))
-    names = {i: sk["items"][i]["name"] for i in sk["items"]}
+    if pending or state.get("pending_clashes"):
+        state["pending_clashes"] = pending
     mine = [c for c in clashes if _item_of(final, c["a"]) in items or _item_of(final, c["b"]) in items]
     by_item = {i: [c for c in mine if i in (_item_of(final, c["a"]), _item_of(final, c["b"]))] for i in items}
+    d_by = {i: [c for c in deferred if i in (_item_of(final, c["a"]), _item_of(final, c["b"]))] for i in items}
     state["last"] = {"items": sorted(items), "clashes": mine, "by_item": by_item, "problems": problems,
-                     "text": ", ".join(names.get(i, i) for i in sorted(items)), "checked": checked}
+                     "text": ", ".join(names.get(i, i) for i in sorted(items)), "checked": checked,
+                     "deferred": deferred, "deferred_by_item": d_by}
     if checked:
         state["check"] = {**(state.get("check") or {}), "status": "done", "scope": "swap", "count": len(clashes),
                           "at": astore.now()}
@@ -460,6 +479,9 @@ def clash_status(state: dict[str, Any]) -> dict[str, Any]:
     chk = state.get("check") or {}
     n = len(state.get("clashes") or [])
     word = f"{n} clash{'es' if n != 1 else ''}"
+    npend = len(state.get("pending_clashes") or [])
+    tail = (f"; {npend} overlap{'s' if npend != 1 else ''} with placeholders, re-checked when those parts are built"
+            if npend else "")
     if chk.get("status") == "running":
         return {"count": None, "status": "running", "text": "the whole-program clash check is running (advisory)"}
     if chk.get("status") == "failed":
@@ -469,7 +491,8 @@ def clash_status(state: dict[str, Any]) -> dict[str, Any]:
         return {"count": n, "status": "done", "text": f"{word} in the whole-program check (advisory)"}
     if chk.get("status") == "done":
         return {"count": n, "status": "partial", "text": f"{word} at the last check ("
-                + ("placeholders" if chk.get("scope") == "placeholders" else "the parts swapped in so far") + ")"}
+                + ("placeholders" if chk.get("scope") == "placeholders" else "the parts swapped in so far") + ")" + tail,
+                "pending": npend}
     return {"count": None, "status": "none", "text": "no clash check yet"}
 
 
@@ -502,6 +525,54 @@ def _envelope_mesh(adoc: dict[str, Any], ifaces: list[dict[str, Any]], c: dict[s
     if not any(f["kind"] == "gear_mesh" and {f["a"]["item"], f["b"]["item"]} == {ia, ib} for f in ifaces):
         return False
     return str(a.get("part", "")).startswith("h_") != str(b.get("part", "")).startswith("h_")
+
+
+def placeholder_side(adoc: dict[str, Any], c: dict[str, Any], swapped: set[str] | None = None) -> str | None:
+    """The item of the placeholder in a clash that involves one (a part against a placeholder, or two
+    placeholders), else None. A placeholder is an envelope built from the ICD, not the part: its overlap with a built
+    part is a measurement artefact until the part is built, and is re-checked then (benchmark A1, 2026-11-21: the
+    built input shaft was sent back twice for a clash with the solid placeholder of an internal ring gear). When both
+    sides are placeholders, the one not just swapped is named."""
+    by = {i["id"]: i for i in adoc["instances"]}
+    sides = [by.get(c["a"]), by.get(c["b"])]
+    ph = [(i.get("office") or {}).get("item") for i in sides if i is not None and str(i.get("part", "")).startswith("h_")]
+    ph = [x for x in ph if x]
+    if not ph:
+        return None
+    return next((x for x in ph if x not in (swapped or set())), ph[0])
+
+
+def pending_text(c: dict[str, Any]) -> str:
+    """The note for an overlap with a placeholder: what it is and when it is checked for real."""
+    who = c.get("until_name") or "the other part"
+    return (f"{c['a_name']} ↔ {c['b_name']}: {float(c['volume_mm3']):.1f} mm³ against the placeholder of {who}, which "
+            f"is not built yet; re-checked when {who} is built")
+
+
+_CLASH_LINE = re.compile(r"Clash: (.+?) ↔ (.+?), [\d.]+ mm³")
+
+
+def placeholder_only(doc: dict[str, Any], t: dict[str, Any]) -> list[str] | None:
+    """A part ticket stopped for clashes that are all with parts still placeholders in the program assembly: the
+    names of those parts, else None. Read from the ticket's clash lines ("Clash: A ↔ B, v mm³"), so it also
+    recognises programs blocked before swap-in kept such overlaps as notes (benchmark A1, 2026-11-21)."""
+    r = t.get("run") or {}
+    lines = [str(x) for x in (r.get("feedback") or [])] + [str(r.get("blocked") or "")]
+    sk = (doc.get("skeleton") or {}).get("items") or {}
+    parts = (doc.get("assembly") or {}).get("parts") or {}
+    by_name = {v["name"]: i for i, v in sk.items()}
+    own = t.get("item_id")
+    found: list[str] = []
+    seen = False
+    for ln in lines:
+        for m in _CLASH_LINE.finditer(ln):
+            seen = True
+            a, b = (by_name.get(re.sub(r"<\d+>$", "", x.strip())) for x in m.groups())
+            other = b if a == own else a if b == own else None
+            if other is None or (parts.get(other) or {}).get("kind") != "placeholder":
+                return None
+            found.append(sk[other]["name"])
+    return sorted(set(found)) if seen else None
 
 
 def _item_of(adoc: dict[str, Any] | None, iid: str) -> str | None:

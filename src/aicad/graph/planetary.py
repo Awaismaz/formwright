@@ -19,7 +19,12 @@ consistent, idempotently, and says what it changed in ``graph.notes``:
 * the mounting chain: each planet on its bearing on its pin (or on its pin), each pin fixed in the carrier, the carrier
   on the output shaft, the sun on the input shaft, the ring in the housing. A planet bearing seated in the housing, or
   a gear, pin or carrier hung on the housing or its cover, is dropped (that is not how the set carries load);
-* centre distances: sun / planet a = m (z_s + z_p) / 2, planet / ring a = m (z_r - z_p) / 2 (internal mesh).
+* centre distances: sun / planet a = m (z_s + z_p) / 2, planet / ring a = m (z_r - z_p) / 2 (internal mesh);
+* the rim rule (benchmark A1, 2026-11-21: a 6204, D 47, in a z30 m2 planet whose root is Ø55 left a 4 mm rim): the
+  planet bearing is the deep-groove bearing (60xx / 62xx, ``toolbox.BEARING``) that leaves a rim
+  (root Ø - bearing D) / 2 of at least ``RIM_MIN_M`` modules under the teeth, on the pin's bore when it can; when
+  none fits, the planets grow (and the ring with them: z_ring = z_sun + 2 z_planet, the assembly condition kept)
+  until one does. The choice and its reason are said in ``graph.notes``.
 """
 
 from __future__ import annotations
@@ -40,6 +45,14 @@ HUBS = ("keyed_hub", "hub_fit")
 MIN_TEETH = 13          # the least planet / sun teeth without undercut at 20 deg (with a little margin: 17 ideal)
 SUN_TEETH = 24          # code's sun when a stated ratio sizes the set
 PLANET_CLEAR = 1.0      # mm between the tip circles of neighbouring planets
+DEDENDUM = 1.25         # ISO 53 basic rack: dedendum 1.25 m (root Ø of an external gear m (z - 2.5))
+# The least rim under the teeth of a gear that runs on a bearing in its bore, in modules. ISO 6336-3 (rim thickness
+# factor Y_B = 1) and AGMA 2001-D04 (K_B = 1) put no rim penalty on tooth bending when the rim s_R is at least 1.2
+# tooth depths h_t; full-depth teeth have h_t = 2.25 m, so s_R >= 1.2 x 2.25 m = 2.7 m. Within the usual 2.5 to 3 m
+# rule of thumb. Verify against the standard for a real design (PD-261).
+RIM_MIN_M = 2.7
+RIM_SOURCE = "ISO 6336-3 / AGMA 2001-D04: rim at least 1.2 tooth depths, 1.2 x 2.25 m (verify)"
+GROW_MAX = 40           # the most teeth the rim rule adds to a planet before it gives up and says so
 
 
 @dataclass
@@ -152,6 +165,44 @@ def centre_distance(m: float, z_a: int, z_b: int, internal: bool) -> float:
     return float(m) * (abs(int(z_a) - int(z_b)) if internal else int(z_a) + int(z_b)) / 2
 
 
+def root_d(m: float, z: int) -> float:
+    """Root Ø of an external gear: d_f = m (z - 2 x 1.25) (ISO 53 basic rack)."""
+    return float(m) * (int(z) - 2 * DEDENDUM)
+
+
+def rim(m: float, z: int, D: float) -> float:
+    """The rim under the teeth of a gear with a bore of Ø D: (root Ø - D) / 2."""
+    return (root_d(m, z) - float(D)) / 2
+
+
+def planet_bearing(m: float, zp: int, pin_d: float | None = None, pin_fixed: bool = False) -> int | None:
+    """The planet bearing the rim rule allows: a 60xx / 62xx (``toolbox.BEARING``) whose outer Ø leaves at least
+    ``RIM_MIN_M`` m under the planet's root. The pin's bore first (nothing else changes), then the largest bore (the
+    stiffest pin), then the larger bearing (capacity). ``pin_fixed``: the brief fixes the pin Ø, so only that bore.
+    None when none fits."""
+    from aicad.toolbox import BEARING
+
+    dmax = root_d(m, zp) - 2 * RIM_MIN_M * float(m)
+    fit = [k for k, (_d, D, _b) in BEARING.items() if D <= dmax + 1e-9]
+    if pin_fixed and pin_d is not None:
+        fit = [k for k in fit if abs(BEARING[k][0] - float(pin_d)) < 1e-9]
+    if not fit:
+        return None
+    on_pin = (lambda k: pin_d is not None and abs(BEARING[k][0] - float(pin_d)) < 1e-9)
+    return max(fit, key=lambda k: (on_pin(k), BEARING[k][0], BEARING[k][1], BEARING[k][2]))
+
+
+def _rim_words(m: float, zp: int, des: int, D: float) -> str:
+    s = rim(m, zp, D)
+    return (f"rim (Ø{root_d(m, zp):g} root - Ø{D:g}) / 2 = {s:g} mm = {s / float(m):.3g} m under the planet teeth, "
+            f"at least {RIM_MIN_M:g} m ({RIM_SOURCE})")
+
+
+def _planets_touch(m: float, zs: int, zp: int, n: int) -> bool:
+    a = float(m) * (zs + zp) / 2
+    return n > 1 and 2 * a * math.sin(math.pi / n) < float(m) * (zp + 2) + PLANET_CLEAR
+
+
 def _teeth_for_ratio(r: float, n: int) -> tuple[int, int, int] | None:
     best = None
     for zs in range(SUN_TEETH - 6, SUN_TEETH + 7):
@@ -163,6 +214,72 @@ def _teeth_for_ratio(r: float, n: int) -> tuple[int, int, int] | None:
             if best is None or key < best[0]:
                 best = (key, (zs, (zr - zs) // 2, zr))
     return best[1] if best else None
+
+
+def _rim_rule(g: DesignGraph, ps: Planetary, sun: Component, planet: Component, ring: Component, m: float,
+              zs: int, zp: int, notes: list[str]) -> int:
+    """The planet bearing that leaves the rim ``RIM_MIN_M`` m under the planet teeth (module docstring). Returns the
+    planet's teeth (grown when no bearing fits the planet as it is)."""
+    from aicad.toolbox import BEARING
+
+    brg = g.comp(ps.bearing) if ps.bearing else None
+    if brg is None:
+        return zp
+    pin = g.comp(ps.pin) if ps.pin else None
+    pin_d = float(pin.v("d")) if pin is not None and pin.v("d") is not None else None
+    pin_fixed = pin is not None and _given(pin, "d")
+    cur = brg.v("designation")
+    cur = int(cur) if isinstance(cur, int | float) and int(cur) in BEARING else None
+    if cur is not None and rim(m, zp, BEARING[cur][1]) >= RIM_MIN_M * m - 1e-9 and (
+            pin_d is None or abs(BEARING[cur][0] - pin_d) < 1e-9 or not pin_fixed):
+        notes.append(f"{brg.name} {cur}: {_rim_words(m, zp, cur, BEARING[cur][1])}.")
+        return zp
+    if cur is not None and (_given(brg, "designation") or _given(brg, "D")):
+        notes.append(f"Check: {brg.name} {cur} (OD {BEARING[cur][1]:g}) leaves a rim of "
+                     f"{rim(m, zp, BEARING[cur][1]):g} mm = {rim(m, zp, BEARING[cur][1]) / m:.3g} m under the teeth of "
+                     f"{planet.name} (root Ø{root_d(m, zp):g}), less than {RIM_MIN_M:g} m ({RIM_SOURCE}); the brief's "
+                     "bearing is kept.")
+        return zp
+    was = (f"{cur} (OD {BEARING[cur][1]:g}) left a rim of {rim(m, zp, BEARING[cur][1]):g} mm = "
+           f"{rim(m, zp, BEARING[cur][1]) / m:.3g} m under the planet's Ø{root_d(m, zp):g} root, less than "
+           f"{RIM_MIN_M:g} m" if cur is not None else "no bearing was sized yet")
+    des = planet_bearing(m, zp, pin_d, pin_fixed)
+    teeth_free = not any(_given(c, "teeth") for c in (sun, planet, ring))
+    if des is None and teeth_free:
+        for z in range(zp + 1, zp + GROW_MAX + 1):
+            if (2 * zs + 2 * z) % ps.n or _planets_touch(m, zs, z, ps.n):
+                continue
+            des = planet_bearing(m, z, pin_d, pin_fixed)
+            if des is not None:
+                why = f"the rim rule: no 60xx / 62xx bearing fits a {zp}-tooth planet with {RIM_MIN_M:g} m of rim"
+                planet.set("teeth", z, "rule", why, force=True)
+                ring.set("teeth", ring_teeth(zs, z), "rule", "z_ring = z_sun + 2 z_planet", force=True)
+                notes.append(f"{planet.name}: {z} teeth (was {zp}) and {ring.name} {ring_teeth(zs, z)} (z_ring = z_sun"
+                             f" + 2 z_planet), because {was} and no 60xx / 62xx bearing fits a {zp}-tooth planet with "
+                             f"{RIM_MIN_M:g} m of rim. (z_sun + z_ring) / {ps.n} = {(2 * zs + 2 * z) // ps.n} stays "
+                             f"whole; the ratio is now 1 + {ring_teeth(zs, z)} / {zs} = "
+                             f"{1 + ring_teeth(zs, z) / zs:.3g}.")
+                zp = z
+                break
+    if des is None:
+        notes.append(f"Check: no 60xx / 62xx bearing leaves {RIM_MIN_M:g} m of rim under the teeth of {planet.name} "
+                     f"(root Ø{root_d(m, zp):g}): a needle bearing, a plain bush or larger planets (verify).")
+        return zp
+    bd, bD, bB = BEARING[des]
+    reason = f"the rim rule: {_rim_words(m, zp, des, bD)}"
+    brg.set("designation", des, "rule", reason[:300], force=True)
+    for k, v in (("d", bd), ("D", bD), ("B", bB)):
+        brg.set(k, float(v), "standard", f"ISO 15 {des}", force=True)
+    if pin is not None and (pin_d is None or abs(pin_d - bd) > 1e-9):
+        pin.set("d", float(bd), "rule", f"the bore of its {des} planet bearing", force=True)
+    if pin is not None:
+        pin.set("journal_d", float(bd), "standard", f"the bore of the {des}", force=True)
+    if cur != des:
+        notes.append(f"{brg.name}: {des} (Ø{bd:g} x Ø{bD:g} x {bB:g}) instead, because {was}"
+                     + (f"; the pin is Ø{bd:g} to suit" if pin is not None and pin_d is not None and
+                        abs(pin_d - bd) > 1e-9 else "") + ".")
+    notes.append(f"{brg.name} {des}: {_rim_words(m, zp, des, bD)}.")
+    return zp
 
 
 def normalise(graph: DesignGraph) -> DesignGraph:
@@ -220,6 +337,8 @@ def normalise(graph: DesignGraph) -> DesignGraph:
         if (zs + zr) % ps.n:
             notes.append(f"Check: (z_sun + z_ring) / {ps.n} = {(zs + zr) / ps.n:g} is not whole, so {ps.n} equally "
                          "spaced planets can't all mesh; the brief's teeth are kept.")
+        if m is not None:
+            zp = _rim_rule(g, ps, sun, planet, ring, float(m), zs, zp, notes)
         if m is not None and ps.n > 1:
             a = float(m) * (zs + zp) / 2
             if 2 * a * math.sin(math.pi / ps.n) < float(m) * (zp + 2) + PLANET_CLEAR:

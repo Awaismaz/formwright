@@ -88,7 +88,9 @@ def test_the_graph_is_made_consistent_ring_teeth_and_mounting_chain() -> None:
     assert ring.v("internal") is True
     assert ring.v("teeth") == 90  # z_ring = z_sun + 2 z_planet
     assert (int(sun.v("teeth")) + int(ring.v("teeth"))) % 3 == 0  # three planets can be assembled
-    assert planet.v("bore") == 47.0  # the outer ring of its 6204
+    # the outer ring of its bearing: the rim rule (benchmark A1) takes the 6004, D 42, so the rim under the root
+    # Ø55 is (55 - 42) / 2 = 6.5 mm >= 2.7 m (the 6204's would be 4 mm)
+    assert g.comp("planet_bearing").v("designation") == 6004 and planet.v("bore") == 42.0
     # the planet bearings sit in the planets, never in the housing wall
     assert not [x for x in g.connections if x.kind == "bearing_seat" and x.guest == "planet_bearing"]
     meshes = {(x.host, x.guest): x.v("centre_distance") for x in g.connections if x.kind == "gear_mesh"}

@@ -509,7 +509,9 @@ class PlatformEnv(orchestrator.Env):
             out: dict[str, dict[str, Any]] = {}
             for item, (xt, _, _) in batch.items():
                 mine = (last.get("by_item") or {}).get(item, last.get("clashes") if len(batch) == 1 else [])
-                out[xt] = {"last": {**last, "clashes": mine or []}, "problems": last.get("problems") or [],
+                dmine = (last.get("deferred_by_item") or {}).get(item, last.get("deferred") if len(batch) == 1 else [])
+                out[xt] = {"last": {**last, "clashes": mine or [], "deferred": dmine or []},
+                           "problems": last.get("problems") or [],
                            "mates": state.get("mates"), "batch": len(batch)}
             own = out.pop(tid)
             _FITTED[pid].update(out)

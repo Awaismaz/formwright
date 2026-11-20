@@ -1372,6 +1372,10 @@ class _Layout:
             if bD / 2 > rf - m + 1e-6:
                 self.conflict(f"{self.name(pb)} (OD {bD:g}) leaves no rim under the teeth of {self.name(pl)} (root "
                               f"Ø{2 * rf:g}): use a smaller bearing, a smaller pin or larger planets.", [pl, pb], [])
+            elif rf - bD / 2 < planetary.RIM_MIN_M * m - 1e-6:
+                self.notes.append(f"Check: {self.name(pb)} (OD {bD:g}) leaves a rim of {rf - bD / 2:g} mm under the "
+                                  f"teeth of {self.name(pl)}, less than {planetary.RIM_MIN_M:g} m "
+                                  f"({planetary.RIM_SOURCE}).")
             if bB > b + 1e-6:
                 self.notes.append(f"{self.name(pb)} ({bB:g} wide) is wider than the {b:g} mm planet face.")
         else:
@@ -1539,13 +1543,19 @@ class _Layout:
         seats = [{"face": face, "open": side, "z": [_r2(b0), _r2(b1)]} for _sd, b0, b1, _p in s["brg"]]
         lo = min(b0 for _sd, b0, _b1, _p in s["brg"])
         hi = max(b1 for _sd, _b0, b1, _p in s["brg"])
+        # the shoulder between the inner seat and the cavity: the shaft passes through it (said in the ICD, so no
+        # part or placeholder claims the shaft's room there)
+        inner = (self.hm["y0"] + self.hm["t_in"]) if side < 0 else (self.hm["y1"] - self.hm["t_out"])
+        span = [_r2(hi), _r2(inner)] if side < 0 and inner - hi > 0.5 else \
+            [_r2(inner), _r2(lo)] if side > 0 and lo - inner > 0.5 else None
+        passes = [{"z": span, "d": _r2(bd + 2), "what": "shaft clearance through the shoulder"}] if span else []
         self.add("bearing_seat", (self.item[self.housing], 0), (self.item[sh], 0), {
             "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
             "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
             "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(lo), _r2(hi)], "seats": seats,
             "clearance_d": _r2(bd + 2), "flush_z": None, "bearing_item": self.item[bitem], "shaft_d": s["seat"],
             "count": len(seats), "r_s_min": icd._BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)",
-            "position_tol": POS_TOL, "journals": [[_r2(lo), _r2(hi)]]},
+            "position_tol": POS_TOL, "journals": [[_r2(lo), _r2(hi)]], **({"passes": passes} if passes else {})},
             ["A", "B", "C"], f"shaft in {len(seats)} bearings {des} ({face})")
 
     def _emit_planetary(self) -> None:
@@ -1582,6 +1592,12 @@ class _Layout:
                 o = self.nxt()
                 hf = str(o.get("housing_fit") or "H7")
                 z0, z1 = P["ym"] - P["B"] / 2, P["ym"] + P["B"] / 2
+                # the rest of the planet's bore (benchmark A1: left solid, so the pin "clashed" with the planet):
+                # the seat Ø out to the -Y face (the way the bearing goes in), the pin clearance beyond the shoulder
+                f0, f1 = P["ym"] - P["b"] / 2, P["ym"] + P["b"] / 2
+                passes = ([{"z": [_r2(f0), _r2(z0)], "d": P["bD"], "what": "bearing entry"}] if z0 - f0 > 0.5 else []) \
+                    + ([{"z": [_r2(z1), _r2(f1)], "d": _r2(P["bd"] + 2), "what": "pin clearance behind the shoulder"}]
+                       if f1 - z1 > 0.5 else [])
                 self.add("bearing_seat", (self.item[pl], k), (self.item[pin], k), {
                     "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": P["bd"],
                     "D": P["bD"], "B": P["B"], "housing_fit": hf if hf in HOUSING_FITS else "H7",
@@ -1589,7 +1605,8 @@ class _Layout:
                     "seats": [{"face": "planet bore", "open": -1, "z": [_r2(z0), _r2(z1)]}],
                     "clearance_d": _r2(P["bd"] + 2), "flush_z": None, "bearing_item": self.item[pb],
                     "shaft_d": dp, "count": 1, "r_s_min": icd._BEARING_RS[int(des)], "planet": True,
-                    "journals": [[_r2(z0), _r2(z1)]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                    "journals": [[_r2(z0), _r2(z1)]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL,
+                    **({"passes": passes} if passes else {})},
                     ["A", "B", "C"], f"planet on its bearing {des} on the pin")
             else:
                 o = self.nxt()

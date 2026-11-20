@@ -131,7 +131,9 @@ the rounds, the interfaces (ICD) and their issues, change requests, visual verdi
 - budget or capacity.
 Act only through the tools below, the smallest action that unblocks honest work. Relaxing a check records it as \
 relaxed, never as passed. Relax a check that measures geometry (conformance, envelope, brief_size, clash) only when \
-the evidence shows the measurement or the spec is at fault, scoped to one feature of one part, with an expiry. Never \
+the evidence shows the measurement or the spec is at fault, scoped to one feature of one part, with an expiry. A \
+clash with a part that is still a placeholder (an envelope made from the interfaces, not the part) is a measurement \
+artefact: retry the built part (Fitz swaps it in again unchanged), never send it back to be redesigned. Never \
 claim a part is fit for manufacture. Put every change you recommend in "actions", major ones too (an interface change, a part added or removed, a bigger budget, a relaxed geometry check): the office asks the engineer for those with clickable choices before anything happens. A change you only describe in words can't be approved with one click.
 
 Answer with one or two plain sentences, then exactly one fenced block:
@@ -495,6 +497,10 @@ def state_view(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[
                     row += f"; latest build: {'passes its gating checks' if f.get('ok') else 'fails' if f.get('builds') else 'none'} ({f.get('builds', 0)} builds)"
                 if r.get("blocked"):
                     row += f"\n    blocked: {str(r['blocked'])[:400]}"
+                ph = _placeholder_clash(doc, t) if t["kind"] == "part" and r.get("clash_round") else None
+                if ph:
+                    row += ("\n    every clash is with the placeholder of " + ", ".join(ph) + " (not built yet: an "
+                            "envelope, not the part)")
                 if r.get("last_findings"):
                     row += "\n    Gage's measurable findings (latest): " + " | ".join(str(x)[:220] for x in r["last_findings"][:4])
                 keys = _feature_keys(t)
@@ -679,6 +685,19 @@ def rule_plan(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[s
                 diag.append(f"{t['key']} {t['title']} stopped at its run budget before finishing.")
                 says.append(f"{t['key']} {t['title']} stopped at its run budget. A retry carries on and uses more "
                             "tokens: retry it if the budget allows.")
+            elif "clash" in low and t["kind"] == "part" and _placeholder_clash(doc, t):
+                # (benchmark A1) every overlap is with a part that is still a placeholder: an envelope built from
+                # the interfaces, not the part. A measurement artefact: the part goes back to Fitz unchanged
+                waits = _placeholder_clash(doc, t) or []
+                cause = "measurement"
+                diag.append(f"{t['key']} {t['title']} was stopped for clashing with the placeholder of "
+                            f"{', '.join(waits)}, which is not built yet. A placeholder is the envelope the "
+                            "interfaces describe, not the part, so that overlap says nothing about the real parts: "
+                            "a measurement artefact, not a fault in this part.")
+                ev.append(f"{t['key']}: every clash is with a placeholder ({', '.join(waits)})")
+                if x["kind"] == "blocked":
+                    acts.append({"tool": "retry", "ticket": t["key"], "why": "Fitz swaps it in again unchanged; the "
+                                 f"overlap with {', '.join(waits)} is checked for real when that part is built."})
             elif "clash" in low:
                 cause = "interfaces"
                 diag.append(f"{t['key']} {t['title']} still clashes in the program assembly: {why[:220]}")
@@ -745,6 +764,12 @@ def rule_plan(doc: dict[str, Any], triggers: list[dict[str, Any]], facts: dict[s
 
 
 # ============================================================================ typed tools: check, classify, describe
+def _placeholder_clash(doc: dict[str, Any], t: dict[str, Any]) -> list[str] | None:
+    from aicad.office import program_assembly
+
+    return program_assembly.placeholder_only(doc, t)
+
+
 def _ticket(doc: dict[str, Any], ref: Any) -> dict[str, Any] | None:
     return archie_chat.find_ticket(doc, str(ref or ""))
 
@@ -1186,6 +1211,8 @@ async def execute(root: Path, pid: str, a: dict[str, Any], env: Any = None,
             if tool == "retry":
                 if busy:
                     return f"Interrupted {t['key']}: the office picks it up again.", None, True
+                if orchestrator.refit_placeholder_clash(root, d, t, actor):  # (benchmark A1) unchanged, to Fitz
+                    return f"{t['key']} goes back to Fitz to be swapped in again, unchanged.", None, False
                 orchestrator.control(root, d, t["id"], "retry", actor)
                 orchestrator.close_wait(t)
                 return f"{t['key']} is back in the queue.", None, False

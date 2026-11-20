@@ -1,0 +1,234 @@
+{
+ "source": "archie",
+ "summary": "Single stage planetary gearbox with 3 planets. A sun gear keyed on the input shaft meshes with three planet gears on bearings and pins in a carrier keyed on the output shaft. The planets also mesh with an internal ring gear fixed in a split housing.",
+ "assumptions": [
+  "Input shaft: Ø20 assumed (the brief gives none).",
+  "Output shaft: Ø20 assumed (the brief gives none).",
+  "Sun gear: module 2, 30 teeth assumed (the brief gives none).",
+  "Planet gear: module 2, 30 teeth assumed (the brief gives none).",
+  "Planet pin: Ø20 assumed (the brief gives none).",
+  "Ring gear: module 2 assumed (the brief gives none).",
+  "Three planet gears, per the engineer's answer.",
+  "Input and output shafts are coaxial and leave the housing at opposite ends. Each runs on two deep-groove ball bearings seated in the housing.",
+  "The housing is a split base with a bolted cover. An open bearing cap is fitted where each shaft leaves the housing.",
+  "No sizes were given in the brief. Code sizes the gears, ring (z_ring = z_sun + 2 z_planet), bearings, keys and housing from standards."
+ ],
+ "subassemblies": [
+  {
+   "id": "s1",
+   "name": "Housing",
+   "description": "The housing that carries the bearings, with its cover and bearing caps.",
+   "parts": [
+    {
+     "id": "p1",
+     "name": "Housing base",
+     "family": "machined",
+     "complexity": 4,
+     "qty": 1,
+     "description": "Lower half of the split housing: mounting feet, the bearing bores for every shaft and the flange the cover bolts to.",
+     "toolbox": null
+    },
+    {
+     "id": "p2",
+     "name": "Housing cover",
+     "family": "machined",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Upper half of the split housing (the cover), bolted to the base.",
+     "toolbox": null,
+     "mounts_on": "Housing base"
+    },
+    {
+     "id": "p3",
+     "name": "Planet gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 3,
+     "description": "Steel spur gear, module 2, 30 teeth, 20 mm face width, 47 mm H7 bore.",
+     "toolbox": null,
+     "envelope": [
+      64.0,
+      64.0,
+      20.0
+     ],
+     "module": 2.0,
+     "teeth": 30
+    },
+    {
+     "id": "p4",
+     "name": "Ring gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Steel spur gear, module 2, 90 teeth, 20 mm face width.",
+     "toolbox": null,
+     "envelope": [
+      184.0,
+      184.0,
+      20.0
+     ],
+     "module": 2.0,
+     "teeth": 90
+    },
+    {
+     "id": "p5",
+     "name": "Input open cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Open flanged bearing cap: the shaft passes through it.",
+     "toolbox": null,
+     "mounts_on": "Housing base"
+    },
+    {
+     "id": "p6",
+     "name": "Output open cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Open flanged bearing cap: the shaft passes through it.",
+     "toolbox": null,
+     "mounts_on": "Housing base"
+    },
+    {
+     "id": "p7",
+     "name": "Cap screw",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "description": "Socket head cap screw M6x16 that fixes the bearing caps.",
+     "toolbox": "shcs"
+    },
+    {
+     "id": "p8",
+     "name": "Cover bolt",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 6,
+     "description": "Hex bolt M8x30 joining the cover to the base.",
+     "toolbox": "hex_bolt"
+    }
+   ]
+  },
+  {
+   "id": "s2",
+   "name": "Input shaft group",
+   "description": "The input shaft with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "id": "p9",
+     "name": "Input shaft",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Steel shaft Ø20, with a DIN 6885 keyseat for its gear.",
+     "toolbox": null
+    },
+    {
+     "id": "p10",
+     "name": "Sun gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Steel spur gear, module 2, 30 teeth, 20 mm face width, 20 mm H7 bore with a keyway per DIN 6885.",
+     "toolbox": null,
+     "envelope": [
+      64.0,
+      64.0,
+      20.0
+     ],
+     "mounts_on": "Input shaft",
+     "module": 2.0,
+     "teeth": 30
+    },
+    {
+     "id": "p11",
+     "name": "Sun gear key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "Parallel key DIN 6885 form A 6 x 6 x 18 mm, locks the Sun gear to the Input shaft.",
+     "toolbox": null
+    },
+    {
+     "id": "p12",
+     "name": "Input shaft bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "6204 deep-groove ball bearing, 20 x 47 x 14.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "id": "s3",
+   "name": "Output shaft group",
+   "description": "The output shaft with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "id": "p13",
+     "name": "Output shaft",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Steel shaft Ø20, with a DIN 6885 keyseat for its hub.",
+     "toolbox": null
+    },
+    {
+     "id": "p14",
+     "name": "Planet carrier",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Hub , 20 mm H7 bore.",
+     "toolbox": null,
+     "mounts_on": "Output shaft"
+    },
+    {
+     "id": "p15",
+     "name": "Carrier key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "Parallel key DIN 6885 form A 6 x 6 mm, locks the Planet carrier to the Output shaft.",
+     "toolbox": null
+    },
+    {
+     "id": "p16",
+     "name": "Output shaft bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "6204 deep-groove ball bearing, 20 x 47 x 14.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "id": "s4",
+   "name": "Planet pin group",
+   "description": "The planet pin with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "id": "p17",
+     "name": "Planet pin",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 3,
+     "description": "Steel shaft Ø20.",
+     "toolbox": null
+    },
+    {
+     "id": "p18",
+     "name": "Planet bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 3,
+     "description": "6204 deep-groove ball bearing, 20 x 47 x 14.",
+     "toolbox": "bearing"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1623 @@
+{
+ "source": "benchmark attempt A1 (2026-11-21), the program ICD v1 as approved: skeleton and interfaces only, copied read-only",
+ "skeleton": {
+  "units": "mm",
+  "base": "i_s1_p1",
+  "layout": "gearbox",
+  "csys": "Origin at the centre of the top face of the Housing base (datums A, B, C); +Z up, away from the base; +X along the row of parts; +Y completes a right-handed frame. The shafts run along +Y.",
+  "datums": [
+   {
+    "id": "A",
+    "kind": "plane",
+    "name": "Housing base top face",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   },
+   {
+    "id": "B",
+    "kind": "plane",
+    "name": "Mid-plane XZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     0,
+     1,
+     0
+    ]
+   },
+   {
+    "id": "C",
+    "kind": "plane",
+    "name": "Mid-plane YZ",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ]
+   }
+  ],
+  "axes": [
+   {
+    "id": "AX1",
+    "name": "Input shaft axis",
+    "item": "i_s2_p9",
+    "origin": [
+     0.0,
+     0.0,
+     -104.5
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "id": "AX2",
+    "name": "Output shaft axis",
+    "item": "i_s3_p13",
+    "origin": [
+     0.0,
+     0.0,
+     -104.5
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   },
+   {
+    "id": "AX3",
+    "name": "Planet pin axis",
+    "item": "i_s4_p17",
+    "origin": [
+     0.0,
+     0.0,
+     -44.5
+    ],
+    "dir": [
+     0.0,
+     1.0,
+     0.0
+    ]
+   }
+  ],
+  "envelope": {
+   "min": [
+    -128.5,
+    -93.0,
+    -219.0
+   ],
+   "max": [
+    128.5,
+    93.0,
+    20.0
+   ],
+   "size": [
+    257.0,
+    186.0,
+    239.0
+   ]
+  },
+  "items": {
+   "i_s1_p1": {
+    "name": "Housing base",
+    "role": "block",
+    "shape": "box",
+    "size": [
+     257.0,
+     122.0,
+     219.0
+    ],
+    "sub": "i_s1",
+    "parent": null,
+    "copies": [
+     [
+      0.0,
+      0.0,
+      -109.5
+     ]
+    ],
+    "qty": 1,
+    "source": "assumed",
+    "cavity": {
+     "min": [
+      -104.5,
+      -29.0,
+      -99.5
+     ],
+     "max": [
+      104.5,
+      29.0,
+      109.5
+     ],
+     "wall": 24.0,
+     "end_wall": 32.0,
+     "floor": 10.0,
+     "note": "Gear cavity: keep it clear (the planetary set turns there); open at the top under the lid. The ring sits against the inner face of the -Y wall."
+    }
+   },
+   "i_s1_p2": {
+    "name": "Housing cover",
+    "role": "block",
+    "shape": "box",
+    "size": [
+     257.0,
+     122.0,
+     20.0
+    ],
+    "sub": "i_s1",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      0.0,
+      10.0
+     ]
+    ],
+    "qty": 1,
+    "source": "assumed"
+   },
+   "i_s2_p9": {
+    "name": "Input shaft",
+    "role": "shaft",
+    "shape": "cylinder",
+    "size": [
+     20.0,
+     20.0,
+     87.0
+    ],
+    "sub": "i_s2",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      -49.5,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "brief",
+    "ax": "y",
+    "d": 20.0,
+    "bearing": {
+     "designation": 6204,
+     "item": "i_s2_p12",
+     "journal": 20.0,
+     "seats": 2
+    }
+   },
+   "i_s3_p13": {
+    "name": "Output shaft",
+    "role": "shaft",
+    "shape": "cylinder",
+    "size": [
+     20.0,
+     20.0,
+     96.0
+    ],
+    "sub": "i_s3",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      45.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "brief",
+    "ax": "y",
+    "d": 20.0,
+    "bearing": {
+     "designation": 6204,
+     "item": "i_s3_p16",
+     "journal": 20.0,
+     "seats": 2
+    }
+   },
+   "i_s2_p10": {
+    "name": "Sun gear",
+    "role": "gear",
+    "shape": "cylinder",
+    "size": [
+     64.0,
+     64.0,
+     20.0
+    ],
+    "sub": "i_s2",
+    "parent": "i_s2_p9",
+    "copies": [
+     [
+      0.0,
+      -16.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "plan",
+    "ax": "y",
+    "bore": 20.0,
+    "module": 2.0,
+    "teeth": 30,
+    "face_width": 20.0
+   },
+   "i_s1_p3": {
+    "name": "Planet gear",
+    "role": "gear",
+    "shape": "cylinder",
+    "size": [
+     64.0,
+     64.0,
+     20.0
+    ],
+    "sub": "i_s1",
+    "parent": "i_s4_p17",
+    "copies": [
+     [
+      0.0,
+      -16.0,
+      -44.5
+     ],
+     [
+      -51.96,
+      -16.0,
+      -134.5
+     ],
+     [
+      51.96,
+      -16.0,
+      -134.5
+     ]
+    ],
+    "qty": 3,
+    "source": "plan",
+    "ax": "y",
+    "phase": 6.0,
+    "module": 2.0,
+    "teeth": 30,
+    "face_width": 20.0
+   },
+   "i_s4_p17": {
+    "name": "Planet pin",
+    "role": "shaft",
+    "shape": "cylinder",
+    "size": [
+     20.0,
+     20.0,
+     45.0
+    ],
+    "sub": "i_s4",
+    "parent": "i_s3_p14",
+    "copies": [
+     [
+      0.0,
+      -5.5,
+      -44.5
+     ],
+     [
+      -51.96,
+      -5.5,
+      -134.5
+     ],
+     [
+      51.96,
+      -5.5,
+      -134.5
+     ]
+    ],
+    "qty": 3,
+    "source": "brief",
+    "ax": "y",
+    "d": 20.0,
+    "bearing": {
+     "designation": 6204,
+     "item": "i_s4_p18",
+     "journal": 20.0,
+     "seats": 1
+    }
+   },
+   "i_s3_p14": {
+    "name": "Planet carrier",
+    "role": "hub",
+    "shape": "cylinder",
+    "size": [
+     160.0,
+     160.0,
+     20.0
+    ],
+    "sub": "i_s3",
+    "parent": "i_s3_p13",
+    "copies": [
+     [
+      0.0,
+      7.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "assumed",
+    "ax": "y",
+    "bore": 20.0
+   },
+   "i_s1_p4": {
+    "name": "Ring gear",
+    "role": "gear",
+    "shape": "cylinder",
+    "size": [
+     197.0,
+     197.0,
+     26.0
+    ],
+    "sub": "i_s1",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      -16.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "plan",
+    "ax": "y",
+    "module": 2.0,
+    "teeth": 90,
+    "face_width": 20.0,
+    "internal": true
+   },
+   "i_s1_p5": {
+    "name": "Input open cap",
+    "role": "hub",
+    "shape": "cylinder",
+    "size": [
+     70.0,
+     70.0,
+     12.0
+    ],
+    "sub": "i_s1",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      -67.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "assumed",
+    "ax": "y",
+    "bore": 22.0
+   },
+   "i_s1_p6": {
+    "name": "Output open cap",
+    "role": "hub",
+    "shape": "cylinder",
+    "size": [
+     70.0,
+     70.0,
+     12.0
+    ],
+    "sub": "i_s1",
+    "parent": "i_s1_p1",
+    "copies": [
+     [
+      0.0,
+      67.0,
+      -104.5
+     ]
+    ],
+    "qty": 1,
+    "source": "assumed",
+    "ax": "y",
+    "bore": 22.0
+   }
+  },
+  "notes": [
+   "Laid out from the design's connections: Planetary set: Sun gear (30 teeth) on the Input shaft; 3 x Planet gear (30 teeth) on the radius a = 60 mm, each on its own Planet pin and Planet bearing, the pins fixed in the Planet carrier on the Output shaft; Ring gear (90 internal teeth, a = m (z_r - z_p) / 2) fixed in the Housing base against its -Y wall. Ring fixed, sun in, carrier out: i = 1 + z_r / z_s = 4. The input and output shafts are coaxial along +Y, each in two bearings in its end wall; the housing is sized for the ring (Ø197) and the stack."
+  ],
+  "standard": [
+   {
+    "item": "i_s1_p7",
+    "name": "Cap screw",
+    "qty": 8,
+    "sub": "i_s1"
+   },
+   {
+    "item": "i_s1_p8",
+    "name": "Cover bolt",
+    "qty": 6,
+    "sub": "i_s1"
+   },
+   {
+    "item": "i_s2_p11",
+    "name": "Sun gear key",
+    "qty": 1,
+    "sub": "i_s2"
+   },
+   {
+    "item": "i_s2_p12",
+    "name": "Input shaft bearing",
+    "qty": 2,
+    "sub": "i_s2"
+   },
+   {
+    "item": "i_s3_p15",
+    "name": "Carrier key",
+    "qty": 1,
+    "sub": "i_s3"
+   },
+   {
+    "item": "i_s3_p16",
+    "name": "Output shaft bearing",
+    "qty": 2,
+    "sub": "i_s3"
+   },
+   {
+    "item": "i_s4_p18",
+    "name": "Planet bearing",
+    "qty": 3,
+    "sub": "i_s4"
+   }
+  ],
+  "solver": "graph"
+ },
+ "interfaces": [
+  {
+   "id": "IF-01",
+   "kind": "hole_pattern",
+   "name": "Housing cover ↔ Housing base: bolted joint",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s1_p2",
+    "copy": 0,
+    "name": "Housing cover"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "fastener": "M8",
+    "fastener_size": 8,
+    "fastener_item": "i_s1_p8",
+    "count": 4,
+    "d": 9.0,
+    "pattern": "grid",
+    "inset": 18.0,
+    "plane_z": 0.0,
+    "normal": [
+     0,
+     0,
+     1
+    ],
+    "positions": [
+     [
+      -110.5,
+      -43.0
+     ],
+     [
+      110.5,
+      -43.0
+     ],
+     [
+      -110.5,
+      43.0
+     ],
+     [
+      110.5,
+      43.0
+     ]
+    ],
+    "through": false,
+    "tapped": {
+     "d": 6.8,
+     "depth": 23.0,
+     "thread": "M8"
+    },
+    "flatness": 0.05,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-02",
+   "kind": "bearing_seat",
+   "name": "Input shaft ↔ Housing base: shaft in 2 bearings 6204 (-Y wall)",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s2_p9",
+    "copy": 0,
+    "name": "Input shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "designation": "6204",
+    "bearing": "Deep-groove ball bearing 6204",
+    "d": 20.0,
+    "D": 47.0,
+    "B": 14.0,
+    "housing_fit": "H7",
+    "shaft_fit": "k6",
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "z": [
+     -61.0,
+     -33.0
+    ],
+    "seats": [
+     {
+      "face": "-Y wall",
+      "open": -1,
+      "z": [
+       -61.0,
+       -47.0
+      ]
+     },
+     {
+      "face": "-Y wall",
+      "open": -1,
+      "z": [
+       -47.0,
+       -33.0
+      ]
+     }
+    ],
+    "clearance_d": 22.0,
+    "flush_z": null,
+    "bearing_item": "i_s2_p12",
+    "shaft_d": 20.0,
+    "count": 2,
+    "r_s_min": 1.0,
+    "standard": "ISO 15 (Toolbox table)",
+    "position_tol": 0.1,
+    "journals": [
+     [
+      -61.0,
+      -33.0
+     ]
+    ]
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-03",
+   "kind": "shaft_bore",
+   "name": "Input shaft ↔ Sun gear: bore on shaft",
+   "a": {
+    "item": "i_s2_p10",
+    "copy": 0,
+    "name": "Sun gear"
+   },
+   "b": {
+    "item": "i_s2_p9",
+    "copy": 0,
+    "name": "Input shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "fit": "H7/k6",
+    "length": 20.0,
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "z": [
+     -26.0,
+     -6.0
+    ],
+    "flush_z": null,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-04",
+   "kind": "key",
+   "name": "Input shaft ↔ Sun gear: parallel key 6 x 6 x 18",
+   "a": {
+    "item": "i_s2_p10",
+    "copy": 0,
+    "name": "Sun gear"
+   },
+   "b": {
+    "item": "i_s2_p9",
+    "copy": 0,
+    "name": "Input shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "b": 6.0,
+    "h": 6.0,
+    "t1": 3.5,
+    "t2": 2.8,
+    "length": 18.0,
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "dir": [
+     1,
+     0
+    ],
+    "z": [
+     -25.0,
+     -7.0
+    ],
+    "hub_z": [
+     -26.0,
+     -6.0
+    ],
+    "key_item": "i_s2_p11",
+    "standard": "DIN 6885-1 A",
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-05",
+   "kind": "bearing_seat",
+   "name": "Output shaft ↔ Housing base: shaft in 2 bearings 6204 (+Y wall)",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s3_p13",
+    "copy": 0,
+    "name": "Output shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "designation": "6204",
+    "bearing": "Deep-groove ball bearing 6204",
+    "d": 20.0,
+    "D": 47.0,
+    "B": 14.0,
+    "housing_fit": "H7",
+    "shaft_fit": "k6",
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "z": [
+     33.0,
+     61.0
+    ],
+    "seats": [
+     {
+      "face": "+Y wall",
+      "open": 1,
+      "z": [
+       47.0,
+       61.0
+      ]
+     },
+     {
+      "face": "+Y wall",
+      "open": 1,
+      "z": [
+       33.0,
+       47.0
+      ]
+     }
+    ],
+    "clearance_d": 22.0,
+    "flush_z": null,
+    "bearing_item": "i_s3_p16",
+    "shaft_d": 20.0,
+    "count": 2,
+    "r_s_min": 1.0,
+    "standard": "ISO 15 (Toolbox table)",
+    "position_tol": 0.1,
+    "journals": [
+     [
+      33.0,
+      61.0
+     ]
+    ]
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-06",
+   "kind": "shaft_bore",
+   "name": "Output shaft ↔ Planet carrier: bore on shaft",
+   "a": {
+    "item": "i_s3_p14",
+    "copy": 0,
+    "name": "Planet carrier"
+   },
+   "b": {
+    "item": "i_s3_p13",
+    "copy": 0,
+    "name": "Output shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "fit": "H7/k6",
+    "length": 20.0,
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "z": [
+     -3.0,
+     17.0
+    ],
+    "flush_z": null,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-07",
+   "kind": "key",
+   "name": "Output shaft ↔ Planet carrier: parallel key 6 x 6 x 18",
+   "a": {
+    "item": "i_s3_p14",
+    "copy": 0,
+    "name": "Planet carrier"
+   },
+   "b": {
+    "item": "i_s3_p13",
+    "copy": 0,
+    "name": "Output shaft"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "b": 6.0,
+    "h": 6.0,
+    "t1": 3.5,
+    "t2": 2.8,
+    "length": 18.0,
+    "ax": "y",
+    "axis": [
+     0.0,
+     -104.5
+    ],
+    "dir": [
+     1,
+     0
+    ],
+    "z": [
+     -2.0,
+     16.0
+    ],
+    "hub_z": [
+     -3.0,
+     17.0
+    ],
+    "key_item": "i_s3_p15",
+    "standard": "DIN 6885-1 A",
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-08",
+   "kind": "hole_pattern",
+   "name": "Input open cap ↔ Housing base: open bearing cap over the -Y seat",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s1_p5",
+    "copy": 0,
+    "name": "Input open cap"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "fastener": "M6",
+    "fastener_size": 6,
+    "fastener_item": "i_s1_p7",
+    "count": 4,
+    "d": 6.6,
+    "pattern": "circular",
+    "pcd": 58.0,
+    "centre": [
+     0.0,
+     -104.5
+    ],
+    "ax": "y",
+    "plane_z": -61.0,
+    "normal": [
+     0,
+     -1,
+     0
+    ],
+    "positions": [
+     [
+      20.51,
+      -83.99
+     ],
+     [
+      -20.51,
+      -83.99
+     ],
+     [
+      -20.51,
+      -125.01
+     ],
+     [
+      20.51,
+      -125.01
+     ]
+    ],
+    "through": false,
+    "tapped": {
+     "d": 5.0,
+     "depth": 18.0,
+     "thread": "M6"
+    },
+    "cap": "open",
+    "seat_D": 47.0,
+    "bearing": "6204",
+    "relief": {
+     "d": 33.5,
+     "depth": 1.0
+    },
+    "flatness": 0.05,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-09",
+   "kind": "hole_pattern",
+   "name": "Output open cap ↔ Housing base: open bearing cap over the +Y seat",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s1_p6",
+    "copy": 0,
+    "name": "Output open cap"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "fastener": "M6",
+    "fastener_size": 6,
+    "fastener_item": "i_s1_p7",
+    "count": 4,
+    "d": 6.6,
+    "pattern": "circular",
+    "pcd": 58.0,
+    "centre": [
+     0.0,
+     -104.5
+    ],
+    "ax": "y",
+    "plane_z": 61.0,
+    "normal": [
+     0,
+     1,
+     0
+    ],
+    "positions": [
+     [
+      20.51,
+      -83.99
+     ],
+     [
+      -20.51,
+      -83.99
+     ],
+     [
+      -20.51,
+      -125.01
+     ],
+     [
+      20.51,
+      -125.01
+     ]
+    ],
+    "through": false,
+    "tapped": {
+     "d": 5.0,
+     "depth": 18.0,
+     "thread": "M6"
+    },
+    "cap": "open",
+    "seat_D": 47.0,
+    "bearing": "6204",
+    "relief": {
+     "d": 33.5,
+     "depth": 1.0
+    },
+    "flatness": 0.05,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-10",
+   "kind": "face",
+   "name": "Ring gear ↔ Housing base: ring gear against the inner face of the -Y wall",
+   "a": {
+    "item": "i_s1_p1",
+    "copy": 0,
+    "name": "Housing base"
+   },
+   "b": {
+    "item": "i_s1_p4",
+    "copy": 0,
+    "name": "Ring gear"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "plane_z": -29.0,
+    "normal": [
+     0,
+     1,
+     0
+    ],
+    "ax": "y",
+    "flatness": 0.05,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-11",
+   "kind": "shaft_bore",
+   "name": "Planet pin #1 ↔ Planet carrier: planet pin pressed into the carrier",
+   "a": {
+    "item": "i_s3_p14",
+    "copy": 0,
+    "name": "Planet carrier"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 0,
+    "name": "Planet pin #1"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "fit": "H7/p6",
+    "length": 20.0,
+    "ax": "y",
+    "axis": [
+     0.0,
+     -44.5
+    ],
+    "z": [
+     -3.0,
+     17.0
+    ],
+    "flush_z": null,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-12",
+   "kind": "bearing_seat",
+   "name": "Planet pin #1 ↔ Planet gear #1: planet on its bearing 6204 on the pin",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 0,
+    "name": "Planet gear #1"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 0,
+    "name": "Planet pin #1"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "designation": "6204",
+    "bearing": "Deep-groove ball bearing 6204",
+    "d": 20.0,
+    "D": 47.0,
+    "B": 14.0,
+    "housing_fit": "H7",
+    "shaft_fit": "k6",
+    "ax": "y",
+    "axis": [
+     0.0,
+     -44.5
+    ],
+    "z": [
+     -23.0,
+     -9.0
+    ],
+    "seats": [
+     {
+      "face": "planet bore",
+      "open": -1,
+      "z": [
+       -23.0,
+       -9.0
+      ]
+     }
+    ],
+    "clearance_d": 22.0,
+    "flush_z": null,
+    "bearing_item": "i_s4_p18",
+    "shaft_d": 20.0,
+    "count": 1,
+    "r_s_min": 1.0,
+    "planet": true,
+    "journals": [
+     [
+      -23.0,
+      -9.0
+     ]
+    ],
+    "standard": "ISO 15 (Toolbox table)",
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-13",
+   "kind": "gear_mesh",
+   "name": "Planet gear #1 ↔ Sun gear: sun / planet mesh",
+   "a": {
+    "item": "i_s2_p10",
+    "copy": 0,
+    "name": "Sun gear"
+   },
+   "b": {
+    "item": "i_s1_p3",
+    "copy": 0,
+    "name": "Planet gear #1"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 30,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 1.0,
+    "axis_a": [
+     0.0,
+     -104.5
+    ],
+    "axis_b": [
+     0.0,
+     -44.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0,
+    "phase_b": 6.0
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-14",
+   "kind": "gear_mesh",
+   "name": "Ring gear ↔ Planet gear #1: planet / ring mesh (internal)",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 0,
+    "name": "Planet gear #1"
+   },
+   "b": {
+    "item": "i_s1_p4",
+    "copy": 0,
+    "name": "Ring gear"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 90,
+    "internal": true,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 3.0,
+    "axis_a": [
+     0.0,
+     -44.5
+    ],
+    "axis_b": [
+     0.0,
+     -104.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-15",
+   "kind": "shaft_bore",
+   "name": "Planet pin #2 ↔ Planet carrier: planet pin pressed into the carrier",
+   "a": {
+    "item": "i_s3_p14",
+    "copy": 0,
+    "name": "Planet carrier"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 1,
+    "name": "Planet pin #2"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "fit": "H7/p6",
+    "length": 20.0,
+    "ax": "y",
+    "axis": [
+     -51.96,
+     -134.5
+    ],
+    "z": [
+     -3.0,
+     17.0
+    ],
+    "flush_z": null,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-16",
+   "kind": "bearing_seat",
+   "name": "Planet pin #2 ↔ Planet gear #2: planet on its bearing 6204 on the pin",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 1,
+    "name": "Planet gear #2"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 1,
+    "name": "Planet pin #2"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "designation": "6204",
+    "bearing": "Deep-groove ball bearing 6204",
+    "d": 20.0,
+    "D": 47.0,
+    "B": 14.0,
+    "housing_fit": "H7",
+    "shaft_fit": "k6",
+    "ax": "y",
+    "axis": [
+     -51.96,
+     -134.5
+    ],
+    "z": [
+     -23.0,
+     -9.0
+    ],
+    "seats": [
+     {
+      "face": "planet bore",
+      "open": -1,
+      "z": [
+       -23.0,
+       -9.0
+      ]
+     }
+    ],
+    "clearance_d": 22.0,
+    "flush_z": null,
+    "bearing_item": "i_s4_p18",
+    "shaft_d": 20.0,
+    "count": 1,
+    "r_s_min": 1.0,
+    "planet": true,
+    "journals": [
+     [
+      -23.0,
+      -9.0
+     ]
+    ],
+    "standard": "ISO 15 (Toolbox table)",
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-17",
+   "kind": "gear_mesh",
+   "name": "Planet gear #2 ↔ Sun gear: sun / planet mesh",
+   "a": {
+    "item": "i_s2_p10",
+    "copy": 0,
+    "name": "Sun gear"
+   },
+   "b": {
+    "item": "i_s1_p3",
+    "copy": 1,
+    "name": "Planet gear #2"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 30,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 1.0,
+    "axis_a": [
+     0.0,
+     -104.5
+    ],
+    "axis_b": [
+     -51.96,
+     -134.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-18",
+   "kind": "gear_mesh",
+   "name": "Ring gear ↔ Planet gear #2: planet / ring mesh (internal)",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 1,
+    "name": "Planet gear #2"
+   },
+   "b": {
+    "item": "i_s1_p4",
+    "copy": 0,
+    "name": "Ring gear"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 90,
+    "internal": true,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 3.0,
+    "axis_a": [
+     -51.96,
+     -134.5
+    ],
+    "axis_b": [
+     0.0,
+     -104.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-19",
+   "kind": "shaft_bore",
+   "name": "Planet pin #3 ↔ Planet carrier: planet pin pressed into the carrier",
+   "a": {
+    "item": "i_s3_p14",
+    "copy": 0,
+    "name": "Planet carrier"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 2,
+    "name": "Planet pin #3"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "d": 20.0,
+    "fit": "H7/p6",
+    "length": 20.0,
+    "ax": "y",
+    "axis": [
+     51.96,
+     -134.5
+    ],
+    "z": [
+     -3.0,
+     17.0
+    ],
+    "flush_z": null,
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-20",
+   "kind": "bearing_seat",
+   "name": "Planet pin #3 ↔ Planet gear #3: planet on its bearing 6204 on the pin",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 2,
+    "name": "Planet gear #3"
+   },
+   "b": {
+    "item": "i_s4_p17",
+    "copy": 2,
+    "name": "Planet pin #3"
+   },
+   "datums": [
+    "A",
+    "B",
+    "C"
+   ],
+   "data": {
+    "designation": "6204",
+    "bearing": "Deep-groove ball bearing 6204",
+    "d": 20.0,
+    "D": 47.0,
+    "B": 14.0,
+    "housing_fit": "H7",
+    "shaft_fit": "k6",
+    "ax": "y",
+    "axis": [
+     51.96,
+     -134.5
+    ],
+    "z": [
+     -23.0,
+     -9.0
+    ],
+    "seats": [
+     {
+      "face": "planet bore",
+      "open": -1,
+      "z": [
+       -23.0,
+       -9.0
+      ]
+     }
+    ],
+    "clearance_d": 22.0,
+    "flush_z": null,
+    "bearing_item": "i_s4_p18",
+    "shaft_d": 20.0,
+    "count": 1,
+    "r_s_min": 1.0,
+    "planet": true,
+    "journals": [
+     [
+      -23.0,
+      -9.0
+     ]
+    ],
+    "standard": "ISO 15 (Toolbox table)",
+    "position_tol": 0.1
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-21",
+   "kind": "gear_mesh",
+   "name": "Planet gear #3 ↔ Sun gear: sun / planet mesh",
+   "a": {
+    "item": "i_s2_p10",
+    "copy": 0,
+    "name": "Sun gear"
+   },
+   "b": {
+    "item": "i_s1_p3",
+    "copy": 2,
+    "name": "Planet gear #3"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 30,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 1.0,
+    "axis_a": [
+     0.0,
+     -104.5
+    ],
+    "axis_b": [
+     51.96,
+     -134.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0
+   },
+   "edited": []
+  },
+  {
+   "id": "IF-22",
+   "kind": "gear_mesh",
+   "name": "Ring gear ↔ Planet gear #3: planet / ring mesh (internal)",
+   "a": {
+    "item": "i_s1_p3",
+    "copy": 2,
+    "name": "Planet gear #3"
+   },
+   "b": {
+    "item": "i_s1_p4",
+    "copy": 0,
+    "name": "Ring gear"
+   },
+   "datums": [
+    "A",
+    "B"
+   ],
+   "data": {
+    "module": 2.0,
+    "teeth_a": 30,
+    "teeth_b": 90,
+    "internal": true,
+    "centre_distance": 60.0,
+    "face_width": 20.0,
+    "pressure_angle": 20.0,
+    "ratio": 3.0,
+    "axis_a": [
+     51.96,
+     -134.5
+    ],
+    "axis_b": [
+     0.0,
+     -104.5
+    ],
+    "ax": "y",
+    "plane_a": -16.0,
+    "plane_b": -16.0
+   },
+   "edited": []
+  }
+ ],
+ "clashes": [
+  {
+   "a": "i7",
+   "b": "i22",
+   "a_name": "Ring gear<1>",
+   "b_name": "Sun gear<1>",
+   "volume_mm3": 49911.231
+  },
+  {
+   "a": "i7",
+   "b": "i21",
+   "a_name": "Ring gear<1>",
+   "b_name": "Input shaft<1>",
+   "volume_mm3": 6858.49
+  },
+  {
+   "a": "i7",
+   "b": "i29",
+   "a_name": "Ring gear<1>",
+   "b_name": "Planet pin<1>",
+   "volume_mm3": 7823.613
+  },
+  {
+   "a": "i7",
+   "b": "i30",
+   "a_name": "Ring gear<1>",
+   "b_name": "Planet pin<2>",
+   "volume_mm3": 7823.613
+  },
+  {
+   "a": "i7",
+   "b": "i31",
+   "a_name": "Ring gear<1>",
+   "b_name": "Planet pin<3>",
+   "volume_mm3": 7823.613
+  }
+ ]
+}
