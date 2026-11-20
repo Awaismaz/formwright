@@ -1346,7 +1346,10 @@ class _Layout:
                           [ring, sun, pl], list(ps.meshes))
         a = m * (zs + zp) / 2
         b = min(float(sg["b"]), float(sp["b"]))
-        G = PLANET_GAP
+        # axial running gap between a turning part and a fixed one (planetary.running_gap: max(1 mm, 0.5 m)):
+        # the planets and the sun to the -Y wall face and inside the ring's lands, the carrier to the ring's end face
+        run = planetary.running_gap(m)
+        G = max(PLANET_GAP, run)
         # the ring: internal teeth, a rim under them
         rim = max(3.0 * m, 6.0)
         od_r = _r2(m * (zr + 2.5) + 2 * rim)
@@ -1434,7 +1437,7 @@ class _Layout:
         if cap_m:
             t_in = max(t_in, icd.tap_depth(cap_m) + 3.0)
             t_out = max(t_out, icd.tap_depth(cap_m) + 3.0)
-        stack = wr + Hc + CAV_Y   # ring (with the gears in it), the carrier, room to the +Y wall
+        stack = wr + run + Hc + CAV_Y   # ring (with the gears in it), the running gap, the carrier, room to +Y
         above = max(od_r / 2 + CAV, caps_od / 2 + 2.0, max(D_in, D_out) / 2 + 3.0)
         below = above + FLOOR
         hs, ho = self.spec[h], self.o(h)
@@ -1449,7 +1452,7 @@ class _Layout:
         yc0 = y0 + t_in
         ym = yc0 + G + b / 2
         yr0 = yc0
-        yc_car0 = ym + b / 2 + G
+        yc_car0 = yr0 + wr + run  # (A1: the carrier sat on the fixed ring's end face, turning against it)
         yc_car1 = yc_car0 + Hc
         za = -(above + (Hh - want_sz["H"]) / 2)  # (a taller housing than needed: the axis at mid-height)
         self.at[h] = [[0.0, 0.0, _r2(-Hh / 2)]]
@@ -1494,7 +1497,7 @@ class _Layout:
                 self.spec[r]["ax"] = "y"
                 self.at[r] = [[0.0, _r2(self.local[sh][r]), _r2(za)]]
         # the planets, their pins and bearings, on the planet radius
-        py0 = ym - max(bB, b) / 2 - PIN_END
+        py0 = max(ym - max(bB, b) / 2 - PIN_END, yc0 + run)  # the pin's free end clear of the fixed wall
         ks = self.spec[pin]
         ks.update(body=None, collar=None, ax="y", y0=_r2(py0), y1=_r2(yc_car1), length=_r2(yc_car1 - py0))
         ks["brg"] = [(-1, ym - bB / 2, ym + bB / 2, (pb, 0))] if pb else []
@@ -1592,12 +1595,6 @@ class _Layout:
                 o = self.nxt()
                 hf = str(o.get("housing_fit") or "H7")
                 z0, z1 = P["ym"] - P["B"] / 2, P["ym"] + P["B"] / 2
-                # the rest of the planet's bore (benchmark A1: left solid, so the pin "clashed" with the planet):
-                # the seat Ø out to the -Y face (the way the bearing goes in), the pin clearance beyond the shoulder
-                f0, f1 = P["ym"] - P["b"] / 2, P["ym"] + P["b"] / 2
-                passes = ([{"z": [_r2(f0), _r2(z0)], "d": P["bD"], "what": "bearing entry"}] if z0 - f0 > 0.5 else []) \
-                    + ([{"z": [_r2(z1), _r2(f1)], "d": _r2(P["bd"] + 2), "what": "pin clearance behind the shoulder"}]
-                       if f1 - z1 > 0.5 else [])
                 self.add("bearing_seat", (self.item[pl], k), (self.item[pin], k), {
                     "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": P["bd"],
                     "D": P["bD"], "B": P["B"], "housing_fit": hf if hf in HOUSING_FITS else "H7",
@@ -1605,8 +1602,7 @@ class _Layout:
                     "seats": [{"face": "planet bore", "open": -1, "z": [_r2(z0), _r2(z1)]}],
                     "clearance_d": _r2(P["bd"] + 2), "flush_z": None, "bearing_item": self.item[pb],
                     "shaft_d": dp, "count": 1, "r_s_min": icd._BEARING_RS[int(des)], "planet": True,
-                    "journals": [[_r2(z0), _r2(z1)]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL,
-                    **({"passes": passes} if passes else {})},
+                    "journals": [[_r2(z0), _r2(z1)]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
                     ["A", "B", "C"], f"planet on its bearing {des} on the pin")
             else:
                 o = self.nxt()

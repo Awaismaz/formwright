@@ -296,3 +296,58 @@ Regression, same run: b gear-pair PASS 29 s, c reducer PASS 73 s, R2 r-shaft-gea
 `ruff` is clean.
 
 **Parked:** PD-268, minor/major for revisions. A revision is major when it redesigns or removes a part past Ready, or removes a part the brief names. It is minor for pure re-placement and for changes to parts not started. Alternative: every Archie-initiated revision asked (the pre-copilot behaviour).
+
+## Follow-up 2: carrier running gap, merge with `wip/planetary-geometry`, `test_toolbox_keys` (master's request)
+
+### Axial running gap (`graph/planetary.py` `running_gap`, `graph/layout.py` `_planetary`)
+
+**The rule** (PD-269, Formwright's own rule, not a standard's value): turning parts stay at least max(1 mm, 0.5 m) clear of fixed ones.
+
+A1 broke it: the turning carrier sat on the fixed ring's end face (ring Y -29..-3, carrier -3..17). The layout now:
+- puts the carrier one running gap past the ring's end face;
+- keeps the gears' lands to the wall and ring faces at max(3 mm, the running gap);
+- keeps a pin's free end at least one running gap from the -Y wall;
+- grows the housing by the gap.
+
+For m2 the gap is 1 mm. On a temp copy of A1's program, its graph re-laid out today gives:
+- ring Y -29.5..-3.5;
+- carrier -2.5..17.5 (1.0 mm clear);
+- sun and planets -26.5..-6.5 (3 mm lands);
+- pin ends 1.0 mm off the wall;
+- housing W 123 (was 122).
+
+A1 as approved fails the new check (carrier to ring 0.0).
+
+The golden case's `planetary` check has a new row, "Axial running gaps (turning to fixed)": carrier to ring, gears to the ring faces, pin end to wall, each at least the gap (`running_gap = 1.0` in `k_planetary.toml`).
+
+### Merge with main (`wip/planetary-geometry`)
+
+The merge was clean. I don't phase rings, so their `_phase` stands. Two overlaps had to be reconciled:
+- **Planet bore.** Their direct builder and conformance bore the planet seat from its open face down to the ICD's shoulder, with a shoulder bore D - (D - d) / 4 behind it. My earlier planet "passes" (bearing entry, Ø22 pin clearance) contradicted that, and their builder declined: "bearing entry Ø42 has no shoulder". I removed the planet passes from the ICD. The planet placeholder now mirrors their geometry, placeholder only: seat from the face to the shoulder, plus the 36.5 shoulder bore. The housing shoulder passes stay.
+- **`test_internal_gear` expected the 6204.** Its fixture comes from the planetary graph, so the rim rule now gives it a 6004. I swapped the parametrisation: the fixture is the 6004 and is gated, and the 6204 is the swapped variant. The "no shoulder" refusal test now spans the 20 mm face explicitly, since the 6004 is 12 wide.
+
+### `tests/test_toolbox_keys.py` (3 failures, also on main 3104737)
+
+**Cause.** Rings are now assigned by role (connection-layout, golden F4: correct). But the role was inferred from the whole name, so the four "Gear circlip" rings (description "Circlip DIN 471") read as hub rings. They left the gear shaft's two bearing faces without rings and crossed to the pinion shaft's gear faces. That made 4 grooves on the pinion shaft, with IF-10 carrying the gear sub-assembly's ring. **This was a regression.**
+
+**Fix** (`icd.py`): a leading "Gear" / "Pinion" in a ring's name says whose line it belongs to, not what it holds. Only the description, or a later word of the name, gives the hub role. R2's "Gear circlip ... holding the gear against the shoulder" still reads as hub, from its description.
+
+**Expectations, each re-read from the plan:**
+1. **IF-10 to IF-15.** The pinion's two circlips, described "next to the 6204", locate the pinion shaft's bearings at their outboard faces (Y -30.2 and 29). The four gear circlips stay on the gear shaft: both gear faces and both bearings. The old expectation, pinion circlips at the pinion's faces, was the order-only reading that F4 removed. I updated it with a comment.
+2. **Grooves.** The pinion shaft has 2 grooves, now at the bearing faces (-30.3..-29, 29..30.3), not 4.
+3. **"Pinion shaft" direct summary.** It is back to "1 keyseat, 2 circlip grooves", unchanged. The fit test checks that the rings touch the bearings, not the gear.
+
+### Runs (pairs, workers reaped)
+
+| Files | Result |
+|---|---|
+| `test_toolbox_keys` + `test_planetary_orchestration` | 26 passed |
+| `test_internal_gear` + `test_connection_layout` | 38 passed |
+| `test_office_orchestrator` + `test_golden` | 31 passed |
+| `test_planetary_layout` + `test_office_icd` | 25 passed |
+
+`uv run aicad golden --simulated --case k_planetary` gives **PASS**: 78.6 s, 0 clashes, 0 stops, 0 placeholders, every planetary row (running gaps 1.0 / 3.0 / 1.0).
+
+**Parked: PD-269, axial running gap max(1 mm, 0.5 m)** between turning and fixed parts. Alternative: a fixed 1 mm, or a value from bearing axial play plus tolerance stack.
+
+Full suite `uv run aicad golden --simulated`: **14 of 14 cases pass**, k planetary included (graph path, workers reaped by the runner).

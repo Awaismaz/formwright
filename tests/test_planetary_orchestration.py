@@ -124,15 +124,17 @@ def test_placeholders_carry_the_openings_the_icd_defines() -> None:
     assert icd.internal_opening(2, 90) == 185.0
     planet = icd.placeholder_spec(sk, ifs, _item(sk, "Planet gear"))
     seats = sorted((s["z0"], s["z1"], s["d"]) for s in planet["seats"])
-    # the bearing entry (Ø42, from the -Y face), the 6004 seat (12 wide), the pin clearance Ø22 behind the shoulder
-    assert seats == [(-10.0, -6.0, 42.0), (-6.0, 6.0, 42.0), (6.0, 10.0, 22.0)]
+    # the 6004 seat Ø42 bored from the -Y face (-10) to its shoulder (+6), and behind the shoulder the gear
+    # generator's bore 42 - (42 - 20) / 4 = 36.5 (clear of the turning inner ring and of the Ø20 pin)
+    assert seats == [(-10.0, 6.0, 42.0)]
+    assert {"c": [0.0, 0.0], "d": 36.5} in planet["holes"]
     house = icd.placeholder_spec(sk, ifs, _item(sk, "Housing base"))
     clear = sorted((s["z0"], s["z1"]) for s in house["seats"] if s["d"] == 22.0)
-    assert clear == [(-33.0, -29.0), (29.0, 33.0)]  # the shafts through the end-wall shoulders to the cavity
+    assert clear == [(-33.5, -29.5), (29.5, 33.5)]  # (housing W 123: the 1 mm running gap) the shafts through the end-wall shoulders to the cavity
     assert house["pockets"]  # the gear cavity
     # two bearings side by side in one bore: no fictitious shoulder between them
     walls = [f for f in icd.item_features(sk, ifs, _item(sk, "Housing base")) if "bearing shoulder" in f["label"]]
-    assert sorted(f["z"] for f in walls) == [-33.0, 33.0]
+    assert sorted(f["z"] for f in walls) == [-33.5, 33.5]
 
 
 def _solid(spec: dict[str, Any], T: list[float]) -> Any:
@@ -349,24 +351,41 @@ def test_archie_reads_a_placeholder_clash_as_a_measurement_artefact(tmp_path: Pa
 
 
 # ============================================================================ the golden case
+def _boxes(sk: dict[str, Any]) -> list[dict[str, Any]]:
+    """Final-assembly-like instances from a skeleton: each item's envelope placed at its copies."""
+    out = []
+    for i, it in sk["items"].items():
+        for k in range(len(it["copies"])):
+            T = program_assembly.place(sk, i, k)
+            sz = it["size"]
+            bb = [-sz[0] / 2, -sz[1] / 2, -sz[2] / 2, sz[0] / 2, sz[1] / 2, sz[2] / 2]
+            out.append({"name": f"{it['name']}<{k + 1}>", "T": T, "box": golden.world_box(T, bb)})
+    return out
+
+
 def test_the_benchmark_case_loads_and_its_planetary_rows_hold_on_the_hand_layout() -> None:
     case = next(c for c in golden.load_cases(["k_planetary"]))
     assert case["id"] == "planetary" and case["brief"] == BRIEF and case["sim"]["intent_data"]
     g = _graph()
     sk, _ifs = _icd(g)
-    insts = []
-    for i, it in sk["items"].items():
-        for k, c in enumerate(it["copies"]):
-            T = program_assembly.place(sk, i, k)
-            sz = it["size"]
-            bb = [-sz[0] / 2, -sz[1] / 2, -sz[2] / 2, sz[0] / 2, sz[1] / 2, sz[2] / 2]
-            insts.append({"name": f"{it['name']}<{k + 1}>", "T": T, "box": golden.world_box(T, bb)})
+    insts = _boxes(sk)
     spec = case["expect"]["planetary"][0]
     rows = golden.planetary_rows(1, spec, insts, {"graph": g.dump()})
     bad = [r for r in rows if not r["ok"]]
     assert not bad, bad
     assert {r["id"].split(".")[-1] for r in rows} >= {"coaxial", "assembly", "ratio", "rim", "chain", "spacing",
-                                                       "coplanar", "placed"}
+                                                       "coplanar", "placed", "running"}
+    # running gaps by hand: m2 gives max(1, 0.5 x 2) = 1 mm. Ring Y -29.5 .. -3.5 on the -Y wall's inner face, the
+    # carrier -2.5 .. 17.5 (1 mm off the ring's end face), sun and planets -26.5 .. -6.5 (3 mm lands), pin ends at
+    # -28.5 (1 mm off the wall)
+    assert planetary.running_gap(2) == 1.0 and planetary.running_gap(4) == 2.0
+    run = next(r for r in rows if r["id"].endswith(".running"))
+    assert run["got"] == {"carrier_to_ring": 1.0, "gears_to_ring_faces": 3.0, "pin_end_to_wall": 1.0}, run
+    # A1's own layout (approved ICD v1): the turning carrier sat on the fixed ring's end face (ring -29 .. -3,
+    # carrier -3 .. 17)
+    a1 = next(r for r in golden.planetary_rows(1, spec, _boxes(A1["skeleton"]), {"graph": g.dump()})
+              if r["id"].endswith(".running"))
+    assert a1["ok"] is False and a1["got"]["carrier_to_ring"] == 0.0
     # the A1 graph as it was (the 6204) fails the rim rule
     data = g.dump()
     for c in data["components"]:

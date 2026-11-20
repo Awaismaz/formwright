@@ -656,8 +656,14 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         if ringy:
             # its role, as the plan states it: what it locates ("locating each bearing inner race" / "holding the gear
             # against the shoulder"): rings go to spots of that role, never just by order and Ø (golden suite F4)
-            role = "bearing" if _BEARINGY.search(text) and not re.search(r"gear|hub|pulley|wheel|sprocket|spacer",
-                                                                          p["name"], re.IGNORECASE) else                 "hub" if re.search(r"gear|hub|pulley|wheel|sprocket|spacer", text, re.IGNORECASE) else None
+            # A leading "Gear" / "Pinion" in the name says whose line the ring belongs to ("Gear circlip" in the Gear
+            # shaft assembly), not what it holds: only the description, or a later word of the name, gives the hub
+            # role (live gear pair: four "Gear circlip" rings read as hub rings left the gear shaft's bearings without
+            # rings and crossed to the pinion's gear faces)
+            hubby = r"gear|hub|pulley|wheel|sprocket|spacer"
+            rest = " ".join(str(p["name"]).split()[1:])
+            role = "bearing" if _BEARINGY.search(text) and not re.search(hubby, p["name"], re.IGNORECASE) else \
+                "hub" if re.search(hubby, f"{rest} {p['description']}", re.IGNORECASE) else None
             ring_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "name": p["name"], "d": None,
                               "role": role})
         elif keyy:
@@ -2507,6 +2513,19 @@ def placeholder_spec(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str)
     elif it["role"] == "gear":
         p = it["module"] * it["teeth"]
         size = [p, p, size[2]]
+        # a gear on its bearing (a planet): the seat is bored from its open face to the shoulder, and the bore behind
+        # the shoulder clears the turning inner ring (the gear generator's rule, D - (D - d) / 4 down to 0.5 mm);
+        # without these the pin "clashed" with the planet's placeholder. Placeholder only: the ICD keeps its seat.
+        byid = {f["id"]: f for f in ifs}
+        for x in [f for f in feats if f["type"] == "seat" and f.get("fit")]:
+            d = (byid.get(x["if"]) or {}).get("data") or {}
+            if (byid.get(x["if"]) or {}).get("kind") != "bearing_seat" or not d.get("d"):
+                continue
+            D, bd, H = float(d["D"]), float(d["d"]), float(size[2])
+            bore = max(float(bore or 0.0), math.floor(2 * (D - (D - bd) / 4)) / 2)
+            opens = [int(s.get("open") or -1) for s in d.get("seats") or []] or [-1]
+            z0, z1 = float(x["z0"]), float(x["z1"])
+            x["z0"], x["z1"] = (-H / 2, z1) if opens[0] < 0 else (z0, H / 2)
     return body_spec(it["shape"], size, feats, bore, it["name"], it.get("cavity"))
 
 

@@ -13,6 +13,9 @@
 #   planet root Ø d_f = m (z - 2.5) = 2 x 27.5 = 55; rim rule s_R >= 1.2 h_t = 1.2 x 2.25 m = 2.7 m = 5.4 mm, so the
 #   bearing D <= 55 - 10.8 = 44.2 on the Ø20 pin: 6004 (20 x 42 x 12), rim (55 - 42) / 2 = 6.5 mm = 3.25 m
 #   (the 6204's rim would be (55 - 47) / 2 = 4 mm = 2 m: fails)
+#   axial running gap turning to fixed max(1 mm, 0.5 m) = 1 mm: ring Y -29.5 .. -3.5 against the -Y wall, carrier
+#   -2.5 .. 17.5 (1 mm off the ring's end face; A1 had it touching: ring -29 .. -3, carrier -3 .. 17), sun and
+#   planets -26.5 .. -6.5 (3 mm lands), pin ends 1 mm off the wall
 #   ring placeholder: OD 197 (root m (z + 2.5) = 185 plus a 6 mm rim each side), open to its root circle Ø185
 id = "planetary"
 title = "Single stage planetary gearbox (founder's benchmark)"
@@ -50,6 +53,7 @@ planets = 3
 ratio = 4.0
 centre_distance = 60.0
 rim_min_m = 2.7
+running_gap = 1.0        # max(1 mm, 0.5 m) for m2
 tol = 0.05
 
 [[expect.count]]

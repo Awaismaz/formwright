@@ -52,6 +52,11 @@ DEDENDUM = 1.25         # ISO 53 basic rack: dedendum 1.25 m (root Ø of an exte
 # rule of thumb. Verify against the standard for a real design (PD-261).
 RIM_MIN_M = 2.7
 RIM_SOURCE = "ISO 6336-3 / AGMA 2001-D04: rim at least 1.2 tooth depths, 1.2 x 2.25 m (verify)"
+# Axial running gap between a part that turns and one that is fixed (carrier to ring end face, planets and sun to the
+# housing wall, a pin's free end to the wall): at least 1 mm, and half a module on larger sets, so the faces never rub
+# under axial play, tolerance stack and thermal growth. Formwright's rule (PD-269), not a standard's value.
+RUN_GAP_MIN = 1.0
+RUN_GAP_M = 0.5
 GROW_MAX = 40           # the most teeth the rim rule adds to a planet before it gives up and says so
 
 
@@ -163,6 +168,11 @@ def ring_teeth(z_sun: int, z_planet: int) -> int:
 def centre_distance(m: float, z_a: int, z_b: int, internal: bool) -> float:
     """External pair a = m (z1 + z2) / 2; a planet in its ring a = m (z_ring - z_planet) / 2."""
     return float(m) * (abs(int(z_a) - int(z_b)) if internal else int(z_a) + int(z_b)) / 2
+
+
+def running_gap(m: float) -> float:
+    """The axial running gap between a turning part and a fixed one: max(1 mm, 0.5 m)."""
+    return max(RUN_GAP_MIN, RUN_GAP_M * float(m))
 
 
 def root_d(m: float, z: int) -> float:

@@ -403,6 +403,23 @@ def planetary_rows(n: int, spec: dict[str, Any], insts: list[dict[str, Any]], sn
         return all(any(all(o["box"][k] - tol <= i["box"][k] and i["box"][k + 3] <= o["box"][k + 3] + tol for k in ks)
                        for o in outer) for i in inner)
 
+    # axial running gaps between turning and fixed parts (planetary.running_gap): the carrier off the ring's end
+    # face; the sun, the planets and the pins' free ends off the -Y wall (the ring's seating face lies on it)
+    run = float(spec.get("running_gap") or planetary.running_gap(m))
+    cars0 = select(insts, {"name": spec.get("carrier", "(?i)carrier")})
+    pins0 = select(insts, {"name": spec.get("pin", "(?i)\\bplanet pin")})
+    if rings and cars0:
+        rb = rings[0]["box"]
+        gaps = [round(max(c["box"][ax] - rb[ax + 3], rb[ax] - c["box"][ax + 3]), 3) for c in cars0]
+        lo_gear = min(i["box"][ax] for i in suns + plans) - rb[ax]
+        hi_gear = rb[ax + 3] - max(i["box"][ax + 3] for i in suns + plans)
+        side = 1 if centre(cars0[0]["box"])[ax] > centre(rb)[ax] else -1
+        got: dict[str, float] = {"carrier_to_ring": min(gaps), "gears_to_ring_faces": round(min(lo_gear, hi_gear), 3)}
+        if pins0:
+            got["pin_end_to_wall"] = round(min((p["box"][ax] - rb[ax]) if side > 0 else (rb[ax + 3] - p["box"][ax + 3])
+                                               for p in pins0), 3)
+        rows.append(_row(f"{pre}.running", "Axial running gaps (turning to fixed)",
+                         all(v >= run - 1e-6 for v in got.values()), got, f">= {run:g} mm"))
     ins = select(insts, {"name": spec.get("input", "(?i)\\binput shaft")})
     outs = select(insts, {"name": spec.get("output", "(?i)\\boutput shaft")})
     cars = select(insts, {"name": spec.get("carrier", "(?i)carrier")})

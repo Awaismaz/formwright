@@ -18,7 +18,8 @@ Hand values (ISO 53 basic rack, profile shift 0, α = 20°; ISO 15 bearings):
   v = 1/2 - u in the opposite angle sense.
 * working backlash 0.04 m at the pitch circle on each member (Toolbox gears): 0.04 x 2 = 0.08 circumferential per
   flank pair, a normal gap of 0.08 cos 20° = 0.0752 mm.
-* planet bearing 6204: d 20, D 47, B 14 (ISO 15); the seat Ø47 H7 bored from the -Z face to the shoulder at Z 7 (the
+* planet bearing: the rim rule (graph/planetary.py, benchmark A1) gives the default set a 6004; the 6204 case is
+  the same ICD with the bearing swapped. 6204: d 20, D 47, B 14 (ISO 15); the seat Ø47 H7 bored from the -Z face to the shoulder at Z 7 (the
   ICD's), depth 7 + 20 / 2 = 17; shoulder bore D - (D - d) / 4 = 40.25, rounded down to 0.5: Ø40. 6004: d 20, D 42,
   B 12; shoulder 42 - 22 / 4 = 36.5.
 """
@@ -399,13 +400,14 @@ def _seat_doc(doc: dict[str, Any], designation: str) -> dict[str, Any]:
             for s in dd.get("seats") or []:
                 s["z"] = nz
     for it in d2["items"]:  # the plan's words follow the bearing
-        it["description"] = it["description"].replace(f"{ISO15['6204'][1]:g} mm", f"{D:g} mm")
+        it["description"] = it["description"].replace(f"{ISO15['6004'][1]:g} mm", f"{D:g} mm")
     return d2
 
 
 @pytest.mark.parametrize("designation", ["6204", "6004"])
 def test_the_planet_goes_direct_with_its_bearing_seat(pdoc: dict[str, Any], designation: str, tmp_path: Path) -> None:
-    doc = pdoc if designation == "6204" else _seat_doc(pdoc, designation)
+    # the fixture's own bearing is the 6004 (the rim rule: a 6204 leaves (55 - 47) / 2 = 4 mm = 2 m < 2.7 m)
+    doc = pdoc if designation == "6004" else _seat_doc(pdoc, designation)
     pid = _item(doc, "Planet gear")
     sk, ifs = doc["skeleton"], doc["icd"]["interfaces"]
     seat_if = next(f for f in ifs if f["kind"] == "bearing_seat" and f["a"]["item"] == pid)
@@ -429,14 +431,14 @@ def test_the_planet_goes_direct_with_its_bearing_seat(pdoc: dict[str, Any], desi
     hand = spur_area(2, 30, 0.08) * 20 - math.pi / 4 * bore ** 2 * 20 - math.pi / 4 * (D ** 2 - bore ** 2) * depth
     gear, e = fw_std.spur_gear(2, 30, 20, bore=bore, seats=[(D, depth, -1)], backlash=0.08, z0=-10)
     assert e["volume"] == pytest.approx(hand, rel=1e-6)
-    if designation == "6004":
+    if designation == "6204":
         assert gear.volume == pytest.approx(hand, rel=1e-5)
         return
     st, res, info = _gate(tmp_path, doc, "Planet gear", src)
     assert st["fingerprint"]["volume"] == pytest.approx(hand, rel=1e-5)
     assert res["ok"] and res["envelope"]["ok"], [r for x in res["interfaces"] for r in x["rows"] if not r["ok"]]
     rows = {r["feature"]: r for x in res["interfaces"] for r in x["rows"]}
-    assert rows[seat["label"]]["ok"] and rows[seat["label"]]["d_mm"] == pytest.approx(47, abs=1e-6)
+    assert rows[seat["label"]]["ok"] and rows[seat["label"]]["d_mm"] == pytest.approx(D, abs=1e-6)
     assert rows[shoulder["label"]]["ok"]
     assert info["component"]["kind"] == "spur_gear" and info["component"]["params"]["teeth"] == 30
 
@@ -446,7 +448,8 @@ def test_seat_refusals_send_the_gear_to_the_designer(pdoc: dict[str, Any]) -> No
     d2 = copy.deepcopy(pdoc)
     for f in d2["icd"]["interfaces"]:  # no shoulder: the seat runs from face to face
         if f["kind"] == "bearing_seat" and f["a"]["item"] == pid:
-            f["data"]["z"] = [f["data"]["z"][0] - 3, f["data"]["z"][1] + 3]
+            mid = (f["data"]["z"][0] + f["data"]["z"][1]) / 2  # the 20 mm face, whatever bearing (6004 since the rim rule)
+            f["data"]["z"] = [mid - 10, mid + 10]
             for s in f["data"].get("seats") or []:
                 s["z"] = f["data"]["z"]
     p = direct.plan(d2, _t(d2, "Planet gear"))
