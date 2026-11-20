@@ -122,6 +122,14 @@ def open_questions(plan_: dict[str, Any] | None) -> list[dict[str, Any]]:
     return list((((plan_ or {}).get("graph") or {}).get("questions")) or [])
 
 
+def _is_default(q: dict[str, Any], v: str) -> bool:
+    """The answer is the model's own question's default (already built into the graph)."""
+    if q.get("id") in ("housing", "bearings") or str(q.get("id") or "").startswith("material"):
+        return False  # code's questions: applied by code below
+    d = " ".join(str(q.get("default") or "").lower().split())
+    return bool(d) and " ".join(str(v).lower().split()) == d
+
+
 def answer(doc: dict[str, Any], answers: dict[str, str]) -> tuple[OfficePlan | None, str | None]:
     """Apply answers to the program's graph. Code's questions (housing, bearings, material) are applied by code here
     (returns the new plan); any other answer needs the model again (returns None and the notes to plan with)."""
@@ -133,7 +141,11 @@ def answer(doc: dict[str, Any], answers: dict[str, str]) -> tuple[OfficePlan | N
     if not ans:
         return None, None
     g = DesignGraph.load(gd)
-    if not all(k in ("housing", "bearings") or k.startswith("material") for k in ans):
+    # the model builds its graph for each question's default (intent prompt), so an answer that IS the default
+    # changes nothing and needs no second call (benchmark A3: re-asking the model for "3 planets", the default,
+    # cost 20 s and, when that call failed, the whole planetary plan)
+    if not all(k in ("housing", "bearings") or k.startswith("material") or _is_default(qs[k], v)
+               for k, v in ans.items()):
         notes = "Answers to your questions: " + "; ".join(f"{qs[k]['question']} {v}" for k, v in ans.items())
         return None, notes
     g.questions = [q for q in g.questions if q.id not in ans]

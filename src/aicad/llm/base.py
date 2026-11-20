@@ -208,6 +208,36 @@ def schema_instruction(schema: dict[str, Any]) -> str:
 _FENCE = re.compile(r"```[\w-]*\s*\n(.*?)\n?```", re.DOTALL)
 
 
+_TRIMMABLE = ("maxLength", "maxItems")
+
+
+def trim_to_schema(value: Any, schema: dict[str, Any], rounds: int = 50) -> Any:
+    """Cut strings and lists that only run past a ``maxLength`` / ``maxItems`` of the schema, so a good answer is
+    never thrown away for a long sentence (benchmark A3, 2026-11-21: a 370-character summary against a limit of 300
+    lost a correct planetary plan, and the office fell back to a generic gearbox). Any other violation is left for
+    validation to report."""
+    import jsonschema
+
+    v = json.loads(json.dumps(value))
+    cls = jsonschema.validators.validator_for(schema)
+    for _ in range(rounds):
+        errs = [e for e in cls(schema).iter_errors(v) if e.validator in _TRIMMABLE]
+        if not errs:
+            return v
+        for e in errs:
+            path = list(e.absolute_path)
+            parent = v
+            for k in path[:-1]:
+                parent = parent[k]
+            limit = int(e.validator_value)
+            if not path:
+                v = v[:limit]
+            elif isinstance(parent[path[-1]], str | list):
+                parent[path[-1]] = parent[path[-1]][:limit]
+            break  # paths shift after a list is cut: re-read the errors
+    return v
+
+
 def parse_json_answer(text: str, schema: dict[str, Any]) -> Any:
     """The last fenced (or bare) JSON value in ``text``, validated against ``schema``."""
     import jsonschema
@@ -225,6 +255,7 @@ def parse_json_answer(text: str, schema: dict[str, Any]) -> Any:
                 value = json.loads(raw[s:e + 1])
             except ValueError:
                 continue
+        value = trim_to_schema(value, schema)
         try:
             jsonschema.validate(value, schema)
         except jsonschema.ValidationError as ex:

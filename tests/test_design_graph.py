@@ -615,3 +615,83 @@ def test_live_intent_replies_replayed(case: str, direct: int, question: str | No
         mats = {c["name"]: c["material"] for c in new.plan["graph"]["data"]["components"] if c["kind"] == "spur_gear"}
         assert mats == {"Pinion": "Carbon steel (C45)", "Output gear": "Carbon steel (C45)"}
         assert len(stub.calls) == 1
+
+
+# ----------------------------------------------------------------------------- benchmark A3: answers that keep the design
+_PLANETARY = json.loads((Path(__file__).resolve().parents[1] / "src" / "aicad" / "eval" / "golden_cases"
+                         / "k_planetary.intent.json").read_text(encoding="utf-8"))["reply"]
+_PLANET_Q = {"id": "planet_count", "question": "How many planet gears?", "options": ["3", "4", "2"], "default": "3"}
+
+
+def _planetary_program(c: Any, email: str, second: Any) -> tuple[str, StubProvider]:
+    """A planetary program whose first intent reply asks the planet count (A3); ``second`` answers any later call."""
+    from test_platform import signup
+
+    first = {**_PLANETARY, "questions": [_PLANET_Q]}
+    n = {"i": 0}
+
+    def responder(req: Any) -> str | None:
+        if req.role != "intent":
+            return None
+        n["i"] += 1
+        return "```json\n" + json.dumps(first if n["i"] == 1 else second) + "\n```"
+
+    stub = StubProvider(responder)
+    signup(c, email)
+    _topup(email)
+    with llm.use_provider(stub, roles=("intent",)):
+        pid = c.post("/api/office/programs", json={"name": "Planetary", "brief": "Build a single stage planetary "
+                                                   "Gearbox", "planner": "archie"}).json()["id"]
+        v = _wait(c, pid, lambda v: v["status"] == "plan_review")
+    assert [q["id"] for q in v["plan"]["graph"]["questions"]] == ["planet_count"]
+    return pid, stub
+
+
+def _parts(v: dict[str, Any]) -> dict[str, int]:
+    return {p["name"]: int(p.get("qty") or 1) for s in v["plan"]["subassemblies"] for p in s["parts"]}
+
+
+def test_a3_the_default_answer_keeps_the_graph_with_no_second_call(office: Any,  # noqa: F811
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(goffice.ENV, "1")
+    c = office
+    pid, stub = _planetary_program(c, "a3d@x.com", None)
+    with llm.use_provider(stub, roles=("intent",)):
+        r = c.post(f"/api/office/programs/{pid}/plan/answers", json={"answers": {"planet_count": "3"}})
+    assert r.status_code == 200, r.text
+    v = r.json()
+    assert len(stub.calls) == 1 and v["status"] == "plan_review" and v["plan"]["graph"]["questions"] == []
+    parts = _parts(v)
+    assert parts["Planet gear"] == 3 and parts["Ring gear"] == 1 and parts["Planet pin"] == 3
+
+
+def test_a3_a_failed_replan_keeps_the_plan_it_started_from(office: Any,  # noqa: F811
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(goffice.ENV, "1")
+    c = office
+    pid, stub = _planetary_program(c, "a3f@x.com", {"components": "not a graph"})
+    with llm.use_provider(stub, roles=("intent",)):
+        r = c.post(f"/api/office/programs/{pid}/plan/answers", json={"answers": {"planet_count": "4"}})
+        assert r.status_code == 200, r.text
+        v = _wait(c, pid, lambda v: v["status"] == "plan_review")
+    assert len(stub.calls) == 2
+    parts = _parts(v)
+    assert parts["Planet gear"] == 3 and parts["Ring gear"] == 1  # the planetary plan, not a generic breakdown
+    assert "plan before them is kept" in (v["plan"].get("note") or "")
+
+
+def test_a3_a_long_summary_no_longer_loses_the_plan(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    monkeypatch.setenv(goffice.ENV, "1")
+    c = office
+    four = json.loads(json.dumps(_PLANETARY))
+    four["summary"] = "Single-stage planetary gearbox with 4 planets. " * 9  # ~430 characters, the limit is 300
+    for comp in four["components"]:
+        if comp.get("qty") == 3:
+            comp["qty"] = 4
+    pid, stub = _planetary_program(c, "a3l@x.com", four)
+    with llm.use_provider(stub, roles=("intent",)):
+        r = c.post(f"/api/office/programs/{pid}/plan/answers", json={"answers": {"planet_count": "4"}})
+        assert r.status_code == 200, r.text
+        v = _wait(c, pid, lambda v: v["status"] == "plan_review")
+    assert len(stub.calls) == 2 and "plan before them is kept" not in (v["plan"].get("note") or "")
+    assert _parts(v)["Planet gear"] == 4

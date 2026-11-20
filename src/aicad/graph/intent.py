@@ -88,7 +88,8 @@ The planet bearings sit in the planet gears, never in the housing; only the inpu
 bearings. Code sizes the ring (z_ring = z_sun + 2 z_planet) and the housing around it.
 - Ask at most 3 questions, only when the answer changes which parts exist or how they connect (housing or not, the \
 bearing type, the number of stages) or the material when the use makes it a real choice. Never ask about sizes. \
-Each question has 2 to 4 short options, the most likely first, and a default.
+Each question has 2 to 4 short options, the most likely first, and a default. Build the components and connections \
+for each question's default answer.
 
 """ + registry.prompt_reference() + """
 

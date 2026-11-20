@@ -323,9 +323,17 @@ async def _plan_task(root: Path, pid: str, org_id: str, user_id: str, god_tokens
             if graphed is not None:
                 design_graph.attach(plan, graphed)
             service.set_plan(root, doc, plan, archie, narrative=planner.narrative(text), note=scope_note)
+        elif notes and (((doc.get("plan") or {}).get("graph") or {}).get("data")):
+            # a re-plan (answers, changes) that failed keeps the plan it started from: a generic breakdown in its
+            # place threw away a correct planetary design (benchmark A3, 2026-11-21)
+            log.warning("Archie re-plan failed for %s: %s", pid, getattr(graphed, "error", None))
+            service.set_plan(root, doc, doc["plan"], archie, narrative=str(doc["plan"].get("narrative") or ""),
+                             note="Archie couldn't redo the plan with your answers just now, so the plan before them "
+                                  "is kept. Answer again, or approve it as it is.")
         else:
             why = ("Archie stopped before finishing the plan" if failed else
                    "Archie's answer did not contain a plan that could be used")
+            log.warning("Archie planning failed for %s: %s", pid, getattr(graphed, "error", None))
             std, scope_note = planner.finish(planner.standard_plan(doc["name"], doc["brief"]), doc["name"],
                                              doc["brief"])
             service.set_plan(root, doc, std, archie,

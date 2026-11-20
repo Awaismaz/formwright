@@ -410,3 +410,15 @@ def test_no_module_calls_a_model_sdk_directly() -> None:
         if pat.search(f.read_text(encoding="utf-8")):
             offenders.append(rel)
     assert offenders == [], offenders
+
+
+def test_an_answer_only_too_long_is_trimmed_not_thrown_away() -> None:
+    """Benchmark A3: a 370-character summary against a limit of 300 lost a correct plan."""
+    schema = {"type": "object", "required": ["summary", "items"], "properties": {
+        "summary": {"type": "string", "maxLength": 10},
+        "items": {"type": "array", "maxItems": 2, "items": {"type": "string", "maxLength": 3}},
+        "n": {"type": "integer"}}}
+    got = parse_json_answer('```json\n{"summary": "much too long here", "items": ["abcd", "e", "f"]}\n```', schema)
+    assert got == {"summary": "much too l", "items": ["abc", "e"]}
+    with pytest.raises(llm.StructuredOutputError):  # any other violation still fails
+        parse_json_answer('{"summary": "ok", "items": [], "n": "x"}', schema)
