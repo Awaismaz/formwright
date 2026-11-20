@@ -115,16 +115,16 @@ Studio chat note after a Toolbox or template insert.
 - The in-flight build count is per server process (as the assembly lock, PD-53).
 
 ## Parked decisions (default used)
-- **PD-190 Estimate model.** Path ranges (Toolbox 1 to 6 s, direct 3 to 9 s, template 6 to 21 s, AI designer 0.6× to
+- **PD-220 Estimate model.** Path ranges (Toolbox 1 to 6 s, direct 3 to 9 s, template 6 to 21 s, AI designer 0.6× to
   1.5× of complexity × rate) and the recalibrated default rates above. Alternative: keep the old per-family minutes and
   only zero the direct parts.
-- **PD-191 Brief fastener size.** One explicit size in the brief wins over the plan's bolt text and the span rule;
+- **PD-221 Brief fastener size.** One explicit size in the brief wins over the plan's bolt text and the span rule;
   several sizes leave it per joint; bearing-cap screws keep their own; ICD edits and accepted CRs still win.
   Alternative: ask the engineer when the plan and the brief disagree.
-- **PD-192 Superseded looks.** A stale look is labelled, not deleted; a revision triggers a new layout look (metered
+- **PD-222 Superseded looks.** A stale look is labelled, not deleted; a revision triggers a new layout look (metered
   as at the gate); undo takes only the free checks. Alternative: no new look until the engineer asks.
-- **PD-193 Toast placement.** Bottom right, 360 px, 3 visible, 6 s, closable, everywhere.
-- **PD-194 Studio templates.** Any member can start a part from a template (viewers are refused by the install path);
+- **PD-223 Toast placement.** Bottom right, 360 px, 3 visible, 6 s, closable, everywhere.
+- **PD-224 Studio templates.** Any member can start a part from a template (viewers are refused by the install path);
   only the template's own parameters may change, within its `PARAM_META` limits.
-- **PD-195 Assembly build wait.** Integrations queue behind a build in flight with no time cap but a 30 min safety
+- **PD-225 Assembly build wait.** Integrations queue behind a build in flight with no time cap but a 30 min safety
   net; with none running they build it once, then block with the reason (no bench fallback for ICD programs).

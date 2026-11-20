@@ -180,30 +180,30 @@ Hand values, never measured from the built part:
   `tsc --noEmit`, `npm test` (157) and `vite build`. The full suite was not run in one go (resource rule).
 
 ## Parked decisions (default used)
-- **PD-140 Lip seal on open caps.** Default: every open cap gets a seal recess for the shaft the ICD passes (the
+- **PD-210 Lip seal on open caps.** Default: every open cap gets a seal recess for the shaft the ICD passes (the
   plan's seal when it fits that shaft, else the graph's seal component, else the DIN 3760 table, marked verify). A
   plan seal sized for another shaft is superseded, with a note. Alternative: a seal only when the brief names one.
-- **PD-141 Blind caps have no spigot.** Default: the ICD's flat face with the relief locates on the outer ring; a
+- **PD-211 Blind caps have no spigot.** Default: the ICD's flat face with the relief locates on the outer ring; a
   brief's "spigot" is noted, not modelled. Alternative: a spigot (the ICD would need the seat deeper than B).
-- **PD-142 Housing design additions.** Default: cap pads (2 mm relief, pads cap OD + 4) and mounting feet (2 mm
+- **PD-212 Housing design additions.** Default: cap pads (2 mm relief, pads cap OD + 4) and mounting feet (2 mm
   underside relief, 4 tapped holes, M6 under 120 long, M8 under 250, M10 under 400, else M12; 1.5 d from the
   edges; depth 2 d), all inside the envelope. Each is dropped (and said) when it would cross an interface feature.
   Alternative: feet as flanges outside the envelope (needs the layout to size them).
-- **PD-143 Superseded plan statements.** Default: a plan clause about holes that names one of the ICD's hole Ø or
+- **PD-213 Superseded plan statements.** Default: a plan clause about holes that names one of the ICD's hole Ø or
   fastener sizes is the plan's view of a joint the approved ICD now fixes, so its numbers are not extras. Alternative:
   any unexplained number sends the part to the designer (the old rule).
-- **PD-144 Default materials.** Housings, covers and pulleys Aluminium 6061-T6; caps, plates and brackets Steel 1018;
+- **PD-214 Default materials.** Housings, covers and pulleys Aluminium 6061-T6; caps, plates and brackets Steel 1018;
   couplings, collars and hubs Steel 1045; unless the plan or graph names one.
-- **PD-145 Brackets.** Default: an L bracket only when every interface feature is on its foot; the upright goes on the
+- **PD-215 Brackets.** Default: an L bracket only when every interface feature is on its foot; the upright goes on the
   longer edge that clears the washers; gussets only when they clear every washer. Otherwise the designer, with the
   numbers. Alternative: a solid block bracket (it would conform, but it isn't a bracket).
-- **PD-146 Simplified pulleys and sprockets.** Default: timing pulleys as their pitch cylinder with flanges,
+- **PD-216 Simplified pulleys and sprockets.** Default: timing pulleys as their pitch cylinder with flanges,
   sprockets as their pitch disc (teeth not modelled, said in the script). V-belt pulleys go to the designer.
-- **PD-147 Templates are kept on request, not automatically.** Default: the engineer presses "Keep as a template" on an
+- **PD-217 Templates are kept on request, not automatically.** Default: the engineer presses "Keep as a template" on an
   approved AI part. Alternative: keep every eligible part automatically.
-- **PD-148 Template reuse thresholds.** Default: same family; similarity at least 0.5 to seed; direct only with the same
+- **PD-218 Template reuse thresholds.** Default: same family; similarity at least 0.5 to seed; direct only with the same
   feature set and every parameter mapped. Alternative: direct use with design values scaled by the size ratio.
-- **PD-149 Live pass on the graph path.** The one live run of (c) used `FW_DESIGN_GRAPH=1` (architecture v2, the path
+- **PD-219 Live pass on the graph path.** The one live run of (c) used `FW_DESIGN_GRAPH=1` (architecture v2, the path
   the generators read the graph from). The old planner path was measured simulated only.
 
 ## Findings for the master (not fixed here)

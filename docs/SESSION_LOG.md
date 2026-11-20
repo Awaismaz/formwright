@@ -24,6 +24,12 @@ everything"), with model routing by job size.
 - Worker housekeeping: CAD workers reaped after test modules, killed at exit, capped (founder's PC hung).
 - Smooth involute Toolbox gears with backlash; sidebar never auto-folds (DS-042).
 
+**Later on 2026-11-20 (same session):** WORKLIST 44 (connection layout), 54 (program revision; the founder's TEST
+Project was revised in the app and is now a correct table), 51 (Assembly Studio chat), 45/48 (generators and templates),
+50 (hybrid master model), 56 (polish pass 2) and 47 (instant plan preview) merged and pushed, each with targeted tests
+in 1-2 file batches and the golden suite (13/13 on the graph path). Toolbox spur gears are spline involutes with backlash
+(v3); the sidebar never auto-folds. PD numbering clashes fixed (generators -> PD-210..219, polish2 -> PD-220..225).
+
 **In progress (local agents on this PC):** WORKLIST 44 connection layout (wip/connection-layout), 54 program revision
 (wip/program-revision). Paused: 45/48 generators (wip/generators 3886b47). Next: 51 Assembly Studio chat, 50 hybrid
 master model, then 52 Motion Studio and 53 Simulation (later, after the core). 55 catalogues/standards: backlog.

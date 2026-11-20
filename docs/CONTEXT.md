@@ -170,7 +170,7 @@ size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/c
    if needed (it holds credentials), or start fresh (God mode, seed demo).
 3. Start the app with the design graph on, as the founder runs it: `FW_DESIGN_GRAPH=1 uv run aicad app --no-browser
    --port 8765` (after `unset VIRTUAL_ENV`).
-4. Work in flight on the original PC (local worktrees under `D:/AI CAD/fw-worktrees/`): `wip/connection-layout`
+4. (Historical, all merged now) Work that was in flight on the original PC (local worktrees under `D:/AI CAD/fw-worktrees/`): `wip/connection-layout`
    (WORKLIST 44, also golden findings F1-F6 and the TEST Project table layout), `wip/program-revision` (54, will repair
    the founder's TEST Project), `wip/generators` (45/48, paused at 3886b47). Their committed heads are pushed to
    origin as `wip/*` branches for safety; the agents' reports land in `docs/reports/` when they finish.
@@ -180,9 +180,7 @@ size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/c
 
 ## Where things stand (handoff, updated 2026-11-20)
 
-**Latest (2026-11-20):** WORKLIST 41, 42, 43 (flag), 46, 49 merged and pushed, plus the recognition fix, gearbox caps,
-Toolbox keys/rings, agent cost, the site revamp, smooth involute gears and the sidebar fix (SESSION_LOG 2026-11-20;
-PUNCH_LIST CD-041..045, DS-041/042, EVAL-009, WEB-010; DECISIONS PD-88..166 index). In flight: 44, 54; paused: 45/48.
+**Latest (2026-11-20, end of the v2 wave):** WORKLIST 41-51, 54 and 56 are done and pushed; architecture v2 steps 1-2 (design graph, connection layout), program revision, Archie supervisor, hybrid master model, plan preview, generators and templates, Assembly Studio chat. Golden suite 13/13 on the graph path (`aicad golden --simulated --env FW_DESIGN_GRAPH=1`). The founder's app runs with FW_DESIGN_GRAPH=1. Nothing in flight. Remaining plan: 52 Motion Studio and 53 Simulation (later, founder's order), 55 catalogues (backlog), and making the design graph the default for everyone (PD-110) once the founder agrees.
 
 **Earlier (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
 PD-73..87; SESSION_LOG 2026-11-19 (i)). In flight: live Design Office run of the test case (`wip/live-gear`) and
