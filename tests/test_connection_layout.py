@@ -189,7 +189,9 @@ def test_belt_drive_on_pillow_blocks() -> None:
     brg = next(s["item"] for s in sk["standard"] if s["name"] == "Drive shaft bearing")
     assert icd.seated(ifs, brg)["at"] == [[-90, -33, 66], [-90, 19, 66]]
     assert gc.check(g, sk, ifs) == []
-    assert {k for k, v in gc.to_direct(g, plan).items() if v["path"] == "direct"} == {"drive_shaft", "driven_shaft"}
+    # shafts, pulleys, pillow blocks and the base plate (WORKLIST 45 generators)
+    assert {k for k, v in gc.to_direct(g, plan).items() if v["path"] == "direct"} == {
+        "drive_shaft", "driven_shaft", "drive_pulley", "driven_pulley", "drive_pb", "driven_pb", "base_plate"}
 
 
 # ----------------------------------------------------------------------------- 5. a motor coupled to a shaft unit

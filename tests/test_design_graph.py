@@ -288,7 +288,8 @@ def test_golden_reducer_graph_plan_icd_direct() -> None:
                     ("Output open cap", "open", 1)]
     assert gc.check(g, sk, ifs) == []
     d = gc.to_direct(g, plan)
-    assert {k for k, v in d.items() if v["path"] == "direct"} == {"input_shaft", "pinion", "output_shaft", "output_gear"}
+    # every designed part, the housing, cover and caps included (WORKLIST 45 generators, tests/test_generators.py)
+    assert {k for k, v in d.items() if v["path"] == "direct"} == set(d) and len(d) == 10
     assert gc.to_fitz_items(g)[0] == []  # a housing: the office lays it out, not a train
 
 
@@ -584,7 +585,7 @@ def test_questions_block_approval_until_answered(office: Any, monkeypatch: pytes
 
 # ----------------------------------------------------------------------------- the live replies, replayed
 @pytest.mark.parametrize("case,direct,question", [("keyed_gear", 2, None), ("gear_pair", 4, None),
-                                                  ("reducer", 4, "material_spur_gear")])
+                                                  ("reducer", 10, "material_spur_gear")])
 def test_live_intent_replies_replayed(case: str, direct: int, question: str | None) -> None:
     """The one live intent reply per golden case (docs/reports/design-graph.md), replayed with the stub provider:
     the same deterministic middle gives a graph whose compiled ICD has no problem and agrees with it. The live

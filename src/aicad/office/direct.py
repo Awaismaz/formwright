@@ -33,6 +33,7 @@ LABEL = "Built from the interface spec (no AI)"
 _SHAFTY = re.compile(r"\b(shaft|axle|spindle|arbor)s?\b", re.IGNORECASE)
 _SPACERY = re.compile(r"\b(spacer|sleeve|distance (?:ring|piece|tube)|bush(?:ing)?|collar)s?\b", re.IGNORECASE)
 _GEARY = re.compile(r"\b(gear|pinion|gearwheel)s?\b", re.IGNORECASE)
+_SETSCREW = re.compile(r"set ?screws?|grub ?screws?", re.IGNORECASE)
 _KEYWORD = re.compile(r"\bkey(?:ed|way|seat)?s?\b|feather key|parallel key", re.IGNORECASE)
 
 # Features a brief may ask for that the interfaces don't size: (pattern, what it is, also looked for in the
@@ -116,9 +117,10 @@ def plan(doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any]:
     name = str(item.get("name") or t["title"])
     desc = str(item.get("description") or "")
     kind = _kind(it, f"{name} {desc}")
-    if kind is None:
-        what = {"block": "a block or plate", "hub": "a hub, pulley or cap"}.get(str(it.get("role")), "this kind of part")
-        return _agent([f"{what} needs the designer (built from the interface spec: shafts, spacers and spur gears)"])
+    if kind == "spacer" and _SETSCREW.search(f"{name} {desc}"):
+        kind = "collar"  # a set-screw collar: the generators' turned ring with a radial tapped hole
+    if kind is None or kind == "collar":
+        return _generated(doc, t, it, name, desc, kind)
     ifs = doc["icd"]["interfaces"]
     try:
         spec = {"shaft": _shaft_spec, "gear": _gear_spec, "spacer": _spacer_spec}[kind](sk, ifs, t["item_id"], it)
@@ -138,6 +140,29 @@ def plan(doc: dict[str, Any], t: dict[str, Any]) -> dict[str, Any]:
            "features": spec["n_features"]}
     if extras:
         return {**_agent(extras), "seed": out}
+    return {"path": "direct", **out}
+
+
+def _generated(doc: dict[str, Any], t: dict[str, Any], it: dict[str, Any], name: str, desc: str,
+               kind: str | None) -> dict[str, Any]:
+    """Housings, covers, caps, plates, brackets, pulleys, couplings and collars (``generators``, WORKLIST 45)."""
+    from aicad.office import generators
+
+    kind = kind or generators.kind_of(doc, t["item_id"], name, desc)
+    if kind is None:
+        what = {"block": "a block or plate", "hub": "a hub of this kind"}.get(str(it.get("role")), "this kind of part")
+        return _agent([f"{what} needs the designer (no generator for it)"])
+    try:
+        g = generators.plan_part(kind, doc, t["item_id"], name, desc)
+    except (Undetermined, generators.Undetermined) as e:
+        return _agent([str(e)])
+    except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError, StopIteration):
+        return _agent(["the interfaces of this part are incomplete"])
+    out = {"kind": kind, "script": g["script"], "sha": sha(g["script"]), "summary": g["summary"],
+           "material": g["material"], "icd_version": doc["icd"]["version"], "version": VERSION,
+           "features": g["n_features"], "generator": g["generator"], "notes": g["notes"]}
+    if g["extras"]:
+        return {**_agent(g["extras"]), "seed": out}
     return {"path": "direct", **out}
 
 
@@ -767,6 +792,15 @@ def spacer_script(spec: dict[str, Any]) -> str:
 # ============================================================================ ticket wording
 def note(p: dict[str, Any], seed: bool = False) -> str:
     """What the Studio chat says about a direct build (plain words; also the revision's cause)."""
+    if p.get("template"):
+        t = p["template"]
+        src = f"{t['source'].get('title') or t['name']}" + (f" in {t['source']['program_name']}"
+                                                            if t["source"].get("program_name") else "")
+        if seed:
+            return (f"Design Office: a starting model from the workspace template {t['name']} (from {src}; no AI), "
+                    f"its parameters mapped to ICD v{p['icd_version']} where they match. The designer fits the rest.")
+        return (f"Design Office: built from the workspace template {t['name']} (from {src}; no AI), every mapped "
+                f"size from ICD v{p['icd_version']}. Every parameter can be edited here without AI.")
     if seed:
         return (f"Design Office: a starting model from the interface spec (no AI): {p['summary']}, every size from "
                 f"ICD v{p['icd_version']}. The designer adds what the brief asks for beyond the interfaces.")
@@ -776,6 +810,11 @@ def note(p: dict[str, Any], seed: bool = False) -> str:
 
 def seed_prompt(reasons: list[str]) -> str:
     """Told to the design agent when it starts from the direct model (only extras are missing)."""
+    if any(r.startswith("starting from the workspace template") for r in reasons):
+        return ("A starting model is already built from a workspace template of the same kind of part (an earlier "
+                "verified design), its parameters set from this ICD where they match. Read the current model first, "
+                "keep its structure and PARAMS, make every interface feature match this part's ICD excerpt, rebuild, "
+                "and finish with your self-review.")
     want = "; ".join(r.removeprefix("the brief asks for ").removeprefix("the brief gives ") for r in reasons)
     return ("A starting model is already built and verified from the ICD: every interface feature at its stated "
             "place, the driving dimensions in PARAMS. Read the current model first and keep its interface features "

@@ -316,10 +316,12 @@ def test_gate_placeholders_and_assembly_from_minute_one(office: Any) -> None:  #
     assert r["instances"] == [] and r["subassemblies"] == []
 
 
-def test_parts_swap_in_and_keep_every_mate(office: Any) -> None:  # noqa: F811
+def test_parts_swap_in_and_keep_every_mate(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from aicad.assembly import store as astore
+    from aicad.office import direct
 
-    c = office
+    monkeypatch.setenv(direct.ENV, "0")  # the scripted designer makes the bracket (blocks are otherwise
+    c = office                            # built from the ICD with no agent turn, WORKLIST 45)
     fake_agents.SCRIPT.append((r"Design the Bracket", {"icd_shift": 0.5, "omit_turns": 1}))
     v = _program(c, "swap@x.com", PLAN)
     pid = v["id"]
@@ -380,10 +382,12 @@ def test_parts_swap_in_and_keep_every_mate(office: Any) -> None:  # noqa: F811
         assert bad not in blob
 
 
-def test_change_request_accepted_updates_icd_reopens_and_regenerates(office: Any) -> None:  # noqa: F811
+def test_change_request_accepted_updates_icd_reopens_and_regenerates(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     from aicad.assembly import store as astore
+    from aicad.office import direct
 
-    c = office
+    monkeypatch.setenv(direct.ENV, "0")  # the scripted designer makes the bracket (blocks are otherwise
+    c = office                            # built from the ICD with no agent turn, WORKLIST 45)
     # the bracket's designer asks for coarse clearance holes (Ø7, ISO 273 coarse for M6) at the same positions
     fake_agents.SCRIPT.append((r"Design the Bracket", {"cr": {"interface": "IF-01", "values": {"d": 7.0},
                                                               "reason": "The bracket is cast: coarse clearance."}}))

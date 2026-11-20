@@ -1728,3 +1728,63 @@ async def archie_act(pid: str, body: ArchieActIn, ctx: Ctx = Depends(verified_ct
                         y.update(status=status, by=_actor(ctx), at=store.now(), **done)
         archie_chat.save_history(root, pid, hist)
     return {**_chat_view(ctx, pid), "program": _view(_load(ctx, pid))}
+
+
+# ----------------------------------------------------------------------------- workspace templates (WORKLIST 48)
+@router.get("/templates")
+def list_templates(ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The workspace's part templates (kept from AI-designed parts), newest last. Tenant scoped by the org root."""
+    from aicad.office import templates
+
+    return {"items": [templates.public(r) for r in templates.load_all(_root(ctx))], "can_edit": ctx.role != "viewer"}
+
+
+@router.post("/programs/{pid}/tickets/{tid}/template")
+def keep_template(pid: str, tid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Keep this ticket's AI-designed, approved, parametric part as a workspace template."""
+    from aicad.office import templates
+    from aicad.platform.models import Project
+    from aicad.platform.routers.projects import workspace_for
+
+    _editor(ctx)
+    root = _root(ctx)
+    doc = _load(ctx, pid)
+    t = next((x for x in doc.get("tickets") or [] if x["id"] == tid), None)
+    if t is None:
+        raise HTTPException(404, "Ticket not found")
+    p = ctx.db.get(Project, t.get("project_id")) if t.get("project_id") else None
+    if p is None or p.org_id != ctx.require_org().id:
+        raise HTTPException(409, "This part has no design in the Studio yet.")
+    ws = workspace_for(p)
+    try:
+        st = json.loads((ws / "out" / "status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    try:
+        src = (ws / "model.py").read_text(encoding="utf-8")
+    except OSError:
+        src = ""
+    state = {"ok": bool(st.get("ok")) and not st.get("error"), "source": src}
+    try:
+        rec = templates.harvest(root, doc, t, state, ctx.user.name or ctx.user.email)
+    except templates.TemplateError as e:
+        raise HTTPException(422, str(e)) from e
+
+    def fn(r: Path, d: dict[str, Any]) -> None:
+        tt = service.ticket(d, tid)
+        tt["template_kept"] = {"id": rec["id"], "at": store.now()}
+        service.emit(r, d, "ticket.template", f"{service._label(tt)} kept as the workspace template {rec['name']} "
+                     f"({rec['family']}, {rec['mapped']} of {rec['params']} parameters mapped to its interfaces).",
+                     _actor(ctx), tid)
+    _mutate(ctx, pid, fn)
+    return rec
+
+
+@router.delete("/templates/{template_id}")
+def delete_template(template_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.office import templates
+
+    _editor(ctx)
+    if not templates.delete(_root(ctx), template_id):
+        raise HTTPException(404, "Template not found")
+    return {"ok": True}
