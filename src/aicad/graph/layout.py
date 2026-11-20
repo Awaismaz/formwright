@@ -1113,12 +1113,13 @@ class _Layout:
         return next((x for x in self.joints if x.guest == guest and (host is None or x.host == host)), None)
 
     def _fastener(self, x: Connection | None, span: float) -> int:
-        """M size of a bolted joint: the via fastener's stated size, else the layout rule for the span."""
+        """M size of a bolted joint: the via fastener's stated size, else the one size the brief states, else the
+        layout rule for the span."""
         for v in (x.via if x else []):
             c = self.comp.get(v)
             if c is not None and c.kind == "fastener" and c.v("size") and int(c.v("size")) in CLEARANCE:
                 return int(c.v("size"))
-        return icd.fastener_for(span)
+        return icd.brief_fastener(self.brief) or icd.fastener_for(span)
 
     def _fastener_item(self, x: Connection | None) -> str | None:
         for v in (x.via if x else []):
@@ -1920,27 +1921,37 @@ class _Layout:
             ["A", "B", "C"], f"shaft in bearing {des} ({self.name(pb)})")
 
     def _coupling(self, e: dict[str, Any]) -> None:
+        """The coupling's two bores. Of one Ø, one bore runs through; of two Ø (a Ø20 shaft to a Ø14 one) each bore
+        runs through its own half and they meet in the middle of the gap (``bore_z``, the bore's span along the
+        axis), so a stepped bore can satisfy both interfaces (generators finding G1: both said "through")."""
         cid = e["via"]
         sh = e["b"]
         a2 = self._axis2(sh)
         lo = self.spec[sh]["y0"]
         eng = e["eng"]
+        mid = lo - COUPLING_GAP / 2  # the middle of the coupling: where the two bores meet
+        other = e.get("motor") or e.get("a")
+        stepped = other is not None and abs(float(e["da"]) - float(e["db"])) > 1e-6
         self.add("shaft_bore", (self.item[cid], 0), (self.item[sh], 0), {
             "d": e["db"], "fit": "H7/k6", "length": _r2(eng), "ax": "y", "axis": a2, "z": [_r2(lo), _r2(lo + eng)],
-            "flush_z": None, "position_tol": POS_TOL}, ["A", "B", "C"], "coupling bore on the shaft end")
+            "flush_z": None, "position_tol": POS_TOL,
+            **({"bore_z": [_r2(mid), _r2(lo + eng)]} if stepped else {})}, ["A", "B", "C"],
+            "coupling bore on the shaft end")
         if e.get("motor"):
             m = e["motor"]
             end = lo - COUPLING_GAP
             self.add("shaft_bore", (self.item[cid], 0), (self.item[m], 0), {
                 "d": e["da"], "fit": "H7/k6", "length": _r2(eng), "ax": "y", "axis": a2,
-                "z": [_r2(end - eng), _r2(end)], "flush_z": None, "position_tol": POS_TOL}, ["A", "B", "C"],
+                "z": [_r2(end - eng), _r2(end)], "flush_z": None, "position_tol": POS_TOL,
+                **({"bore_z": [_r2(end - eng), _r2(mid)]} if stepped else {})}, ["A", "B", "C"],
                 "coupling bore on the motor shaft")
         elif e.get("a"):
             a = e["a"]
             end = self.spec[a]["y1"]
             self.add("shaft_bore", (self.item[cid], 0), (self.item[a], 0), {
                 "d": e["da"], "fit": "H7/k6", "length": _r2(eng), "ax": "y", "axis": a2,
-                "z": [_r2(end - eng), _r2(end)], "flush_z": None, "position_tol": POS_TOL}, ["A", "B", "C"],
+                "z": [_r2(end - eng), _r2(end)], "flush_z": None, "position_tol": POS_TOL,
+                **({"bore_z": [_r2(end - eng), _r2(mid)]} if stepped else {})}, ["A", "B", "C"],
                 "coupling bore on the shaft end")
 
     def _mesh(self, e: dict[str, Any]) -> None:

@@ -146,6 +146,36 @@ def first_stage(t: dict[str, Any]) -> str:
     return "integrate" if t["kind"] == "integration" else "hex"
 
 
+# programs whose placeholder assembly is being built in this server right now (pid -> builds in flight). Set the
+# moment a build is started (before its task runs), so Run pressed a second after the gate never sees a gap.
+_ASSEMBLY_BUILDS: dict[str, int] = {}
+
+
+def assembly_building(pid: str | None) -> bool:
+    """A placeholder (or revision) build of this program's assembly is in flight in this server."""
+    return bool(pid) and _ASSEMBLY_BUILDS.get(str(pid), 0) > 0
+
+
+def mark_assembly_build(pid: str, on: bool) -> None:
+    """Count a program assembly build in (``on``) or out. Integrations of the program queue behind it
+    (``claimable``) and are woken when it ends."""
+    n = _ASSEMBLY_BUILDS.get(pid, 0) + (1 if on else -1)
+    if n > 0:
+        _ASSEMBLY_BUILDS[pid] = n
+    else:
+        _ASSEMBLY_BUILDS.pop(pid, None)
+        poke(pid)
+
+
+def waits_for_assembly(doc: dict[str, Any], t: dict[str, Any]) -> bool:
+    """An integration that must wait: its program's assembly is being laid out (at ICD approval, or again for a
+    revision). Integrated before it is ready, a level would take the bench path and lay its parts out in a row
+    (program-revision report: Run pressed while the placeholders build stopped the fasteners kit as "a row")."""
+    a = doc.get("assembly") or {}
+    return t["kind"] == "integration" and a.get("status") == "building" and bool(
+        a.get("revision") or assembly_building(doc.get("id")))
+
+
 def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
     """The stage a ticket would start at if claimed now, or None."""
     r = run_of(t)
@@ -160,8 +190,8 @@ def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
         return None
     if not deps_done(doc, t):
         return None
-    if t["kind"] == "integration" and (doc.get("assembly") or {}).get("status") == "building"             and (doc.get("assembly") or {}).get("revision"):
-        return None  # Fitz is laying the program assembly out again for a program revision: integrate after
+    if waits_for_assembly(doc, t):
+        return None  # Fitz is laying the program assembly out (gate or revision): integrate on it once it is ready
     if st is None:  # never touched by the orchestrator: only what the plan put in Backlog / Ready
         if t["column"] in ("ready", "backlog"):
             return first_stage(t)
@@ -489,7 +519,8 @@ def to_designer(root: Path, doc: dict[str, Any], t: dict[str, Any]) -> str:
     fam = "turned" if _ROUND.search(t["title"]) else "machined"
     t["kind"], t["family"] = "part", fam
     t["specialist"] = roster.specialist_for(fam)
-    t["estimate_min"] = estimates.estimate_minutes(fam, max(1, int(t.get("complexity") or 1)), service.rates_of(doc))
+    t["complexity"] = max(1, int(t.get("complexity") or 1))
+    estimates.apply_estimate(t, "agent", service.rates_of(doc))
     if "Model it as a bought-out part" not in t["brief"]:
         t["brief"] = (f"{t['title']}: no stock part in the Toolbox or the company's parts. Model it as a bought-out "
                       "part to its standard catalogue sizes (state the standard you follow), simple and accurate at "
@@ -1504,6 +1535,7 @@ class Runner:
             tt = service.ticket(d, tid)
             if tt["column"] != "in_design":
                 service.move(self.root, d, tid, "in_design", service.agent_actor("fitz"))
+            tt.pop("look", None)  # any re-run: the level's earlier look is superseded until Fitz looks again
             self.status(d, tt, "fitz", f"Fitz is laying out {t['title'].removeprefix('Assemble ')} on the bench",
                         status="integrating")
         self.edit(begin)

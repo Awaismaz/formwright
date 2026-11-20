@@ -452,6 +452,7 @@ def approve(root: Path, doc: dict[str, Any], actor: dict[str, Any], *, with_plan
                           **({"with_plan": True} if with_plan else {})})
     g.update(status="approved", by=actor.get("name"), at=store.now(), **({"with_plan": True} if with_plan else {}))
     doc["assembly"] = {**(doc.get("assembly") or {}), "status": "building"}
+    service.reestimate(root, doc)  # each part on the path the office will really take (PD-190)
     service.emit(root, doc, "gate.approved", f"{actor.get('name', 'Someone')} approved the architecture and "
                  f"interfaces{how} (ICD v{ic['version']}, {len(ic['interfaces'])} interfaces). Part tickets are "
                  "released; Fitz is assembling the placeholders.", actor, gate="icd")

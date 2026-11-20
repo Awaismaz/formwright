@@ -1105,6 +1105,29 @@ async def rebuild_assembly(root: Path, pid: str, env: Any = None) -> None:
         user, gp = o.get("user_id") or doc.get("created_by"), bool(o.get("god_paywall"))
     await platform_env.build_program_assembly(root, pid, doc["org_id"], user, gp, keep_subs=keep)
     orchestrator.poke(pid)
+    await look_again(root, pid, env)
+
+
+async def look_again(root: Path, pid: str, env: Any = None) -> None:
+    """Archie looks at the layout the revision (or its undo) made: the look taken at the interfaces gate described
+    the earlier layout and is superseded (``visual_office.looks``). The levels get new looks as Fitz assembles them
+    again. Same metering as the gate's look; never raises."""
+    from aicad.office import fake_agents, platform_env, visual_office
+
+    doc = store.load(root, pid)
+    if doc is None or not doc.get("skeleton"):
+        return
+    o = doc.get("orchestrator") or {}
+    if isinstance(env, platform_env.PlatformEnv):
+        user, god, mode = env.user_id, env.god_tokens, "simulated" if env.simulated else "ai"
+    else:  # no request behind it (an undo, a restart): the free checks only, never an unmetered AI call
+        user, god = o.get("user_id") or doc.get("created_by"), bool(o.get("god_tokens"))
+        mode = "simulated" if fake_agents.enabled() else "none"
+    rev = latest(doc)
+    tag = rev["id"] if rev and int(rev.get("icd_to") or 0) == int((doc.get("icd") or {}).get("version") or 0) \
+        else f"ICD v{(doc.get('icd') or {}).get('version') or 1}"
+    await visual_office.layout_look(root, pid, org_id=doc["org_id"], user_id=str(user or ""), god=god, mode=mode,
+                                    revised=tag)
 
 
 _TASKS: set[Any] = set()
@@ -1121,6 +1144,10 @@ def spawn_rebuild(root: Path, pid: str, env: Any = None) -> Any:
     except RuntimeError:
         return None
 
+    from aicad.office import orchestrator
+
+    orchestrator.mark_assembly_build(pid, True)  # integrations queue behind it from this moment
+
     async def run() -> None:
         try:
             await rebuild_assembly(root, pid, env)
@@ -1133,6 +1160,8 @@ def spawn_rebuild(root: Path, pid: str, env: Any = None) -> Any:
                                      "summary": "Fitz couldn't lay the program assembly out again: rebuild it from "
                                                 "the Assembly tab."}
                     store.save(root, d)
+        finally:
+            orchestrator.mark_assembly_build(pid, False)
     task = loop.create_task(run())
     _TASKS.add(task)
     task.add_done_callback(_TASKS.discard)

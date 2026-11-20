@@ -60,16 +60,18 @@ def test_calibration_ema_with_clamps_hand_computed(tmp_path: Path) -> None:
     t = {"key": "TR-1", "title": "Plate"}
     e = calibration.record(tmp_path, "simulated", family="machined", complexity=2, estimate_min=8.0, actual_min=2.0,
                            ticket=t, program={"id": "p", "name": "Rig"})
-    assert (e["before"], e["after"], e["error_pct"]) == (4.0, 3.4, -75.0)
-    e = calibration.record(tmp_path, "simulated", family="machined", complexity=2, estimate_min=6.8, actual_min=2.0,
+    # default 1.2 min a unit (PD-190); 2.0 / 2 = 1.0 a unit, inside the step: 1.2 + 0.3 x (1.0 - 1.2) = 1.14
+    assert (e["before"], e["after"], e["error_pct"]) == (1.2, 1.14, -75.0)
+    e = calibration.record(tmp_path, "simulated", family="machined", complexity=2, estimate_min=6.8, actual_min=0.5,
                            ticket=t, program={"id": "p", "name": "Rig"})
-    assert (e["before"], e["after"]) == (3.4, 2.89)  # 3.4 x 0.5 = 1.7 clamp; 3.4 + 0.3 x (1.7 - 3.4) = 2.89
-    assert calibration.rates(tmp_path, "simulated")["machined"] == 2.89
-    assert calibration.rates(tmp_path, "live")["machined"] == 4.0
+    # 0.5 / 2 = 0.25 a unit, clamped to 1.14 x 0.5 = 0.57; 1.14 + 0.3 x (0.57 - 1.14) = 0.969
+    assert (e["before"], e["after"]) == (1.14, 0.969)
+    assert calibration.rates(tmp_path, "simulated")["machined"] == 0.969
+    assert calibration.rates(tmp_path, "live")["machined"] == 1.2
     v = calibration.view(tmp_path, "simulated")
     mach = next(f for f in v["families"] if f["family"] == "machined")
-    assert (mach["rate"], mach["default"], mach["n"], mach["specialist"]) == (2.89, 4.0, 2, "mill")
-    assert [h["after"] for h in v["history"]] == [2.89, 3.4] and len(v["trend"]) == 2
+    assert (mach["rate"], mach["default"], mach["n"], mach["specialist"]) == (0.969, 1.2, 2, "mill")
+    assert [h["after"] for h in v["history"]] == [0.969, 1.14] and len(v["trend"]) == 2
     assert v["rule"] == {"alpha": 0.3, "step": [0.5, 2.0], "bounds": [0.05, 60.0], "window": 5}
 
 

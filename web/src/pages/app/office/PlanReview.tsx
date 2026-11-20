@@ -10,7 +10,9 @@ import { BASE } from "./api";
 import SpeedPanel from "./SpeedPanel";
 import DesignGraphCard, { GraphQuestions } from "./DesignGraph";
 import LayoutPathCard from "./MasterModel";
-import { estimateMinutes, fmtEta, fmtMinutes, planPreview } from "./model";
+import { estimateRange, fmtEta, fmtRange, partPath, planPreview, type BuildPath } from "./model";
+
+const PATH_WORD: Record<BuildPath, string> = { toolbox: "Toolbox", direct: "from the interfaces", template: "workspace template", agent: "AI designer" };
 import type { Family, Plan, PlanPart, Program } from "./types";
 
 const PLANNING_LINES = ["Reading the brief", "Finding the sub-assemblies", "Deciding what is bought out", "Choosing part families",
@@ -50,8 +52,9 @@ export default function PlanReview({ program }: { program: Program }) {
   const canEdit = program.can_edit !== false;
   const k = program.constants;
   useEffect(() => { if (!dirty) setPlan(structuredClone(program.plan!)); }, [program.plan, dirty]);
+  const paths = program.plan_estimate?.paths ?? null;
   const preview = useMemo(() => planPreview(plan, k, program.concurrency, program.threads ?? null,
-    f => program.families.find(x => x.code === f)?.specialist ?? "mill"), [plan, k, program.concurrency, program.threads, program.families]);
+    f => program.families.find(x => x.code === f)?.specialist ?? "mill", paths), [plan, k, program.concurrency, program.threads, program.families, paths]);
   const team = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of plan.subassemblies) for (const p of s.parts) {
@@ -95,7 +98,8 @@ export default function PlanReview({ program }: { program: Program }) {
 
   const familyOptions = program.families.filter(f => f.code !== "integration");
   const partRow = (si: number, p: PlanPart, pi: number) => {
-    const est = estimateMinutes(p.family, p.family === "standard" ? 1 : p.complexity, k);
+    const path = partPath(p, paths);
+    const est = estimateRange(p.family, p.family === "standard" ? 1 : p.complexity, path, k);
     const sp = program.families.find(f => f.code === p.family)?.specialist ?? "mill";
     return (
       <tr key={p.id} className="border-t border-border align-top">
@@ -117,7 +121,9 @@ export default function PlanReview({ program }: { program: Program }) {
         </td>
         <td className="py-1.5 pr-2"><Input aria-label="Quantity" className="h-8 w-16" type="number" min={1} value={p.qty} disabled={!canEdit}
           onChange={e => edit(n => { n.subassemblies[si]!.parts[pi]!.qty = Math.max(1, Number(e.target.value) || 1); })} /></td>
-        <td className="py-1.5 pr-2 text-right text-[12.5px] tabular-nums text-muted">{fmtMinutes(est)}</td>
+        <td className="py-1.5 pr-2 text-right text-[12.5px] tabular-nums text-muted" data-part-estimate={path}>
+          <div className="whitespace-nowrap">{fmtRange(est[0], est[1])}</div>
+          <div className={cx("text-[10.5px]", path === "agent" ? "text-muted" : "text-success")}>{PATH_WORD[path]}</div></td>
         <td className="py-1.5 text-right">{canEdit && <button className="rounded p-1.5 text-muted hover:bg-danger/10 hover:text-danger" aria-label={`Remove ${p.name}`}
           onClick={() => edit(n => { n.subassemblies[si]!.parts.splice(pi, 1); })}><Trash2 className="h-3.5 w-3.5" /></button>}</td>
       </tr>
@@ -170,7 +176,7 @@ export default function PlanReview({ program }: { program: Program }) {
               <table className="w-full min-w-[620px] text-[13px]">
                 <thead><tr className="text-left text-[11px] uppercase tracking-wider text-muted">
                   <th className="w-9 pb-1" /><th className="pb-1">Part</th><th className="w-48 pb-1">Family</th><th className="w-20 pb-1" title="1 trivial … 5 very complex">Complexity</th>
-                  <th className="w-20 pb-1">Qty</th><th className="w-20 pb-1 text-right">Estimate</th><th className="w-8 pb-1" /></tr></thead>
+                  <th className="w-20 pb-1">Qty</th><th className="w-28 pb-1 text-right" title="Each part on the way it will be built">Estimate</th><th className="w-8 pb-1" /></tr></thead>
                 <tbody>{s.parts.map((p, pi) => partRow(si, p, pi))}</tbody>
               </table>
             </div>
@@ -188,7 +194,7 @@ export default function PlanReview({ program }: { program: Program }) {
           <div className="label mb-2">Approving opens</div>
           <div className="text-2xl font-semibold tabular-nums">{preview.tickets} tickets</div>
           <div className="mt-2 space-y-1 text-[12.5px]">
-            <div className="flex justify-between"><span className="text-muted">Total effort (estimate)</span><b className="tabular-nums">{fmtMinutes(preview.estimate_min)}</b></div>
+            <div className="flex justify-between"><span className="text-muted">Total effort (estimate)</span><b className="tabular-nums" data-plan-effort>{fmtRange(preview.estimate_lo, preview.estimate_hi)}</b></div>
             <div className="flex justify-between"><span className="text-muted">ETA at {program.concurrency} in parallel</span><b className="tabular-nums">{fmtEta(preview.eta)}</b></div>
           </div>
           <div className="mt-3 border-t border-border pt-3">
@@ -216,7 +222,7 @@ export default function PlanReview({ program }: { program: Program }) {
               {dirty && <Button className="flex-1" size="sm" variant="ghost" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => { setDirty(false); setPlan(structuredClone(program.plan!)); }}>Discard edits</Button>}
             </div>
           </div>}
-          <p className={cx("mt-3 text-[11px] text-muted")}>Estimates are complexity × calibrated minutes per part family; ranges, not promises.</p>
+          <p className={cx("mt-3 text-[11px] text-muted")} data-estimate-note>Each part is estimated on the way it will be built: Toolbox and parts built from the interfaces take seconds, a part for the AI designer about a minute or two per design turn. The interfaces settle the way at their approval. Ranges, not promises.</p>
         </Card>
         <Card className="p-4"><SpeedPanel program={program} plan={plan} /></Card>
       </aside>
