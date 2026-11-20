@@ -433,3 +433,20 @@ def test_planet_positions_are_exact_so_pins_sit_on_the_carrier_pattern() -> None
         th = math.pi / 2 + 2 * math.pi * k / 3
         x, z = f["data"]["axis"]
         assert abs(x - 60 * math.cos(th)) < 1e-8 and abs(z - za - 60 * math.sin(th)) < 1e-8
+
+
+# ============================================================================ benchmark A4: a cap bolted to the lid
+def test_a4_a_cap_the_model_bolted_to_the_cover_goes_on_the_housing_and_the_fast_path_holds() -> None:
+    from aicad.master import decide
+
+    reply = copy.deepcopy(REPLY["reply"])
+    for x in reply["connections"]:
+        if x["kind"] == "bolted_joint" and x["guest"] == "output_open_cap":
+            x["host"] = "cover"  # A4's reply: the output cap on the cover, every bearing seat in the housing
+    g = _graph(reply)
+    caps = {x.guest: x.host for x in g.connections if x.kind == "bolted_joint" and g.comp(x.guest).kind == "bearing_cap"}
+    assert set(caps.values()) == {g.comp("housing").id}
+    assert any("Output open cap is bolted to the" in n for n in g.notes)
+    p = gc.to_plan(g, resolved=True)
+    d = decide.decide(p, BRIEF, "Planetary")
+    assert d["path"] == "fast", d["reasons"]

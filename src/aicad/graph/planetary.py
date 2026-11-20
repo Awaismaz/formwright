@@ -405,6 +405,20 @@ def normalise(graph: DesignGraph) -> DesignGraph:
     if ps.housing and not any(x.guest == ring.id and x.host == ps.housing for x in g.connections):
         hs = g.comp(ps.housing)
         add("mounted_on", ps.housing, ring.id, f"{ring.name} is fixed in the {hs.name if hs else 'housing'}.")
+    # bearing caps sit over the end walls' bearing seats, which are all in the housing in a planetary set (the cover
+    # is the lid on top): a cap the model bolted to the cover goes on the housing (benchmark A4, 2026-11-21: the
+    # output cap on the cover was reached by no connection, so the fast layout gave way to a master model)
+    if ps.housing:
+        hs = g.comp(ps.housing)
+        covers = {c.id for c in g.components if c.kind == "cover"}
+        seats_in_cover = any(x.kind == "bearing_seat" and x.host in covers for x in g.connections)
+        for x in g.connections:
+            gu = g.comp(x.guest)
+            if x.kind == "bolted_joint" and x.host in covers and gu is not None and gu.kind == "bearing_cap" \
+                    and not seats_in_cover:
+                x.host = ps.housing
+                notes.append(f"{gu.name} is bolted to the {hs.name if hs else 'housing'}'s end wall, over its "
+                             "bearing seat (the shaft bearings sit in the housing walls; the cover is the lid).")
     if pin is not None and pin.kind == "shaft":
         pin.set("role", "intermediate", "rule", "a planet pin")
     # centre distances (the internal mesh by the difference)
