@@ -5,7 +5,7 @@ import { fitRibbon } from "@/pages/app/studio/Ribbon";
 function ctx(over: Partial<AsmRibbonCtx> = {}): AsmRibbonCtx {
   const f = vi.fn();
   return {
-    canEdit: true, hasParts: true, panel: "chat", setPanel: f, onInsert: f, onNewPart: f, mateChoice: "auto", onMateType: f,
+    canEdit: true, hasParts: true, panel: "tree", setPanel: f, onChat: f, onInsert: f, onNewPart: f, mateChoice: "auto", onMateType: f,
     move: { can: true, mode: null }, onMove: f, fmode: "hole", onFasten: f, onInterference: f, onClearance: f, checking: false,
     onFit: f, onView: f, explode: 0, onExplode: f, selected: { name: "Plate", visible: true }, onToggleVisible: f, hidden: 0, onShowAll: f,
     onExport: f, exporting: false, exported: true, stepUrl: "/x.step", onDownloadStep: f, onSave: f, onOpen: f, onRender: f, ...over,

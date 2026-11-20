@@ -7,7 +7,9 @@ import { MATE_CHOICES, type MateChoice } from "./MatePanel";
 import type { AsmView as ViewName } from "./viewer";
 
 /** The right-hand panels of the Assembly Studio (the command bar opens and highlights them). */
-export type TabKey = "chat" | "describe" | "mate" | "fasten" | "check" | "motion" | "bom";
+/** The left panel's tabs (founder 2026-11-20: tools on the left with the tree, like Design Studio; the right side
+ * is only the Assembly Agent chat). */
+export type TabKey = "tree" | "describe" | "mate" | "fasten" | "check" | "motion" | "bom";
 
 /** Command bar tabs, named as SOLIDWORKS names them (founder 2026-11-20: nobody should feel like an alien here). */
 export const ASM_TABS = ["Assembly", "Evaluate", "View", "Make"] as const;
@@ -17,7 +19,7 @@ export const ASM_VIEWS: ViewName[] = ["Iso", "Front", "Top", "Right", "Back", "L
 
 /** Everything the Assembly command bar shows and does; Workspace wires it to its existing handlers. */
 export interface AsmRibbonCtx {
-  canEdit: boolean; hasParts: boolean; panel: TabKey; setPanel: (t: TabKey) => void;
+  canEdit: boolean; hasParts: boolean; panel: TabKey; setPanel: (t: TabKey) => void; onChat: () => void;
   onInsert: () => void; onNewPart: () => void;
   mateChoice: MateChoice; onMateType: (c: MateChoice) => void;
   /** null: nothing selected; otherwise whether the selected part can move, and why not */
@@ -81,7 +83,7 @@ export function assemblyRibbon(c: AsmRibbonCtx): Record<AsmRibbonTab, RibbonBtn[
           { label: "Fit to a hole or hole pattern", on: c.panel === "fasten" && c.fmode === "hole", onSelect: () => c.onFasten("hole") },
           { label: "Fasten two parts", on: c.panel === "fasten" && c.fmode === "pair", onSelect: () => c.onFasten("pair") },
         ] },
-      { id: "chat", copilot: "asm-chat", label: "Assembly Chat", icon: <MessagesSquare className={I} />, tip: "Talk to the assembly agent: one conversation that keeps the context", ...at("chat") },
+      { id: "chat", copilot: "asm-chat", label: "Assembly Chat", icon: <MessagesSquare className={I} />, tip: "Talk to the assembly agent (on the right): one conversation that keeps the context", onClick: c.onChat },
     ]],
     Evaluate: [[
       { id: "interference", copilot: "asm-interference", label: "Interference Detection", icon: <ScanSearch className={I} />,

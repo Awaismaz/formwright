@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Boxes, ClipboardList, Link2, MessagesSquare, Move, Orbit, Pencil, Plus, RotateCcw, RotateCw, ScanSearch, Sparkles, Wrench,
+  ListTree,
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
@@ -37,7 +38,8 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
   const view = q.data;
   const setView = useCallback((v: AsmView) => qc.setQueryData(key, v), [qc, key]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [tab, setTab] = useState<TabKey>("chat");   // WORKLIST 51: the conversation is where an assembly starts
+  const [tab, setTab] = useState<TabKey>("tree");   // left panel; the Assembly Agent chat is always on the right
+  const focusChat = () => document.querySelector<HTMLTextAreaElement>("[data-asm-agent] textarea")?.focus();
   const [tabSet, setTabSet] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [picks, setPicks] = useState<AsmPick[]>([]);
@@ -354,16 +356,16 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
     setSendingPart(true);
     try {
       qc.setQueryData(["asm-chat", aid], await api.post(`${A}/chat`, { text: `Design a new part for this assembly and bring it in: ${d}` }));
-      setNewPart(null); setTab("chat");
+      setNewPart(null); focusChat();
     } catch (e) { toast.error((e as Error).message); } finally { setSendingPart(false); }
   };
   const ribbon = assemblyRibbon({
-    canEdit: view.can_edit, hasParts: view.instances.length > 0, panel: tab, setPanel: setTab,
+    canEdit: view.can_edit, hasParts: view.instances.length > 0, panel: tab, setPanel: setTab, onChat: focusChat,
     onInsert: () => setInsertOpen(true), onNewPart: () => setNewPart(""),
     mateChoice: choice, onMateType: c => { setTab("mate"); setChoice(c); },
     move: selInst ? { can: movable, mode: gizmo ? gizmoMode : null,
       why: selInst.fixed ? `${selInst.display} is fixed. Float it from the tree to move it.` : "Its mates hold this part in place. Suppress or delete a mate to move it." } : null,
-    onMove: m => { setGizmoMode(m); if (!showsGizmo(tab)) setTab("chat"); if (explode > 0) setExplode(0); },
+    onMove: m => { setGizmoMode(m); if (!showsGizmo(tab)) setTab("tree"); if (explode > 0) setExplode(0); },
     fmode, onFasten: m => { setTab("fasten"); if (m !== fmode) { setFmode(m); setTarget(null); } },
     onInterference: () => { setTab("check"); void runCheck(); },
     onClearance: () => { setTab("check"); if (!view.analysis || view.analysis.stale) void runCheck(); },
@@ -406,9 +408,22 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
       {view.office_busy && <div className="flex items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-1.5 text-[12.5px]" role="status" data-testid="office-busy">
         <span className="h-2 w-2 animate-pulse rounded-full bg-warning" />The Design Office is updating this assembly right now. Your next change waits until Fitz has finished (usually a few seconds).</div>}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[264px_minmax(0,1fr)_360px] lg:overflow-hidden">
-        <aside className="flex min-h-0 flex-col border-r border-border bg-panel">
-          <div className="min-h-0 flex-1">
+      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[320px_minmax(0,1fr)_380px] lg:overflow-hidden">
+        <aside className="flex min-h-0 flex-col border-r border-border bg-panel" data-asm-tools>
+          <Tabs value={tab} onValueChange={v => setTab(v as TabKey)} className="flex min-h-0 flex-1 flex-col">
+            <TabList className="sticky top-0 z-10 shrink-0 gap-0 overflow-x-auto bg-panel px-1 [&_svg]:hidden">
+              <Tab value="tree" compact title="The assembly tree: parts, sub-assemblies, mates"><ListTree className="h-3.5 w-3.5" />Tree</Tab>
+              <Tab value="describe" compact title="Quick add: Hex finds components from a description, Fitz mates them"><Sparkles className="h-3.5 w-3.5" />Quick add</Tab>
+              <Tab value="mate" compact><Link2 className="h-3.5 w-3.5" />Mate</Tab>
+              <Tab value="fasten" compact><Wrench className="h-3.5 w-3.5" />Fasten</Tab>
+              <Tab value="check" compact><ScanSearch className="h-3.5 w-3.5" />Check{view.analysis && !view.analysis.stale && view.analysis.interference.count > 0 &&
+                <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{view.analysis.interference.count}</span>}</Tab>
+              <Tab value="motion" compact title="Joints and a motion range check"><Orbit className="h-3.5 w-3.5" />Motion{motion && !motion.stale && motion.colliding_steps.length > 0 &&
+                <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">!</span>}</Tab>
+              <Tab value="bom" compact><ClipboardList className="h-3.5 w-3.5" />BOM</Tab>
+            </TabList>
+          <TabPanel value="tree" className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <Tree view={view} selected={sel} onSelect={setSel} canEdit={view.can_edit} onPatch={patchInst}
               onDelete={iid => run("del", () => api.del<AsmView>(`${A}/instances/${iid}`), "Instance deleted")}
               onDeleteGroup={gid => run("del", () => api.del<AsmView>(`${A}/groups/${gid}`), "Fastener stack removed")}
@@ -446,18 +461,52 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
                   <div className="mt-2 flex items-center gap-2 text-[12px]"><span className="text-muted">Drag in view</span>
                     <div className="flex-1"><Segmented size="sm" value={gizmoMode} onChange={setGizmoMode}
                       options={[{ value: "translate", label: "Move" }, { value: "rotate", label: "Rotate" }]} /></div></div>
-                  <p className="mt-2 text-[11px] text-muted">{tab === "mate" || tab === "fasten" ? "The drag handles show in the Check and BOM tabs. " : ""}{selInst.dof && selInst.dof.dof < 6 ? "Mates re-apply after each move, so only the free directions change." : "Drag the arrows or rings, or step it here."}</p>
+                  <p className="mt-2 text-[11px] text-muted">{tab === "mate" || tab === "fasten" ? "The drag handles show in the Tree, Check and BOM tabs. " : ""}{selInst.dof && selInst.dof.dof < 6 ? "Mates re-apply after each move, so only the free directions change." : "Drag the arrows or rings, or step it here."}</p>
                 </>
               )}
             </div>
           )}
+          </TabPanel>
+            <TabPanel value="describe">
+              <SmartPanel view={view} aid={aid} onRun={smartRun} busy={busy === "smart"} />
+          </TabPanel>
+          <TabPanel value="mate">
+              <MatePanel view={view} choice={choice} onChoice={setChoice} picks={picks} onClearPick={k => setPicks(p => p.filter((_, j) => j !== k))}
+                value={mval} onValue={setMval} flip={mflip} onFlip={setMflip} onAdd={addMate} busy={busy === "add-mate"} describe={describe}
+                editing={editing} onCancelEdit={() => { setEditing(null); setPicks([]); }} />
+          </TabPanel>
+          <TabPanel value="fasten">
+              <div className="border-b border-border px-4 py-2.5">
+                <Segmented value={fmode} onChange={v => { setFmode(v); setTarget(null); }} options={[
+                  { value: "hole", label: "Pick a hole", title: "Fit fasteners to one hole or a hole pattern" },
+                  { value: "pair", label: "Two parts", title: "Fit every lined-up hole between two parts" }]} />
+              </div>
+              {fmode === "hole"
+                ? <FastenPanel view={view} target={target} onTarget={setTarget} opts={fit} onOpts={setFit} plan={plan} loading={fitQ.isFetching}
+                    error={fitQ.error ? (fitQ.error as Error).message : null} onInsert={acceptFit} busy={busy === "fit"} />
+                : <PairPanel view={view} aid={aid} pair={pair} onPair={setPair} style={fit.style} washers={fit.washers}
+                    onInsert={acceptPairs} onFix={fixHole} busy={busy} />}
+          </TabPanel>
+          <TabPanel value="check">
+              <CheckPanel view={view} onRun={runCheck} busy={busy === "check"} focus={clashFocus} onFocus={setClashFocus} rowFocus={rowFocus} onRowFocus={setRowFocus} />
+          </TabPanel>
+          <TabPanel value="motion">
+              <MotionPanel view={view} motion={motion} step={mstep} onStep={setMstep} busy={busy}
+                onAddJoint={async b => { await run("joint", () => api.post<AsmView>(`${A}/joints`, b), "Joint added"); }}
+                onDeleteJoint={async id => { await run("joint", () => api.del<AsmView>(`${A}/joints/${id}`), "Joint deleted"); }}
+                onRun={runMotion} />
+          </TabPanel>
+          <TabPanel value="bom">
+              <BomPanel view={view} onFocus={r => setBomFocus(r ? r.instances : null)} />
+          </TabPanel>
+          </Tabs>
         </aside>
         <section className="relative min-h-[460px] min-w-0">
           {view.instances.length === 0 ? (
             <div className="flex h-full items-center justify-center p-8">
               <EmptyState icon={<Boxes className="h-5 w-5" />} title="Empty assembly" body="Insert a verified project part (it comes in fixed at the origin), then Toolbox components or more parts."
                 action={view.can_edit ? <div className="flex flex-wrap justify-center gap-2"><Button icon={<Plus className="h-4 w-4" />} onClick={() => setInsertOpen(true)}>Insert component</Button>
-                  <Button variant="secondary" icon={<MessagesSquare className="h-4 w-4" />} onClick={() => setTab("chat")}>Ask the assembly agent</Button></div> : undefined} />
+                  <Button variant="secondary" icon={<MessagesSquare className="h-4 w-4" />} onClick={focusChat}>Ask the assembly agent</Button></div> : undefined} />
             </div>
           ) : (
             <Viewport view={view} picking={picking} picks={picks} marks={marks} selected={selected} ghost={ghost}
@@ -473,55 +522,14 @@ export default function Workspace({ aid, onClose }: { aid: string; onClose: () =
           {focusPair && <div className="pointer-events-none absolute bottom-14 left-1/2 -translate-x-1/2 rounded-full border border-danger/40 bg-panel/95 px-3 py-1 text-[12px] text-danger shadow-card">
             {focusPair.a_name} ↔ {focusPair.b_name}: <b>{mm(focusPair.volume_mm3, 3)} mm³</b>{explode > 0 ? " (collapse the explode to see it)" : ""}</div>}
         </section>
-        <aside className="min-h-0 overflow-y-auto border-l border-border bg-panel">
-          <Tabs value={tab} onValueChange={v => setTab(v as TabKey)} className={cx(tab === "chat" && "flex h-full flex-col")}>
-            <TabList className="sticky top-0 z-10 gap-0 overflow-x-auto bg-panel px-1 [&_svg]:hidden">
-              <Tab value="chat" compact title="Talk to the assembly agent: one conversation that keeps the context"><MessagesSquare className="h-3.5 w-3.5" />Chat</Tab>
-              <Tab value="describe" compact title="Quick add: Hex finds components from a description, Fitz mates them"><Sparkles className="h-3.5 w-3.5" />Quick add</Tab>
-              <Tab value="mate" compact><Link2 className="h-3.5 w-3.5" />Mate</Tab>
-              <Tab value="fasten" compact><Wrench className="h-3.5 w-3.5" />Fasten</Tab>
-              <Tab value="check" compact><ScanSearch className="h-3.5 w-3.5" />Check{view.analysis && !view.analysis.stale && view.analysis.interference.count > 0 &&
-                <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">{view.analysis.interference.count}</span>}</Tab>
-              <Tab value="motion" compact title="Joints and a motion range check"><Orbit className="h-3.5 w-3.5" />Motion{motion && !motion.stale && motion.colliding_steps.length > 0 &&
-                <span className="ml-0.5 rounded-full bg-danger px-1.5 text-[10px] font-bold text-white">!</span>}</Tab>
-              <Tab value="bom" compact><ClipboardList className="h-3.5 w-3.5" />BOM</Tab>
-            </TabList>
-            <TabPanel value="chat" className="min-h-0 flex-1">
-              <AssemblyChat aid={aid} view={view} onChanged={reloadView} onSelect={setSel} />
-            </TabPanel>
-            <TabPanel value="describe">
-              <SmartPanel view={view} aid={aid} onRun={smartRun} busy={busy === "smart"} />
-            </TabPanel>
-            <TabPanel value="mate">
-              <MatePanel view={view} choice={choice} onChoice={setChoice} picks={picks} onClearPick={k => setPicks(p => p.filter((_, j) => j !== k))}
-                value={mval} onValue={setMval} flip={mflip} onFlip={setMflip} onAdd={addMate} busy={busy === "add-mate"} describe={describe}
-                editing={editing} onCancelEdit={() => { setEditing(null); setPicks([]); }} />
-            </TabPanel>
-            <TabPanel value="fasten">
-              <div className="border-b border-border px-4 py-2.5">
-                <Segmented value={fmode} onChange={v => { setFmode(v); setTarget(null); }} options={[
-                  { value: "hole", label: "Pick a hole", title: "Fit fasteners to one hole or a hole pattern" },
-                  { value: "pair", label: "Two parts", title: "Fit every lined-up hole between two parts" }]} />
-              </div>
-              {fmode === "hole"
-                ? <FastenPanel view={view} target={target} onTarget={setTarget} opts={fit} onOpts={setFit} plan={plan} loading={fitQ.isFetching}
-                    error={fitQ.error ? (fitQ.error as Error).message : null} onInsert={acceptFit} busy={busy === "fit"} />
-                : <PairPanel view={view} aid={aid} pair={pair} onPair={setPair} style={fit.style} washers={fit.washers}
-                    onInsert={acceptPairs} onFix={fixHole} busy={busy} />}
-            </TabPanel>
-            <TabPanel value="check">
-              <CheckPanel view={view} onRun={runCheck} busy={busy === "check"} focus={clashFocus} onFocus={setClashFocus} rowFocus={rowFocus} onRowFocus={setRowFocus} />
-            </TabPanel>
-            <TabPanel value="motion">
-              <MotionPanel view={view} motion={motion} step={mstep} onStep={setMstep} busy={busy}
-                onAddJoint={async b => { await run("joint", () => api.post<AsmView>(`${A}/joints`, b), "Joint added"); }}
-                onDeleteJoint={async id => { await run("joint", () => api.del<AsmView>(`${A}/joints/${id}`), "Joint deleted"); }}
-                onRun={runMotion} />
-            </TabPanel>
-            <TabPanel value="bom">
-              <BomPanel view={view} onFocus={r => setBomFocus(r ? r.instances : null)} />
-            </TabPanel>
-          </Tabs>
+        <aside className="flex min-h-0 flex-col border-l border-border bg-panel" data-asm-agent>
+          <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+            <MessagesSquare className="h-4 w-4 text-primary" /><span className="text-[13px] font-semibold">Assembly Agent</span>
+            <span className="truncate text-[11.5px] text-muted">designs, brings in and mates parts</span>
+          </div>
+          <div className="min-h-0 flex-1">
+            <AssemblyChat aid={aid} view={view} onChanged={reloadView} onSelect={setSel} />
+          </div>
           {exp && (
             <div className={cx("mx-4 my-3 rounded border px-3 py-2 text-[11.5px]", exp.ok ? "border-success/25 bg-success/5 text-success" : "border-warning/30 bg-warning/5 text-warning")}>
               Last STEP: {plural(exp.instances, "instance")}, {plural(exp.groups, "sub-assembly", "sub-assemblies")}; re-import {exp.ok ? "matched" : "did not match"} (placement deviation {mm(exp.placement_dev_mm, 9)} mm){exp.stale ? ". The assembly changed since." : "."}
