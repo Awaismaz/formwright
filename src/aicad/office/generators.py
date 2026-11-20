@@ -902,10 +902,10 @@ def _cover_extras(cx: Ctx, ctx: dict[str, Any]) -> None:
     ctx["optional"].append("Hollow")
     notes.append(f"Hollow: shelled from below over the housing's cavity ({_g(hi_x - lo_x)} × {_g(hi_y - lo_y)}), "
                  f"roof {_g(roof)} mm; the bolt holes stay in the walls.")
+    n_dowel = sum(1 for c, _w in ctx["cuts"] if c["name"].startswith("Dowel"))
     ctx["summary"] = (f"housing cover {_g(ctx['L'])} × {_g(ctx['W'])} × {_g(ctx['H'])}: "
                       f"{sum(1 for c, _w in ctx['cuts'] if not c['name'].startswith('Dowel'))} bolt holes, "
-                      f"{sum(1 for c, _w in ctx['cuts'] if c['name'].startswith('Dowel'))} dowel holes, shelled over "
-                      "the cavity")
+                      + (f"{n_dowel} dowel holes, " if n_dowel else "") + "shelled over the cavity")
 
 
 def _plate_extras(cx: Ctx, ctx: dict[str, Any]) -> None:
