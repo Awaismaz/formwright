@@ -1,12 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
-  ArrowDownToLine, ArrowUpFromLine, ChevronDown, ChevronUp, Circle, CircleDotDashed, Cone, Cuboid, Diamond, Drill, Fence, FlipHorizontal2,
+  ArrowDownToLine, ArrowUpFromLine, Circle, CircleDotDashed, Cone, Cuboid, Diamond, Drill, Fence, FlipHorizontal2,
   Focus, GitCompare, Grid3x3, Layers2, Maximize, MousePointer2, PackageOpen, PenLine, Pyramid, RectangleHorizontal, RefreshCcwDot, Rotate3d,
-  RotateCw, Route, Ruler, Scale, Scissors, ShieldCheck, ScanSearch, Spline, SquareDashed, Squircle, Triangle, Upload, Wrench, Hexagon, Ellipsis, Lock,
+  RotateCw, Route, Ruler, Scale, Scissors, ShieldCheck, ScanSearch, Spline, SquareDashed, Squircle, Triangle, Upload, Wrench, Hexagon,
   PanelBottom, CornerRightUp, Undo2, FoldHorizontal, FileDown, StepForward,
 } from "lucide-react";
-import { cx } from "@/lib/format";
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger, Tip } from "@/components/ui";
+import { Ribbon, type RibbonBtn } from "./Ribbon";
 import type { ViewerApi } from "@/components/Viewer3D";
 import type { DisplayMode, ViewName } from "@/viewer/types";
 
@@ -26,9 +25,6 @@ interface Btn {
 }
 
 const TABS = ["Features", "Sketch", "Sheet Metal", "Evaluate", "View", "Library", "Make"] as const;
-type Size = "full" | "mid" | "icon";
-const WIDTH: Record<Size, number> = { full: 76, mid: 62, icon: 42 };
-const SEP = 13, MORE = 46;
 
 /** Downstream modules shown on the Make tab (only the Live ones are passed in). */
 export interface MakeModule {
@@ -53,12 +49,8 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
   /** sheet metal: whether the part is sheet metal, the flat-pattern toggle and the DXF download */
   sheet?: SheetTab;
 }) {
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem("fw_cm_collapsed") === "1"; } catch { return false; } });
-  const toggle = () => setCollapsed(c => { try { localStorage.setItem("fw_cm_collapsed", c ? "0" : "1"); } catch { /* */ } return !c; });
   const [, setTick] = useState(0);
   const viewer = viewerRef.current;
-  const [tab, setTab] = useState<(typeof TABS)[number]>(() => { try { return (localStorage.getItem("fw_cm_tab") as (typeof TABS)[number]) || "Features"; } catch { return "Features"; } });
-  const pick = (t: (typeof TABS)[number]) => { setTab(t); try { localStorage.setItem("fw_cm_tab", t); } catch { /* */ } };
   const views: ViewName[] = ["Iso", "Front", "Top", "Right", "Back", "Left", "Bottom"];
   const displays: [DisplayMode, string][] = [["shaded-edges", "Shaded with edges"], ["shaded", "Shaded"], ["hidden", "Hidden lines visible"], ["wireframe", "Wireframe"]];
 
@@ -127,93 +119,24 @@ export default function CommandManager({ onCommand, viewerRef, disabled, activeT
     Make: [make.map(m => ({ id: m.code, label: m.name, icon: m.icon, onClick: () => onMake?.(m.code), disabled: disabled && !m.locked, status: m.locked ? undefined : m.status, locked: m.locked,
       tip: m.locked ? `Add-on, not in your plan yet: ${m.tip}. Opens the add-on page.` : m.status ? `${m.tip}. Now: ${m.status.text}` : m.tip })) as Btn[]],
   };
-  const shown = groups[tab === "Make" && !make.length ? "Features" : tab];
-
-  // Never hide a command (STU-09): shrink the buttons first, then move what still doesn't fit into "More".
-  const row = useRef<HTMLDivElement>(null);
-  const [avail, setAvail] = useState(2000);
-  useLayoutEffect(() => {
-    const el = row.current; if (!el) return;
-    const ro = new ResizeObserver(() => setAvail(el.clientWidth - 16)); ro.observe(el); setAvail(el.clientWidth - 16);
-    return () => ro.disconnect();
-  }, [collapsed]);
-  const count = shown.reduce((n, g) => n + g.length, 0);
-  const need = (s: Size) => count * (WIDTH[s] + 2) + (shown.length - 1) * SEP;
-  const size: Size = need("full") <= avail ? "full" : need("mid") <= avail || touch ? "mid" : "icon";
-  const fits = need(size) <= avail || touch ? count : Math.max(1, Math.floor((avail - MORE - (shown.length - 1) * SEP) / (WIDTH.icon + 2)));
-  let k = 0;
-  const visible = shown.map(g => g.filter(() => k++ < fits)).filter(g => g.length);
-  const overflow = shown.flat().slice(fits);
-  useEffect(() => { setTick(t => t + 1); }, [size]);
-
-  const run = (b: Btn) => { if (b.onClick) { b.onClick(); setTimeout(() => setTick(t => t + 1), 0); } else if (b.cmd) onCommand(b.cmd); };
-  const isDisabled = (b: Btn) => b.disabled || (disabled && !!b.needsBody);
-  const make_ = tab === "Make";
-  const face = (b: Btn) => (
-    <>{b.locked && <Lock className="absolute right-1 top-1 h-3 w-3 text-muted" aria-label="Add-on" />}
-      <span className={b.locked ? "text-muted" : "text-primary"}>{b.icon}</span>{(size !== "icon" || make_) && <span className={cx("text-center", make_ && "whitespace-nowrap")}>{b.label}</span>}
-      {b.menu && size !== "icon" && <ChevronDown className="-mt-0.5 h-3 w-3 text-muted" />}
-      {b.status && <span className={cx("max-w-full truncate text-[9.5px] leading-none", b.status.tone === "warn" ? "font-semibold text-warning" : b.status.tone === "ok" ? "text-success" : "text-muted")}>{b.status.text}</span>}</>
-  );
-  const btnCls = (b: Btn) => cx("relative flex flex-col items-center justify-center gap-1 rounded px-1 leading-tight transition disabled:opacity-35",
-    make_ ? "min-w-[88px] max-w-[150px] px-2.5 text-[10.5px]" : size === "full" ? "w-[76px] text-[10.5px]" : size === "mid" ? "w-[62px] text-[9.5px]" : "w-[42px]",
-    b.active ? "bg-primary-soft text-primary ring-1 ring-primary/40" : "text-text hover:bg-primary-soft hover:text-primary");
-  const tipOf = (b: Btn) => (isDisabled(b) && b.needsBody ? "Needs a solid first: start with Extruded or Revolved Boss, ask the agent, use the Toolbox or import a STEP"
-    : size === "icon" ? `${b.label}: ${b.tip}` : b.tip);
-
-  const tabButtons = TABS.filter(t => t !== "Make" || make.length > 0).map(t => (
-          <button key={t} onClick={() => { pick(t); if (collapsed) toggle(); }} data-tour={t === "Make" ? "make" : undefined}
-            className={cx("shrink-0 rounded-t px-3 py-1 text-[12px]", tab === t && !collapsed ? "border border-b-0 border-border bg-panel font-semibold text-text" : "text-muted hover:text-text")}>{t}
-            {t === "Make" && make.some(m => m.status?.tone === "warn") && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle" title="An output is out of date with the model" />}</button>));
-  const rightSide = (
-    <div className="ml-auto flex shrink-0 items-center gap-1 self-center">
-      {right}
-      <Tip content={collapsed ? "Show command bar" : "Hide command bar"} side="bottom">
-        <button onClick={toggle} className={cx("rounded text-muted hover:bg-text/5 hover:text-text", touch ? "p-2" : "p-1")} aria-label="Toggle command bar">
-          {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}</button>
-      </Tip>
-    </div>);
+  // Commands become plain ribbon buttons; a click re-renders so toggles (section, ortho, display) show their new state.
+  const after = () => setTimeout(() => setTick(t => t + 1), 0);
+  const toRibbon = (b: Btn, makeTab: boolean): RibbonBtn => {
+    const off = b.disabled || (disabled && !!b.needsBody);
+    return {
+      id: b.id, label: b.label, icon: b.icon, active: b.active, disabled: off, status: b.status, locked: b.locked,
+      tip: off && b.needsBody ? "Needs a solid first: start with Extruded or Revolved Boss, ask the agent, use the Toolbox or import a STEP" : b.tip,
+      onClick: () => { if (b.onClick) { b.onClick(); after(); } else if (b.cmd) onCommand(b.cmd); },
+      menu: b.menu?.map(m => ({ ...m, onSelect: () => { m.onSelect(); after(); } })),
+      attrs: makeTab && !b.menu ? { "data-make": b.id } : undefined,
+    };
+  };
+  const ribbon = Object.fromEntries(TABS.map(t => [t, groups[t].map(g => g.map(b => toRibbon(b, t === "Make")))])) as Record<(typeof TABS)[number], RibbonBtn[][]>;
+  const tabs = TABS.filter(t => t !== "Make" || make.length > 0);
 
   return (
-    <div className="shrink-0 border-b border-border bg-panel" data-tour="command-manager" data-touch={touch || undefined}>
-      {touch ? (<>
-        <div className="flex h-11 items-center gap-1 border-b border-border bg-panel2 px-2">
-          {left && <div className="flex min-w-0 flex-1 items-center gap-1.5">{left}</div>}
-          {rightSide}
-        </div>
-        {!collapsed && <div className="fw-hscroll flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">{tabButtons}</div>}
-      </>) : (
-      <div className="flex h-9 items-end gap-0.5 border-b border-border bg-panel2 px-2">
-        {left && <div className="mr-2 flex min-w-0 shrink items-center gap-1.5 self-center">{left}</div>}
-        {tabButtons}
-        {rightSide}
-      </div>)}
-      {!collapsed && <div ref={row} className={cx("flex items-stretch gap-1 px-2 py-1", touch ? "fw-hscroll snap-x" : "overflow-hidden", size === "icon" ? "h-[46px]" : "h-[66px]")} data-ribbon-size={size}>
-        {visible.map((g, gi) => (
-          <div key={gi} className={cx("flex shrink-0 items-stretch gap-0.5", touch && "snap-start")}>
-            {gi > 0 && <span className="mx-1.5 my-1 w-px bg-border" />}
-            {g.map(b => b.menu ? (
-              <Menu key={b.id}>
-                <Tip content={b.tip} side="bottom"><MenuTrigger asChild><button disabled={isDisabled(b)} className={btnCls(b)} aria-label={b.label}>{face(b)}</button></MenuTrigger></Tip>
-                <MenuContent align="start"><MenuLabel>{b.label}</MenuLabel>
-                  {b.menu.map(m => <MenuItem key={m.label} onSelect={() => { m.onSelect(); setTimeout(() => setTick(t => t + 1), 0); }}>{m.label}{m.on && <span className="ml-auto text-primary">●</span>}</MenuItem>)}</MenuContent>
-              </Menu>
-            ) : (
-              <Tip key={b.id} content={tipOf(b)} side="bottom">
-                <button disabled={isDisabled(b)} onClick={() => run(b)} className={btnCls(b)} aria-label={b.label} data-make={tab === "Make" ? b.id : undefined}>{face(b)}</button>
-              </Tip>))}
-          </div>))}
-        {overflow.length > 0 && <Menu>
-          <MenuTrigger asChild><button className="ml-1 flex w-[46px] flex-col items-center justify-center gap-0.5 rounded text-[10px] text-muted hover:bg-primary-soft hover:text-primary" aria-label="More commands" data-ribbon-more>
-            <Ellipsis className="h-5 w-5" />More</button></MenuTrigger>
-          <MenuContent align="end"><MenuLabel>More commands</MenuLabel>
-            {overflow.flatMap(b => b.menu ? b.menu.map(m => <MenuItem key={`${b.id}-${m.label}`} onSelect={m.onSelect}>{b.label}: {m.label}</MenuItem>)
-              : isDisabled(b) ? [<div key={b.id} className="px-2.5 py-1.5 text-sm text-muted/60">{b.label}</div>]
-              : [<MenuItem key={b.id} icon={b.icon} onSelect={() => run(b)}>{b.label}</MenuItem>])}
-          </MenuContent>
-        </Menu>}
-      </div>}
-    </div>
+    <Ribbon tabs={tabs} groups={ribbon} storageKey="fw_cm" left={left} right={right} touch={touch} wide={["Make"]} tour="command-manager"
+      onSize={() => setTick(t => t + 1)}
+      tabAttrs={t => t === "Make" ? { tour: "make", dot: make.some(m => m.status?.tone === "warn") ? "An output is out of date with the model" : undefined } : undefined} />
   );
 }
-

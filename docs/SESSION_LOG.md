@@ -4,6 +4,36 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-20 (b) — Assembly Studio command bar (ASM-RB-1)
+
+Founder ask: "Assembly commands should be on a command bar on top, just like Design Studio. Like we have in SOLIDWORKS.
+I do not want users to feel like aliens when they land on this software."
+
+### Done
+- `web/src/pages/app/studio/Ribbon.tsx`: the Design Studio CommandManager's rendering (tabs, collapse, shrink-then-More
+  fitting, touch layout, menus, status/lock) extracted into a shared `Ribbon`; `CommandManager.tsx` now builds its
+  buttons and hands them to it (same storage keys `fw_cm_*`, same `data-tour` / `data-make`, same look).
+- `web/src/pages/app/modules/assembly/AsmRibbon.tsx`: the Assembly command bar's button model (pure, tested).
+  Tabs Assembly / Evaluate / View / Make with SOLIDWORKS names; each button calls the Workspace's existing handler and
+  opens + highlights the matching right-hand panel; `data-copilot="asm-*"` ids for Archie; tooltips everywhere.
+- `Workspace.tsx`: the old header (Insert, Render, STEP, .fwasm buttons, Export STEP) moved into the ribbon (test ids
+  `insert`, `export-step`, `step-download`, `render-assembly` kept); title row carries back link, Live badge, rename and the
+  solve chip. New Part opens a short dialog and posts the request to the assembly chat. F / Ctrl+1-7 keys.
+  `Viewport.tsx` gained an `apiRef` (fit, standard views); `MatePanel.tsx` exports `MATE_CHOICES` for the Standard Mates menu.
+
+### Verified how
+- `npx tsc --noEmit` clean; `npx vitest run src/pages/app/modules/assembly/AsmRibbon.test.ts src/pages/app/studio` 20 passed
+  (fast-iteration rule: no full suite, no browser walkthrough this round).
+
+### Not done / omitted on purpose
+- Component patterns, Parallel/Perpendicular/Tangent mates, Section View and an assembly Drawing hand-off: not supported by
+  the backend/viewer, so no buttons (no fakes).
+
+### Next
+- Browser walkthrough of the ribbon on desktop and phone widths (studio-e2e); Archie pointing at `asm-*` ids.
+
+---
+
 ## 2026-11-20 (a) — Archie: whole-app copilot, agentic loop, the brief is the reference (CD-049, CD-050, PD-226..229)
 
 Founder asks: Archie's powers must not be limited to Design Office (navigate, point at buttons, fix things, re-plan

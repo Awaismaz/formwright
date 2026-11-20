@@ -7,7 +7,7 @@ import { MATE_ICON } from "./Tree";
 import { Section } from "./bits";
 
 export type MateChoice = "auto" | MateType;
-const CHOICES: { value: MateChoice; label: string; help: string }[] = [
+export const MATE_CHOICES: { value: MateChoice; label: string; help: string }[] = [
   { value: "auto", label: "Smart", help: "Two flat faces → coincident, two cylinders or circular edges → concentric." },
   { value: "coincident", label: "Coincident", help: "Flat faces touch, facing each other." },
   { value: "flush", label: "Flush", help: "Flat faces in the same plane, facing the same way." },
@@ -37,7 +37,7 @@ export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, o
   value: string; onValue: (v: string) => void; flip: boolean; onFlip: (v: boolean) => void; onAdd: () => void; busy: boolean;
   describe: (p: AsmPick) => string; editing?: Mate | null; onCancelEdit?: () => void;
 }) {
-  const help = CHOICES.find(c => c.value === choice)!.help;
+  const help = MATE_CHOICES.find(c => c.value === choice)!.help;
   const needsValue = choice === "distance" || choice === "angle";
   const showValue = needsValue || choice === "gear";
   const ready = picks.length === 2 && (!needsValue || value.trim() !== "");
@@ -52,7 +52,7 @@ export function MatePanel({ view, choice, onChoice, picks, onClearPick, value, o
       )}
       <Section title="Mate type">
         <div className="grid grid-cols-3 gap-1.5">
-          {CHOICES.filter(c => !editing || c.value !== "auto").map(c => (
+          {MATE_CHOICES.filter(c => !editing || c.value !== "auto").map(c => (
             <button key={c.value} type="button" onClick={() => onChoice(c.value)} data-mate-type={c.value}
               className={cx("flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[12.5px] transition",
                 choice === c.value ? "border-primary bg-primary-soft font-medium text-primary" : "border-border text-muted hover:border-primary/40 hover:text-text")}>
