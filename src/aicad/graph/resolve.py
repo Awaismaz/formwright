@@ -180,6 +180,21 @@ def resolve(graph: DesignGraph) -> DesignGraph:
         if sh is not None and sh.v("d") is not None:
             hb.set("bore", float(sh.v("d")), "rule", f"bored to the Ø{float(sh.v('d')):g} seat")
 
+    # housing fasteners the reply leaves unsized: the PD-114 rule (cap screws M6 x 16 socket head, cover bolts M8 x 30
+    # hex), the same sizes code gives when it completes a housing itself (golden suite F6)
+    for x in g.connections:
+        host, guest = g.comp(x.host), g.comp(x.guest)
+        if x.kind != "bolted_joint" or host is None or guest is None or host.kind != "housing":
+            continue
+        rule = {"bearing_cap": (6, 16, "shcs"), "cover": (8, 30, "hex_bolt")}.get(guest.kind)
+        for v in x.via if rule else []:
+            f = g.comp(v)
+            if f is None or f.kind != "fastener" or f.v("size") is not None:
+                continue
+            f.set("size", rule[0], "rule", "PD-114: housing " + ("cap screws" if rule[0] == 6 else "cover bolts"))
+            f.set("length", rule[1], "rule", "PD-114")
+            f.set("style", rule[2], "rule", "PD-114")
+
     # 5. keys, bearings, rings, the mesh
     for c in g.connections:
         sh, guest = g.comp(c.host), g.comp(c.guest)
@@ -213,6 +228,8 @@ def resolve(graph: DesignGraph) -> DesignGraph:
             c.params.setdefault("count", _p(2, "rule", "two bearings per shaft"))
         elif c.kind == "ring_retained" and sh is not None:
             d = float(sh.v("d"))
+            if guest is not None and guest.kind == "bearing" and sh.v("journal_d") is not None:
+                d = float(sh.v("journal_d"))  # a ring that locates a bearing sits on its journal
             for vid in c.via:
                 r = g.comp(vid)
                 if r is not None and r.kind == "retaining_ring":

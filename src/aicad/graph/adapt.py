@@ -39,21 +39,33 @@ def from_office(plan: dict[str, Any], skel: dict[str, Any] | None, ifs: list[dic
                 brief: str = "", name: str = "") -> DesignGraph:
     """A graph from an approved plan (``doc["plan"]``) and, when present, the ICD (``doc["skeleton"]``,
     ``doc["icd"]["interfaces"]``). Without an ICD the graph has the components and no connections."""
-    skel = skel or {}
-    items = skel.get("items") or {}
+    rows = [(f"i_{s['id']}_{p['id']}", p, str(s.get("name") or "")) for s in plan.get("subassemblies") or []
+            for p in s.get("parts") or []]
     g = DesignGraph(name=name, brief=brief, summary=str(plan.get("summary") or ""), source="plan",
                     constraints=intent.constraints_of(brief), assumptions=list(plan.get("assumptions") or []))
+    return _from_rows(g, rows, skel, ifs)
+
+
+def from_parts(parts: list[dict[str, Any]], skel: dict[str, Any] | None, ifs: list[dict[str, Any]] | None,
+               brief: str = "", name: str = "") -> DesignGraph:
+    """The same from the layout's own part list (``icd.parts_from`` / ``compile.plan_parts``: item ids, no plan
+    document): what the parity check of the connection layout re-solves (``docs/reports/connection-layout.md``)."""
+    g = DesignGraph(name=name, brief=brief, source="plan", constraints=intent.constraints_of(brief))
+    return _from_rows(g, [(p["id"], p, str(p.get("sub") or "")) for p in parts], skel, ifs)
+
+
+def _from_rows(g: DesignGraph, rows: list[tuple[str, dict[str, Any], str]], skel: dict[str, Any] | None,
+               ifs: list[dict[str, Any]] | None) -> DesignGraph:
+    skel = skel or {}
+    items = skel.get("items") or {}
     by_item: dict[str, str] = {}
-    for s in plan.get("subassemblies") or []:
-        for p in s.get("parts") or []:
-            iid = f"i_{s['id']}_{p['id']}"
-            it = items.get(iid) or {}
-            kind = _kind(p, it.get("role"))
-            c = Component(id=g.new_id(p["name"]), kind=kind, name=p["name"], qty=int(p.get("qty") or 1),
-                          group=str(s.get("name") or ""))
-            _params_from(c, p, it)
-            g.components.append(c)
-            by_item[iid] = c.id
+    for iid, p, group in rows:
+        it = items.get(iid) or {}
+        kind = _kind(p, it.get("role"))
+        c = Component(id=g.new_id(p["name"]), kind=kind, name=p["name"], qty=int(p.get("qty") or 1), group=group)
+        _params_from(c, p, it)
+        g.components.append(c)
+        by_item[iid] = c.id
     pairs: dict[frozenset[str], dict[str, Any]] = {}
     journals: dict[tuple[str, str], int] = {}
     for f in ifs or []:
@@ -82,6 +94,10 @@ def from_office(plan: dict[str, Any], skel: dict[str, Any] | None, ifs: list[dic
                                                 params={"count": Param(value=n, source="plan")}))
         elif k == "hole_pattern" and a and b:
             via = [x for x in [by_item.get(str(d.get("fastener_item")))] if x]
+            for v in via:  # the joint's screw size (the layout read it from the plan text)
+                fc = g.comp(v)
+                if fc is not None and fc.kind == "fastener" and d.get("fastener_size") and fc.v("size") is None:
+                    fc.set("size", int(d["fastener_size"]), "plan", force=True)
             g.connections.append(Connection(id=g.next_connection_id(), kind="bolted_joint", host=a, guest=b, via=via))
         elif k == "face" and a and b:
             g.connections.append(Connection(id=g.next_connection_id(), kind="mounted_on", host=a, guest=b))
@@ -169,4 +185,8 @@ def _params_from(c: Component, p: dict[str, Any], it: dict[str, Any]) -> None:
         c.set("od", float(size[0]), "plan", force=True)
         c.set("length" if c.kind == "spacer" else "width", float(size[2]), "plan", force=True)
     elif c.kind == "bearing_cap":
-        c.set("style", "open" if "open" in c.name.lower() else "blind", "plan", force=True)
+        from aicad.office import icd
+
+        style = icd._cap_kind(p)  # by its name, else its description; a cap that says neither goes either way
+        if style:
+            c.set("style", style, "plan", force=True)

@@ -691,6 +691,16 @@ class PlatformEnv(orchestrator.Env):
                                    "the add-on, then retry."}
         finally:
             db.close()
+        if (doc.get("assembly") or {}).get("status") != "ready" and doc.get("icd") and doc.get("skeleton"):
+            # a program with an ICD: its assembly is being built (at ICD approval); a level integrated before it is
+            # ready would be laid out on the bench instead (a fastener kit's parts in a row: golden R3)
+            import asyncio
+
+            for _ in range(240):
+                await asyncio.sleep(0.5)
+                doc = store.load(root, pid) or doc
+                if (doc.get("assembly") or {}).get("status") in ("ready", "failed"):
+                    break
         if (doc.get("assembly") or {}).get("status") == "ready":
             return await self._integrate_program(root, pid, tid)
         kids = children(doc, t)

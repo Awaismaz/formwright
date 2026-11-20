@@ -1,0 +1,96 @@
+{
+  "source": "archie",
+  "summary": "Foldable table: wooden top with four steel legs, each on a steel hinge bracket screwed under the top so the leg pivots on a bolt and folds flat beneath the top.",
+  "assumptions": [
+    "Four legs, one at each corner, each pivoting on its own hinge bracket.",
+    "Each leg pivots on a single shoulder bolt with a washer and a lock nut so it can swing flat under the top.",
+    "Hinge brackets are fixed to the underside of the wooden top with wood screws.",
+    "No sizes were given, so all dimensions are left to the sizing code."
+  ],
+  "subassemblies": [
+    {
+      "id": "s1",
+      "name": "Top",
+      "description": "Every part, assembled as one unit.",
+      "parts": [
+        {
+          "id": "p1",
+          "name": "Table top",
+          "family": "machined",
+          "complexity": 2,
+          "qty": 1,
+          "description": "Plate (size assumed), Wood.",
+          "toolbox": null
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "name": "Legs",
+      "description": "Every part, assembled as one unit.",
+      "parts": [
+        {
+          "id": "p2",
+          "name": "Folding leg",
+          "family": "machined",
+          "complexity": 3,
+          "qty": 4,
+          "description": "Folding leg, Steel.",
+          "toolbox": null
+        },
+        {
+          "id": "p3",
+          "name": "Leg hinge bracket",
+          "family": "machined",
+          "complexity": 2,
+          "qty": 4,
+          "description": "Bracket (size assumed), Steel.",
+          "toolbox": null
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "name": "Fasteners",
+      "description": "Every part, assembled as one unit.",
+      "parts": [
+        {
+          "id": "p4",
+          "name": "Bracket wood screw",
+          "family": "standard",
+          "complexity": 1,
+          "qty": 16,
+          "description": "Socket head cap screw.",
+          "toolbox": "shcs"
+        },
+        {
+          "id": "p5",
+          "name": "Leg pivot bolt",
+          "family": "standard",
+          "complexity": 1,
+          "qty": 4,
+          "description": "Hex bolt.",
+          "toolbox": "hex_bolt"
+        },
+        {
+          "id": "p6",
+          "name": "Pivot washer",
+          "family": "standard",
+          "complexity": 1,
+          "qty": 8,
+          "description": "Washer.",
+          "toolbox": "washer"
+        },
+        {
+          "id": "p7",
+          "name": "Pivot lock nut",
+          "family": "standard",
+          "complexity": 1,
+          "qty": 4,
+          "description": "Hex nut.",
+          "toolbox": "hex_nut"
+        }
+      ]
+    }
+  ]
+}

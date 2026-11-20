@@ -12,6 +12,7 @@ fast = true
 
 [sim]
 plan = "r_test5.plan.json"
+intent = "r_test5.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
 
 [limits]
 tokens = 30

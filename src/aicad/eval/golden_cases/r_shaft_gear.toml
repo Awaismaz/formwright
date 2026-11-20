@@ -14,6 +14,7 @@ brief = "Build a stepped shaft with a gear fitted on it with key"
 
 [sim]
 plan = "r_shaft_gear.plan.json"
+intent = "r_shaft_gear.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
 
 [limits]
 tokens = 60

@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from aicad.graph import layout as glayout
 from aicad.office import (
     archie_chat,
     icd,
@@ -130,8 +132,22 @@ def _table(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     plan = planner.normalise_plan(TABLE_PLAN, "archie")
     plan["graph"] = copy.deepcopy(TABLE_GRAPH)
     service.set_plan(root, doc, plan, ENG)
-    service.approve_plan(root, doc, None, ENG)
-    interfaces.approve(root, doc, ENG)
+    # the founder's ICD v1 as stored: laid out by the template, before the connection layout (graph/layout.py) existed
+    # (every revision below re-lays it out with the solver)
+    # and with the template's old base choice (the largest box: a leg); icd._base_rank prefers the top since
+    old, rank = os.environ.get(glayout.ENV), icd._base_rank
+    os.environ[glayout.ENV] = "0"
+    icd._base_rank = lambda p: (0, 0)  # type: ignore[assignment]
+    try:
+        service.approve_plan(root, doc, None, ENG)
+        doc["icd"]["problems"] = []  # approved under the old gate: no_interface was checked per item, not per copy
+        interfaces.approve(root, doc, ENG)
+    finally:
+        icd._base_rank = rank  # type: ignore[assignment]
+        if old is None:
+            os.environ.pop(glayout.ENV, None)
+        else:
+            os.environ[glayout.ENV] = old
     _done(doc, blocked="Assemble Legs")
     # as in the founder's program: he moved the final assembly to Integrated by hand, it stopped on the same floating
     # leg and Archie paused it
@@ -178,10 +194,14 @@ def test_the_founder_table_block_reproduces_and_the_per_copy_check_sees_it(tmp_p
     sk, ifs = doc["skeleton"], doc["icd"]["interfaces"]
     assert sk["base"] == ids["Folding leg"] and sk["layout"] == "block"  # the leg (4 off) became the base
     assert len(ifs) == 5 and all(f["a"]["item"] == ids["Folding leg"] and f["a"]["copy"] == 0 for f in ifs)
-    assert icd.problems(sk, ifs) == []  # the gate passed: no_interface is per item
+    # his gate passed (no_interface was per item); today's per-copy check blocks it
+    assert [p.split(":")[0] for p in icd.problems(sk, ifs)] == [f"Folding leg #{n}" for n in (2, 3, 4)]
     assert revision.loose_copies(sk, ifs) == [(ids["Folding leg"], 1), (ids["Folding leg"], 2),
                                               (ids["Folding leg"], 3)]
     assert revision.placement_blocks(sk, ifs)[0] == "Folding leg #2, #3, #4: no interface places them"
+    # a re-layout with the connection layout (graph/layout.py) takes the top as the base, each leg on its own bracket
+    c = revision.candidate(doc, [{"op": "relayout"}])
+    assert c["ok"] and c["base"] == ids["Table top"] and revision.loose_copies(c["skeleton"], c["interfaces"]) == []
 
 
 def test_table_revision_archie_proposes_without_ai_keeps_the_kit_and_redesigns_the_three_parts(tmp_path: Path) -> None:
@@ -189,35 +209,37 @@ def test_table_revision_archie_proposes_without_ai_keeps_the_kit_and_redesigns_t
     ids = _ids(doc)
     c = revision.propose(doc)
     assert c is not None and c["ok"]
-    # the design graph says the top carries the brackets and each bracket a leg: the top (1 off) is the base
-    assert c["ops"][:3] == [{"op": "base", "part": "Table top"},
-                            {"op": "mount", "part": "Leg hinge bracket", "on": "Table top"},
-                            {"op": "mount", "part": "Folding leg", "on": "Leg hinge bracket"}]
+    # with the connection layout a plain re-layout is enough: the design graph says the top carries the brackets and
+    # each bracket a leg, and the layout pairs copy n with copy n (no base or mount ops needed any more)
+    assert c["ops"] == [{"op": "relayout"}]
     sk = c["skeleton"]
     assert sk["base"] == ids["Table top"]
     it = sk["items"]
-    # hand: 4 brackets 100 wide in a row on the top, gap 12, margins 10: 4 × 100 + 3 × 12 + 2 × 10 = 456; 70 + 20 = 90
-    assert it[ids["Table top"]]["size"] == [456.0, 90.0, 16.0]
-    # brackets centred: start -456 / 2 + 10 = -218, centres -168, -56, 56, 168; on the top face (Z 0), H 16: Z 8
-    assert [x[0] for x in it[ids["Leg hinge bracket"]]["copies"]] == [-168.0, -56.0, 56.0, 168.0]
-    assert it[ids["Leg hinge bracket"]]["size"] == [100.0, 70.0, 16.0]  # kept as sized, so copy n carries leg n
-    # a leg 568 × 90 is wider than its 100 × 70 bracket: it stands on its end, 90 × 20 × 568, centre 16 + 284 = 300
-    assert it[ids["Folding leg"]]["size"] == [90.0, 20.0, 568.0]
-    assert it[ids["Folding leg"]]["copies"] == [[x, 0.0, 300.0] for x in (-168.0, -56.0, 56.0, 168.0)]
-    # per copy: bracket n on the top, leg n on bracket n, nothing loose
+    # hand (the role sizes, nothing stated): top 1200 x 700 x 18, brackets 60 x 30 x 60 under the corners 30 mm in:
+    # X +-(600 - 30 - 30) = +-540, Y +-(350 - 30 - 15) = +-305, Z -18 - 30 = -48
+    assert it[ids["Table top"]]["size"] == [1200.0, 700.0, 18.0]
+    assert it[ids["Leg hinge bracket"]]["size"] == [60.0, 30.0, 60.0]
+    assert sorted(it[ids["Leg hinge bracket"]]["copies"]) == [[-540.0, -305.0, -48.0], [-540.0, 305.0, -48.0],
+                                                              [540.0, -305.0, -48.0], [540.0, 305.0, -48.0]]
+    # legs 40 x 20 x 700 hang under the top (deployed), on each bracket's inboard face (Y +-(305 - 15 - 10) = +-280),
+    # the upper end 2 mm under the top, the pivot bore 20 below it (Z -40): centre -40 + 20 - 350 = -370
+    assert it[ids["Folding leg"]]["size"] == [40.0, 20.0, 700.0]
+    assert sorted(it[ids["Folding leg"]]["copies"]) == [[-540.0, -280.0, -370.0], [-540.0, 280.0, -370.0],
+                                                        [540.0, -280.0, -370.0], [540.0, 280.0, -370.0]]
+    # per copy: bracket n on the top, leg n pivoting on bracket n (a pivot bolt), nothing loose
     pairs = sorted((f["a"]["item"], f["a"]["copy"], f["b"]["item"], f["b"]["copy"]) for f in c["interfaces"])
     assert pairs == sorted([(ids["Table top"], 0, ids["Leg hinge bracket"], n) for n in range(4)]
                            + [(ids["Leg hinge bracket"], n, ids["Folding leg"], n) for n in range(4)])
+    assert sum(1 for f in c["interfaces"] if f["data"].get("pivot")) == 4
     assert c["placement"]["after"] == [] and c["new_problems"] == []
     assert _classes(c) == {"Table top": "redesign", "Folding leg": "redesign", "Leg hinge bracket": "redesign",
                            "Bracket wood screw": "unchanged", "Leg pivot bolt": "unchanged",
                            "Pivot washer": "unchanged", "Pivot lock nut": "unchanged"}
     assert _levels(c) == {"Top": "rerun", "Legs": "rerun", "Fasteners": "kept", "Final assembly": "rerun"}
     rows = {r["name"]: r for r in c["impact"]["parts"]}
-    assert rows["Table top"]["why"].startswith("envelope 100 × 70 × 16 → 456 × 90 × 16 mm")
-    # the old joint with leg #1 goes from the top: its mounting face and 4 holes (5 features); the bracket keeps its
-    # bottom face and holes (same place in its own frame) and gains the top face it carries the leg on
-    assert len(rows["Table top"]["remove"]) == 5 and rows["Leg hinge bracket"]["remove"] == []
+    assert rows["Table top"]["why"].startswith("envelope 100 × 70 × 16 → 1200 × 700 × 18 mm")
+    # the old joint with leg #1 goes from the top: its mounting face and 4 holes (5 features)
+    assert len(rows["Table top"]["remove"]) == 5
     assert c["impact"]["estimate"]["tokens"] == 3 * revision.REDESIGN_TOKENS  # three parts the designer redoes
     assert supervisor.classify(doc, {"tool": "revise_program", "impact": revision.view(c)})[0] == "major"
 
@@ -229,10 +251,14 @@ def test_table_revision_with_archies_corrected_plan(tmp_path: Path) -> None:
     assert c["ok"], c["why"]
     it = c["skeleton"]["items"]
     assert c["skeleton"]["base"] == ids["Table top"] and it[ids["Table top"]]["size"] == [1200.0, 600.0, 18.0]
-    # hand: brackets 80 wide, gap max(12, 8) = 12: 4 × 80 + 3 × 12 = 356, centred: -138, -46, 46, 138; Z 40 / 2 = 20
-    assert it[ids["Leg hinge bracket"]]["copies"] == [[x, 0.0, 20.0] for x in (-138.0, -46.0, 46.0, 138.0)]
-    # each leg 700 tall stands on its bracket (top at Z 40): centre 40 + 350 = 390
-    assert it[ids["Folding leg"]]["copies"] == [[x, 0.0, 390.0] for x in (-138.0, -46.0, 46.0, 138.0)]
+    # hand: brackets 80 x 60 x 40 under the corners 30 mm in: X +-(600 - 30 - 40) = +-530, Y +-(300 - 30 - 30) = +-240,
+    # Z -18 - 20 = -38 (40 deep holds the pivot: 20 + 2 + 9 / 2 + 1 = 27.5)
+    assert sorted(it[ids["Leg hinge bracket"]]["copies"]) == [[-530.0, -240.0, -38.0], [-530.0, 240.0, -38.0],
+                                                              [530.0, -240.0, -38.0], [530.0, 240.0, -38.0]]
+    # each leg 40 x 40 x 700 on its bracket's inboard face (Y +-(240 - 30 - 20) = +-190), pivot Z -18 - 2 - 20 = -40,
+    # centre -40 + 20 - 350 = -370
+    assert sorted(it[ids["Folding leg"]]["copies"]) == [[-530.0, -190.0, -370.0], [-530.0, 190.0, -370.0],
+                                                        [530.0, -190.0, -370.0], [530.0, 190.0, -370.0]]
     assert revision.loose_copies(c["skeleton"], c["interfaces"]) == []
     assert _classes(c)["Table top"] == _classes(c)["Folding leg"] == _classes(c)["Leg hinge bracket"] == "redesign"
     assert {k: v for k, v in _classes(c).items() if v != "redesign"} == {
@@ -361,7 +387,8 @@ def test_archie_proposes_the_revision_asks_with_the_impact_list_and_applies_it(t
         e = next(x for x in d["supervisor"]["log"] if x["id"] == res["asked"][0])
         assert e["tool"] == "revise_program" and e["class"] == "major"
         assert "it reopens parts already worked on" in e["class_why"]
-        assert e["title"].startswith("Revise the program to ICD v2 (Table top is the base;")
+        # the connection layout fixes the table on its own: Archie proposes a plain re-layout (3 parts redesigned)
+        assert e["title"].startswith("Revise the program to ICD v2 (lay the program out again with today's layout)")
         msg = archie_chat.history(root, pid)[-1]
         q = msg["questions"][0]
         assert q["options"][0]["label"] == "Yes, revise the program"
@@ -407,8 +434,9 @@ def test_the_chat_reader_offers_the_revision_on_a_placement_block(tmp_path: Path
     assert acts and acts[0]["type"] == "revise_program"
     assert "new program" not in text.lower() and "I can revise the program (ICD v2)" in text
     n = archie_chat.normalise(doc, acts[0])
-    assert n is not None and n["changes"][0] == {"op": "base", "part": "Table top"}
-    assert archie_chat.describe(doc, n).startswith("Revise the program to ICD v2: Table top is the base")
+    # a plain re-layout is enough now: the connection layout takes the top as the base and pairs the copies
+    assert n is not None and n["changes"][0] == {"op": "relayout"}
+    assert archie_chat.describe(doc, n).startswith("Revise the program to ICD v2")
 
 
 def test_a_revision_waits_for_a_step_in_progress_and_refuses_after_release(tmp_path: Path) -> None:

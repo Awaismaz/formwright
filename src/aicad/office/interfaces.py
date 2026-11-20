@@ -44,7 +44,11 @@ def create(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
     parts = icd.parts_from(doc)
     from aicad.graph.compile import overrides_for
 
-    skel, ic = icd.new_icd(parts, doc["brief"], "Archie", overrides_for(doc.get("plan") or {}, parts))
+    ov0 = overrides_for(doc.get("plan") or {}, parts)
+    built = _graph_layout(doc, ov0)
+    skel, ic = icd.new_icd(parts, doc["brief"], "Archie", ov0, built=built)
+    if skel.get("solver") == "roles":  # every rebuild keeps the layout read from the parts' roles
+        ic["overrides"] = {**(ic["overrides"] or {}), "layout": "roles"}
     ic["history"][0]["at"] = store.now()
     doc.setdefault("change_requests", [])
     doc["icd"] = ic
@@ -72,8 +76,50 @@ def create(root: Path, doc: dict[str, Any], actor: dict[str, Any]) -> None:
                  archie, interfaces=len(ic["interfaces"]))
 
 
+def _graph_layout(doc: dict[str, Any], overrides: dict[str, Any] | None
+                  ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+    """A program planned from a design graph is laid out from its connections (``graph/layout.py``); None for the
+    others (and when the solver can't lay the graph out yet: the template layout then, said in its notes)."""
+    from aicad.graph import layout
+
+    out = layout.build_for_doc(doc, overrides)
+    why = doc.pop("_layout_fallback", None)
+    if out is None and why and layout.graph_of(doc.get("plan")) is not None:
+        skel, ifs = icd.build(icd.parts_from(doc), doc["brief"], overrides)
+        skel["notes"].append(f"Laid out with the standard layout: {why}.")
+        return skel, ifs
+    if out is None and layout.graph_of(doc.get("plan")) is None and layout.enabled():
+        return _roles_layout(doc, overrides)
+    return out
+
+
+def _roles_layout(doc: dict[str, Any], overrides: dict[str, Any] | None
+                  ) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+    """A plan without a graph whose parts read cleanly by role (``graph/roles.py``: exactly a top or frame as the base,
+    brackets on it, legs or arms on them): laid out from those roles when that gives no problem (the template picks the
+    largest box as the base and hangs every copy on copy #1: the founder's "TEST Project", 2026-11-20); else None
+    (the template). Once chosen it is kept for every rebuild (``overrides["layout"] == "roles"``)."""
+    from aicad.graph import layout, roles
+
+    parts = icd.parts_from(doc)
+    keep = (overrides or {}).get("layout") == "roles"
+    g = roles.from_roles(parts, doc["brief"])
+    if g is None:
+        return None
+    try:
+        s2, i2 = layout.build(g, parts, doc["brief"], overrides)
+    except layout.Unsupported:
+        return None
+    if not keep and (s2.get("conflicts") or icd.problems(s2, i2)):
+        return None
+    s2["solver"] = "roles"
+    s2["notes"].insert(0, "Laid out from the roles of the plan's parts (a base, what is mounted on it, what pivots on "
+                          "that), copy by copy" + (": " + "; ".join(g.assumptions) if g.assumptions else "."))
+    return s2, i2
+
+
 def _rebuild(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    return icd.build(icd.parts_from(doc), doc["brief"], overrides)
+    return _graph_layout(doc, overrides) or icd.build(icd.parts_from(doc), doc["brief"], overrides)
 
 
 def edit(root: Path, doc: dict[str, Any], iid: str, values: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:

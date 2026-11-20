@@ -11,6 +11,7 @@ brief = "A conveyor idler roller: a Ã˜50 x 200 mm steel roller tube fixed on a Ã
 
 [sim]
 plan = "e_roller.plan.json"
+intent = "e_roller.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
 
 [limits]
 tokens = 120

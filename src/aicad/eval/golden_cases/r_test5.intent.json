@@ -1,0 +1,50 @@
+{
+  "case": "r_test5",
+  "name": "Test 5",
+  "brief": "Build a Spur Gear, mounted on shaft and locked with a key. No extra items. Just a spur gear, a shaft and a key",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "A spur gear keyed on a shaft. Just the gear, the shaft and the key.",
+    "components": [
+      {
+        "id": "shaft",
+        "kind": "shaft",
+        "name": "Shaft",
+        "qty": 1,
+        "params": {
+          "d": 20,
+          "length": 80
+        }
+      },
+      {
+        "id": "gear",
+        "kind": "spur_gear",
+        "name": "Spur gear",
+        "qty": 1,
+        "params": {
+          "module": 2,
+          "teeth": 30,
+          "face_width": 20
+        }
+      },
+      {
+        "id": "key",
+        "kind": "key",
+        "name": "Parallel key",
+        "qty": 1
+      }
+    ],
+    "connections": [
+      {
+        "kind": "keyed_hub",
+        "host": "shaft",
+        "guest": "gear",
+        "via": [
+          "key"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

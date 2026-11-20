@@ -1,0 +1,102 @@
+{
+  "case": "r_shaft_gear",
+  "name": "Shaft Gear",
+  "brief": "Build a stepped shaft with a gear fitted on it with key",
+  "recorded": "hand-written graph reply (connection-layout, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "A stepped shaft on two 6004 bearings carrying a keyed gear against its shoulder; circlips locate the bearings and hold the gear.",
+    "components": [
+      {
+        "id": "shaft",
+        "kind": "shaft",
+        "name": "Stepped shaft",
+        "qty": 1,
+        "params": {
+          "d": 25,
+          "journal_d": 20,
+          "shoulder_d": 30,
+          "stepped": true
+        }
+      },
+      {
+        "id": "brg",
+        "kind": "bearing",
+        "name": "Deep groove bearing 6004",
+        "qty": 2,
+        "params": {
+          "designation": 6004
+        }
+      },
+      {
+        "id": "bclip",
+        "kind": "retaining_ring",
+        "name": "Bearing circlip 20 mm",
+        "qty": 2
+      },
+      {
+        "id": "gear",
+        "kind": "spur_gear",
+        "name": "Spur gear",
+        "qty": 1,
+        "params": {
+          "module": 2,
+          "teeth": 40,
+          "face_width": 20
+        }
+      },
+      {
+        "id": "key",
+        "kind": "key",
+        "name": "Parallel key",
+        "qty": 1
+      },
+      {
+        "id": "gclip",
+        "kind": "retaining_ring",
+        "name": "Gear circlip 25 mm",
+        "qty": 1
+      }
+    ],
+    "connections": [
+      {
+        "kind": "keyed_hub",
+        "host": "shaft",
+        "guest": "gear",
+        "via": [
+          "key"
+        ]
+      },
+      {
+        "kind": "shoulder_stop",
+        "host": "shaft",
+        "guest": "gear"
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "shaft",
+        "guest": "brg",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "ring_retained",
+        "host": "shaft",
+        "guest": "brg",
+        "via": [
+          "bclip"
+        ]
+      },
+      {
+        "kind": "ring_retained",
+        "host": "shaft",
+        "guest": "gear",
+        "via": [
+          "gclip"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}
