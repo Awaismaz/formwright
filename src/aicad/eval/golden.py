@@ -7,12 +7,14 @@ A case is a brief plus hand-checked expectations, one TOML file in ``golden_case
     [sim] planner = "standard"            simulated runs: the office's own planner on the brief (no AI), or
     [sim] plan = "<file>.plan.json"       Archie's plan, replayed (a recorded or reference plan; no AI)
     [sim] intent = "<file>.intent.json"   a recorded intent reply, replayed when FW_DESIGN_GRAPH=1 (PD-110)
+    [sim] master = "<file>.master.py"     a recorded master model, replayed when the office takes the master path
+                                          (WORKLIST 50; ``FW_MASTER_MODEL=force`` forces that path for comparison)
     [limits] tokens, wall_simulated_s, wall_live_s
     [expect] complete, light, parts (part lines), pieces, subs, tickets, kinds = {kind = pieces}, no_extras,
              instances, clashes, binned, loose, placeholders, blocked, icd_problems, conformance, direct_min (parts
              built without AI: from the interfaces, or a designed part made from the Toolbox to the ICD),
              supervisor_max; only_simulated = [names]: counts that only a replayed plan fixes (a live planner may
-             split or merge part lines)
+             split or merge part lines); path = "master" | "fast": the layout path the office decided (WORKLIST 50)
     [[expect.at]] / span / along / distance / within / touch / same_span / count / stacks / reuse  (``CHECKS``)
 
 Selectors pick final-assembly instances: ``{kind = "key"}`` (the head noun, ``office.scope.kind_of``) or
@@ -54,6 +56,7 @@ LABELS = {
     "placeholders": "Placeholders left", "blocked": "Tickets that stopped for the engineer",
     "icd_problems": "Interface problems at the gate", "conformance": "Parts conform to the interfaces",
     "direct_min": "Parts built without AI", "supervisor_max": "Supervisor interventions", "tokens": "Tokens",
+    "path": "Layout path (fast or master model)",
     "wall": "Wall time",
 }
 
@@ -84,11 +87,17 @@ def load_case(path: Path) -> dict[str, Any]:
             sim["intent_data"] = json.loads(f.read_text(encoding="utf-8"))["reply"]
         except (OSError, ValueError, KeyError) as e:
             raise CaseError(f"{path.name}: intent {sim['intent']}: {e}") from e
+    if "master" in sim:
+        f = path.parent / str(sim["master"])
+        try:
+            sim["master_src"] = f.read_text(encoding="utf-8")
+        except OSError as e:
+            raise CaseError(f"{path.name}: master {sim['master']}: {e}") from e
     if "plan" not in sim and sim.get("planner", "standard") != "standard":
         raise CaseError(f"{path.name}: [sim] needs plan = <file> or planner = 'standard'")
     ex = case.setdefault("expect", {})
     unknown = set(ex) - set(COUNTS) - set(CHECKS) - {"complete", "light", "kinds", "no_extras", "conformance",
-                                                     "direct_min", "supervisor_max", "only_simulated"}
+                                                     "direct_min", "supervisor_max", "only_simulated", "path"}
     if unknown:
         raise CaseError(f"{path.name}: unknown expectations {sorted(unknown)}")
     case.setdefault("limits", {})
@@ -336,6 +345,9 @@ def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str, plan_fixed: 
     if "direct_min" in ex:
         n = int(m.get("no_ai", m.get("direct")) or 0)
         rows.append(_row("direct_min", LABELS["direct_min"], n >= int(ex["direct_min"]), n, f">= {ex['direct_min']}"))
+    if "path" in ex and not (m.get("path_forced") and ex["path"] != m.get("path")):
+        rows.append(_row("path", LABELS["path"], m.get("path") == ex["path"], m.get("path"), ex["path"],
+                         m.get("path_words") or ""))
     if "supervisor_max" in ex:
         rows.append(_row("supervisor_max", LABELS["supervisor_max"],
                          int(m.get("supervisor") or 0) <= int(ex["supervisor_max"]), m.get("supervisor"),

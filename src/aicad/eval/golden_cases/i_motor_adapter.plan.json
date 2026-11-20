@@ -1,0 +1,17 @@
+{"source": "archie", "summary": "NEMA 17 stepper motor on a custom adapter plate, bolted to an L bracket", "assumptions": [
+  "Motor envelope 42.3 x 42.3 x 48 with a Ø22 pilot boss 2 mm proud and a Ø5 shaft 24 long (NEMA 17 frame).",
+  "The adapter plate stands on the bracket foot against the upright; four M4 screws into tapped holes in the upright."],
+ "subassemblies": [
+  {"name": "Motor mount", "description": "Bracket, adapter plate and motor.", "parts": [
+    {"name": "Mounting bracket", "family": "machined", "complexity": 2, "qty": 1, "envelope": [80.0, 60.0, 76.0],
+     "description": "Aluminium L bracket: foot 80 x 60 x 6 mm, upright 80 x 14 x 70 mm at the back edge, four M4 tapped holes (12 deep) in the upright on a 60 x 40 mm pattern, a Ø52 window in the upright on the motor axis for the motor screw heads, two Ø6.6 fixing holes in the foot."},
+    {"name": "Motor adapter plate", "family": "machined", "complexity": 3, "qty": 1, "envelope": [80.0, 5.0, 60.0],
+     "mounts_on": "Mounting bracket",
+     "description": "Custom aluminium adapter plate 80 x 60 x 5 mm: Ø23 pilot bore, four Ø3.4 holes on the 31 mm NEMA 17 square, four Ø4.5 holes on a 60 x 40 mm pattern for the bracket."},
+    {"name": "Stepper motor NEMA 17", "family": "machined", "complexity": 2, "qty": 1, "envelope": [42.3, 42.3, 48.0],
+     "mounts_on": "Motor adapter plate",
+     "description": "Bought-out NEMA 17 stepper motor, modelled as its envelope: body 42.3 x 42.3 x 48, Ø22 pilot boss, four M3 tapped holes 8 deep on the 31 mm square in the face (check the motor's datasheet), Ø5 shaft."},
+    {"name": "Motor screw M3x12", "family": "standard", "complexity": 1, "qty": 4, "toolbox": "shcs",
+     "description": "ISO 4762 socket head cap screw M3 x 12 through the adapter plate into the motor face."},
+    {"name": "Plate screw M4x16", "family": "standard", "complexity": 1, "qty": 4, "toolbox": "shcs",
+     "description": "ISO 4762 socket head cap screw M4 x 16 through the adapter plate into the bracket upright."}]}]}

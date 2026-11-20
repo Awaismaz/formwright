@@ -1,0 +1,86 @@
+{
+  "case": "i_motor_adapter",
+  "name": "Stepper motor on a custom adapter plate",
+  "brief": "A NEMA 17 stepper motor mounted on a custom 5 mm aluminium adapter plate, which is screwed to the upright of an L-shaped mounting bracket (foot 80 x 60 x 6 mm, upright 70 mm high and 14 mm thick). The motor bolts to the plate with four M3 x 12 screws on the 31 mm square pattern; the plate bolts to the bracket upright with four M4 x 16 screws.",
+  "recorded": "hand-written graph reply (master-model, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "A NEMA 17 stepper on a custom adapter plate screwed to the upright of an L bracket.",
+    "components": [
+      {
+        "id": "bracket",
+        "kind": "bracket",
+        "name": "Mounting bracket",
+        "qty": 1,
+        "params": {
+          "L": 80,
+          "W": 60,
+          "H": 76
+        }
+      },
+      {
+        "id": "plate",
+        "kind": "plate",
+        "name": "Motor adapter plate",
+        "qty": 1,
+        "params": {
+          "L": 80,
+          "W": 60,
+          "T": 5
+        }
+      },
+      {
+        "id": "motor",
+        "kind": "motor",
+        "name": "Stepper motor NEMA 17",
+        "qty": 1,
+        "params": {
+          "L": 42.3,
+          "W": 42.3,
+          "H": 48
+        }
+      },
+      {
+        "id": "m3",
+        "kind": "fastener",
+        "name": "Motor screw M3x12",
+        "qty": 4,
+        "params": {
+          "style": "shcs",
+          "size": 3,
+          "length": 12
+        }
+      },
+      {
+        "id": "m4",
+        "kind": "fastener",
+        "name": "Plate screw M4x16",
+        "qty": 4,
+        "params": {
+          "style": "shcs",
+          "size": 4,
+          "length": 16
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "bracket",
+        "guest": "plate",
+        "via": [
+          "m4"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "plate",
+        "guest": "motor",
+        "via": [
+          "m3"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

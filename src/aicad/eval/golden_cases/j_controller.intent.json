@@ -1,0 +1,56 @@
+{
+  "case": "j_controller",
+  "name": "Handheld controller-style split housing",
+  "brief": "An original handheld game-controller style housing (not a copy of any product): a moulded ABS lower shell 150 x 95 x 18 mm and an upper shell 150 x 95 x 14 mm, each with a rounded grip lobe at both ends, meeting on a flat split line and joined by four M3 x 16 socket head screws from below into bosses in the upper shell.",
+  "recorded": "hand-written graph reply (master-model, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "An original handheld-controller-style housing: two moulded shells screwed together on a flat split line.",
+    "components": [
+      {
+        "id": "lower",
+        "kind": "other",
+        "name": "Lower shell",
+        "qty": 1,
+        "params": {
+          "L": 150,
+          "W": 95,
+          "H": 18
+        }
+      },
+      {
+        "id": "upper",
+        "kind": "other",
+        "name": "Upper shell",
+        "qty": 1,
+        "params": {
+          "L": 150,
+          "W": 95,
+          "H": 14
+        }
+      },
+      {
+        "id": "screw",
+        "kind": "fastener",
+        "name": "Shell screw M3x16",
+        "qty": 4,
+        "params": {
+          "style": "shcs",
+          "size": 3,
+          "length": 16
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "lower",
+        "guest": "upper",
+        "via": [
+          "screw"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

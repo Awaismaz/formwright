@@ -1,0 +1,313 @@
+{
+ "schema": 1,
+ "run_id": "33a6ef67d92c",
+ "at": "2026-11-20T01:05:11Z",
+ "mode": "simulated",
+ "case": "controller",
+ "title": "Handheld controller-style split housing",
+ "letter": "j",
+ "cap": null,
+ "flags": {},
+ "status": "complete",
+ "stopped": null,
+ "metrics": {
+  "wall_s": 14.11,
+  "phases": {
+   "plan": 6.19,
+   "gate": 0.31,
+   "run": 7.59,
+   "check": 0.02
+  },
+  "tokens": 70,
+  "light": true,
+  "parts": 3,
+  "pieces": 6,
+  "subs": 1,
+  "tickets": 5,
+  "instances": 2,
+  "clashes": 0,
+  "clash_check": "done",
+  "binned": 0,
+  "loose": 0,
+  "loose_names": [],
+  "placeholders": 0,
+  "blocked": 0,
+  "icd_problems": 0,
+  "interfaces": 1,
+  "questions": 0,
+  "conformance": {
+   "ok": 10,
+   "total": 10
+  },
+  "direct": 0,
+  "no_ai": 0,
+  "supervisor": 0,
+  "supervisor_asking": 0,
+  "ai_parts": 2,
+  "looks_wrong": 0,
+  "path": "master",
+  "path_words": "Laid out from a master model (free-form product)",
+  "path_forced": false,
+  "path_reasons": [
+   "product"
+  ],
+  "master_s": 5.97,
+  "master_tokens": 0,
+  "master_ok": true
+ },
+ "plan_fixed": true,
+ "expectations": [
+  {
+   "id": "complete",
+   "label": "Program completes",
+   "ok": true,
+   "got": "complete",
+   "want": "complete"
+  },
+  {
+   "id": "parts",
+   "label": "Part lines planned",
+   "ok": true,
+   "got": 3,
+   "want": 3
+  },
+  {
+   "id": "pieces",
+   "label": "Pieces planned",
+   "ok": true,
+   "got": 6,
+   "want": 6
+  },
+  {
+   "id": "clashes",
+   "label": "Clashes (whole-program check)",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "binned",
+   "label": "Parts in the parts bin",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "loose",
+   "label": "Loose parts",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "placeholders",
+   "label": "Placeholders left",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "blocked",
+   "label": "Tickets that stopped for the engineer",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "icd_problems",
+   "label": "Interface problems at the gate",
+   "ok": true,
+   "got": 0,
+   "want": 0
+  },
+  {
+   "id": "conformance",
+   "label": "Parts conform to the interfaces",
+   "ok": true,
+   "got": "10 of 10 features",
+   "want": "all"
+  },
+  {
+   "id": "path",
+   "label": "Layout path (fast or master model)",
+   "ok": true,
+   "got": "master",
+   "want": "master",
+   "note": "Laid out from a master model (free-form product)"
+  },
+  {
+   "id": "span.1",
+   "label": "lower shell along Z",
+   "ok": true,
+   "got": [
+    -18.0,
+    0.0
+   ],
+   "want": [
+    -18.0,
+    0.0
+   ]
+  },
+  {
+   "id": "span.2",
+   "label": "upper shell along Z",
+   "ok": true,
+   "got": [
+    0.0,
+    14.0
+   ],
+   "want": [
+    0.0,
+    14.0
+   ]
+  },
+  {
+   "id": "within.1",
+   "label": "screw inside lower shell along X",
+   "ok": false,
+   "got": 0,
+   "want": 1,
+   "note": "not found"
+  },
+  {
+   "id": "stacks.1",
+   "label": "shcs M3 fastener stacks",
+   "ok": false,
+   "got": 0,
+   "want": 4
+  },
+  {
+   "id": "tokens",
+   "label": "Tokens",
+   "ok": null,
+   "got": 70,
+   "want": "<= 120",
+   "note": "simulated metering, not spend"
+  },
+  {
+   "id": "wall",
+   "label": "Wall time",
+   "ok": true,
+   "got": 14.11,
+   "want": "<= 240 s"
+  }
+ ],
+ "passed": false,
+ "detail": {
+  "kinds": {
+   "none": 2,
+   "fastener": 4
+  },
+  "tickets": [
+   {
+    "title": "Lower shell",
+    "kind": "part",
+    "column": "integrated",
+    "status": "done",
+    "reuse_code": "",
+    "direct": false,
+    "tokens": 35
+   },
+   {
+    "title": "Upper shell",
+    "kind": "part",
+    "column": "integrated",
+    "status": "done",
+    "reuse_code": "",
+    "direct": false,
+    "tokens": 35
+   },
+   {
+    "title": "Shell screw M3x14",
+    "kind": "standard",
+    "column": "integrated",
+    "status": "done",
+    "reuse_code": "shcs",
+    "direct": false,
+    "tokens": 0
+   },
+   {
+    "title": "Assemble Controller housing",
+    "kind": "integration",
+    "column": "integrated",
+    "status": "done",
+    "reuse_code": "",
+    "direct": false,
+    "tokens": 0
+   },
+   {
+    "title": "Final assembly of Handheld controller-style split housing",
+    "kind": "integration",
+    "column": "integrated",
+    "status": "done",
+    "reuse_code": "",
+    "direct": false,
+    "tokens": 0
+   }
+  ],
+  "stacks": [],
+  "warnings": [],
+  "fix": null,
+  "looks": [
+   {
+    "name": "Assemble Controller housing",
+    "status": "done",
+    "verdict": "looks_assembled"
+   },
+   {
+    "name": "Final assembly of Handheld controller-style split housing",
+    "status": "done",
+    "verdict": "looks_assembled"
+   }
+  ],
+  "supervisor": [],
+  "instances": [
+   {
+    "name": "Lower shell<1>",
+    "box": [
+     -75.0,
+     -47.5,
+     -18.0,
+     75.0,
+     47.5,
+     0.0
+    ],
+    "bin": false
+   },
+   {
+    "name": "Upper shell<1>",
+    "box": [
+     -75.0,
+     -47.5,
+     0.0,
+     75.0,
+     47.5,
+     14.0
+    ],
+    "bin": false
+   }
+  ]
+ },
+ "elapsed_s": 20.7,
+ "sha": "44d53c072f",
+ "dirty": true,
+ "routing": {
+  "design_agent.complex": "default",
+  "design_agent.simple": "sonnet",
+  "design_agent.edit": "sonnet",
+  "planner": "default",
+  "change_review": "default",
+  "reviewer": "default",
+  "vision": "default",
+  "render_refine": "default",
+  "draft_assist": "default",
+  "librarian": "default",
+  "reconcile": "default",
+  "office_chat": "default",
+  "assembly_check": "haiku",
+  "supervisor": "default",
+  "intent": "default",
+  "assembly_agent": "default"
+ },
+ "routing_id": "dde464"
+}

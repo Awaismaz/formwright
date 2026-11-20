@@ -2249,6 +2249,17 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
             else:
                 out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"], "tol": tol,
                             "label": f"hole {k + 1}"})
+        for n, w in enumerate(d.get("passages") or []):  # an opening across the joint (master model, WORKLIST 50)
+            dw = float(w["d_a" if which == "a" else "d_b"])
+            out.append({"type": "hole", **_axial(skel, side, d, w["at"], d["plane_z"]), "d": dw, "tol": tol,
+                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)"})
+        cb = d.get("counterbore") if which == "b" else None
+        if cb:  # the screw heads sink into the head side (measured from a master model): a seat at its far face
+            far = d["plane_z"] + sa * float(cb["length"])
+            for k, xy in enumerate(d["positions"]):
+                g = _axial(skel, side, d, xy, far - sa * float(cb["depth"]), far)
+                out.append({"type": "seat", **g, "d": float(cb["d"]), "tol": tol,
+                            "label": f"counterbore {k + 1} Ø{float(cb['d']):g} × {float(cb['depth']):g} deep"})
         rl = d.get("relief") if which == "b" else None
         if rl:  # a bearing cap: the recess in its mounting face over the turning inner ring (and the shaft end)
             g = _axial(skel, side, d, d["centre"], d["plane_z"], d["plane_z"] + sa * float(rl["depth"]))
@@ -2345,6 +2356,10 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         sa = _sgn(d)
         fc = _plane(skel, side, d, d["plane_z"], sa if which == "a" else -sa)
         out.append({"type": "face", **fc, "tol": tol, "label": "seating face" + _side_word(fc)})
+        for n, w in enumerate(d.get("passages") or []):  # an opening across the joint (master model, WORKLIST 50)
+            dw = float(w["d_a" if which == "a" else "d_b"])
+            out.append({"type": "hole", **_axial(skel, side, d, w["at"], d["plane_z"]), "d": dw, "tol": tol,
+                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)"})
     elif f["kind"] == "gear_mesh":
         z = d["teeth_a"] if which == "a" else d["teeth_b"]
         out.append({"type": "gear", "module": d["module"], "teeth": z, "c": [0.0, 0.0], "tol": tol,
@@ -2698,6 +2713,10 @@ def _layout_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict
         out.append({"code": "layout_conflict", "items": list(c.get("items") or []), "interfaces": [],
                     "parts": list(c.get("parts") or []), "connections": list(c.get("connections") or []),
                     "text": c["text"]})
+    for w in skel.get("findings") or []:  # a measured layout's findings (master model, WORKLIST 50): shown at the gate
+        out.append({"code": str(w.get("code") or "master"), "severity": str(w.get("severity") or "warning"),
+                    "items": list(w.get("items") or []), "interfaces": list(w.get("interfaces") or []),
+                    "text": str(w.get("text") or "")})
     linked = {f[w]["item"] for f in ifs for w in ("a", "b")}
     separate = set(skel.get("separate") or [])
     if len(items) > 1:
@@ -3127,7 +3146,11 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                         "bearing's outer ring is flush with the wall face, so no spigot)")
         lines.append(f"- {f['id']} {f['name']}: " + "; ".join(bits) + f" (position tolerance ±{d.get('position_tol', POS_TOL):g}).")
     cav = it.get("cavity")
-    if cav and cav.get("open_through"):  # a slot (a clevis between its lugs: graph layout's pin joint)
+    if cav and cav.get("kind") == "pocket":  # the open pocket of a master body (an L bracket's inside corner)
+        lines.append(f"- Open pocket (keep clear, {cav.get('note') or 'a mating part sits there'}): X {cav['min'][0]:g} "
+                     f"to {cav['max'][0]:g}, Y {cav['min'][1]:g} to {cav['max'][1]:g}, Z {cav['min'][2]:g} to "
+                     f"{cav['max'][2]:g} (open on {', '.join(cav.get('open') or []) or 'no side'}).")
+    elif cav and cav.get("open_through"):  # a slot (a clevis between its lugs: graph layout's pin joint)
         lines.append(f"- Slot (keep clear, {cav.get('note') or 'a part moves there'}): X {cav['min'][0]:g} to "
                      f"{cav['max'][0]:g} (open at both ends), Y {cav['min'][1]:g} to {cav['max'][1]:g}, Z "
                      f"{cav['min'][2]:g} up to the top face; lugs {cav['wall']:g} thick, floor {cav['floor']:g} mm.")

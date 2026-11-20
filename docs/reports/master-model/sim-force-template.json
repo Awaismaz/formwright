@@ -1,0 +1,518 @@
+[
+ {
+  "schema": 1,
+  "run_id": "6e11ba283b38",
+  "at": "2026-11-20T01:21:06Z",
+  "mode": "simulated",
+  "case": "bracket",
+  "title": "Bolted bracket on a base plate",
+  "letter": "d",
+  "cap": null,
+  "flags": {
+   "FW_MASTER_MODEL": "force"
+  },
+  "status": "complete",
+  "stopped": null,
+  "metrics": {
+   "wall_s": 12.95,
+   "phases": {
+    "plan": 5.11,
+    "gate": 0.39,
+    "run": 7.44,
+    "check": 0.01
+   },
+   "tokens": 70,
+   "light": false,
+   "parts": 5,
+   "pieces": 10,
+   "subs": 1,
+   "tickets": 7,
+   "instances": 10,
+   "clashes": 0,
+   "clash_check": "done",
+   "binned": 0,
+   "loose": 0,
+   "loose_names": [],
+   "placeholders": 0,
+   "blocked": 0,
+   "icd_problems": 0,
+   "interfaces": 1,
+   "questions": 0,
+   "conformance": {
+    "ok": 6,
+    "total": 6
+   },
+   "direct": 0,
+   "no_ai": 0,
+   "supervisor": 0,
+   "supervisor_asking": 0,
+   "ai_parts": 2,
+   "looks_wrong": 0,
+   "path": "master",
+   "path_words": "Laid out from a master model (forced for comparison)",
+   "path_forced": true,
+   "path_reasons": [
+    "forced"
+   ],
+   "master_s": 4.91,
+   "master_tokens": 0,
+   "master_ok": true
+  },
+  "plan_fixed": true,
+  "expectations": [
+   {
+    "id": "complete",
+    "label": "Program completes",
+    "ok": true,
+    "got": "complete",
+    "want": "complete"
+   },
+   {
+    "id": "light",
+    "label": "Light path (one-step approval)",
+    "ok": true,
+    "got": false,
+    "want": false
+   },
+   {
+    "id": "parts",
+    "label": "Part lines planned",
+    "ok": true,
+    "got": 5,
+    "want": 5
+   },
+   {
+    "id": "pieces",
+    "label": "Pieces planned",
+    "ok": true,
+    "got": 10,
+    "want": 10
+   },
+   {
+    "id": "clashes",
+    "label": "Clashes (whole-program check)",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "binned",
+    "label": "Parts in the parts bin",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "loose",
+    "label": "Loose parts",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "placeholders",
+    "label": "Placeholders left",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "blocked",
+    "label": "Tickets that stopped for the engineer",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "icd_problems",
+    "label": "Interface problems at the gate",
+    "ok": true,
+    "got": 0,
+    "want": 0
+   },
+   {
+    "id": "kinds",
+    "label": "Kinds of part",
+    "ok": true,
+    "got": {
+     "plate": 1,
+     "support": 1,
+     "fastener": 8
+    },
+    "want": {
+     "plate": 1,
+     "support": 1,
+     "fastener": 8
+    }
+   },
+   {
+    "id": "no_extras",
+    "label": "No extra kinds of part",
+    "ok": true,
+    "got": "none",
+    "want": "none"
+   },
+   {
+    "id": "conformance",
+    "label": "Parts conform to the interfaces",
+    "ok": true,
+    "got": "6 of 6 features",
+    "want": "all"
+   },
+   {
+    "id": "span.1",
+    "label": "base plate along Z",
+    "ok": true,
+    "got": [
+     -10.0,
+     0.0
+    ],
+    "want": [
+     -10.0,
+     0.0
+    ]
+   },
+   {
+    "id": "span.2",
+    "label": "bracket along Z",
+    "ok": true,
+    "got": [
+     0.0,
+     58.0
+    ],
+    "want": [
+     0.0,
+     null
+    ]
+   },
+   {
+    "id": "stacks.1",
+    "label": "hex_bolt M6 fastener stacks",
+    "ok": true,
+    "got": 2,
+    "want": 2
+   },
+   {
+    "id": "tokens",
+    "label": "Tokens",
+    "ok": null,
+    "got": 70,
+    "want": "<= 120",
+    "note": "simulated metering, not spend"
+   },
+   {
+    "id": "wall",
+    "label": "Wall time",
+    "ok": true,
+    "got": 12.95,
+    "want": "<= 240 s"
+   }
+  ],
+  "passed": true,
+  "detail": {
+   "kinds": {
+    "plate": 1,
+    "support": 1,
+    "fastener": 8
+   },
+   "tickets": [
+    {
+     "title": "Base plate",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Angle bracket",
+     "kind": "part",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 35
+    },
+    {
+     "title": "Hex bolt M6x30",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "hex_bolt",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Washer M6",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "washer",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Hex nut M6",
+     "kind": "standard",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "hex_nut",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Assemble Bracket assembly",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    },
+    {
+     "title": "Final assembly of Bolted bracket on a base plate",
+     "kind": "integration",
+     "column": "integrated",
+     "status": "done",
+     "reuse_code": "",
+     "direct": false,
+     "tokens": 0
+    }
+   ],
+   "stacks": [
+    {
+     "style": "hex_bolt",
+     "size": 6,
+     "length": {
+      "L": 30,
+      "L_min": 28.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 18.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 1.6
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 1.6
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 5.2
+       },
+       {
+        "label": "Protrusion 2 × P (P = 1)",
+        "mm": 2.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 3.6
+     }
+    },
+    {
+     "style": "hex_bolt",
+     "size": 6,
+     "length": {
+      "L": 30,
+      "L_min": 28.4,
+      "terms": [
+       {
+        "label": "Grip (clamped parts)",
+        "mm": 18.0
+       },
+       {
+        "label": "Washer under head (ISO 7089)",
+        "mm": 1.6
+       },
+       {
+        "label": "Washer under nut (ISO 7089)",
+        "mm": 1.6
+       },
+       {
+        "label": "Nut height m (ISO 4032)",
+        "mm": 5.2
+       },
+       {
+        "label": "Protrusion 2 × P (P = 1)",
+        "mm": 2.0
+       }
+      ],
+      "rule": "Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify against your company standard.",
+      "protrusion": 3.6,
+      "protrusion_threads": 3.6
+     }
+    }
+   ],
+   "warnings": [],
+   "fix": null,
+   "looks": [
+    {
+     "name": "Layout (interfaces gate)",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Assemble Bracket assembly",
+     "status": "done",
+     "verdict": "looks_assembled"
+    },
+    {
+     "name": "Final assembly of Bolted bracket on a base plate",
+     "status": "done",
+     "verdict": "looks_assembled"
+    }
+   ],
+   "supervisor": [],
+   "instances": [
+    {
+     "name": "Base plate<1>",
+     "box": [
+      -60.0,
+      -40.0,
+      -10.0,
+      60.0,
+      40.0,
+      0.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Angle bracket<1>",
+     "box": [
+      -30.0,
+      -20.0,
+      0.0,
+      30.0,
+      20.0,
+      58.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M6<1>",
+     "box": [
+      -26.0,
+      -10.0,
+      8.0,
+      -14.0,
+      2.0,
+      9.6
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex bolt ISO 4017 M6×30<1>",
+     "box": [
+      -25.773503,
+      -9.0,
+      -20.4,
+      -14.226497,
+      1.0,
+      13.6
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M6<2>",
+     "box": [
+      -26.0,
+      -10.0,
+      -11.6,
+      -14.0,
+      2.0,
+      -10.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M6<1>",
+     "box": [
+      -25.773503,
+      -9.0,
+      -16.8,
+      -14.226497,
+      1.0,
+      -11.6
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M6<3>",
+     "box": [
+      14.0,
+      -10.0,
+      8.0,
+      26.0,
+      2.0,
+      9.6
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex bolt ISO 4017 M6×30<2>",
+     "box": [
+      14.226497,
+      -9.0,
+      -20.4,
+      25.773503,
+      1.0,
+      13.6
+     ],
+     "bin": false
+    },
+    {
+     "name": "Washer ISO 7089 M6<4>",
+     "box": [
+      14.0,
+      -10.0,
+      -11.6,
+      26.0,
+      2.0,
+      -10.0
+     ],
+     "bin": false
+    },
+    {
+     "name": "Hex nut ISO 4032 M6<2>",
+     "box": [
+      14.226497,
+      -9.0,
+      -16.8,
+      25.773503,
+      1.0,
+      -11.6
+     ],
+     "bin": false
+    }
+   ]
+  },
+  "elapsed_s": 15.5,
+  "sha": "44d53c072f",
+  "dirty": true,
+  "routing": {
+   "design_agent.complex": "default",
+   "design_agent.simple": "sonnet",
+   "design_agent.edit": "sonnet",
+   "planner": "default",
+   "change_review": "default",
+   "reviewer": "default",
+   "vision": "default",
+   "render_refine": "default",
+   "draft_assist": "default",
+   "librarian": "default",
+   "reconcile": "default",
+   "office_chat": "default",
+   "assembly_check": "haiku",
+   "supervisor": "default",
+   "intent": "default",
+   "assembly_agent": "default"
+  },
+  "routing_id": "dde464",
+  "suite_id": "7e9c76a5"
+ }
+]

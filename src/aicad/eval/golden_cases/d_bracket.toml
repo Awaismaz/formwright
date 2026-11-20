@@ -13,6 +13,7 @@ brief = "An aluminium angle bracket (foot 60 x 40 x 8 mm, upright 50 mm high and
 [sim]
 plan = "d_bracket.plan.json"
 intent = "d_bracket.intent.json"  # with FW_DESIGN_GRAPH=1: a hand-written graph reply, replayed
+master = "d_bracket.master.py"  # replayed when the master path is taken (FW_MASTER_MODEL=force: comparison)
 
 [limits]
 tokens = 120

@@ -1,0 +1,12 @@
+{"source": "archie", "summary": "Handheld controller-style split housing: two moulded shells joined by four screws (an original design)", "assumptions": [
+  "Original shape, not a copy of any product: a rounded slab with a grip lobe at each end.",
+  "Screws from below through counterbored holes in the lower shell into bosses in the upper shell."],
+ "subassemblies": [
+  {"name": "Controller housing", "description": "Lower and upper shell screwed together on the split line.", "parts": [
+    {"name": "Lower shell", "family": "plastic", "complexity": 4, "qty": 1, "envelope": [150.0, 95.0, 18.0],
+     "description": "Moulded ABS lower shell 150 x 95 x 18 mm, 2 mm wall, a grip lobe at each end, four Ø3.4 screw holes counterbored Ø8 x 9 from below (in Ø11 bosses), flat split face on top."},
+    {"name": "Upper shell", "family": "plastic", "complexity": 4, "qty": 1, "envelope": [150.0, 95.0, 14.0],
+     "mounts_on": "Lower shell",
+     "description": "Moulded ABS upper shell 150 x 95 x 14 mm, 2 mm wall, four Ø7 bosses tapped M3 (Ø2.5) from the split face."},
+    {"name": "Shell screw M3x16", "family": "standard", "complexity": 1, "qty": 4, "toolbox": "shcs",
+     "description": "ISO 4762 socket head cap screw M3 x 16 from below through the lower shell into the upper shell bosses."}]}]}

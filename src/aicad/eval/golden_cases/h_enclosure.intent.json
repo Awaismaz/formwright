@@ -1,0 +1,56 @@
+{
+  "case": "h_enclosure",
+  "name": "Electronics enclosure with a screwed lid",
+  "brief": "A small electronics enclosure: a 120 x 80 x 40 mm ABS base box with 2.5 mm walls, open at the top, four Ø8 mm screw bosses in the inside corners, and a flat 120 x 80 x 3 mm lid held by four M3 x 10 socket head screws into the bosses.",
+  "recorded": "hand-written graph reply (master-model, 2026-11-20): what the intent step should return for this brief",
+  "reply": {
+    "summary": "An ABS enclosure base with four corner screw bosses and a flat lid held by four M3 screws.",
+    "components": [
+      {
+        "id": "base",
+        "kind": "housing",
+        "name": "Enclosure base",
+        "qty": 1,
+        "params": {
+          "L": 120,
+          "W": 80,
+          "H": 40
+        }
+      },
+      {
+        "id": "lid",
+        "kind": "cover",
+        "name": "Enclosure lid",
+        "qty": 1,
+        "params": {
+          "L": 120,
+          "W": 80,
+          "H": 3
+        }
+      },
+      {
+        "id": "screw",
+        "kind": "fastener",
+        "name": "Lid screw M3x10",
+        "qty": 4,
+        "params": {
+          "style": "shcs",
+          "size": 3,
+          "length": 10
+        }
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bolted_joint",
+        "host": "base",
+        "guest": "lid",
+        "via": [
+          "screw"
+        ]
+      }
+    ],
+    "assumptions": [],
+    "questions": []
+  }
+}

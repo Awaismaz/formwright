@@ -9,26 +9,33 @@ import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
 import SpeedPanel from "./SpeedPanel";
 import DesignGraphCard, { GraphQuestions } from "./DesignGraph";
+import LayoutPathCard from "./MasterModel";
 import { estimateMinutes, fmtEta, fmtMinutes, planPreview } from "./model";
 import type { Family, Plan, PlanPart, Program } from "./types";
 
 const PLANNING_LINES = ["Reading the brief", "Finding the sub-assemblies", "Deciding what is bought out", "Choosing part families",
   "Sizing each part's complexity", "Checking what fits the Toolbox", "Laying out the work"];
+const MASTER_LINES = ["Modelling every part in one coordinate system", "Placing each body against what carries it",
+  "Lining up the screw holes across each joint", "Measuring the joints from the model", "Checking nothing overlaps or floats"];
 
 /** Archie at work: shown while the planning turn runs (typically well under a minute). */
 export function Planning({ program }: { program: Program }) {
   const [i, setI] = useState(0);
   const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => setI(x => (x + 1) % PLANNING_LINES.length), 2400); return () => clearInterval(t); }, []);
+  const master = program.planning?.stage === "master";
+  const lines = master ? MASTER_LINES : PLANNING_LINES;
+  useEffect(() => { const t = setInterval(() => setI(x => (x + 1) % lines.length), 2400); return () => clearInterval(t); }, [lines.length]);
   useEffect(() => { const t = setInterval(() => tick(x => x + 1), 1000); return () => clearInterval(t); }, []);
   const since = program.planning?.started_at ? Math.max(0, Math.round((Date.now() - new Date(program.planning.started_at).getTime()) / 1000)) : 0;
   return (
     <Card className="mx-auto flex max-w-xl flex-col items-center px-6 py-12 text-center">
       <AgentAvatar code="archie" state="working" size={112} />
-      <div className="mt-5 text-[17px] font-semibold">Archie is planning {program.name}</div>
-      <div role="status" aria-live="polite" key={i} className="mt-1 animate-fade-in text-[14px] text-primary">{PLANNING_LINES[i]}…</div>
+      <div className="mt-5 text-[17px] font-semibold">{master ? `Archie is modelling a master of ${program.name}` : `Archie is planning ${program.name}`}</div>
+      <div role="status" aria-live="polite" key={i} className="mt-1 animate-fade-in text-[14px] text-primary">{lines[i % lines.length]}…</div>
       <div className="mt-1 text-[12px] tabular-nums text-muted">{Math.floor(since / 60)}:{String(since % 60).padStart(2, "0")}</div>
-      <p className="mt-5 max-w-sm text-[12.5px] text-muted">You'll review and edit the plan before any ticket opens. If Archie can't finish, you get the standard breakdown instead, clearly labelled.</p>
+      <p className="mt-5 max-w-sm text-[12.5px] text-muted">{master
+        ? (program.plan?.layout_path?.reasons?.[0]?.text ?? "This structure has no known connection pattern.") + " The layout and the interfaces are measured from that one model. If it can't be made, the fast path lays the program out, clearly labelled."
+        : "You'll review and edit the plan before any ticket opens. If Archie can't finish, you get the standard breakdown instead, clearly labelled."}</p>
     </Card>
   );
 }
@@ -144,6 +151,7 @@ export default function PlanReview({ program }: { program: Program }) {
             <p className="mt-1 whitespace-pre-line">{program.brief}</p></details>
         </Card>
 
+        {program.plan && <LayoutPathCard plan={program.plan} />}
         {program.plan?.graph && <GraphQuestions program={program} graph={program.plan.graph} />}
         {program.plan?.graph && <DesignGraphCard graph={program.plan.graph} />}
 

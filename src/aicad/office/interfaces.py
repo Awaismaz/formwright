@@ -81,7 +81,11 @@ def _graph_layout(doc: dict[str, Any], overrides: dict[str, Any] | None
     """A program planned from a design graph is laid out from its connections (``graph/layout.py``); None for the
     others (and when the solver can't lay the graph out yet: the template layout then, said in its notes)."""
     from aicad.graph import layout
+    from aicad.master import skeleton as master_skeleton
 
+    measured = master_skeleton.build_for_doc(doc, overrides)  # the master path (WORKLIST 50): measured, not solved
+    if measured is not None:
+        return measured
     out = layout.build_for_doc(doc, overrides)
     why = doc.pop("_layout_fallback", None)
     if out is None and why and layout.graph_of(doc.get("plan")) is not None:

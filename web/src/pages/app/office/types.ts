@@ -13,6 +13,18 @@ export interface PlanSub { id: string; name: string; description: string; parts:
 export interface Plan {
   source: "archie" | "standard"; summary: string; assumptions: string[]; subassemblies: PlanSub[];
   narrative?: string; note?: string | null; edited?: boolean; graph?: PlanGraph;
+  layout_path?: LayoutPath; master?: PlanMaster;
+}
+
+/** How the office lays the program out (WORKLIST 50): the fast path or a master model, decided by a fixed rule. */
+export interface LayoutPath {
+  path: "fast" | "master" | "pending"; words: string; reasons: { code: string; text: string }[];
+  state?: "modelling" | "done" | "fallback"; fallback?: string | null; mode?: string;
+}
+export interface PlanMaster {
+  ok: boolean; error?: string | null; tokens?: number; seconds?: { total?: number } | null;
+  summary?: { bodies: number; interfaces: number; bolted: number; faces: number; fits: number };
+  graph?: PlanGraph; errors?: string[]; warnings?: string[]; notes?: string[];
 }
 
 /** The design graph behind a plan (architecture v2): a readable list of parts and connections, and open questions. */
@@ -185,7 +197,7 @@ export interface Constants {
 
 export interface Program {
   id: string; name: string; brief: string; key: string; status: ProgramStatus; planner: "archie" | "standard";
-  planning: { started_at: string; notes: string } | null; plan: Plan | null;
+  planning: { started_at: string; notes: string; stage?: "master" } | null; plan: Plan | null;
   plan_estimate?: { tickets: number; estimate_min: number; eta: Eta };
   gates: Gate[]; items: Item[]; tickets: Ticket[]; columns: { code: Column; label: string }[];
   counts: Record<Column, number>; rollup: Rollup | null; eta: Eta | null; concurrency: number;
