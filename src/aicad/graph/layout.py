@@ -2442,6 +2442,27 @@ class _Layout:
             if gb not in self.phase:
                 self.phase[gb] = round(((th + 180.0) - w * pb) % pb, 6)
             d["phase_b"] = self.phase[gb]
+        for f in self.ifs:  # then each ring gear from its first pinion (planet copy 0), now phased
+            d = f["data"]
+            if f["kind"] != "gear_mesh" or not d.get("internal"):
+                continue
+            ring = "a" if int(d["teeth_a"]) > int(d["teeth_b"]) else "b"
+            pin = "b" if ring == "a" else "a"
+            if int(f[pin].get("copy") or 0) > 0:
+                continue
+            gr, gp = f[ring]["item"], f[pin]["item"]
+            # a ring gear is modelled with a tooth SPACE centred on +X (fw_std.internal_gear); both look outward from
+            # the ring's axis along the line to the pinion, so the line measured from a ring space equals the line
+            # measured from a pinion tooth (in pitches): u_ring = v_pinion
+            v = frames.apply(frames.transpose(icd.CANON[icd.ax_of(d)]),
+                             icd.point3(icd.ax_of(d), [d[f"axis_{pin}"][0] - d[f"axis_{ring}"][0],
+                                                       d[f"axis_{pin}"][1] - d[f"axis_{ring}"][1]], 0.0))
+            th = math.degrees(math.atan2(v[1], v[0]))
+            pp, pr = 360.0 / d[f"teeth_{pin}"], 360.0 / d[f"teeth_{ring}"]
+            vp = ((th - self.phase.get(gp, 0.0)) % pp) / pp
+            if gr not in self.phase:
+                self.phase[gr] = round((th - vp * pr) % pr, 6)
+            d[f"phase_{ring}"] = self.phase[gr]
 
     # ------------------------------------------------------------------ 7. the skeleton document
     def _skeleton(self) -> dict[str, Any]:

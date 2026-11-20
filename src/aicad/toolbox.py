@@ -265,6 +265,32 @@ def _spur_gear(M: float, Z: float, B: float, BORE: float, KEY_B: float = 0.0, KE
     return part, {"bbox": exp["bbox"], "volume": exp["volume"], "solids": 1}
 
 
+def _internal_gear(M: float, Z: float, B: float, OD: float, N: float = 0, PCD: float = 0.0,
+                   HOLE: float = 0.0) -> tuple[Any, dict[str, Any]]:
+    """Ring gear (internal spur gear) with a plain rim OD and optional axial holes on a PCD through the rim. Same
+    working backlash as the spur gear (0.04 m), so a Toolbox pinion meshes at m (Z - z) / 2 without touching."""
+    from aicad import fw_std
+
+    z = round(Z)
+    if z < 30 or z > 300 or abs(Z - z) > 1e-9:
+        raise ToolboxError("teeth must be a whole number between 30 and 300")
+    if M <= 0 or B <= 0:
+        raise ToolboxError("module and face width must be positive")
+    root = M * (z + 2.5)
+    if OD < root + M:
+        raise ToolboxError(f"the rim OD must be at least Ø{root + M:g} (root Ø {root:g} plus a rim)")
+    holes = None
+    if N:
+        if PCD <= 0 or HOLE <= 0:
+            raise ToolboxError("holes need a PCD and a hole Ø")
+        holes = (int(N), PCD, HOLE)
+    try:
+        part, exp = fw_std.internal_gear(M, z, B, rim_od=OD, backlash=0.04 * M, holes=holes, name="Internal teeth")
+    except ValueError as e:
+        raise ToolboxError(str(e)) from None
+    return part, {"bbox": exp["bbox"], "volume": exp["volume"], "solids": 1}
+
+
 def _key_for(D: float) -> tuple[float, float]:
     for (lo, hi), v in KEYS:
         if lo < D <= hi:
@@ -427,6 +453,16 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
               lambda p: f"Spur gear m{p['M']:g} z{int(p['Z'])}" + (
                   f", keyed {p['KEY_B']:g}×{p['KEY_T2']:g}" if p.get("KEY_B") else ""),
               "True involute flanks (smooth splines), no profile shift. Optional DIN 6885 hub keyway.", "cog"),
+    Component("internal_gear", "Ring gear (internal)", "Power transmission", "ISO 53 profile, α = 20°, internal",
+              ["ring gear", "internal gear", "annulus", "annular gear", "planetary ring"],
+              [P("M", "Module", 2, min=0.3, max=20), P("Z", "Teeth", 72, unit="", min=30, max=300, integer=True),
+               P("B", "Face width", 15, min=1, max=300), P("OD", "Rim outside Ø", 170, min=10, max=2000),
+               P("N", "Holes", 0, unit="", min=0, max=48, integer=True, help="Axial holes through the rim; 0 = none"),
+               P("PCD", "Hole PCD", 0, min=0, max=2000), P("HOLE", "Hole Ø", 0, min=0, max=100)],
+              "Steel C45", _internal_gear,
+              lambda p: f"Ring gear m{p['M']:g} z{int(p['Z'])} internal, OD {p['OD']:g}",
+              "True involute internal teeth (smooth splines), no profile shift: tip Ø m(z - 2), root Ø m(z + 2.5), "
+              "a tooth space centred on +X. Plain rim, optional holes on a PCD.", "cog"),
     Component("parallel_key", "Parallel key", "Pins & keys", "DIN 6885-1 form A",
               ["parallel key", "feather key", "6885", "key", "keys"],
               [P("D", "Shaft diameter", 20, min=8, max=65, help="b × h from DIN 6885-1 for the shaft Ø"),
@@ -577,7 +613,7 @@ def match(prompt: str) -> list[dict[str, Any]]:
             if b and int(b.group(1)) in BEARING:
                 vals["SERIES"] = float(b.group(1))
                 score += 2
-        if c.code == "spur_gear":
+        if c.code in ("spur_gear", "internal_gear"):
             # "m2 z60" / "m2 20T" (the usual gear shorthand) first; the spelled-out forms override them
             for pat, key in ((r"\bm\s?" + _NUM + r"(?![\d.]|\s*[x×])", "M"), (r"\bz\s?(\d{2,3})\b", "Z"),
                              (r"\b(\d{2,3})\s?t\b", "Z"),

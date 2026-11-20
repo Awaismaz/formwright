@@ -913,6 +913,8 @@ def toolbox_gear_for(doc: dict[str, Any], item_id: str, params: dict[str, Any]) 
 
     skel = doc["skeleton"]
     it = skel["items"][item_id]
+    if it.get("internal"):
+        return None, "it is an internal (ring) gear, not a spur gear"
     B = float(it["face_width"])
     if abs(float(it["size"][2]) - B) > 1e-6:
         return None, "its envelope is longer than its face width (a hub)"
