@@ -14,7 +14,9 @@ typical mechanism, built from the approved interfaces with no AI.
 * ``bracket``  L brackets with gussets (foot, upright and gussets from ``fw.gusset``);
 * ``pulley``   plain belt pulleys (rim, web, hub), timing pulleys simplified to their pitch Ø, sprockets simplified
   to their pitch Ø, with the ICD's bore and hub keyway;
-* ``coupling`` rigid sleeve couplings and set-screw collars.
+* ``coupling`` rigid sleeve couplings and set-screw collars;
+* ``ring_gear`` the internal gear of a planetary set (``fw_std.internal_gear``): involute internal teeth through the
+  ring, a plain rim to the envelope (or the ICD's fitted OD), the ICD's axial holes through the rim.
 
 Each generator reads the part's interface features (``icd.item_features``) and, when the program has a design
 graph, the component's parameters (style, sizes), and writes a normal Studio script: ``PARAMS`` with
@@ -426,6 +428,8 @@ def kind_of(doc: dict[str, Any], item: str, name: str, desc: str) -> str | None:
     g = graph_component(doc, name) or {}
     gk = g.get("kind")
     role = it.get("role")
+    if role == "gear" and it.get("internal") and it.get("module") and it.get("teeth"):
+        return "ring_gear"  # the internal gear of a planetary set
     if role == "block" and it.get("shape") == "box":
         cav = it.get("cavity") or {}
         if cav and cav.get("wall") is not None and any(
@@ -994,7 +998,8 @@ _KIND_RX = {"housing": re.compile(r"housing|casing|\bcase\b|gear ?box|\bbase\b",
             "pulley": re.compile(r"\bpulleys?\b|\bsprockets?\b|\bsheaves?\b", re.IGNORECASE),
             "coupling": re.compile(r"\bcouplings?\b", re.IGNORECASE),
             "collar": re.compile(r"\bcollars?\b", re.IGNORECASE),
-            "hub": re.compile(r"\bhubs?\b|\btubes?\b|\bdrums?\b|\bwheels?\b|\bflanges?\b", re.IGNORECASE)}
+            "hub": re.compile(r"\bhubs?\b|\btubes?\b|\bdrums?\b|\bwheels?\b|\bflanges?\b", re.IGNORECASE),
+            "ring_gear": re.compile(r"\bring gears?\b|\binternal gears?\b|\bannulus\b", re.IGNORECASE)}
 _HOLE_CLAUSE = re.compile(r"\bholes?\b|\bbores?\b", re.IGNORECASE)
 _THREAD_M = re.compile(r"(?<![\w.])M(\d{1,2})(?:\s*[x×]\s*\d+(?:\.\d+)?)?\b")
 
@@ -1043,6 +1048,8 @@ def _exempt(what: str, m: re.Match[str], src: str, allowed: set[str], m_ok: set[
         return threaded
     if what == "a hex or square":
         return bool(_FASTENER_AFTER.match(src[m.end():]))
+    if what == "a special gear form" and word.lower().startswith("internal gear") and "internal gear" in allowed:
+        return True  # the ring gear generator makes internal teeth (and no other special gear form)
     return what in allowed
 
 
@@ -1083,10 +1090,11 @@ def extras(kind: str, spec: dict[str, Any], name: str, desc: str, program: str,
 DEFAULT_MATERIAL = {"housing": "Aluminium 6061-T6", "cover": "Aluminium 6061-T6", "cap": "Steel 1018 (low carbon)",
                     "plate": "Steel 1018 (low carbon)", "bracket": "Steel 1018 (low carbon)",
                     "pulley": "Aluminium 6061-T6", "coupling": "Steel 1045 (medium carbon)",
-                    "collar": "Steel 1045 (medium carbon)", "hub": "Steel 1045 (medium carbon)"}
+                    "collar": "Steel 1045 (medium carbon)", "hub": "Steel 1045 (medium carbon)",
+                    "ring_gear": "Steel 1045 (medium carbon)"}
 ALLOW_WORDS = {"housing": ("chamfer",), "cover": (), "plate": (), "bracket": ("fillet", "radius", "rounded"),
                "cap": ("spigot", "chamfer", "recess"), "pulley": ("groove", "web", "chamfer", "step"),
-               "coupling": ("chamfer", "step"), "collar": ("chamfer",), "hub": ("chamfer",)}
+               "coupling": ("chamfer", "step"), "collar": ("chamfer",), "hub": ("chamfer",), "ring_gear": ()}
 
 
 def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -> dict[str, Any]:
@@ -1097,7 +1105,7 @@ def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -
     cx = Ctx(doc, item, name, desc)
     builder = {"housing": block_spec, "cover": block_spec, "plate": block_spec}.get(kind)
     other = {"cap": cap_spec, "bracket": bracket_spec, "pulley": pulley_spec, "coupling": coupling_spec, "hub": hub_spec,
-             "collar": collar_spec}.get(kind)
+             "collar": collar_spec, "ring_gear": ring_gear_spec}.get(kind)
     if builder is not None:
         spec = builder(kind, cx)
     elif other is not None:
@@ -1107,7 +1115,7 @@ def plan_part(kind: str, doc: dict[str, Any], item: str, name: str, desc: str) -
     material = direct._material(desc) or _graph_material(cx) or DEFAULT_MATERIAL[kind]
     writer = {"housing": block_script, "cover": block_script, "plate": block_script, "cap": cap_script,
               "bracket": bracket_script, "pulley": pulley_script, "coupling": coupling_script, "hub": coupling_script,
-              "collar": collar_script}[kind]
+              "collar": collar_script, "ring_gear": ring_gear_script}[kind]
     script = writer(spec, name, material, cx.icd_version)
     ex = extras(kind, spec, name, desc, program_sentences(str(doc.get("brief") or ""), kind), ALLOW_WORDS.get(kind, ()))
     return {"kind": kind, "script": script, "summary": spec["summary"], "material": material,
@@ -1768,4 +1776,130 @@ def collar_script(spec: dict[str, Any], name: str, material: str, icd_version: i
            "# removed: half the cross hole through the full ring less the half through the bore (by symmetry)",
            'volume = info["volume"] - (fw.cross_hole_volume(OD, SET_SCREW_D) - fw.cross_hole_volume(BORE, SET_SCREW_D)) / 2',
            "", "result = part", 'EXPECTED = {"bbox": info["bbox"], "volume": volume, "solids": 1}', ""]
+    return "\n".join(out)
+
+
+# ============================================================================ ring gears (internal, planetary)
+def ring_gear_spec(cx: Ctx) -> dict[str, Any]:
+    """An internal ring gear: the ICD's internal mesh (module, teeth, pressure angle), its seating faces, the rim
+    Ø (the envelope, or a centred boss the ICD fits into the housing) and any axial holes through the rim."""
+    it = cx.it
+    m, z, B = float(it["module"]), int(it["teeth"]), float(it["face_width"])
+    OD, H = float(it["size"][0]), float(it["size"][2])
+    if B > H + 1e-6:
+        raise Undetermined(f"the ring is {_g(H)} long but the mesh face width is {_g(B)}")
+    alpha = icd.PRESSURE_ANGLE
+    mesh: list[dict[str, Any]] = []
+    faces: list[dict[str, Any]] = []
+    holes: list[dict[str, Any]] = []
+    od_fit = None
+    for x in cx.feats:
+        if x.get("ax"):
+            raise Undetermined(f"{x['label']} is off the ring's axis")
+        if x["type"] == "gear":
+            if not x.get("internal"):
+                raise Undetermined(f"{x['label']}: the ICD meshes this ring as an external gear")
+            if abs(float(x["module"]) - m) > 1e-6 or int(x["teeth"]) != z:
+                raise Undetermined(f"the mesh asks for {x['label']}, the layout for m{_g(m)} × {z}")
+            for iid in [x["if"], *(x.get("also") or [])]:
+                f = cx.byif[iid]
+                alpha = float(f["data"].get("pressure_angle") or alpha)
+                mesh.append({"if": iid, "mate": cx.other(f), "a": float(f["data"]["centre_distance"])})
+        elif x["type"] == "face" and abs(abs(float(x["z"])) - H / 2) < 0.01 and int(x["n"]) * float(x["z"]) > 0:
+            faces.append(x)
+        elif x["type"] == "boss" and abs(float(x["c"][0])) < 1e-6 and abs(float(x["c"][1])) < 1e-6 \
+                and x.get("z0") is None and od_fit is None:
+            OD, od_fit = float(x["d"]), x  # the rim fitted into the housing bore
+        elif x["type"] == "hole" and math.hypot(float(x["c"][0]), float(x["c"][1])) > 1e-6:
+            holes.append(x)
+        else:
+            raise Undetermined(f"{x['label']} is not a ring gear feature this can build")
+    if not mesh:
+        raise Undetermined("the ring has no internal mesh in its interfaces")
+    root, tip = m * (z + 2.5), m * (z - 2)
+    if OD < root + m - 1e-6:
+        raise Undetermined(f"a Ø{_g(OD)} rim leaves less than half a module behind the Ø{_g(root)} root circle")
+    fit = od_fit.get("fit") if od_fit else None
+    S = Script()
+    S.p("MODULE", m, "mm (the planet / ring mesh)", "Teeth", "Module", lo=0.5, hi=10, step=0.25)
+    S.p("LENGTH", H, "ring length along the axis, mm (ICD envelope; the teeth run through it)", "Ring", "Length",
+        lo=max(1.0, B), step=0.5)
+    S.p("RIM_OD", OD, "rim outside Ø, mm (" + (f"fitted into the housing, {fit}" if fit else "ICD envelope") + ")",
+        "Ring", "Rim outside Ø", lo=round(root + m, 1), hi=round(max(2 * OD, OD + 20), 1))
+    S.p("PRESSURE_ANGLE", alpha, "degrees", "Teeth", "Pressure angle", lo=14.5, hi=25, step=0.5, unit="°")
+    rows: list[tuple[Any, str]] = []
+    for k, h in enumerate(holes, start=1):
+        cxy = (float(h["c"][0]), float(h["c"][1]))
+        r = math.hypot(*cxy)
+        d = float(h["d"])
+        if r - d / 2 < root / 2 + 0.5 or r + d / 2 > OD / 2 - 0.5:
+            raise Undetermined(f"{h['label']} (Ø{_g(d)} at {_g(r)} from the axis) is not inside the rim, between "
+                               f"Ø{_g(root + 1)} and Ø{_g(OD - 1)}")
+        span = (float(h["z0"]), float(h["z1"])) if h.get("z0") is not None else (-H / 2, H / 2)
+        if span[0] < -H / 2 - 1e-6 or span[1] > H / 2 + 1e-6 or not (
+                abs(span[0] + H / 2) < 1e-6 or abs(span[1] - H / 2) < 1e-6):
+            raise Undetermined(f"{h['label']} doesn't open on a face of the ring")
+        row: dict[str, Any] = {"name": f"Hole {k}", "c": cxy, "d": d, "span": span}
+        if h.get("thread"):
+            size = int(str(h["thread"]).lstrip("M"))
+            row["thread"] = f"M{size}x{_pitch(size):g}"
+        rows.append((row, f"{h['if']} {h['label']}"))
+    from aicad.office import direct
+
+    lines = [f"{', '.join(ids)}  mesh with the {mate}: m{_g(m)} × {z} internal teeth, α {_g(alpha)}°, centre "
+             f"distance {_g(a)} (m (z ring - z pinion) / 2)" for ids, mate, a in direct.mesh_groups(mesh)]
+    for f in faces:
+        lines.append(f"{f['if']}  {f['label']} at Z {_g(f['z'])}")
+    if od_fit:
+        lines.append(f"{od_fit['if']}  {od_fit['label']}: rim Ø{_g(OD)} {fit or ''}".rstrip())
+    for row, why in rows:
+        lines.append(f"{why}: Ø{_g(row['d'])} at ({_g(row['c'][0])}, {_g(row['c'][1])}), Z {_g(row['span'][0])} to "
+                     f"{_g(row['span'][1])}")
+    notes = [(f"Internal involute teeth, profile shift 0: tip Ø m (z - 2) = {_g(tip)}, root Ø m (z + 2.5) = {_g(root)}, "
+              "a tooth space centred on +X (where an external gear of the same tooth count has a tooth)."),
+             "Working backlash 0.04 x module (each tooth space widened at the pitch circle), as the Toolbox gears.",
+             f"The teeth run through the whole ring length ({_g(H)}); the mesh face width is {_g(B)}."]
+    if not od_fit and not holes:
+        notes.append(f"Rim: a plain Ø{_g(OD)} outside (the envelope), to press or clamp into the housing as the ICD "
+                     "seats it.")
+    known = {m, float(z), B, H, OD, tip, root, m * z, *(x["a"] for x in mesh), *(float(r["d"]) for r, _w in rows)}
+    summary = (f"ring gear m{_g(m)} × {z} internal teeth, Ø{_g(OD)} × {_g(H)}"
+               + (f", {len(rows)} hole{'s' if len(rows) != 1 else ''}" if rows else ""))
+    m_sizes = {int(str(r["thread"]).split("x")[0].lstrip("M")) for r, _w in rows if r.get("thread")}
+    return {"kind": "ring_gear", "S": S, "z": z, "rows": rows, "lines": lines, "notes": notes, "known": known,
+            "summary": summary, "n_features": 1 + len(faces) + len(rows) + (1 if od_fit else 0),
+            "allowed": {"internal gear", "a hole", "a thread"} if rows else {"internal gear"}, "m_sizes": m_sizes,
+            "cuts": [({"d": r["d"], "thread": r.get("thread")}, "") for r, _w in rows]}
+
+
+def ring_gear_script(spec: dict[str, Any], name: str, material: str, icd_version: int) -> str:
+    S: Script = spec["S"]
+    block = S.block()
+    block.insert(1, f"TEETH = {spec['z']}  # internal teeth")
+    block = [b.replace("PARAMS = dict(MODULE=MODULE, ", "PARAMS = dict(MODULE=MODULE, TEETH=TEETH, ") for b in block]
+    block = [b.replace("PARAM_META = {", 'PARAM_META = {\n    "TEETH": {"min": 20, "max": 400, "step": 1, '
+                                         '"group": "Teeth", "label": "Number of teeth"},') for b in block]
+    rows = spec["rows"]
+    out = [header(name, "internal ring gear", icd_version, spec["lines"], spec["notes"]), *_imports(bool(rows)),
+           f'NAME = "{name}"', f'MATERIAL = "{material}"', "", *block, ""]
+    out += ["# true involute internal teeth through the ring, a tooth space centred on +X; Z from -LENGTH / 2 to",
+            "# +LENGTH / 2; a working backlash of 0.04 x MODULE so the pinions' flanks clear",
+            "part, ring = fw_std.internal_gear(MODULE, TEETH, LENGTH, rim_od=RIM_OD, pressure_angle=PRESSURE_ANGLE,",
+            "                                  backlash=0.04 * MODULE, z0=-LENGTH / 2)",
+            'volume = ring["volume"]  # the rim disc less the toothed bore, integrated by hand (no CAD kernel)']
+    if rows:
+        out += ["", "# holes through the rim: position (X, Y), Ø, span along Z", *_rows("holes", rows),
+                "for h in holes:",
+                '    z0, z1 = h["span"]',
+                "    lo = z0 - 0.5 if z0 <= -LENGTH / 2 + 1e-6 else z0  # run the tool out of the face it opens on",
+                "    hi = z1 + 0.5 if z1 >= LENGTH / 2 - 1e-6 else z1",
+                ('    tool = Pos(h["c"][0], h["c"][1], lo) * Cylinder(h["d"] / 2, hi - lo, '
+                 "align=(Align.CENTER, Align.CENTER, Align.MIN))"),
+                '    part = fw.feature(h["name"], part - tool, d=h["d"])',
+                '    volume -= math.pi / 4 * h["d"] ** 2 * (z1 - z0)',
+                '    if h.get("thread"):',
+                ('        part = fw.thread(part, (h["c"][0] + h["d"] / 2, h["c"][1], (z0 + z1) / 2), h["thread"], '
+                 "depth=z1 - z0)")]
+    out += ["", "result = part", 'EXPECTED = {"bbox": ring["bbox"], "volume": volume, "solids": 1}',
+            '# tip Ø = MODULE × (TEETH - 2), root Ø = MODULE × (TEETH + 2.5) (ring["gear"] has them)', ""]
     return "\n".join(out)

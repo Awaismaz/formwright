@@ -26,7 +26,7 @@ from typing import Any
 
 from aicad.office import icd, interfaces
 
-VERSION = 1
+VERSION = 2  # 2: designed gears carry a 0.04 m working backlash; bearing seats in gears (planets); ring gears
 ENV = "FW_OFFICE_DIRECT"  # "0" turns the direct path off (measurements, or an operational kill switch)
 LABEL = "Built from the interface spec (no AI)"
 
@@ -175,7 +175,7 @@ def _kind(it: dict[str, Any], text: str) -> str | None:
     if role == "shaft" and it.get("shape") == "cylinder":
         return "shaft"
     if role == "gear" and it.get("module") and it.get("teeth") and not it.get("internal"):
-        return "gear"  # (an internal ring gear has no generator here: the design agent makes it)
+        return "gear"  # (an internal ring gear goes to the generators: kind "ring_gear")
     if role == "hub" and it.get("shape") == "cylinder" and _SPACERY.search(text) and not _GEARY.search(text):
         return "spacer"
     return None
@@ -430,12 +430,21 @@ def _gear_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: dic
     alpha = icd.PRESSURE_ANGLE
     mesh = []
     faces = []
-    for x in icd.item_features(sk, ifs, item):
+    seats: list[dict[str, Any]] = []
+    inner: list[dict[str, Any]] = []  # faces inside the gear: a bearing seat's shoulder
+    feats = icd.item_features(sk, ifs, item)
+    for x in feats:
         if x.get("ax"):
             raise Undetermined(f"{x['label']} is off the gear axis")
         if x["type"] == "hole" and _centred(x) and x.get("z0") is None and bore is None:
             bore, bore_if = float(x["d"]), x["if"]
+        elif x["type"] == "seat" and _centred(x) and byid[x["if"]]["kind"] == "bearing_seat":
+            seats.append(x)  # a planet on its bearing: the seat is bored into the gear, ending on a shoulder
+        elif x["type"] == "face" and abs(float(x["z"])) < B / 2 - 0.01 and any(f["type"] == "seat" for f in feats):
+            inner.append(x)
         elif x["type"] == "gear":
+            if x.get("internal"):
+                raise Undetermined(f"{x['label']}: an internal gear is not a spur gear")
             if abs(float(x["module"]) - m) > TOL or int(x["teeth"]) != z:
                 raise Undetermined(f"the mesh asks for {x['label']}, the layout for m{m:g} × {z}")
             for iid in [x["if"], *(x.get("also") or [])]:
@@ -453,11 +462,20 @@ def _gear_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: dic
             faces.append(x)
         else:
             raise Undetermined(f"{x['label']} is not a gear feature this can build")
+    rf = m * z / 2 - 1.25 * m
+    seat_specs = _gear_seats(seats, inner, byid, B, rf, m)
+    if seat_specs and keyway is not None:
+        raise Undetermined("a keyway in a gear that runs on its own bearing")
+    if seat_specs and bore is None:  # the through bore is the shoulder the bearing's outer ring bears on
+        bore = max(s["shoulder"] for s in seat_specs)
     if bore is None:
         raise Undetermined("the gear has no bore in its interfaces")
-    rf = m * z / 2 - 1.25 * m
     if bore / 2 >= rf - 0.5 * m:
         raise Undetermined(f"the Ø{bore:g} bore leaves no rim under the teeth")
+    for s in seat_specs:
+        if not bore < s["d"] or bore <= s["clear"]:
+            raise Undetermined(f"the Ø{bore:g} bore doesn't leave a shoulder for the Ø{s['d']:g} seat over the "
+                               f"Ø{s['clear']:g} the bearing's inner ring needs")
     if keyway is not None:
         from aicad import fw_std
 
@@ -473,10 +491,56 @@ def _gear_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: dic
         known |= {keyway["b"], keyway["t2"]}
         kd = byid[keyway["if"]]["data"]
         known |= {float(kd[x]) for x in ("h", "t1", "length") if kd.get(x) is not None}
+    for s in seat_specs:
+        known |= {s["d"], s["depth"], s["shoulder"], *s["bearing"]}
     summary = f"spur gear m{m:g} × {z} teeth, face {B:g}, bore Ø{bore:g}" + (" with a keyway" if keyway else "")
+    if seat_specs:
+        summary = (f"spur gear m{m:g} × {z} teeth, face {B:g}, "
+                   + " and ".join(f"bearing seat Ø{s['d']:g} {s['fit'] or ''} × {s['depth']:g}".replace("  ", " ")
+                                  for s in seat_specs) + f" on a Ø{bore:g} shoulder")
     return {"m": m, "z": z, "B": B, "bore": bore, "bore_if": bore_if, "alpha": alpha, "keyway": keyway,
             "keyways": [keyway] if keyway else [], "mesh": mesh, "faces": faces, "known": known, "summary": summary,
-            "n_features": 2 + len(faces) + (1 if keyway else 0)}
+            "seats": seat_specs, "n_features": 2 + len(faces) + (1 if keyway else 0) + 2 * len(seat_specs)}
+
+
+def _gear_seats(seats: list[dict[str, Any]], inner: list[dict[str, Any]], byid: dict[str, dict[str, Any]], B: float,
+                rf: float, m: float) -> list[dict[str, Any]]:
+    """Bearing seats bored into a gear (a planet on its bearing): each opens on one gear face and ends on the
+    shoulder face the ICD gives (normal -Z at the seat's +Z end: bored from the -Z face; +Z at its -Z end: from the
+    +Z face). The through bore behind the shoulder clears the bearing's inner ring: the interface's shoulder Ø when
+    it gives one, else D - (D - d) / 4 rounded down to 0.5 mm (inside the outer ring's face; verify against the
+    bearing maker's abutment Ø Da max)."""
+    out: list[dict[str, Any]] = []
+    used: set[int] = set()
+    for x in seats:
+        z0, z1, D = float(x["z0"]), float(x["z1"]), float(x["d"])
+        k = next((i for i, f in enumerate(inner) if i not in used and (
+            (int(f["n"]) < 0 and abs(float(f["z"]) - z1) < 0.01) or (int(f["n"]) > 0 and abs(float(f["z"]) - z0) < 0.01))),
+            None)
+        if k is None:
+            raise Undetermined(f"{x['label']} has no shoulder in the interfaces")
+        used.add(k)
+        f = inner[k]
+        side = -1 if int(f["n"]) < 0 else 1
+        depth = float(f["z"]) + B / 2 if side < 0 else B / 2 - float(f["z"])
+        d = byid[x["if"]]["data"]
+        bd = float(d.get("d") or 0.0)
+        given = next((float(d[k2]) for k2 in ("shoulder_d", "abutment_d", "Da_max", "da_housing") if d.get(k2)), None)
+        shoulder = given if given else math.floor(2 * (D - (D - bd) / 4)) / 2
+        # the shoulder must stay outside the bearing's pitch circle (clear of the turning inner ring) and the pin
+        clear = max(float(d.get("clearance_d") or 0.0), (bd + D) / 2 if bd else 0.0)
+        if D / 2 >= rf - 0.5 * m:
+            raise Undetermined(f"the Ø{D:g} bearing seat leaves no rim under the teeth")
+        out.append({"if": x["if"], "also": x.get("also") or [], "d": D, "fit": x.get("fit"), "z0": z0, "z1": z1,
+                    "side": side, "depth": round(depth, 4), "shoulder": shoulder, "shoulder_given": bool(given),
+                    "clear": round(clear, 4), "label": x["label"], "face_if": f["if"],
+                    "designation": d.get("designation"),
+                    "bearing": [float(d[k2]) for k2 in ("d", "D", "B") if d.get(k2) is not None]})
+    if len(used) != len(inner):
+        raise Undetermined("a face inside the gear is not a bearing shoulder")
+    if len({s["side"] for s in out}) != len(out) or sum(s["depth"] for s in out) >= B - 0.5:
+        raise Undetermined("the bearing seats leave no shoulder in the gear")
+    return out
 
 
 def _spacer_spec(sk: dict[str, Any], ifs: list[dict[str, Any]], item: str, it: dict[str, Any]) -> dict[str, Any]:
@@ -719,12 +783,35 @@ def fw_din(d: float) -> dict[str, float]:
     return fw_std.din6885(d)
 
 
+def mesh_groups(mesh: list[dict[str, Any]]) -> list[tuple[list[str], str, float]]:
+    """Meshes with the copies of one mate at one centre distance, as one header line: (interface ids, mate, a)."""
+    out: list[tuple[list[str], str, float]] = []
+    for x in mesh:
+        mate = re.sub(r"\s*#\d+$", "", str(x["mate"]))
+        hit = next((g for g in out if g[1] == mate and abs(g[2] - x["a"]) < 1e-9), None)
+        if hit:
+            hit[0].append(x["if"])
+        else:
+            out.append(([x["if"]], mate, x["a"]))
+    return out
+
+
 def gear_script(spec: dict[str, Any]) -> str:
     k = spec["keyway"]
-    lines = [f"{spec['bore_if']}  bore Ø{_g(spec['bore'])} H7 through, on the shaft"]
-    for x in spec["mesh"]:
-        lines.append(f"{x['if']}  mesh with the {x['mate']}: m{_g(spec['m'])} × {spec['z']} teeth, "
-                     f"α {_g(spec['alpha'])}°, centre distance {_g(x['a'])}; a tooth centred on +X")
+    seats = spec.get("seats") or []
+    if seats:
+        lines = []
+        for s in seats:
+            lines.append(f"{s['if']}  {s['label']}: Ø{_g(s['d'])} {s['fit'] or ''}".rstrip()
+                         + f" for the {s['designation'] or 'bearing'}, Z {_g(s['z0'])} to {_g(s['z1'])}, bored from the "
+                         + f"{'-Z' if s['side'] < 0 else '+Z'} face to depth {_g(s['depth'])}")
+            lines.append(f"{s['face_if']}  bearing shoulder at Z {_g(s['z1'] if s['side'] < 0 else s['z0'])}: the "
+                         f"outer ring bears on it")
+    else:
+        lines = [f"{spec['bore_if']}  bore Ø{_g(spec['bore'])} H7 through, on the shaft"]
+    for ids, mate, a in mesh_groups(spec["mesh"]):
+        lines.append(f"{', '.join(ids)}  mesh with the {mate}: m{_g(spec['m'])} × {spec['z']} teeth, "
+                     f"α {_g(spec['alpha'])}°, centre distance {_g(a)}; a tooth centred on +X")
     if k:
         lines.append(f"{k['if']}  hub keyway {_g(k['b'])} × {_g(k['t2'])} ({k['standard']}) through the bore")
     for f in spec["faces"]:
@@ -732,24 +819,51 @@ def gear_script(spec: dict[str, Any]) -> str:
     out = [_header(spec, "spur gear", lines), "from build123d import *\n", "from aicad import fw\n",
            f'NAME = "{spec["name"]}"', f'MATERIAL = "{spec["material"]}"', "",
            f"MODULE = {_f(spec['m'])}  # mm (the mesh)", f"TEETH = {spec['z']}  # number of teeth",
-           f"FACE_WIDTH = {_f(spec['B'])}  # mm", f"PRESSURE_ANGLE = {_f(spec['alpha'])}  # degrees",
-           f"BORE = {_f(spec['bore'])}  # bore Ø, mm (H7 on the shaft)", "",
-           _params(["MODULE", "TEETH", "FACE_WIDTH", "PRESSURE_ANGLE", "BORE"])]
+           f"FACE_WIDTH = {_f(spec['B'])}  # mm", f"PRESSURE_ANGLE = {_f(spec['alpha'])}  # degrees"]
+    names = ["MODULE", "TEETH", "FACE_WIDTH", "PRESSURE_ANGLE", "BORE"]
     rim = spec["m"] * spec["z"] - 2.5 * spec["m"] - spec["m"]
-    out.append(_meta([("MODULE", 0.5, 10.0, 0.25, "mm", "Teeth", "Module"),
-                      ("TEETH", 8, 400, 1, "", "Teeth", "Number of teeth"),
-                      ("FACE_WIDTH", 1.0, float(math.ceil(4 * spec["B"])), 0.5, "mm", "Teeth", "Face width"),
-                      ("PRESSURE_ANGLE", 14.5, 25.0, 0.5, "°", "Teeth", "Pressure angle"),
-                      ("BORE", 3.0, round(max(spec["bore"], rim - 0.5), 1), 0.5, "mm", "Bore", "Bore Ø")]))
-    out.append("")
+    rows = [("MODULE", 0.5, 10.0, 0.25, "mm", "Teeth", "Module"),
+            ("TEETH", 8, 400, 1, "", "Teeth", "Number of teeth"),
+            ("FACE_WIDTH", 1.0, float(math.ceil(4 * spec["B"])), 0.5, "mm", "Teeth", "Face width"),
+            ("PRESSURE_ANGLE", 14.5, 25.0, 0.5, "°", "Teeth", "Pressure angle")]
+    if seats:
+        s0 = seats[0]
+        why = ("the interface's shoulder Ø" if s0["shoulder_given"] else
+               "D - (D - d) / 4; verify against the maker's Da max")
+        out.append(f"BORE = {_f(spec['bore'])}  # through bore Ø, mm: the shoulder for the outer ring ({why})")
+        rows.append(("BORE", round(min(spec["bore"], s0["clear"] + 0.5), 1), round(min(s["d"] for s in seats) - 1, 1),
+                     0.5, "mm", "Bearing seat", "Shoulder bore Ø"))
+        for n, s in enumerate(seats, start=1):
+            sfx = "" if len(seats) == 1 else f"_{n}"
+            out.append(f"SEAT{sfx}_D = {_f(s['d'])}  # bearing seat Ø, mm ({s['fit'] or 'nominal'}, the "
+                       f"{s['designation'] or 'bearing'}'s outer ring)")
+            out.append(f"SEAT{sfx}_DEPTH = {_f(s['depth'])}  # from the {'-Z' if s['side'] < 0 else '+Z'} face to "
+                       "the shoulder, mm")
+            names += [f"SEAT{sfx}_D", f"SEAT{sfx}_DEPTH"]
+            rows += [(f"SEAT{sfx}_D", round(spec["bore"] + 1, 1), round(max(s["d"], rim - 0.5), 1), 0.5, "mm",
+                      "Bearing seat", "Seat Ø"),
+                     (f"SEAT{sfx}_DEPTH", 1.0, round(spec["B"] - 1, 1), 0.5, "mm", "Bearing seat", "Seat depth")]
+    else:
+        out.append(f"BORE = {_f(spec['bore'])}  # bore Ø, mm (H7 on the shaft)")
+        rows.append(("BORE", 3.0, round(max(spec["bore"], rim - 0.5), 1), 0.5, "mm", "Bore", "Bore Ø"))
+    out += ["", _params(names), _meta(rows), ""]
     kw = ""
     if k:
         kw = ", keyway=True" if k["din"] else f", keyway=({_f(k['b'])}, {_f(k['t2'])})"
         if abs(k["angle"] - 90) > 1e-9:
             kw += f", keyway_angle={_g(k['angle'])}"
-    out.append("# true involute teeth, a tooth centred on +X; Z from -FACE_WIDTH / 2 to +FACE_WIDTH / 2")
+    st = ""
+    if seats:
+        st = ", seats=[" + ", ".join(
+            f"(SEAT{'' if len(seats) == 1 else f'_{n}'}_D, SEAT{'' if len(seats) == 1 else f'_{n}'}_DEPTH, {s['side']})"
+            for n, s in enumerate(seats, start=1)) + "]"
+    out.append("# true involute teeth, a tooth centred on +X; Z from -FACE_WIDTH / 2 to +FACE_WIDTH / 2; a working "
+               "backlash of\n# 0.04 x MODULE (tooth thinning at the pitch circle, as the Toolbox gears) so meshing "
+               "flanks clear")
+    if seats:
+        out.append("# the bearing seat: Ø SEAT_D bored from its face to SEAT_DEPTH, ending on the shoulder at the BORE")
     out.append(f"part, gear = fw.spur_gear(MODULE, TEETH, FACE_WIDTH, pressure_angle=PRESSURE_ANGLE, bore=BORE{kw},\n"
-               "                          z0=-FACE_WIDTH / 2)" + (
+               f"                          backlash=0.04 * MODULE{st}, z0=-FACE_WIDTH / 2)" + (
                    f"  # keyway: DIN 6885 for Ø{_g(spec['bore'])}" if k and k["din"] else ""))
     out += ["", "result = part", 'EXPECTED = {"bbox": gear["bbox"], "volume": gear["volume"], "solids": 1}',
             '# tip Ø = MODULE × (TEETH + 2), pitch Ø = MODULE × TEETH (gear["gear"] has them)', ""]

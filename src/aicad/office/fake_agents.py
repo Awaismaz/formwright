@@ -110,7 +110,12 @@ def _write_icd_part(ws: Path, name: str, spec: dict[str, Any], shift: float = 0.
         bs["holes"][0] = {**h0, "c": [float(h0["c"][0]) + shift, float(h0["c"][1])]}
     holes = bs["holes"]
     g = spec.get("gear")
-    if g:
+    if g and g.get("internal"):  # a ring gear: internal teeth through its length, a plain rim to the envelope
+        from aicad import fw_std
+
+        body, _e = fw_std.internal_gear(float(g["module"]), int(g["teeth"]), H, rim_od=L,
+                                        backlash=0.04 * float(g["module"]), z0=-H / 2)
+    elif g:
         from aicad import toolbox
 
         bore = next((h["d"] for h in holes if abs(h["c"][0]) < 1e-6 and abs(h["c"][1]) < 1e-6), None)

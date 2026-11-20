@@ -204,7 +204,12 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   - `part, g = fw.spur_gear(module, teeth, face_width, pressure_angle=20, bore=0, hub_d=0, hub_l=0, keyway=False,
     helix_angle=0)`: true involute flanks (standard addendum/dedendum, no profile shift), optional hub on +Z,
     through bore, hub keyway on +Y (`keyway=True` = DIN 6885 for the bore, or `(b, t2)`). `g` has "bbox", "volume",
-    "solids" and `g["gear"]` (pitch/tip/root/base Ø). Never write an involute by hand.
+    "solids" and `g["gear"]` (pitch/tip/root/base Ø). Never write an involute by hand. A gear running on its own
+    bearing (a planet): `bore=<shoulder Ø>, seats=[(D, depth, -1)]` bores the seat Ø D from the bottom face to
+    `depth`, ending on the shoulder. Meshing gears take `backlash=0.04 * module`.
+  - `part, g = fw_std.internal_gear(module, teeth, face_width, rim_od=..., backlash=0.04 * module,
+    holes=(n, pcd, d))` (`from aicad import fw_std`): a ring gear, true involute internal teeth (tip Ø m (z - 2),
+    root Ø m (z + 2.5), a tooth space on +X), plain rim; EXPECTED from `g`. Never model internal teeth by hand.
   - `part, s = fw.stepped_shaft([(d1, L1), (d2, L2), ...], chamfer=0, fillet=0)`: revolved along +Z from Z=0,
     end chamfers and shoulder fillets included in `s["volume"]`.
   - `part, v = fw.shaft_keyway(part, d, z_center, length, rounded=True)`: DIN 6885 keyseat on +Y; `v` = removed volume.
@@ -234,7 +239,8 @@ The user watches a live 3D viewer that updates every time you call `build_model`
 ## Toolbox (standard components) and imported parts
 - `from aicad import toolbox` gives deterministic generators: `shape, expected = toolbox.build(code, **params)`.
   Codes: hex_bolt(D, L), shcs(D, L), hex_nut(D), washer(D), standoff(D, AF, L), dowel(D, L), bearing(SERIES),
-  spur_gear(M, Z, B, BORE, KEY_B=0, KEY_T2=0, KEY_ANG=0) (optional DIN 6885 hub keyway), shaft(D, L, KEY_L, C),
+  spur_gear(M, Z, B, BORE, KEY_B=0, KEY_T2=0, KEY_ANG=0) (optional DIN 6885 hub keyway),
+  internal_gear(M, Z, B, OD, N=0, PCD=0, HOLE=0) (ring gear, plain rim OD, optional holes), shaft(D, L, KEY_L, C),
   parallel_key(D, L) (DIN 6885 A for shaft Ø D), retaining_ring(D) (DIN 471 for shaft Ø D, as fitted),
   flange(OD, T, BORE, N, HOLE, PCD), l_bracket(A, B, W, T, HOLE).
   D is the metric size (M3–M24) for fasteners. Use them for standard parts inside assemblies (position with Pos/Rot, set

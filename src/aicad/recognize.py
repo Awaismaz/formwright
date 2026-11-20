@@ -36,7 +36,8 @@ def _v(p: Any) -> list[float]:
 
 # Bump when recognised results change for the same geometry: cached part snapshots (assembly.store) are re-made.
 # 2: cylinder extents along the canonical axis (negative-axis holes were mirrored: wrong centre and through flag).
-VERSION = 2
+# 3: internal (ring) gears recognised (component kind "internal_gear"); the bounding-box axes are always tried.
+VERSION = 3
 
 
 def _axis_key(d: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -225,6 +226,41 @@ def _radii(faces: list[Any], fids: list[int], o: list[float], d: list[float]) ->
     return (min(rs), max(rs)) if rs else (0.0, 0.0)
 
 
+def _internal_band(shape: Shape, faces: list[Any], fids: list[int], o: list[float], d: list[float], rmin: float,
+                   rmax: float) -> bool:
+    """The repeated band is an internal gear's teeth: across the band's axial middle, just inside its inner radius
+    is air and just outside its outer radius is material (the rim). An external gear is the other way round."""
+    from build123d import Vector
+
+    ts = []
+    for fid in fids:
+        c = faces[fid].center()
+        ts.append(_dot(_sub([c.X, c.Y, c.Z], o), d))
+    if not ts or rmax - rmin < 1e-3:
+        return False
+    t = (min(ts) + max(ts)) / 2
+    ref = [1.0, 0.0, 0.0] if abs(d[0]) < 0.9 else [0.0, 1.0, 0.0]
+    u = _sub(ref, [d[k] * _dot(ref, d) for k in range(3)])
+    un = _norm(u)
+    u = [x / un for x in u]
+    v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]]
+    eps = 0.05 * (rmax - rmin)
+
+    def solid_at(r: float) -> list[bool]:
+        out = []
+        for k in range(6):  # several angles: one probe could land on a hole
+            a = 2 * math.pi * (k + 0.37) / 6
+            p = [o[i] + d[i] * t + r * (math.cos(a) * u[i] + math.sin(a) * v[i]) for i in range(3)]
+            try:
+                out.append(bool(shape.is_inside(Vector(*p))))
+            except Exception:  # noqa: BLE001
+                out.append(False)
+        return out
+
+    inside, outside = solid_at(rmin - eps), solid_at(rmax + eps)
+    return not any(inside) and sum(outside) >= 4
+
+
 def recognize(shape: Shape) -> dict[str, Any]:
     bb = shape.bounding_box()
     size = [bb.size.X, bb.size.Y, bb.size.Z]
@@ -330,7 +366,10 @@ def recognize(shape: Shape) -> dict[str, Any]:
         if k not in seen:
             seen.add(k)
             uniq.append((o, d))
-    rot = _rotational(faces, [i for i in range(len(faces)) if i not in hole_fids], uniq[:12]) if len(faces) >= 12 else None
+    # the first 12 axes, and always the bounding box's three (a ring gear with many bolt holes has more than 12 axes
+    # before them: its own axis must still be tried)
+    tried = uniq[:12] + [a for a in uniq[12:] if a[0] is bc]
+    rot = _rotational(faces, [i for i in range(len(faces)) if i not in hole_fids], tried) if len(faces) >= 12 else None
     component: dict[str, Any] | None = None
     features: list[dict[str, Any]] = []
     if rot and rot["n"] >= 3 and rot["covered"] >= max(6, 2 * rot["n"]):
@@ -339,7 +378,21 @@ def recognize(shape: Shape) -> dict[str, Any]:
         lo, hi = _extent_along(shape, o, d)
         part_rmax = _radii(faces, list(range(len(faces))), o, d)[1]
         outer = abs(rmax - part_rmax) < 0.01 * part_rmax + 1e-6
-        if outer and n >= 8:
+        internal = not outer and n >= 8 and _internal_band(shape, faces, rot["faces"], o, d, rmin, rmax)
+        if internal:
+            # an internal (ring) gear: tip circle inside (Ø m (z - 2)), root outside (Ø m (z + 2.5)); the module from
+            # both (tip + root = m (2z + 0.5)), so a modified tip alone doesn't throw it off
+            m_est = 2 * (rmin + rmax) / (2 * n + 0.5)
+            m_std = min(STD_MODULES, key=lambda m: abs(m - m_est))
+            params = {"teeth": n, "tip_d": _r(2 * rmin), "root_d": _r(2 * rmax), "module_est": _r(m_est, 3),
+                      "module": m_std if abs(m_std - m_est) / m_est < 0.03 else _r(m_est, 3),
+                      "face_width": _r(hi - lo), "rim_d": _r(2 * part_rmax), "internal": True, "bore_d": None}
+            component = {"kind": "internal_gear", "name": f"Internal gear, {n} teeth, module ≈ {params['module']}",
+                         "confidence": "geometric", "params": params, "axis": d, "origin": o}
+            feat = {"id": "teeth", "name": f"Internal teeth ({n} × circular pattern)", "kind": "gear_teeth",
+                    "count": n, "params": {k: params[k] for k in ("teeth", "tip_d", "root_d", "module", "internal")},
+                    "faces": rot["faces"]}
+        elif outer and n >= 8:
             m_est = 2 * rmax / (n + 2)
             m_std = min(STD_MODULES, key=lambda m: abs(m - m_est))
             bore = min((h for h in holes if h["full"] and _norm(_sub(_foot(o, h["center"], h["axis"]), o)) < 0.05),
