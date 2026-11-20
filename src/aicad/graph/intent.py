@@ -80,6 +80,12 @@ base for a bolted cover), guest the part it carries; via the parts that make the
 screws of a bolted joint). A gear "locked with a key" is keyed_hub; a hub against a step is shoulder_stop (and the \
 shaft is stepped); each shaft's bearings are bearing_journal with param "count" (how many on that shaft), and in a \
 housing also bearing_seat (host the housing).
+- A planetary (epicyclic) gearbox: a sun gear keyed on the input shaft; N planet gears (one component, qty N) each \
+running on a bearing on a planet pin (pin kind shaft, qty N: bearing_journal pin -> bearing with count 1, mounted_on \
+bearing -> planet gear); the pins fixed in a planet carrier (kind hub, mounted_on carrier -> pin) keyed on the output \
+shaft; a ring gear (spur_gear with internal true) mounted_on the housing; gear_mesh sun -> planet and planet -> ring. \
+The planet bearings sit in the planet gears, never in the housing; only the input and output shafts run in housing \
+bearings. Code sizes the ring (z_ring = z_sun + 2 z_planet) and the housing around it.
 - Ask at most 3 questions, only when the answer changes which parts exist or how they connect (housing or not, the \
 bearing type, the number of stages) or the material when the use makes it a real choice. Never ask about sizes. \
 Each question has 2 to 4 short options, the most likely first, and a default.

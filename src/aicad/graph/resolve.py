@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from aicad.graph import registry, standards
+from aicad.graph import planetary, registry, standards
 from aicad.graph.model import Component, Connection, DesignGraph, Param
 from aicad.toolbox import BEARING
 
@@ -241,9 +241,13 @@ def resolve(graph: DesignGraph) -> DesignGraph:
                     for n in ("d2", "m", "s"):
                         r.set(n, row[n], "standard", standards.source_note("ring", d), force=True)
         elif c.kind == "gear_mesh" and sh is not None and guest is not None and sh.v("module") is not None                 and sh.v("teeth") is not None and guest.v("teeth") is not None:
+            if planetary.is_internal(sh) or planetary.is_internal(guest):
+                continue  # the internal mesh of a planetary set: sized by planetary.normalise
             a = standards.centre_distance(float(sh.v("module")), int(sh.v("teeth")), int(guest.v("teeth")))
             c.params["centre_distance"] = _p(a, "rule", standards.source_note("mesh"))
             c.params["ratio"] = _p(round(int(guest.v("teeth")) / int(sh.v("teeth")), 4), "rule", "z2 / z1")
+    # 6. a planetary set: the internal ring, its teeth, the mounting chain, its meshes (``graph/planetary.py``)
+    planetary.normalise(g)
     return g
 
 

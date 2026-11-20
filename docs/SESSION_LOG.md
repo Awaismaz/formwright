@@ -4,7 +4,7 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
-## 2026-11-20 (b) — Assembly Studio as a one-window operation (ASM-OW-1..5, PD-240..244)
+## 2026-11-20 (c) — Assembly Studio as a one-window operation (ASM-OW-1..5, PD-240..244)
 
 Founder complaint: "stepped splined shaft and a spur gear on it" made only the shaft; the gear went to the Design
 Studio, which asked its questions there; the gear then "failed verification because the fit on the spline can't be
@@ -45,6 +45,33 @@ Not done / next
 - Not run live against the real design agent (fake design jobs in the tests). Next: a live run of the founder's request.
 - "fix the spline" re-design of a mismatched hub is offered in words; the chat does not start it by itself yet.
 - "assemble everything" (Fitz shaft lines) does not place spline hubs yet; mate and the direct path do.
+## 2026-11-20 (b) — Assembly Studio command bar (ASM-027)
+
+Founder ask: "Assembly commands should be on a command bar on top, just like Design Studio. Like we have in SOLIDWORKS.
+I do not want users to feel like aliens when they land on this software."
+
+### Done
+- `web/src/pages/app/studio/Ribbon.tsx`: the Design Studio CommandManager's rendering (tabs, collapse, shrink-then-More
+  fitting, touch layout, menus, status/lock) extracted into a shared `Ribbon`; `CommandManager.tsx` now builds its
+  buttons and hands them to it (same storage keys `fw_cm_*`, same `data-tour` / `data-make`, same look).
+- `web/src/pages/app/modules/assembly/AsmRibbon.tsx`: the Assembly command bar's button model (pure, tested).
+  Tabs Assembly / Evaluate / View / Make with SOLIDWORKS names; each button calls the Workspace's existing handler and
+  opens + highlights the matching right-hand panel; `data-copilot="asm-*"` ids for Archie; tooltips everywhere.
+- `Workspace.tsx`: the old header (Insert, Render, STEP, .fwasm buttons, Export STEP) moved into the ribbon (test ids
+  `insert`, `export-step`, `step-download`, `render-assembly` kept); title row carries back link, Live badge, rename and the
+  solve chip. New Part opens a short dialog and posts the request to the assembly chat. F / Ctrl+1-7 keys.
+  `Viewport.tsx` gained an `apiRef` (fit, standard views); `MatePanel.tsx` exports `MATE_CHOICES` for the Standard Mates menu.
+
+### Verified how
+- `npx tsc --noEmit` clean; `npx vitest run src/pages/app/modules/assembly/AsmRibbon.test.ts src/pages/app/studio` 20 passed
+  (fast-iteration rule: no full suite, no browser walkthrough this round).
+
+### Not done / omitted on purpose
+- Component patterns, Parallel/Perpendicular/Tangent mates, Section View and an assembly Drawing hand-off: not supported by
+  the backend/viewer, so no buttons (no fakes).
+
+### Next
+- Browser walkthrough of the ribbon on desktop and phone widths (studio-e2e); Archie pointing at `asm-*` ids.
 
 ---
 
@@ -80,6 +107,47 @@ Verified: tests/test_office_copilot.py (7 new), test_office_archie_chat.py, test
 ruff clean; tsc clean; vitest lib + office 72 passed; server restarted, SPA rebuilt, `/api/copilot` live.
 Not done: browser walkthrough; Gage still sees amended briefs only through new or reopened tickets (ticket briefs
 are built at planning).
+## 2026-11-20 (gbx): Planetary gearbox lays out from its connections; revisions leave a stale master layout (CD-051)
+
+Founder report: "Planetary Gearbox" stuck at the ICD gate (Ø210 openings at the envelope edge, holes "-72.5 mm
+apart"), gears hosted on the base and cover as blocks, and Archie's revision refused with "The revised layout is the
+same as the one the program has".
+
+**Root causes**
+- The intent reply gave the ring the planets' 30 teeth and seated the planet bearings in the housing; no code knew a
+  planetary set. The connection solver raised Unsupported ("Planet gear meshes or belts but sits on no shaft"), so the
+  plan went to the master model. The master skeleton made every part a block and took hosts from a breadth-first walk
+  over touching bodies (gears on the housing and cover); its measured passages put a Ø210 opening at the split face,
+  over the cap screw holes (the negative spacing: a Ø5 hole inside the Ø210 opening).
+- A revision re-derived the layout through the master skeleton, which places parts where the master bodies sat: mount
+  and size ops could not move anything, so the impact was empty. The graph sync also re-hosted the first connection
+  naming the part, which for a gear is its mesh.
+
+**Done**
+- `graph/planetary.py` (new): find and normalise a planetary set (internal ring, teeth rules, assembly condition,
+  ratio, mounting chain, internal centre distance), run at the end of `resolve` and in `layout.build`; the intent
+  prompt describes planetary sets; `spur_gear` has an `internal` param.
+- `graph/layout.py`: planetary mode (`_planetary`, `_planet_seat`, `_emit_planetary`), parents by the kinematic
+  chain, the ring item marked internal; planet copies and internal meshes skipped in tooth phasing.
+- `office/revision.py`: `_leave_master` (a structural revision of a master-path plan goes back to the solver when it
+  lays the design out cleanly, envelopes restored from the graph); on the master path hosts and sizes become
+  overrides; the graph sync re-hosts only carrying connections; `parent` is a placement key.
+- `master/skeleton.py`: hosts from the design graph (what carries a part), parent overrides.
+- `office/icd.py`: `outgrown` is a warning (founder rule: only the brief binds); GROW_CAP 4x for Archie's self-fix
+  (`interfaces._grow`); overlapping holes in plain words ("run into each other", "lies inside").
+- `graph/compile.check` copy-aware; `assembly/visual.py` internal and per-copy planet meshes, coaxial gears are not a
+  mesh; `graph/preview.py` draws the ring as a rim; `office/direct.py` sends internal rings to the agent.
+
+**Verified**: `tests/test_planetary_layout.py` (7 new) and the touched suites (`test_office_layout_envelopes`,
+`test_connection_layout`, `test_master_model`, `test_assembly_visual`, `test_program_revision`, `test_design_graph`,
+`test_office_phase6_layout`, `test_generators`, `test_assembly_trains`, `test_office_icd`, `test_office_direct`,
+`test_plan_preview`) pass; ruff clean. On a temp copy of the founder's program a relayout revision, or Archie's
+mount and size revision, is accepted with 0 ICD problems.
+
+**Not done**: an internal-gear generator (PD-234); brief outline caps on growth (PD-232); Archie chat wording (other
+engineer's files); golden suite not re-run.
+
+**Next**: merge; then on the founder's program ask Archie at the ICD gate to lay the program out again.
 
 ## 2026-11-20: Architecture v2 begins; Archie supervises; agents cheaper and faster; site revamp
 

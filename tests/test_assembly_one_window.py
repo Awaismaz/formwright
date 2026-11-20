@@ -192,7 +192,7 @@ def test_design_jobs_in_parallel_questions_relayed_and_unverified_part_brought_i
 
     async def answer_design(self: Any, pid: str, text: str) -> None:
         seen["answers"].append(text)
-        lay, src = makers.make("gear", {"module": 2, "teeth": 40, "spline": sp, "name": "Spline gear"})
+        _lay, src = makers.make("gear", {"module": 2, "teeth": 40, "spline": sp, "name": "Spline gear"})
         await _install(self, pid, src, fail_volume=True)
 
     monkeypatch.setattr(mac.PlatformEnv, "design_part", design_part)

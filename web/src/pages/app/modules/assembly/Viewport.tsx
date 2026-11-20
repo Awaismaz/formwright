@@ -37,10 +37,15 @@ export interface ViewportProps {
   /** Motion check: placements overriding instances' own (the current step) and the parts colliding there. */
   poses?: Record<string, number[]> | null;
   hot?: string[];
+  /** Camera commands for the command bar (Zoom to Fit, standard views). */
+  apiRef?: { current: AsmViewportApi | null };
 }
 
+export interface AsmViewportApi { fit: () => void; setView: (v: ViewName) => void }
+export const VIEW_NAMES: ViewName[] = ["Iso", "Front", "Top", "Right", "Back", "Left", "Bottom"];
+
 export function Viewport(props: ViewportProps) {
-  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb, gizmo, onDrag, fitKey, poses, hot } = props;
+  const { view, picking, picks, marks, selected, ghost, clashes, clashFocus, measure, explode, onExplode, onPick, hint, describe, thumbKey, onThumb, gizmo, onDrag, fitKey, poses, hot, apiRef } = props;
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<AssemblyViewer | null>(null);
   const [loaded, setLoaded] = useState(0);
@@ -55,8 +60,9 @@ export function Viewport(props: ViewportProps) {
     v.onHover = p => setHover(p);
     v.onDrag = (id, T) => cbs.current.onDrag?.(id, T);
     eng.current = v;
+    if (apiRef) apiRef.current = { fit: () => v.fit(), setView: n => v.setView(n) };
     (window as unknown as { __fwAsm?: AssemblyViewer }).__fwAsm = v;
-    return () => { v.dispose(); eng.current = null; };
+    return () => { v.dispose(); eng.current = null; if (apiRef) apiRef.current = null; };
   }, []);
 
   // load topology of every part once, then place instances

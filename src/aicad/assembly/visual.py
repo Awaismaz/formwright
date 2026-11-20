@@ -290,18 +290,19 @@ def gear_pairs(root: Path, doc: dict[str, Any]) -> list[dict[str, Any]]:
         ax = ax / max(float(np.linalg.norm(ax)), 1e-12)
         mid = xform.pt(T, np.asarray(c.get("origin") or (0, 0, 0), dtype=float)
                        + np.asarray(c.get("axis") or (0, 0, 1), dtype=float) * float(p.get("face_width") or 0) / 2)
-        gears.append((i["id"], float(p["module"]), int(p["teeth"]), ax, mid, float(p.get("face_width") or 0)))
+        gears.append((i["id"], float(p["module"]), int(p["teeth"]), ax, mid, float(p.get("face_width") or 0),
+                      bool(p.get("internal"))))
     out = []
-    for k, (a, ma, za, axa, ca, ba) in enumerate(gears):
-        for b, mb, zb, axb, cb, bb in gears[k + 1:]:
-            if abs(ma - mb) > 1e-6 or np.linalg.norm(np.cross(axa, axb)) > 1e-3:
+    for k, (a, ma, za, axa, ca, ba, ia) in enumerate(gears):
+        for b, mb, zb, axb, cb, bb, ib in gears[k + 1:]:
+            if abs(ma - mb) > 1e-6 or np.linalg.norm(np.cross(axa, axb)) > 1e-3 or (ia and ib):
                 continue
-            want = ma * (za + zb) / 2
+            want = ma * (abs(za - zb) if ia or ib else za + zb) / 2  # a planet in its ring: m (z_r - z_p) / 2
             d = cb - ca
             axial = float(np.dot(d, axa))
             radial = float(np.linalg.norm(d - axial * axa))
-            if radial > 1.2 * want:
-                continue
+            if radial > 1.2 * want or radial < 1.0:
+                continue  # (far apart, or coaxial: a sun in its ring, a compound pair on one shaft, not a mesh)
             out.append({"a": a, "b": b, "a_mm": round(want, 3), "centre_mm": round(radial, 3),
                         "offset_mm": round(abs(axial), 3), "engaged_mm": round(max(0.0, min(ba, bb) - abs(axial)), 3),
                         "face_mm": min(ba, bb)})
@@ -415,33 +416,40 @@ def skeleton_gear_findings(skel: dict[str, Any], ifaces: list[dict[str, Any]]) -
     from aicad.office import frames
 
     items = skel.get("items") or {}
-    pairs = [(f["a"]["item"], f["b"]["item"]) for f in ifaces if f["kind"] == "gear_mesh"]
+    # (item a, copy a, item b, copy b, internal): a planet copy meshes at its own place; an internal ring at
+    # a = m (z_ring - z_planet) / 2
+    pairs = [(f["a"]["item"], int(f["a"].get("copy") or 0), f["b"]["item"], int(f["b"].get("copy") or 0),
+              bool(f["data"].get("internal"))) for f in ifaces if f["kind"] == "gear_mesh"]
     if not pairs:
         by: dict[tuple[str, float], list[str]] = {}
         for i, it in items.items():
             g = _gear_of(it)
             if it.get("role") == "gear" and g:
                 by.setdefault((str(it.get("sub")), g[0]), []).append(i)
-        pairs = [(v[0], v[1]) for v in by.values() if len(v) == 2]
+        pairs = [(v[0], 0, v[1], 0, False) for v in by.values() if len(v) == 2]
     out: list[dict[str, Any]] = []
-    for a, b in pairs:
+    for a, ca, b, cb, internal in pairs:
         ia, ib = items.get(a), items.get(b)
         ga, gb = (_gear_of(ia) if ia else None), (_gear_of(ib) if ib else None)
         if not (ia and ib and ga and gb and ia.get("copies") and ib.get("copies")):
             continue
-        want = ga[0] * (ga[1] + gb[1]) / 2
+        internal = internal or bool(ia.get("internal") or ib.get("internal"))
+        ca, cb = min(ca, len(ia["copies"]) - 1), min(cb, len(ib["copies"]) - 1)
+        want = ga[0] * (abs(ga[1] - gb[1]) if internal else ga[1] + gb[1]) / 2
         axa = np.array(frames.apply(frames.item_rotation(ia.get("ax") or "z", 0.0), [0, 0, 1]), dtype=float)
         axb = np.array(frames.apply(frames.item_rotation(ib.get("ax") or "z", 0.0), [0, 0, 1]), dtype=float)
-        d = np.array(ib["copies"][0], dtype=float) - np.array(ia["copies"][0], dtype=float)
+        d = np.array(ib["copies"][cb], dtype=float) - np.array(ia["copies"][ca], dtype=float)
         axial = float(np.dot(d, axa))
         radial = float(np.linalg.norm(d - axial * axa))
-        na, nb = ia["name"], ib["name"]
+        na = ia["name"] + (f" #{ca + 1}" if len(ia["copies"]) > 1 else "")
+        nb = ib["name"] + (f" #{cb + 1}" if len(ib["copies"]) > 1 else "")
         if np.linalg.norm(np.cross(axa, axb)) > 1e-3:
             out.append({"code": "gear_axes", "severity": "block", "items": [a, b],
                         "text": f"{na} and {nb} must mesh, but their axes are not parallel in this layout."})
         elif abs(radial - want) > MESH_TOL_MM:
             out.append({"code": "gear_centre", "severity": "block", "items": [a, b],
-                        "text": f"{na} and {nb} must mesh {want:g} mm apart (m (z1 + z2) / 2), but this layout puts "
+                        "text": f"{na} and {nb} must mesh {want:g} mm apart "
+                                f"({'m (z_ring - z_planet) / 2' if internal else 'm (z1 + z2) / 2'}), but this layout puts "
                                 f"their axes {radial:.4g} mm apart" + (" (on one axis, stacked)" if radial < 1 else "")
                                 + "."})
         elif abs(axial) > MESH_TOL_MM:
