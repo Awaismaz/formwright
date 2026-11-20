@@ -2278,7 +2278,8 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         for n, w in enumerate(d.get("passages") or []):  # an opening across the joint (master model, WORKLIST 50)
             dw = float(w["d_a" if which == "a" else "d_b"])
             out.append({"type": "hole", **_axial(skel, side, d, w["at"], d["plane_z"]), "d": dw, "tol": tol,
-                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)"})
+                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)",
+                        **({"split": True} if w.get("split_" + which) else {})})
         cb = d.get("counterbore") if which == "b" else None
         if cb:  # the screw heads sink into the head side (measured from a master model): a seat at its far face
             far = d["plane_z"] + sa * float(cb["length"])
@@ -2294,11 +2295,12 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
                                  "cap bears on the bearing's outer ring only, clear of the turning inner ring and shaft)"})
     elif f["kind"] == "shaft_bore":
         g = _axial(skel, side, d, d["axis"], d["z"][0])
-        if which == "a" and d.get("bore_z"):  # one bore of a stepped (two-bore) coupling: through its own half
-            bz = d["bore_z"]
+        if which == "a" and d.get("bore_z"):  # one bore of a stepped (two-bore) coupling: through its own half; a
+            bz = d["bore_z"]                    # bore measured from a master model: over the span the pin sits in
             out.append({"type": "hole", **_axial(skel, side, d, d["axis"], bz[0], bz[1]), "d": d["d"],
                         "fit": d["fit"].split("/")[0], "tol": tol, "span": True,
-                        "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]} through its half"})
+                        "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]}"
+                                 + ("" if d.get("measured") else " through its half")})
         elif which == "a":
             out.append({"type": "hole", **g, "d": d["d"], "fit": d["fit"].split("/")[0],
                         "tol": tol, "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]}"})
@@ -2327,6 +2329,8 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
                 fz = st["z"][0] if op > 0 else st["z"][1]
                 if any(o is not st and any(abs(float(e) - float(fz)) < 1e-6 for e in o["z"]) for o in d["seats"]):
                     continue  # two bearings side by side in one bore: the seat runs on, no shoulder between them
+                if d.get("no_shoulder"):
+                    continue  # (a master model's bore with no step: said as a warning, not invented here)
                 fc = _plane(skel, side, d, fz, op)
                 out.append({"type": "face", **fc, "tol": tol,
                             "label": f"bearing shoulder ({st['face']}), seat depth {d['B']:g}"})
@@ -2397,7 +2401,8 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         for n, w in enumerate(d.get("passages") or []):  # an opening across the joint (master model, WORKLIST 50)
             dw = float(w["d_a" if which == "a" else "d_b"])
             out.append({"type": "hole", **_axial(skel, side, d, w["at"], d["plane_z"]), "d": dw, "tol": tol,
-                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)"})
+                        "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)",
+                        **({"split": True} if w.get("split_" + which) else {})})
     elif f["kind"] == "gear_mesh":
         z = d["teeth_a"] if which == "a" else d["teeth_b"]
         g = {"type": "gear", "module": d["module"], "teeth": z, "c": [0.0, 0.0], "tol": tol,
@@ -2405,6 +2410,10 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         if d.get("internal") and _internal_member(skel, f, which):
             g.update(internal=True, label=f"m{d['module']:g} × {z} internal teeth")  # the ring of a planet / ring mesh
         out.append(g)
+    if d.get("split") and which == "a":  # half of a bore split across a joint (master model): centred on the joint
+        for o in out:
+            if o["type"] in ("hole", "seat"):
+                o["split"] = True
     for o in out:
         o["if"] = f["id"]
     return out
@@ -2691,9 +2700,20 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                 continue
             if it["shape"] == "box":
                 half = [abs(v) / 2 for v in to_canon(h.get("ax") or "z", it["size"])]
-                if abs(x) + r > half[0] - 1.0 or abs(y) + r > half[1] - 1.0:
+                # half of a bore split across a joint (a split housing, measured from a master model): its centre lies
+                # on the joint face, the edge of the envelope, by design; the wall is checked across the other way
+                on_x = bool(h.get("split")) and abs(abs(x) - half[0]) <= 0.05
+                on_y = bool(h.get("split")) and abs(abs(y) - half[1]) <= 0.05
+                if (not on_x and abs(x) + r > half[0] - 1.0) or (not on_y and abs(y) + r > half[1] - 1.0):
                     add("hole_edge", f"{it['name']}: {h.get('label', 'hole')} Ø{h['d']:g} at ({x:g}, {y:g}) leaves "
                         "less than 1 mm of wall to the edge of its envelope.", [i], hif)
+                    # the envelope that leaves 1 mm (and a little) round it, grown about its centre: the size Fix
+                    # with Archie tries first (a few mm steps can't reach a hole near the edge of a large part)
+                    need_c = [2 * (abs(v) + r + 1.5) if abs(v) + r > hv - 1.0 and not on else 0.0
+                              for v, hv, on in ((x, half[0], on_x), (y, half[1], on_y))] + [0.0]
+                    need_p = [abs(v) for v in from_canon(h.get("ax") or "z", need_c)]
+                    out[-1]["grow"] = {k: _r2(max(v, float(it["size"][n]))) for n, (k, v)
+                                       in enumerate(zip(("L", "W", "H"), need_p, strict=True)) if v > 0}
             else:
                 rim = L / 2 - (math.hypot(x, y) + r)
                 if it["role"] == "gear":

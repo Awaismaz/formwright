@@ -148,4 +148,12 @@ describe("fixLines: Fix with Archie never looks like it did nothing", () => {
     expect(k.headline).toBe("Fixed 1 size automatically; Archie made 1 fix himself; every part can be made: review and approve.");
     expect(fixLines({ steps: [], problems: ["x"], archie: { ran: false, open: ["x is open"] } }).headline).toBe("No size change could help; what numbers can't fix needs your decision; 1 problem still open.");
   });
+  it("says when the master model was measured again first", () => {
+    const r = fixLines({ steps: [], problems: [], remeasured: { ok: true, text: "Measured the master model again with the current rules and laid the interfaces out from it: 9 of 9 problems cleared" } });
+    expect(r.headline).toBe("Measured the master model again; every part can be made: review and approve.");
+    expect(r.lines).toEqual(["Done: Measured the master model again with the current rules and laid the interfaces out from it: 9 of 9 problems cleared."]);
+    const f = fixLines({ steps: [], problems: ["x"], remeasured: { ok: false, text: "the master model is not on file, so it can't be measured again" } });
+    expect(f.headline).toBe("No size change could help; 1 problem still open.");
+    expect(f.lines[0]).toBe("Not done: the master model is not on file, so it can't be measured again.");
+  });
 });

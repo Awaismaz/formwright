@@ -352,7 +352,9 @@ export function fixLines(fix: GateFix): { headline: string; lines: string[]; ope
   const n = fix.steps.length;
   const a = fix.archie;
   const done = a?.done ?? [], asked = a?.asked ?? [];
-  const bits = [n ? `Fixed ${n} size${n === 1 ? "" : "s"} automatically` : "No size change could help"];
+  const rm = fix.remeasured;
+  const bits = rm?.ok ? ["Measured the master model again"] : [];
+  if (n || !rm?.ok) bits.push(n ? `Fixed ${n} size${n === 1 ? "" : "s"} automatically` : "No size change could help");
   if (a?.ran) {
     if (done.length) bits.push(`Archie made ${done.length} fix${done.length === 1 ? "" : "es"} himself`);
     if (asked.length) bits.push(`Archie proposes ${asked.length === 1 ? "a plan change" : `${asked.length} plan changes`}: answer in the chat`);
@@ -362,6 +364,7 @@ export function fixLines(fix: GateFix): { headline: string; lines: string[]; ope
   if (!left) bits.push("every part can be made: review and approve");
   else if (!asked.length) bits.push(`${left} problem${left === 1 ? "" : "s"} still open`);
   const head = bits.join("; ") + ".";
-  return { headline: head.charAt(0).toUpperCase() + head.slice(1), lines: [...done.map(x => `Done: ${x}.`), ...asked.map(x => `Proposed: ${x}.`)],
+  const first = rm?.text ? [`${rm.ok ? "Done" : "Not done"}: ${rm.text}.`] : [];
+  return { headline: head.charAt(0).toUpperCase() + head.slice(1), lines: [...first, ...done.map(x => `Done: ${x}.`), ...asked.map(x => `Proposed: ${x}.`)],
     open: left ? (a?.open?.length ? a.open : fix.problems) : [], asked };
 }

@@ -245,7 +245,8 @@ def test_route_attach_and_layout(measured: dict[str, Any], tmp_path: Path, monke
     assert doc["plan"]["layout_path"]["state"] == "modelling"
     run.attach(doc, {"ok": True, "measure": measured["h_enclosure"], "seconds": {"total": 1.0}, "via": "replay"}, 0)
     mm = doc["plan"]["master"]
-    assert mm["ok"] and mm["summary"] == {"bodies": 2, "interfaces": 1, "bolted": 1, "faces": 0, "fits": 0}
+    assert mm["ok"] and mm["summary"] == {"bodies": 2, "interfaces": 1, "bolted": 1, "faces": 0, "fits": 0,
+                                         "bearings": 0, "meshes": 0}
     assert mm["graph"]["view"]["connections"][0]["text"].startswith("Enclosure lid bolted to Enclosure base")
     # approval: items from the plan, then the interfaces gate lays it out from the master (measured, not solved)
     items, tickets = service._build(doc["plan"], doc["name"], "P", doc["brief"])

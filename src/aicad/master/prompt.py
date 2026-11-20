@@ -26,6 +26,10 @@ It is not detailed geometry: the parts are designed in detail afterwards, each w
   M10 11) and, in the other part, either blind tap-drill holes (M3 2.5, M4 3.3, M5 4.2, M6 5.0, M8 6.8, M10 8.5;
   depth about 1.5 x the screw size) or clearance holes too (bolt and nut). The holes are coaxial and open on the joint
   face. Leave room for the screw heads.
+- Bearings: the housing bore at the bearing's outside Ø and the shaft journal at its bore Ø, coaxial, over the
+  bearing width at least, with a shoulder (a smaller bore or a step) on the inner side: the office reads the bearing
+  from that pair. A housing split on the shaft axis is fine: half of each bore in each half.
+- Gears: a cylinder of the pitch Ø (module x teeth) and the face width; meshing pitch circles touch exactly.
 - Sizes: the brief's and the plan's; otherwise sensible ones.
 
 ## Helpers

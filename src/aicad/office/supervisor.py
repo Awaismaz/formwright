@@ -1819,6 +1819,9 @@ def gate_plan(doc: dict[str, Any], asked: bool = False) -> dict[str, Any]:
     for x in issues:
         if x["code"] in ("no_interface", "shaft_support", "row_layout", "no_mount", "no_host"):
             continue
+        if str(x.get("text") or "").startswith("Master model:"):  # it says what the master shows and what to change
+            open_.append(str(x["text"]))
+            continue
         open_.append(f"{x['text']} (no safe number change clears it: change the plan, or edit the interface it names)")
     if not issues and ic.get("problems"):
         open_ += [str(p) for p in ic["problems"][:4]]
@@ -1836,10 +1839,16 @@ async def fix_gate(root: Path, pid: str, actor: dict[str, Any], env: Any = None)
     """The interfaces gate's "Fix with Archie": (1) the free number fix (``interfaces.fix``, no AI); (2) when problems
     remain and the supervisor is on, Archie diagnoses them and acts (minor: applied; major: asked in the chat with
     clickable choices); (3) a plain account of what was fixed, what he did or proposes and what is still open."""
+    from aicad.master import run as master_run
     from aicad.office import interfaces
 
+    # (0) a master measured by older rules is measured again first (deterministic, no tokens): the problems its old
+    # reading made (a split bore read as a hole on the edge, a shaft whose bearing was not read) go with it
+    rm = await master_run.remeasure(root, pid)
     steps = _edit(root, pid, lambda d: interfaces.fix(root, d, actor))
     out: dict[str, Any] = {"steps": steps["steps"], "problems": steps["problems"]}
+    if rm is not None:
+        out["remeasured"] = {"ok": bool(rm.get("ok")), "text": str(rm.get("text") or "")}
     if not steps["problems"]:
         return out
     if not enabled():
