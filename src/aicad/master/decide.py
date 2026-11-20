@@ -33,7 +33,7 @@ PRODUCT = re.compile(
     r"\btoy\b|ergonomic|consumer product|wearable|\bphone\b|\btablet\b|\bcase for\b|housing for (?:the )?"
     r"(?:electronics|pcb|board|battery)|\bmou?lded\b", re.IGNORECASE)
 MECHANISM = re.compile(r"shaft|axle|spindle|\bgear|pinion|bearing|\b6[02]0\d\b|pulley|sprocket", re.IGNORECASE)
-JOINT = re.compile(r"pin|dowel|pivot|hinge|axle|rod|shaft", re.IGNORECASE)  # bought-out parts that ARE a joint
+JOINT = re.compile(r"\bpin\b|dowel|pivot|hinge|axle|\brod\b|shaft", re.IGNORECASE)  # bought-out parts that ARE a joint
 ADAPTER = re.compile(r"\badapt[eo]r\b|interface plate|transition (?:plate|piece)", re.IGNORECASE)
 WORDS = {
     "product": "free-form product",
