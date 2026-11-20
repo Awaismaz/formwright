@@ -145,13 +145,16 @@ def test_icd_places_keys_and_rings_and_hex_takes_them() -> None:
     assert [(f["data"]["key_item"], f["data"]["b"], f["data"]["h"], f["data"]["t1"], f["data"]["t2"],
              f["data"]["length"], f["data"]["z"]) for f in keys] == [
         (P_KEY, 6, 6, 3.5, 2.8, 18, [-9, 9]), (G_KEY, 6, 6, 3.5, 2.8, 18, [-9, 9])]
-    # rings: the 20-wide gears span Y -10..10; a ring of each sub-assembly at both gear faces first, then the
-    # gear shaft's two spare rings at the outboard faces of its bearings (Y -29 - 1.2 and 29); ids after the mesh
+    # rings by role (golden suite F4, connection-layout): the plan's "Pinion circlip" x 2 is "next to the 6204", so
+    # it locates the pinion shaft's bearings at their outboard faces (Y -29 - 1.2 and 29), never the pinion's faces
+    # (the first version filled spots by order). The "Gear circlip" x 4 holds no stated part: the leading "Gear" names
+    # its line, so all four stay on the gear shaft: both gear faces (the 20-wide gear spans Y -10..10) and both
+    # bearings' outboard faces. Ids after the mesh, shaft by shaft
     rings = [f for f in ifs if f["kind"] == "retaining_ring"]
     assert [(f["id"], f["a"]["item"], f["data"]["ring_item"], f["data"]["against"], f["data"]["z"],
              f["data"]["groove_z"]) for f in rings] == [
-        ("IF-10", P_SH, P_RING, "hub", [-11.2, -10], [-11.3, -10]),
-        ("IF-11", P_SH, P_RING, "hub", [10, 11.2], [10, 11.3]),
+        ("IF-10", P_SH, P_RING, "bearing", [-30.2, -29], [-30.3, -29]),
+        ("IF-11", P_SH, P_RING, "bearing", [29, 30.2], [29, 30.3]),
         ("IF-12", G_SH, G_RING, "hub", [-11.2, -10], [-11.3, -10]),
         ("IF-13", G_SH, G_RING, "hub", [10, 11.2], [10, 11.3]),
         ("IF-14", G_SH, G_RING, "bearing", [-30.2, -29], [-30.3, -29]),
@@ -172,7 +175,7 @@ def test_icd_places_keys_and_rings_and_hex_takes_them() -> None:
     # the shaft carries the grooves; the excerpt tells its designer where
     feats = icd.item_features(sk, ifs, P_SH)
     grooves = [f for f in feats if f["type"] == "groove"]
-    assert [(g["d"], g["z0"], g["z1"]) for g in grooves] == [(19, -11.3, -10), (19, 10, 11.3)]
+    assert [(g["d"], g["z0"], g["z1"]) for g in grooves] == [(19, -30.3, -29), (19, 29, 30.3)]
     ex = icd.excerpt(sk, {"version": 1, "interfaces": ifs}, P_SH)
     assert "retaining ring groove Ø19 × 1.3 H13 (DIN 471 20)" in ex and "depth 0.5 on the Ø20 shaft" in ex
     # Hex: keys and rings from the ICD; the pinion and the gear as keyed Toolbox gears in the plan's material
@@ -266,9 +269,10 @@ def test_keyed_shaft_line_parts_fit_without_interference(tmp_path: Path) -> None
         for b in names[i + 1:]:
             v = _overlap(placed[a], placed[b])
             assert v < 1e-6, (a, b, v)
-    # and the parts do touch: the key sits on its keyseat floor, the rings against the gear faces
+    # and the parts do touch: the key sits on its keyseat floor, the pinion circlips ("next to the 6204") against the
+    # bearings' outboard faces (rings by role)
     assert placed["key0"].distance_to(placed["shaft"]) < 1e-6
-    assert placed["ring0"].distance_to(placed["gear"]) < 1e-6 and placed["ring1"].distance_to(placed["gear"]) < 1e-6
+    assert placed["ring0"].distance_to(placed["bearing0"]) < 1e-6 and placed["ring1"].distance_to(placed["bearing1"]) < 1e-6
 
 
 def test_bom_lists_a_toolbox_made_gear_as_made_in_the_plan_material() -> None:
@@ -350,6 +354,6 @@ def test_live_plan_assembles_with_keys_and_rings_seated(office: Any) -> None:  #
         if o.get("seated"):
             seated.setdefault(i["name"], []).append((round(i["T"][3], 3), round(i["T"][7], 3), round(i["T"][11], 3)))
     assert sorted(seated["Pinion key"]) == [(6.5, 0, 0)] and sorted(seated["Gear key"]) == [(86.5, 0, 0)]
-    assert sorted(seated["Pinion circlip"]) == [(0, -11.2, 0), (0, 10, 0)]
+    assert sorted(seated["Pinion circlip"]) == [(0, -30.2, 0), (0, 29, 0)]  # by role: at the 6204s, outboard
     assert sorted(seated["Gear circlip"]) == [(80, -30.2, 0), (80, -11.2, 0), (80, 10, 0), (80, 29, 0)]
     assert sum(len(x) for x in seated.values()) == 4 + 2 + 6

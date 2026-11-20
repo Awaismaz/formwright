@@ -16,6 +16,10 @@ A case is a brief plus hand-checked expectations, one TOML file in ``golden_case
              supervisor_max; only_simulated = [names]: counts that only a replayed plan fixes (a live planner may
              split or merge part lines); path = "master" | "fast": the layout path the office decided (WORKLIST 50)
     [[expect.at]] / span / along / distance / within / touch / same_span / count / stacks / reuse  (``CHECKS``)
+    [[expect.planetary]] planets, ratio, centre_distance, rim_min_m, tol: a planetary set, checked on the plan's
+             design graph (teeth, assembly condition, ratio, rim rule, mounting chain) and on the final assembly
+             (planets equally spaced at a, gears coplanar, sun in the input shaft, carrier on the output, ring in the
+             housing); one row per rule (``planetary_rows``)
 
 Selectors pick final-assembly instances: ``{kind = "key"}`` (the head noun, ``office.scope.kind_of``) or
 ``{name = "regex"}``, optionally ``pick = "smallest" | "largest"`` (by box volume). Any geometric expectation may
@@ -48,6 +52,7 @@ AXES = {"x": 0, "y": 1, "z": 2}
 COUNTS = ("parts", "pieces", "subs", "tickets", "instances", "clashes", "binned", "loose", "placeholders",
           "blocked", "icd_problems")
 CHECKS = ("at", "span", "along", "distance", "within", "touch", "same_span", "count", "stacks", "reuse")
+MULTI = ("planetary",)  # checks that give one row per rule they hold
 LABELS = {
     "complete": "Program completes", "light": "Light path (one-step approval)", "parts": "Part lines planned",
     "pieces": "Pieces planned", "subs": "Sub-assemblies", "tickets": "Tickets", "kinds": "Kinds of part",
@@ -96,7 +101,7 @@ def load_case(path: Path) -> dict[str, Any]:
     if "plan" not in sim and sim.get("planner", "standard") != "standard":
         raise CaseError(f"{path.name}: [sim] needs plan = <file> or planner = 'standard'")
     ex = case.setdefault("expect", {})
-    unknown = set(ex) - set(COUNTS) - set(CHECKS) - {"complete", "light", "kinds", "no_extras", "conformance",
+    unknown = set(ex) - set(COUNTS) - set(CHECKS) - set(MULTI) - {"complete", "light", "kinds", "no_extras", "conformance",
                                                      "direct_min", "supervisor_max", "only_simulated", "path"}
     if unknown:
         raise CaseError(f"{path.name}: unknown expectations {sorted(unknown)}")
@@ -112,10 +117,12 @@ def load_cases(only: list[str] | None = None, folder: Path = CASES_DIR) -> list[
         raise CaseError("duplicate case ids")
     if only:
         want = {o.strip() for o in only if o.strip()}
-        missing = want - set(ids) - {c.get("letter") for c in cases}
+        stems = {c["file"].removesuffix(".toml") for c in cases}  # the file name works too ("k_planetary")
+        missing = want - set(ids) - {c.get("letter") for c in cases} - stems
         if missing:
             raise CaseError(f"unknown case(s): {', '.join(sorted(missing))} (have {', '.join(ids)})")
-        cases = [c for c in cases if c["id"] in want or c.get("letter") in want]
+        cases = [c for c in cases if c["id"] in want or c.get("letter") in want
+                 or c["file"].removesuffix(".toml") in want]
     return cases
 
 
@@ -303,6 +310,129 @@ def _geo(kind: str, n: int, spec: dict[str, Any], insts: list[dict[str, Any]],
     raise CaseError(f"unknown check {kind}")
 
 
+def planetary_rows(n: int, spec: dict[str, Any], insts: list[dict[str, Any]], snap: dict[str, Any]
+                   ) -> list[dict[str, Any]]:
+    """A single-stage planetary set, by hand rules (``[[expect.planetary]]``): on the plan's design graph
+    (``snap["graph"]``) z_ring = z_sun + 2 z_planet, (z_sun + z_ring) / N whole, the ratio 1 + z_ring / z_sun (sun
+    in, carrier out, ring fixed), the planet bearing's rim (root Ø - D) / 2 >= ``rim_min_m`` m, and the mounting
+    chain (sun on the input shaft, carrier on the output shaft, ring fixed in the housing, each planet on its bearing
+    on its pin in the carrier); on the final assembly's boxes the N planets equally spaced on a = m (z_s + z_p) / 2
+    about the sun, every gear on one mid-plane, the sun inside the input shaft's span, the carrier inside the output
+    shaft's span and the ring inside the housing."""
+    from aicad.graph import planetary
+    from aicad.graph.model import DesignGraph
+
+    tol = float(spec.get("tol", 0.05))
+    pre = f"planetary.{n}"
+    rows: list[dict[str, Any]] = []
+    data = snap.get("graph")
+    ps = g = None
+    if data:
+        g = DesignGraph.model_validate(data)
+        ps = planetary.find(g)
+    if g is None or ps is None:
+        return [_row(f"{pre}.set", "Planetary set in the design graph", False, None, "sun, planets, ring",
+                     "no design graph" if g is None else "not read as a planetary set")]
+    sun, pl, ring = g.comp(ps.sun), g.comp(ps.planet), g.comp(ps.ring)
+    assert sun is not None and pl is not None and ring is not None
+    zs, zp, zr = int(sun.v("teeth")), int(pl.v("teeth")), int(ring.v("teeth"))
+    m = float(sun.v("module"))
+    N = int(spec.get("planets") or ps.n)
+    rows.append(_row(f"{pre}.coaxial", "z_ring = z_sun + 2 z_planet", zr == zs + 2 * zp, f"{zr} = {zs} + 2 x {zp}"
+                     if zr == zs + 2 * zp else zr, zs + 2 * zp))
+    rows.append(_row(f"{pre}.planets", "Planets", ps.n == N, ps.n, N))
+    rows.append(_row(f"{pre}.assembly", "(z_sun + z_ring) / N whole", (zs + zr) % N == 0, (zs + zr) / N, "whole"))
+    ratio = 1 + zr / zs
+    if spec.get("ratio") is not None:
+        rows.append(_row(f"{pre}.ratio", "Ratio 1 + z_ring / z_sun", abs(ratio - float(spec["ratio"])) <= 1e-6,
+                         round(ratio, 4), float(spec["ratio"])))
+    brg = g.comp(ps.bearing) if ps.bearing else None
+    if spec.get("rim_min_m") is not None and brg is not None and brg.v("D") is not None:
+        s_r = (m * (zp - 2.5) - float(brg.v("D"))) / 2
+        rows.append(_row(f"{pre}.rim", "Planet rim (root Ø - bearing D) / 2", s_r >= float(spec["rim_min_m"]) * m - 1e-9,
+                         f"{s_r:g} mm = {s_r / m:.3g} m ({brg.v('designation')})", f">= {spec['rim_min_m']} m"))
+
+    def joined(kinds: tuple[str, ...], host: str | None, guest: str | None) -> bool:
+        return any(x.kind in kinds and x.host == host and x.guest == guest for x in g.connections)
+
+    hub = ("keyed_hub", "hub_fit")
+    chain = {"sun on the input shaft": bool(ps.input) and joined(hub, ps.input, ps.sun),
+             "carrier on the output shaft": bool(ps.output and ps.carrier) and joined(hub, ps.output, ps.carrier),
+             "ring fixed in the housing": bool(ps.housing) and joined(("mounted_on", "bolted_joint"), ps.housing,
+                                                                      ps.ring),
+             "planet on its bearing on its pin": (joined(("mounted_on",), ps.bearing, ps.planet) and
+                                                  joined(("bearing_journal",), ps.pin, ps.bearing)) if ps.bearing
+             else joined(hub + ("mounted_on",), ps.pin, ps.planet),
+             "pin in the carrier": bool(ps.carrier) and joined(("mounted_on", "shaft_bore"), ps.carrier, ps.pin)}
+    bad = [k for k, ok in chain.items() if not ok]
+    rows.append(_row(f"{pre}.chain", "Mounting chain", not bad, bad or "all", "sun in, carrier out, ring fixed"))
+    # the final assembly
+    a = float(spec.get("centre_distance") or m * (zs + zp) / 2)
+    suns = select(insts, {"name": spec.get("sun", "(?i)\\bsun gear")})
+    plans = select(insts, {"name": spec.get("planet", "(?i)\\bplanet gear")})
+    rings = select(insts, {"name": spec.get("ring", "(?i)\\bring gear")})
+    if not suns or len(plans) != N:
+        rows.append(_row(f"{pre}.spacing", f"{N} planets equally spaced at a = {a:g}", False,
+                         f"{len(suns)} sun, {len(plans)} planets", N, "not found"))
+        return rows
+    sb = suns[0]["box"]
+    ext = [sb[k + 3] - sb[k] for k in range(3)]
+    ax = ext.index(min(ext))  # the sun is a disc: its thin side is the axis
+    keep = [k for k in range(3) if k != ax]
+    cs = centre(sb)
+    rad, ang = [], []
+    for p in plans:
+        cp = centre(p["box"])
+        dx, dy = cp[keep[0]] - cs[keep[0]], cp[keep[1]] - cs[keep[1]]
+        rad.append(round(math.hypot(dx, dy), 3))
+        ang.append(math.degrees(math.atan2(dy, dx)) % 360)
+    ang.sort()
+    steps = [round((ang[(k + 1) % N] - ang[k]) % 360, 2) for k in range(N)]
+    ok = all(abs(r - a) <= tol for r in rad) and all(abs(s_ - 360 / N) <= 0.5 for s_ in steps)
+    rows.append(_row(f"{pre}.spacing", f"{N} planets equally spaced at a = {a:g}", ok,
+                     {"radii": rad, "steps_deg": steps}, {"radius": a, "step_deg": round(360 / N, 2)}))
+    gears = suns + plans + rings
+    mids = [round((i["box"][ax] + i["box"][ax + 3]) / 2, 3) for i in gears]
+    rows.append(_row(f"{pre}.coplanar", "Gears on one mid-plane", max(mids) - min(mids) <= tol,
+                     sorted(set(mids)), "one plane"))
+
+    def inside(inner: list[dict[str, Any]], outer: list[dict[str, Any]], only_axis: bool) -> bool:
+        if not inner or not outer:
+            return False
+        ks = [ax] if only_axis else [0, 1, 2]
+        return all(any(all(o["box"][k] - tol <= i["box"][k] and i["box"][k + 3] <= o["box"][k + 3] + tol for k in ks)
+                       for o in outer) for i in inner)
+
+    # axial running gaps between turning and fixed parts (planetary.running_gap): the carrier off the ring's end
+    # face; the sun, the planets and the pins' free ends off the -Y wall (the ring's seating face lies on it)
+    run = float(spec.get("running_gap") or planetary.running_gap(m))
+    cars0 = select(insts, {"name": spec.get("carrier", "(?i)carrier")})
+    pins0 = select(insts, {"name": spec.get("pin", "(?i)\\bplanet pin")})
+    if rings and cars0:
+        rb = rings[0]["box"]
+        gaps = [round(max(c["box"][ax] - rb[ax + 3], rb[ax] - c["box"][ax + 3]), 3) for c in cars0]
+        lo_gear = min(i["box"][ax] for i in suns + plans) - rb[ax]
+        hi_gear = rb[ax + 3] - max(i["box"][ax + 3] for i in suns + plans)
+        side = 1 if centre(cars0[0]["box"])[ax] > centre(rb)[ax] else -1
+        got: dict[str, float] = {"carrier_to_ring": min(gaps), "gears_to_ring_faces": round(min(lo_gear, hi_gear), 3)}
+        if pins0:
+            got["pin_end_to_wall"] = round(min((p["box"][ax] - rb[ax]) if side > 0 else (rb[ax + 3] - p["box"][ax + 3])
+                                               for p in pins0), 3)
+        rows.append(_row(f"{pre}.running", "Axial running gaps (turning to fixed)",
+                         all(v >= run - 1e-6 for v in got.values()), got, f">= {run:g} mm"))
+    ins = select(insts, {"name": spec.get("input", "(?i)\\binput shaft")})
+    outs = select(insts, {"name": spec.get("output", "(?i)\\boutput shaft")})
+    cars = select(insts, {"name": spec.get("carrier", "(?i)carrier")})
+    hss = select(insts, {"name": spec.get("housing", "(?i)housing base|gearbox base|\\bhousing\\b")})
+    placed = {"sun within the input shaft's span": inside(suns, ins, True),
+              "carrier within the output shaft's span": inside(cars, outs, True),
+              "ring inside the housing": inside(rings, hss, False)}
+    bad = [k for k, ok in placed.items() if not ok]
+    rows.append(_row(f"{pre}.placed", "Sun on the input, carrier on the output, ring in the housing", not bad,
+                     bad or "all", "all"))
+    return rows
+
+
 def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str, plan_fixed: bool | None = None
              ) -> list[dict[str, Any]]:
     """Every expectation of the case against a run snapshot (see ``golden_run.snapshot``). ``ok`` None = not
@@ -359,6 +489,12 @@ def evaluate(case: dict[str, Any], snap: dict[str, Any], mode: str, plan_fixed: 
                     rows.append(_geo(kind, n, spec, insts, snap))
                 except (KeyError, TypeError, ValueError, re.error) as e:
                     rows.append(_row(f"{kind}.{n}", kind, False, None, None, f"bad expectation: {e}"))
+    for n, spec in enumerate(ex.get("planetary") or [], start=1):
+        if applies(spec, mode, fixed):
+            try:
+                rows += planetary_rows(n, spec, insts, snap)
+            except (KeyError, TypeError, ValueError, re.error) as e:
+                rows.append(_row(f"planetary.{n}", "planetary set", False, None, None, f"bad expectation: {e}"))
     cap = lim.get("tokens")
     if cap is not None:
         live = mode == "live"

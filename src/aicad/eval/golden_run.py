@@ -385,7 +385,7 @@ def snapshot(c: Any, pid: str, drove: dict[str, Any]) -> dict[str, Any]:
         "master_ok": (drove.get("path") or {}).get("master_ok"),
     }
     return {"status": v["status"], "stopped": drove.get("stopped"), "metrics": metrics, "kinds": kinds,
-            "tickets": tickets, "instances": insts, "stacks": stacks,
+            "tickets": tickets, "instances": insts, "stacks": stacks, "graph": (plan.get("graph") or {}).get("data"),
             "warnings": (v.get("icd") or {}).get("warnings") or [], "fix": drove.get("fix"), "looks": looks,
             "supervisor": [{k: e.get(k) for k in ("status", "tool", "class", "title", "diagnosis", "outcome")}
                            for e in sup][:12]}

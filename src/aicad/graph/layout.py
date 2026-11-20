@@ -1346,7 +1346,10 @@ class _Layout:
                           [ring, sun, pl], list(ps.meshes))
         a = m * (zs + zp) / 2
         b = min(float(sg["b"]), float(sp["b"]))
-        G = PLANET_GAP
+        # axial running gap between a turning part and a fixed one (planetary.running_gap: max(1 mm, 0.5 m)):
+        # the planets and the sun to the -Y wall face and inside the ring's lands, the carrier to the ring's end face
+        run = planetary.running_gap(m)
+        G = max(PLANET_GAP, run)
         # the ring: internal teeth, a rim under them
         rim = max(3.0 * m, 6.0)
         od_r = _r2(m * (zr + 2.5) + 2 * rim)
@@ -1372,6 +1375,10 @@ class _Layout:
             if bD / 2 > rf - m + 1e-6:
                 self.conflict(f"{self.name(pb)} (OD {bD:g}) leaves no rim under the teeth of {self.name(pl)} (root "
                               f"Ø{2 * rf:g}): use a smaller bearing, a smaller pin or larger planets.", [pl, pb], [])
+            elif rf - bD / 2 < planetary.RIM_MIN_M * m - 1e-6:
+                self.notes.append(f"Check: {self.name(pb)} (OD {bD:g}) leaves a rim of {rf - bD / 2:g} mm under the "
+                                  f"teeth of {self.name(pl)}, less than {planetary.RIM_MIN_M:g} m "
+                                  f"({planetary.RIM_SOURCE}).")
             if bB > b + 1e-6:
                 self.notes.append(f"{self.name(pb)} ({bB:g} wide) is wider than the {b:g} mm planet face.")
         else:
@@ -1430,7 +1437,7 @@ class _Layout:
         if cap_m:
             t_in = max(t_in, icd.tap_depth(cap_m) + 3.0)
             t_out = max(t_out, icd.tap_depth(cap_m) + 3.0)
-        stack = wr + Hc + CAV_Y   # ring (with the gears in it), the carrier, room to the +Y wall
+        stack = wr + run + Hc + CAV_Y   # ring (with the gears in it), the running gap, the carrier, room to +Y
         above = max(od_r / 2 + CAV, caps_od / 2 + 2.0, max(D_in, D_out) / 2 + 3.0)
         below = above + FLOOR
         hs, ho = self.spec[h], self.o(h)
@@ -1445,7 +1452,7 @@ class _Layout:
         yc0 = y0 + t_in
         ym = yc0 + G + b / 2
         yr0 = yc0
-        yc_car0 = ym + b / 2 + G
+        yc_car0 = yr0 + wr + run  # (A1: the carrier sat on the fixed ring's end face, turning against it)
         yc_car1 = yc_car0 + Hc
         za = -(above + (Hh - want_sz["H"]) / 2)  # (a taller housing than needed: the axis at mid-height)
         self.at[h] = [[0.0, 0.0, _r2(-Hh / 2)]]
@@ -1490,7 +1497,7 @@ class _Layout:
                 self.spec[r]["ax"] = "y"
                 self.at[r] = [[0.0, _r2(self.local[sh][r]), _r2(za)]]
         # the planets, their pins and bearings, on the planet radius
-        py0 = ym - max(bB, b) / 2 - PIN_END
+        py0 = max(ym - max(bB, b) / 2 - PIN_END, yc0 + run)  # the pin's free end clear of the fixed wall
         ks = self.spec[pin]
         ks.update(body=None, collar=None, ax="y", y0=_r2(py0), y1=_r2(yc_car1), length=_r2(yc_car1 - py0))
         ks["brg"] = [(-1, ym - bB / 2, ym + bB / 2, (pb, 0))] if pb else []
@@ -1539,13 +1546,19 @@ class _Layout:
         seats = [{"face": face, "open": side, "z": [_r2(b0), _r2(b1)]} for _sd, b0, b1, _p in s["brg"]]
         lo = min(b0 for _sd, b0, _b1, _p in s["brg"])
         hi = max(b1 for _sd, _b0, b1, _p in s["brg"])
+        # the shoulder between the inner seat and the cavity: the shaft passes through it (said in the ICD, so no
+        # part or placeholder claims the shaft's room there)
+        inner = (self.hm["y0"] + self.hm["t_in"]) if side < 0 else (self.hm["y1"] - self.hm["t_out"])
+        span = [_r2(hi), _r2(inner)] if side < 0 and inner - hi > 0.5 else \
+            [_r2(inner), _r2(lo)] if side > 0 and lo - inner > 0.5 else None
+        passes = [{"z": span, "d": _r2(bd + 2), "what": "shaft clearance through the shoulder"}] if span else []
         self.add("bearing_seat", (self.item[self.housing], 0), (self.item[sh], 0), {
             "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
             "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
             "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(lo), _r2(hi)], "seats": seats,
             "clearance_d": _r2(bd + 2), "flush_z": None, "bearing_item": self.item[bitem], "shaft_d": s["seat"],
             "count": len(seats), "r_s_min": icd._BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)",
-            "position_tol": POS_TOL, "journals": [[_r2(lo), _r2(hi)]]},
+            "position_tol": POS_TOL, "journals": [[_r2(lo), _r2(hi)]], **({"passes": passes} if passes else {})},
             ["A", "B", "C"], f"shaft in {len(seats)} bearings {des} ({face})")
 
     def _emit_planetary(self) -> None:

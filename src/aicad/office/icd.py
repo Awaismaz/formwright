@@ -656,8 +656,14 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
         if ringy:
             # its role, as the plan states it: what it locates ("locating each bearing inner race" / "holding the gear
             # against the shoulder"): rings go to spots of that role, never just by order and Ø (golden suite F4)
-            role = "bearing" if _BEARINGY.search(text) and not re.search(r"gear|hub|pulley|wheel|sprocket|spacer",
-                                                                          p["name"], re.IGNORECASE) else                 "hub" if re.search(r"gear|hub|pulley|wheel|sprocket|spacer", text, re.IGNORECASE) else None
+            # A leading "Gear" / "Pinion" in the name says whose line the ring belongs to ("Gear circlip" in the Gear
+            # shaft assembly), not what it holds: only the description, or a later word of the name, gives the hub
+            # role (live gear pair: four "Gear circlip" rings read as hub rings left the gear shaft's bearings without
+            # rings and crossed to the pinion's gear faces)
+            hubby = r"gear|hub|pulley|wheel|sprocket|spacer"
+            rest = " ".join(str(p["name"]).split()[1:])
+            role = "bearing" if _BEARINGY.search(text) and not re.search(hubby, p["name"], re.IGNORECASE) else \
+                "hub" if re.search(hubby, f"{rest} {p['description']}", re.IGNORECASE) else None
             ring_pool.append({"id": p["id"], "left": int(p["qty"]), "sub": p["sub"], "name": p["name"], "d": None,
                               "role": role})
         elif keyy:
@@ -2318,7 +2324,10 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
                 out.append({"type": "seat", **g, "d": d["D"], "fit": d["housing_fit"], "tol": tol,
                             "label": f"bearing seat Ø{d['D']:g} {d['housing_fit']} ({st['face']})"})
                 op = int(st.get("open") or (1 if st["face"] == "top" else -1))
-                fc = _plane(skel, side, d, st["z"][0] if op > 0 else st["z"][1], op)
+                fz = st["z"][0] if op > 0 else st["z"][1]
+                if any(o is not st and any(abs(float(e) - float(fz)) < 1e-6 for e in o["z"]) for o in d["seats"]):
+                    continue  # two bearings side by side in one bore: the seat runs on, no shoulder between them
+                fc = _plane(skel, side, d, fz, op)
                 out.append({"type": "face", **fc, "tol": tol,
                             "label": f"bearing shoulder ({st['face']}), seat depth {d['B']:g}"})
             opens = [(int(st.get("open") or (1 if st["face"] == "top" else -1)), st["z"]) for st in d["seats"]]
@@ -2327,6 +2336,10 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
             if hi - lo > 0.5:
                 out.append({"type": "seat", **_axial(skel, side, d, d["axis"], lo, hi), "d": d["clearance_d"], "tol": tol,
                             "label": f"shaft clearance Ø{d['clearance_d']:g}"})
+            for ps_ in d.get("passes") or []:  # the bore beyond the seats (planetary layout): a shaft through the
+                # wall's shoulder, a planet's bearing entry and pin clearance (benchmark A1: they were left solid)
+                out.append({"type": "seat", **_axial(skel, side, d, d["axis"], ps_["z"][0], ps_["z"][1]),
+                            "d": float(ps_["d"]), "tol": tol, "label": f"{ps_['what']} Ø{float(ps_['d']):g}"})
             if d.get("flush_z") is not None:  # (a pillow block's seat has no flush shaft end)
                 out.append({"type": "face", **_plane(skel, side, d, d["flush_z"], -1), "tol": tol,
                             "label": ("outer face (-Y wall), shaft end flush with it" if horiz
@@ -2473,14 +2486,47 @@ def body_spec(shape: str, size: list[float], features: list[dict[str, Any]], bor
     return out
 
 
+def internal_opening(module: float, teeth: int) -> float:
+    """The opening of an internal gear's placeholder: the root circle of its teeth, d_f = m (z + 2 x 1.25) (ISO 53
+    basic rack, dedendum 1.25 m). Inside it there is only tooth space and the room the planets turn in."""
+    return round(float(module) * (int(teeth) + 2.5), 3)
+
+
 def placeholder_spec(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str) -> dict[str, Any]:
-    """The envelope solid with its interface features, in the part frame."""
+    """The envelope solid with its interface features, in the part frame. A placeholder never claims material where
+    the ICD says there is none (benchmark A1, 2026-11-21: a solid Ø197 disc for an internal ring sent a correct input
+    shaft and three pins back for "clashes" with empty space):
+
+    * an external gear is its pitch cylinder (meshing placeholders touch, never clash), with its bore, or its bearing
+      seat and the passes beside it (a planet: the bearing entry and the pin clearance);
+    * an internal gear is its rim: the envelope OD, open to the root circle of its teeth (``internal_opening``);
+    * through bores and shaft bores of hubs, gears and carriers, bearing seats and a housing's cavity, as the ICD
+      features say (``item_features`` / ``body_spec``)."""
     it = skel["items"][item]
     size = it["size"]
-    if it["role"] == "gear":  # a gear's placeholder is its pitch cylinder: meshing placeholders touch, never clash
+    feats = item_features(skel, ifs, item)
+    bore = it.get("bore")
+    if it["role"] == "gear" and it.get("internal"):
+        opening = internal_opening(it["module"], it["teeth"])
+        if opening < float(size[0]) - 1.0:
+            bore = max(float(bore or 0.0), opening)
+    elif it["role"] == "gear":
         p = it["module"] * it["teeth"]
         size = [p, p, size[2]]
-    return body_spec(it["shape"], size, item_features(skel, ifs, item), it.get("bore"), it["name"], it.get("cavity"))
+        # a gear on its bearing (a planet): the seat is bored from its open face to the shoulder, and the bore behind
+        # the shoulder clears the turning inner ring (the gear generator's rule, D - (D - d) / 4 down to 0.5 mm);
+        # without these the pin "clashed" with the planet's placeholder. Placeholder only: the ICD keeps its seat.
+        byid = {f["id"]: f for f in ifs}
+        for x in [f for f in feats if f["type"] == "seat" and f.get("fit")]:
+            d = (byid.get(x["if"]) or {}).get("data") or {}
+            if (byid.get(x["if"]) or {}).get("kind") != "bearing_seat" or not d.get("d"):
+                continue
+            D, bd, H = float(d["D"]), float(d["d"]), float(size[2])
+            bore = max(float(bore or 0.0), math.floor(2 * (D - (D - bd) / 4)) / 2)
+            opens = [int(s.get("open") or -1) for s in d.get("seats") or []] or [-1]
+            z0, z1 = float(x["z0"]), float(x["z1"])
+            x["z0"], x["z1"] = (-H / 2, z1) if opens[0] < 0 else (z0, H / 2)
+    return body_spec(it["shape"], size, feats, bore, it["name"], it.get("cavity"))
 
 
 def key_frame(d: dict[str, Any]) -> tuple[list[list[float]], list[float]]:

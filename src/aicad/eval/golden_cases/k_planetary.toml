@@ -1,0 +1,65 @@
+# (k) The founder's standing benchmark (2026-11-21): "Build a single stage planetary Gearbox", built through the
+# Design Office and retried until it is right. Attempt A1 planned the set correctly and failed in orchestration: the
+# input shaft and all three planet pins were built correctly and then blocked "after 2 rounds" for clashing with the
+# placeholder of the not-yet-built ring gear (a solid Ø197 disc where the real internal gear is open to Ø176), and its
+# planet bearing (6204, D 47) left a 4 mm rim in a z30 m2 planet (root Ø55).
+# The simulated run replays A1's intent reply on the design-graph path (k_planetary.intent.json, rebuilt from A1's
+# resolved graph) and A1's plan off it (k_planetary.plan.json). Hand values:
+#   teeth: sun 30, planets 3 x 30, ring z_r = z_s + 2 z_p = 30 + 60 = 90 (internal), module 2
+#   assembly condition: (z_s + z_r) / N = (30 + 90) / 3 = 40, whole
+#   ratio (sun in, carrier out, ring fixed): i = 1 + z_r / z_s = 1 + 90 / 30 = 4
+#   centre distance a = m (z_s + z_p) / 2 = 2 (30 + 30) / 2 = 60 = m (z_r - z_p) / 2 = 2 (90 - 30) / 2; planets 120 deg
+#   apart on a = 60 about the sun axis
+#   planet root Ø d_f = m (z - 2.5) = 2 x 27.5 = 55; rim rule s_R >= 1.2 h_t = 1.2 x 2.25 m = 2.7 m = 5.4 mm, so the
+#   bearing D <= 55 - 10.8 = 44.2 on the Ø20 pin: 6004 (20 x 42 x 12), rim (55 - 42) / 2 = 6.5 mm = 3.25 m
+#   (the 6204's rim would be (55 - 47) / 2 = 4 mm = 2 m: fails)
+#   axial running gap turning to fixed max(1 mm, 0.5 m) = 1 mm: ring Y -29.5 .. -3.5 against the -Y wall, carrier
+#   -2.5 .. 17.5 (1 mm off the ring's end face; A1 had it touching: ring -29 .. -3, carrier -3 .. 17), sun and
+#   planets -26.5 .. -6.5 (3 mm lands), pin ends 1 mm off the wall
+#   ring placeholder: OD 197 (root m (z + 2.5) = 185 plus a 6 mm rim each side), open to its root circle Ø185
+id = "planetary"
+title = "Single stage planetary gearbox (founder's benchmark)"
+letter = "k"
+source = "Founder's standing benchmark, attempt A1 2026-11-21 (docs/reports/planetary-orchestration.md)"
+brief = "Build a single stage planetary Gearbox"
+
+[sim]
+plan = "k_planetary.plan.json"      # A1's plan (the old path, FW_DESIGN_GRAPH=0)
+intent = "k_planetary.intent.json"  # A1's intent reply, replayed on the design-graph path (the default)
+
+[limits]
+tokens = 600
+wall_simulated_s = 900
+wall_live_s = 3600
+
+[expect]
+complete = true
+parts = 18               # A1's plan: 18 part lines, 38 pieces (3 planets, 3 pins, 3 planet bearings, 2 + 2 shaft
+pieces = 38              # bearings, 8 cap screws, 6 cover bolts, ...)
+only_simulated = ["parts", "pieces"]
+# pieces by head noun: gears = sun, 3 planets, ring; bearings = 2 + 2 shaft and 3 planet; caps = cover and 2 open
+# caps; supports = housing base and carrier; fasteners = 8 cap screws and 6 cover bolts
+kinds = { gear = 5, bearing = 7, pin = 3, shaft = 2, key = 2, cap = 3, support = 2, fastener = 14 }
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.planetary]]
+planets = 3
+ratio = 4.0
+centre_distance = 60.0
+rim_min_m = 2.7
+running_gap = 1.0        # max(1 mm, 0.5 m) for m2
+tol = 0.05
+
+[[expect.count]]
+name = "(?i)\\bplanet gear"
+n = 3
+
+[[expect.count]]
+name = "(?i)\\bplanet pin"
+n = 3

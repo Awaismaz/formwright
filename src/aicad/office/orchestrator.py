@@ -530,11 +530,42 @@ def to_designer(root: Path, doc: dict[str, Any], t: dict[str, Any]) -> str:
     return str(t["specialist"])
 
 
+def refit_placeholder_clash(root: Path, doc: dict[str, Any], t: dict[str, Any], actor: dict[str, Any]) -> bool:
+    """A built part blocked or sent back only for clashes with parts that are still placeholders (benchmark A1,
+    2026-11-21): the overlap was a measurement artefact, so the part goes straight back to Fitz, unchanged, to be
+    swapped in again (the swap now keeps such overlaps as notes, re-checked when those parts are built). True when it
+    did that."""
+    from aicad.office import program_assembly
+
+    r = run_of(t)
+    if t["kind"] != "part" or t.get("taken_over") or r.get("status") in ACTIVE or not t.get("project_id"):
+        return False
+    if not int(r.get("clash_round") or 0) or (doc.get("assembly") or {}).get("status") != "ready":
+        return False
+    if not (r.get("status") == "blocked" or (r.get("next") == "design" and t["column"] == "changes_requested")):
+        return False
+    waits = program_assembly.placeholder_only(doc, t)
+    if not waits:
+        return False
+    close_wait(t)
+    if t["column"] != "approved":
+        service.move(root, doc, t["id"], "approved", actor)
+    _set_run(t, status="queued", next="fit", agent="fitz", agent_label="Fitz", attempt=0, fit_attempt=0,
+             clash_round=0, blocked=None, feedback=None,
+             line=f"Back to Fitz: its clashes were with the placeholder of {', '.join(waits)}, not a built part")
+    service.emit(root, doc, "ticket.refit", f"{actor.get('name', 'Archie')} put {service._label(t)} back to Fitz: "
+                 f"it only overlapped the placeholder of {', '.join(waits)}, which is not built yet. The real check "
+                 "runs when that part is built.", actor, t["id"])
+    return True
+
+
 def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
     """Parts left waiting by the review rules before CD-030 (AI points could block forever) go back to Gage under
     the current rules: AI-only points end in an approval with the points recorded; a measurable failure comes back
-    to the engineer with the failing check named. Runs whenever the office starts on a program."""
+    to the engineer with the failing check named. A built part stopped only by clashes with placeholders goes back to
+    Fitz (``refit_placeholder_clash``). Runs whenever the office starts on a program."""
     out = []
+    refit = 0
     for t in doc["tickets"]:
         r = run_of(t)
         why = str(r.get("blocked") or "")
@@ -573,6 +604,9 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
                      line=f"Not in stock: {roster.agent(t['specialist'])['name']} models it")
             out.append(t)
             continue
+        if refit_placeholder_clash(root, doc, t, service.agent_actor("archie")):
+            refit += 1  # (its own event: not the review rules)
+            continue
         if r.get("status") == "blocked" and r.get("next") == "review" and why.startswith("Gage sent") \
                 and "measurable check" not in why and not t.get("taken_over"):
             close_wait(t)
@@ -583,7 +617,7 @@ def heal_review_blocks(root: Path, doc: dict[str, Any]) -> int:
         service.emit(root, doc, "program.healed", f"Archie put {len(out)} part{'s' if len(out) != 1 else ''} blocked "
                      "by the old review rules back to Gage: advisory points no longer block a part that passes every "
                      "measurable check.", service.agent_actor("archie"), tickets=[t["key"] for t in out])
-    return len(out)
+    return len(out) + refit
 
 
 # ============================================================================ the platform boundary
@@ -1479,6 +1513,11 @@ class Runner:
                 _set_run(tt, status="done", next=None, line=res["skipped"], agent="fitz")
                 return None
             clashes = (res.get("last") or {}).get("clashes") or []
+            # a clash with a part that is still a placeholder is a note, never a send-back: the real check runs when
+            # that part is built (benchmark A1: a correct shaft was blocked "after 2 rounds" for clashing with empty
+            # space in a solid ring placeholder). Only real-vs-real clashes count toward the round cap below.
+            deferred = list((res.get("last") or {}).get("deferred") or []) + [c for c in clashes if c.get("until")]
+            clashes = [c for c in clashes if not c.get("until")]
             o = supervisor.relaxed_clash(d, tt) if clashes else None
             if o is not None:  # Archie relaxed the swap-in clash check for this part: recorded as relaxed, never 0
                 first = clashes[0]
@@ -1511,6 +1550,21 @@ class Runner:
             cl = "0 clashes" if checked else "its clash check is left to the final assembly"
             if o is not None:
                 cl = f"the clash check relaxed by Archie (not passed): {o['reason']}"
+            if deferred:
+                from aicad.office import program_assembly
+
+                waits = sorted({str(c.get("until_name") or "another part") for c in deferred})
+                cl += (f" with built parts; {len(deferred)} overlap{'s' if len(deferred) != 1 else ''} with the "
+                       f"placeholder{'s' if len(waits) != 1 else ''} of {', '.join(waits)}, re-checked when "
+                       f"{'they are' if len(waits) != 1 else 'it is'} built")
+                service.comment(self.root, d, tid, "Fitz noted overlaps with parts that are not built yet. A "
+                                "placeholder is an envelope made from the interfaces, not the part, so nothing on this "
+                                "part changes for these; the real check runs when those parts are built:\n"
+                                + "\n".join(f"- {program_assembly.pending_text(c)}" for c in deferred[:6]), f)
+                tt["comments"][-1]["delivery"] = "stored"
+                tt["clash_pending"] = waits
+            else:
+                tt.pop("clash_pending", None)
             nrel = len(tt.get("relaxed") or [])
             _set_run(tt, status="done", next=None, agent="fitz", fit_attempt=0,
                      line=f"Fitz swapped {tt['title']} in: interface mates re-attached, {cl}"
