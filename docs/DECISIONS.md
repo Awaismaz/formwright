@@ -265,3 +265,12 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-267 | Two adjacent seats in one bore | No shoulder face between them in the ICD (the bore runs on) | None expected |
 | PD-268 | Revision minor or major | Major when it redesigns or removes a part past Ready, or removes a part the brief names; minor for re-placement and unstarted parts | If every Archie revision should be asked |
 | PD-269 | Running gap, turning vs fixed parts | Axial gap at least max(1 mm, 0.5 m) (Formwright's rule, not a standard) | If a fixed gap or a per-bearing rule is wanted |
+| PD-270 | Bearing read from a master model | A shaft in a bore whose bore and outside Ø equal a planned bearing's; designation from the plan, else the design graph, else the ISO 15 table | If bearings should be modelled in the master |
+| PD-271 | Bearings in a measured bore | Side by side from the end farther from the body's middle; a bore with no shoulder is a warning, not an invented face | If a shoulder should be added automatically |
+| PD-272 | Meshes from a master | gear_mesh only with the plan's module and teeth and the measured centre distance within 0.1 mm; never a carrying joint | If meshes should be inferred without the plan's gear data |
+| PD-273 | Stale master at Fix with Archie | Measured again first, automatically, no tokens; interface overrides reset when the interface list changed (said in the history) | If the engineer should be asked before overrides reset |
+| PD-274 | Wall check on a split half bore | Its centre on the joint face is by design; the wall is still checked across the other direction | None expected |
+| PD-275 | Envelope growth for an opening near the edge | The exact size that leaves 1 mm (+0.5) tried first, capped at 4 x planned; the master itself is not changed | If the master should be re-modelled instead |
+| PD-276 | Studio STEP recognition sums cylinder angles over a line | Not changed (wide blast radius); the master measurement reads per stretch on its own | Fix in recognize.py with a version bump |
+| PD-277 | Split-housing bearing seats in the ICD | One bearing_seat per half; the half nearer the base places the bearings, the other is a half seat only | None expected |
+| PD-278 | Fasteners of a layout grid joint | Planned to the holes the grid makes, unless the brief states a count (A5: 6 cover bolts for 4 holes) | If the grid should grow to the planned count instead |
