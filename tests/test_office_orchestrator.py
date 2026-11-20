@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from aicad.office import fake_agents, gage, orchestrator, planner, platform_env, service
+from aicad.office import direct, fake_agents, gage, orchestrator, planner, platform_env, service
 
 
 # ----------------------------------------------------------------------------- priority (hand calculations)
@@ -255,8 +255,9 @@ def _events(c: Any, pid: str) -> list[dict[str, Any]]:
     return list(reversed(c.get(f"/api/office/programs/{pid}/activity?limit=500").json()["items"]))
 
 
-def test_program_runs_end_to_end(office: Any) -> None:
-    c = office
+def test_program_runs_end_to_end(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(direct.ENV, "0")  # the design agents' path: plates and blocks are otherwise built
+    c = office                            # from the ICD (WORKLIST 45 generators), with no agent turn
     v = _program(c, "run@x.com")
     pid = v["id"]
     assert v["orchestrator"]["state"] == "idle" and v["orchestrator"]["simulated"] is True
@@ -410,8 +411,9 @@ def test_comments_are_queued_and_delivered_and_controls(office: Any) -> None:
                   json={"action": "bogus"}).status_code == 409
 
 
-def test_budget_warns_at_80_and_stops_at_100(office: Any) -> None:
-    c = office
+def test_budget_warns_at_80_and_stops_at_100(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(direct.ENV, "0")  # the design agents' path: plates and blocks are otherwise built
+    c = office                            # from the ICD (WORKLIST 45 generators), with no agent turn
     parts = [{"name": f"Block {i}", "family": "machined", "complexity": 1, "qty": 1,
               "description": f"Block {30 + i} x 20 x 10 mm."} for i in range(6)]
     plan = {"source": "standard", "summary": "", "assumptions": [],
