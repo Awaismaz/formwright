@@ -126,6 +126,43 @@ def _rebuild(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, 
     return _graph_layout(doc, overrides) or icd.build(icd.parts_from(doc), doc["brief"], overrides)
 
 
+def relayout(root: Path, doc: dict[str, Any], why: str) -> dict[str, Any]:
+    """Lay the draft ICD out again from what the program says now (a master measured again), keeping the engineer's
+    overrides. Archie's automatic envelope growth (``grown``) answered the old layout, so it is dropped and decided
+    again (``fix`` runs next). Interface overrides are keyed by interface number: when the list of interfaces changed
+    they no longer point at the same joints, so they are dropped (said in the history). {"problems", "dropped"}."""
+    ic = doc["icd"]
+    if ic["status"] != "draft":
+        raise OfficeInputError("The ICD is approved: interfaces change through a change request now.")
+    ov = copy.deepcopy(ic.get("overrides") or {"items": {}, "interfaces": {}})
+    for io in (ov.get("items") or {}).values():
+        for k in io.pop("grown", None) or []:
+            io.pop(k, None)
+    ov["items"] = {i: io for i, io in (ov.get("items") or {}).items() if io}
+    sk2, ifs2 = _rebuild(doc, ov)
+
+    def sig(fs: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+        return [(f["id"], f["kind"], f["a"]["item"], f["b"]["item"]) for f in fs]
+
+    dropped = bool(ov.get("interfaces")) and sig(ifs2) != sig(ic["interfaces"])
+    if dropped:
+        ov["interfaces"] = {}
+        sk2, ifs2 = _rebuild(doc, ov)
+    d = icd.diff(doc["skeleton"], ic["interfaces"], sk2, ifs2)
+    before = list(ic.get("problems") or [])
+    probs = icd.problems(sk2, ifs2)
+    doc["skeleton"], ic["interfaces"], ic["overrides"], ic["problems"] = sk2, ifs2, ov, probs
+    gone = len([p for p in before if p not in probs])
+    text = (f"{why}: {len(ifs2)} interfaces, {gone} of {len(before)} problem{'s' if len(before) != 1 else ''} "
+            "cleared" + (f", {len(probs)} still open" if probs else "")
+            + ("; the interface values edited before no longer match the new interfaces, so they were reset"
+               if dropped else "") + ".")
+    ic["history"].append({"version": ic["version"], "at": store.now(), "by": "Archie", "kind": "fixed", "text": text,
+                          "changes": d["changes"][:40]})
+    service.emit(root, doc, "icd.fixed", text, service.agent_actor("archie"))
+    return {"problems": probs, "dropped": dropped}
+
+
 def edit(root: Path, doc: dict[str, Any], iid: str, values: dict[str, Any], actor: dict[str, Any]) -> dict[str, Any]:
     """Change numbers of one interface while the ICD is a draft (at the gate)."""
     if not has_icd(doc):
@@ -315,6 +352,12 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
                 if n < len(probs) and (best is None or (n, rank) < (best[0], best[1])):
                     best = (n, rank, f, vals, ov2)
         if best is None:  # no interface change helps: grow the envelope of a part a problem names
+            need: dict[str, dict[str, float]] = {}
+            for x in icd.issues(sk, ifs):  # a hole too near the edge says the size that clears it
+                if x["code"] == "hole_edge" and x.get("grow") and x.get("items"):
+                    g0 = need.setdefault(x["items"][0], {})
+                    for k, v in x["grow"].items():
+                        g0[k] = max(g0.get(k, 0.0), float(v))
             names = {it["name"]: i for i, it in sk["items"].items()}
             byid = {f["id"]: f for f in ifs}
             tries: list[tuple[str, dict[str, Any] | None]] = [
@@ -327,7 +370,7 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
                 f0 = byid.get(f0) if f0 else None
                 extra = [{}] + (_candidates(f0) if f0 else [])
                 found = False
-                for rank, ch in enumerate(_grow(sk["items"][item])):
+                for rank, ch in enumerate(_grow(sk["items"][item], need.get(item))):
                     if found:  # the least growth that helps this part is the one to take
                         break
                     for r2, cand in enumerate(extra):
@@ -370,12 +413,18 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
     return ov, steps, probs
 
 
-def _grow(it: dict[str, Any]) -> list[dict[str, Any]]:
+def _grow(it: dict[str, Any], need: dict[str, float] | None = None) -> list[dict[str, Any]]:
     """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot. The
     planned envelope is Archie's estimate, not a limit (founder rule 2026-11-20: only the brief is binding), so the
-    growth may pass it, up to ``icd.GROW_CAP`` times it (a sanity cap: beyond that the part is not this design's)."""
+    growth may pass it, up to ``icd.GROW_CAP`` times it (a sanity cap: beyond that the part is not this design's).
+    ``need``: the sizes the gate says clear a hole near the edge (``hole_edge``), tried first."""
     L, W, H = (float(x) for x in it["size"])
     out: list[dict[str, Any]] = []
+    if need and it["role"] == "block":
+        cur = {"L": L, "W": W, "H": H}
+        ch = {k: round(float(v), 1) for k, v in need.items() if k in cur and float(v) > cur[k] + 1e-6}
+        if ch:
+            out.append(ch)
     if it["role"] == "block":
         dims = sorted((("L", L), ("W", W), ("H", H)), key=lambda kv: kv[1])
         for add in (2.0, 4.0, 8.0):

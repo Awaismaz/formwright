@@ -1,0 +1,228 @@
+{
+ "source": "archie",
+ "summary": "Single stage planetary gearbox: sun gear keyed on the input shaft drives three planet gears on bearings and pins fixed in a carrier keyed on the output shaft. Planets mesh with an internal ring gear fixed in a split housing with a cover. Input and output shafts each run on two housing bearings under",
+ "assumptions": [],
+ "subassemblies": [
+  {
+   "name": "Housing",
+   "description": "The housing that carries the bearings, with its cover and bearing caps.",
+   "parts": [
+    {
+     "name": "Planet gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 3,
+     "description": "Case hardened steel spur gear, module 2, 30 teeth, 20 mm face width, 42 mm H7 bore.",
+     "envelope": [
+      20.0,
+      60.0,
+      60.0
+     ],
+     "module": 2.0,
+     "teeth": 30
+    },
+    {
+     "name": "Ring gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Through hardened steel spur gear, module 2, 90 teeth, 20 mm face width.",
+     "envelope": [
+      20.0,
+      210.0,
+      210.0
+     ],
+     "module": 2.0,
+     "teeth": 90
+    },
+    {
+     "name": "Housing base",
+     "family": "machined",
+     "complexity": 4,
+     "qty": 1,
+     "description": "Lower half of the split housing: mounting feet, the bearing bores for every shaft and the flange the cover bolts to, Cast iron.",
+     "envelope": [
+      128.0,
+      320.0,
+      135.0
+     ]
+    },
+    {
+     "name": "Housing cover",
+     "family": "machined",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Upper half of the split housing (the cover), bolted to the base, Cast iron.",
+     "envelope": [
+      128.0,
+      300.0,
+      120.0
+     ],
+     "mounts_on": "Housing base"
+    },
+    {
+     "name": "Input open cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Open flanged bearing cap: the shaft passes through it, Cast iron.",
+     "envelope": [
+      8.0,
+      90.0,
+      90.0
+     ],
+     "mounts_on": "Housing base"
+    },
+    {
+     "name": "Output open cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Open flanged bearing cap: the shaft passes through it, Cast iron.",
+     "envelope": [
+      8.0,
+      90.0,
+      90.0
+     ],
+     "mounts_on": "Housing base"
+    },
+    {
+     "name": "Cap screw",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "description": "Socket head cap screw M6x16 that fixes the bearing caps.",
+     "toolbox": "shcs"
+    },
+    {
+     "name": "Cover bolt",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "description": "Hex bolt M8x30 joining the cover to the base.",
+     "toolbox": "hex_bolt"
+    }
+   ]
+  },
+  {
+   "name": "Input shaft group",
+   "description": "The input shaft with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "name": "Input shaft",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "42CrMo4 steel shaft Ø20 x 87, with a DIN 6885 keyseat for its gear.",
+     "envelope": [
+      87.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "name": "Sun gear",
+     "family": "gear",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Case hardened steel spur gear, module 2, 30 teeth, 20 mm face width, 20 mm H7 bore with a keyway per DIN 6885.",
+     "envelope": [
+      20.0,
+      60.0,
+      60.0
+     ],
+     "mounts_on": "Input shaft",
+     "module": 2.0,
+     "teeth": 30
+    },
+    {
+     "name": "Sun gear key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "Parallel key DIN 6885 form A 6 x 6 x 18 mm, locks the Sun gear to the Input shaft."
+    },
+    {
+     "name": "Input shaft bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "6204 deep-groove ball bearing, 20 x 47 x 14.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "name": "Output shaft group",
+   "description": "The output shaft with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "name": "Output shaft",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "42CrMo4 steel shaft Ø20 x 84, with a DIN 6885 keyseat for its hub.",
+     "envelope": [
+      84.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "name": "Planet carrier",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 1,
+     "description": "Hub , 20 mm H7 bore, Steel.",
+     "envelope": [
+      40.0,
+      160.0,
+      160.0
+     ],
+     "mounts_on": "Output shaft"
+    },
+    {
+     "name": "Carrier key",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 1,
+     "description": "Parallel key DIN 6885 form A 6 x 6 mm, locks the Planet carrier to the Output shaft."
+    },
+    {
+     "name": "Output shaft bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "6204 deep-groove ball bearing, 20 x 47 x 14.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "name": "Planet pin group",
+   "description": "The planet pin with what it carries, assembled as one unit.",
+   "parts": [
+    {
+     "name": "Planet pin",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 3,
+     "description": "Hardened steel shaft Ø20 x 46.",
+     "envelope": [
+      46.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "name": "Planet bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 3,
+     "description": "6004 deep-groove ball bearing, 20 x 42 x 12.",
+     "toolbox": "bearing"
+    }
+   ]
+  }
+ ]
+}

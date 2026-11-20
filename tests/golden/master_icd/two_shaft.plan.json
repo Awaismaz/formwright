@@ -1,0 +1,133 @@
+{
+ "source": "archie",
+ "summary": "Standard breakdown for a gear reducer: 3 sub-assemblies.",
+ "assumptions": [],
+ "subassemblies": [
+  {
+   "name": "Housing",
+   "description": "The casing that carries the bearings, seals and mounting feet.",
+   "parts": [
+    {
+     "name": "Housing base",
+     "family": "machined",
+     "complexity": 4,
+     "qty": 1,
+     "description": "Lower casing with bearing bores, mounting feet and an oil drain.",
+     "envelope": [
+      303.0,
+      184.0,
+      110.0
+     ]
+    },
+    {
+     "name": "Housing cover",
+     "family": "machined",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Upper casing matching the base split line, with a breather boss.",
+     "envelope": [
+      263.0,
+      144.0,
+      112.0
+     ]
+    },
+    {
+     "name": "Bearing cap",
+     "family": "turned",
+     "complexity": 2,
+     "qty": 4,
+     "description": "Bolted cap that locates the outer bearing ring.",
+     "envelope": [
+      100.0,
+      10.0,
+      100.0
+     ]
+    },
+    {
+     "name": "Cover bolt",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 8,
+     "description": "Hex bolts clamping the cover to the base.",
+     "toolbox": "hex_bolt"
+    }
+   ]
+  },
+  {
+   "name": "Input stage",
+   "description": "The fast shaft with its pinion and bearings.",
+   "parts": [
+    {
+     "name": "Input shaft",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Stepped shaft with bearing seats and a keyed coupling end.",
+     "envelope": [
+      30.0,
+      200.0,
+      30.0
+     ]
+    },
+    {
+     "name": "Pinion",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Spur pinion on the input shaft.",
+     "envelope": [
+      60.0,
+      40.0,
+      60.0
+     ]
+    },
+    {
+     "name": "Input bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "Deep-groove ball bearings supporting the input shaft.",
+     "toolbox": "bearing"
+    }
+   ]
+  },
+  {
+   "name": "Output stage",
+   "description": "The slow shaft with its gear and bearings.",
+   "parts": [
+    {
+     "name": "Output shaft",
+     "family": "turned",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Stepped shaft with bearing seats, gear seat and a keyed output end.",
+     "envelope": [
+      45.0,
+      210.0,
+      45.0
+     ]
+    },
+    {
+     "name": "Output gear",
+     "family": "gear",
+     "complexity": 3,
+     "qty": 1,
+     "description": "Spur gear meshing with the pinion, keyed to the output shaft.",
+     "envelope": [
+      150.0,
+      40.0,
+      150.0
+     ]
+    },
+    {
+     "name": "Output bearing",
+     "family": "standard",
+     "complexity": 1,
+     "qty": 2,
+     "description": "Deep-groove ball bearings supporting the output shaft.",
+     "toolbox": "bearing"
+    }
+   ]
+  }
+ ]
+}

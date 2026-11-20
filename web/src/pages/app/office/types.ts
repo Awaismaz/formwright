@@ -310,6 +310,8 @@ export interface ArchieQuestion {
 export interface GateFix {
   steps: { name?: string }[]; problems: string[];
   archie?: { ran: boolean; mode?: "ai" | "rules" | "simulated"; done?: string[]; asked?: string[]; open: string[] } | null;
+  /** A master model measured by older rules, measured again first (no tokens). */
+  remeasured?: { ok: boolean; text: string } | null;
 }
 export interface ArchieChat { messages: ArchieMessage[]; ai: boolean; can_edit: boolean }
 

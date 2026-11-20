@@ -208,10 +208,6 @@ def route(root: Path, doc: dict[str, Any]) -> bool:
 def attach(doc: dict[str, Any], res: dict[str, Any], tokens: int = 0) -> None:
     """Put the master turn's result on the plan: the measurement, the measured design graph, the parts' measured
     envelopes; or the fast-path fallback with the reason."""
-    from aicad.graph import office as gview
-    from aicad.master import skeleton
-    from aicad.office import icd
-
     plan = doc["plan"]
     lp = plan.setdefault("layout_path", {"path": "master", "reasons": []})
     if not res.get("ok"):
@@ -221,27 +217,89 @@ def attach(doc: dict[str, Any], res: dict[str, Any], tokens: int = 0) -> None:
         plan["master"] = {"ok": False, "error": res.get("error"), "seconds": res.get("seconds"), "tokens": tokens,
                           "via": res.get("via")}
         return
+    plan["master"] = {"ok": True, "via": res.get("via"), "seconds": res.get("seconds"), "tokens": tokens,
+                      "script_sha": res.get("script_sha")}
+    record(doc, res["measure"])
+    lp["state"] = "done"
+
+
+def record(doc: dict[str, Any], m: dict[str, Any]) -> None:
+    """A measurement of the master on the plan: the measure, its design graph, the parts' measured envelopes, the
+    counts and what the measurement found (``attach``, and a re-measure with newer rules)."""
+    from aicad.graph import office as gview
+    from aicad.master import skeleton
+    from aicad.office import icd
+
+    plan = doc["plan"]
     pdoc = dec.pseudo_doc(plan, str(doc.get("brief") or ""), str(doc.get("name") or ""))
     parts = icd.parts_from(pdoc)
-    skel, ifs = skeleton.build(res["measure"], parts, str(doc.get("brief") or ""))
+    skel, ifs = skeleton.build(m, parts, str(doc.get("brief") or ""), None, plan)
     g = skeleton.graph(skel, ifs, parts, str(doc.get("name") or ""), str(doc.get("brief") or ""))
     size_of = {it["name"]: it["size"] for it in skel["items"].values()}
     for s in plan.get("subassemblies") or []:
         for p in s.get("parts") or []:
             if p.get("name") in size_of:
                 p["envelope"] = [float(x) for x in size_of[p["name"]]]
-    errs = [c["text"] for c in skel.get("conflicts") or []]
-    warns = [w["text"] for w in skel.get("findings") or []]
-    plan["master"] = {
-        "ok": True, "measure": res["measure"], "via": res.get("via"), "seconds": res.get("seconds"), "tokens": tokens,
-        "script_sha": res.get("script_sha"),
-        "graph": {"data": g.dump(), "view": gview.view(g)},
-        "summary": {"bodies": len(res["measure"].get("bodies") or []), "interfaces": len(ifs),
+    mm = plan.setdefault("master", {"ok": True})
+    mm.update({
+        "measure": m, "graph": {"data": g.dump(), "view": gview.view(g)},
+        "summary": {"bodies": len(m.get("bodies") or []), "interfaces": len(ifs),
                     "bolted": sum(1 for f in ifs if f["kind"] == "hole_pattern"),
                     "faces": sum(1 for f in ifs if f["kind"] == "face"),
-                    "fits": sum(1 for f in ifs if f["kind"] in ("shaft_bore", "dowel"))},
-        "errors": errs, "warnings": warns, "notes": list(skel.get("notes") or [])}
-    lp["state"] = "done"
+                    "fits": sum(1 for f in ifs if f["kind"] in ("shaft_bore", "dowel")),
+                    "bearings": sum(1 for f in ifs if f["kind"] == "bearing_seat" and f["data"].get("bearing_item")),
+                    "meshes": sum(1 for f in ifs if f["kind"] == "gear_mesh")},
+        "errors": [c["text"] for c in skel.get("conflicts") or []],
+        "warnings": [w["text"] for w in skel.get("findings") or []], "notes": list(skel.get("notes") or [])})
+
+
+def stale(doc: dict[str, Any]) -> bool:
+    """True when the program is laid out from a master measured by older rules (re-measure it: deterministic)."""
+    from aicad.master import measure
+
+    plan = doc.get("plan") or {}
+    mm = plan.get("master") or {}
+    if (plan.get("layout_path") or {}).get("path") != "master" or not mm.get("ok") or not mm.get("measure"):
+        return False
+    return int(mm["measure"].get("version") or 1) < measure.VERSION
+
+
+async def remeasure(root: Path, pid: str) -> dict[str, Any] | None:
+    """Measure the program's master again with the current rules (no model turn, no tokens: the script Archie wrote
+    is on file) and, while the interfaces are a draft, lay them out again from it. None when there is nothing to do
+    (no master, or measured by the current rules); else {"ok", "text", "problems" (when the ICD was laid out again)}.
+    Programs whose master was measured before the split-bore, bearing and mesh rules (golden A3, A4) clear this way."""
+    from aicad.office import interfaces, service, store
+
+    doc = store.load(root, pid)
+    if doc is None or not stale(doc):
+        return None
+    folder = store.program_dir(root, pid) / "master"
+    script = folder / "ws" / "model.py"
+    if not script.exists():
+        return {"ok": False, "text": "the master model is not on file, so it can't be measured again"}
+    m = await measure_file(script, folder / "measure.json")
+    if "error" in m:
+        return {"ok": False, "text": "the master model could not be measured again (" + str(m["error"])[:200] + ")"}
+    with store.lock(pid):
+        doc = store.load(root, pid)
+        if doc is None or not stale(doc):
+            return None
+        before = list((doc.get("icd") or {}).get("problems") or [])
+        record(doc, m)
+        doc["plan"]["master"]["remeasured_at"] = store.now()
+        out: dict[str, Any] = {"ok": True}
+        if interfaces.has_icd(doc) and doc["icd"]["status"] == "draft":
+            out["problems"] = interfaces.relayout(root, doc, "Archie measured the master model again with the current "
+                                                  "rules")["problems"]
+            gone = len([p for p in before if p not in out["problems"]])
+            out["text"] = (f"Measured the master model again with the current rules and laid the interfaces out from "
+                           f"it: {gone} of {len(before)} problem{'s' if len(before) != 1 else ''} cleared")
+        else:
+            out["text"] = "Measured the master model again with the current rules"
+            service.emit(root, doc, "plan.master_remeasured", out["text"] + ".", service.agent_actor("archie"))
+        store.save(root, doc)
+    return out
 
 
 async def task(root: Path, pid: str, org_id: str, user_id: str, god_tokens: bool) -> None:
@@ -287,7 +345,9 @@ async def task(root: Path, pid: str, org_id: str, user_id: str, god_tokens: bool
             s = m["summary"]
             text = (f"Archie modelled a master of {doc['name']}: {s['bodies']} bodies in one coordinate system, "
                     f"{s['interfaces']} interfaces measured from it ({s['bolted']} bolted, {s['faces']} seating faces"
-                    + (f", {s['fits']} bore fits" if s["fits"] else "") + ")."
+                    + (f", {s['fits']} bore fits" if s["fits"] else "")
+                    + (f", {s['bearings']} bearing seats" if s.get("bearings") else "")
+                    + (f", {s['meshes']} gear meshes" if s.get("meshes") else "") + ")."
                     + (f" {len(m['errors'])} problem(s) found by the measurement: {m['errors'][0]}" if m["errors"] else "")
                     + (f" {len(m['warnings'])} warning(s)." if m["warnings"] else ""))
         else:
