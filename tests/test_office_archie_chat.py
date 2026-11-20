@@ -177,13 +177,14 @@ CROWDED = {"summary": "Display model", "assumptions": [], "subassemblies": [
          "envelope": [3.0, 3.0, 60.0], "mounts_on": "Stub axle"}]}]}
 
 
-# Still unbuildable as laid out (CD-029): the body's M6 screws on a 12 x 6 mirror and camera pod need 20.6 mm, more
-# than 1.5 x their plan. Archie's self-fix takes a smaller bolt; it may not grow them past 1.5 x.
+# Still unbuildable as laid out (CD-029): the body's M6 screws on a 4 x 2 mirror and camera pod need 20.6 mm, more
+# than the 4 x growth cap (CD-051: planned sizes are Archie's own, a part may grow to 4 x). Archie's self-fix takes a
+# smaller bolt.
 TIGHT = json.loads(json.dumps(CROWDED))
-TIGHT["subassemblies"][0]["parts"][2].update(envelope=[12.0, 6.0, 15.0])
+TIGHT["subassemblies"][0]["parts"][2].update(envelope=[4.0, 2.0, 15.0])
 TIGHT["subassemblies"][0]["parts"] += [
     {"id": "p8", "name": "Camera pod", "family": "plastic", "complexity": 1, "qty": 1, "description": "Pod.",
-     "envelope": [12.0, 6.0, 8.0], "mounts_on": "Tub"},
+     "envelope": [4.0, 2.0, 8.0], "mounts_on": "Tub"},
     {"id": "p9", "name": "Body screw M6", "family": "standard", "complexity": 1, "qty": 8,
      "description": "ISO 4762 M6 x 16 cap screw."}]
 TIGHT["subassemblies"][2]["parts"].append(
@@ -232,7 +233,7 @@ def test_left_over_icd_problems_are_fixed_from_the_archie_chat(app_client: Any, 
     pid = _create(c)["id"]
     v = c.post(f"/api/office/programs/{pid}/gates/brief/approve", json={"plan": TIGHT}).json()
     probs = v["icd"]["problems"]
-    assert len(probs) >= 2
+    assert len(probs) >= 1
     assert c.post(f"/api/office/programs/{pid}/gates/icd/approve").status_code == 409
     monkeypatch.setattr(interfaces, "autofix", real)
     # a status report says what blocks the program and what to do
