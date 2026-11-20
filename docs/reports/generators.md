@@ -164,7 +164,20 @@ Hand values, never measured from the built part:
   - end to end in the office: a simulated part isn't parametric (422). A parametric one is kept through the API and
     marked on the ticket. A second program's clevis turn starts from the template. Another workspace sees none and
     can't delete it.
-- `test_office_direct.py`: one assertion updated (the plate now goes direct).
+- Updated where the behaviour changed on purpose:
+  - `test_office_direct` (a plate now goes direct);
+  - `test_design_graph` and `test_connection_layout` (the reducer's and the belt drive's housings, caps, pulleys,
+    pillow blocks and plates go direct);
+  - the agent-path tests now run with `FW_OFFICE_DIRECT=0`, because their blocks used to go to the scripted designer:
+    `test_office_orchestrator` end to end and budget, `test_office_icd` swap-in and change request, and
+    `test_office_phase5` calibration.
+- Gate after `git merge main`, two files per run, workers reaped. Every file passes:
+  `test_generators`, `test_office_direct`, `test_office_orchestrator`, `test_golden`, `test_connection_layout`,
+  `test_office_gearbox_caps`, `test_design_graph`, `test_program_revision`, `test_office`, `test_office_archie_chat`,
+  `test_office_icd`, `test_office_layout_envelopes`, `test_office_phase5`, `test_office_phase6_layout`,
+  `test_office_phase6_review_ecn`, `test_office_polish`, `test_office_shaft_line`, `test_office_small`,
+  `test_office_supervisor`, `test_assembly_ai`, `test_assembly_visual`, `test_platform`. Also `ruff check src tests`,
+  `tsc --noEmit`, `npm test` (157) and `vite build`. The full suite was not run in one go (resource rule).
 
 ## Parked decisions (default used)
 - **PD-140 Lip seal on open caps.** Default: every open cap gets a seal recess for the shaft the ICD passes (the
