@@ -22,9 +22,9 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from aicad import toolbox
+from aicad import fw_std, toolbox
 
-VERSION = 1
+VERSION = 2  # v2 (2026-11-20): ISO 14 splined seat and spline-bore gear (ASM-OW)
 
 
 class MakeError(ValueError):
@@ -94,6 +94,21 @@ def design_shaft(spec: dict[str, Any]) -> dict[str, Any]:
         jl = put("journal_l", 16.0, "assumed")
     ds = _num(spec.get("seat_d"))
     ds = put("seat_d", ds, "stated") if ds else put("seat_d", dj + 5, "assumed: a 2.5 mm shoulder for the bearing")
+    spl = None
+    if spec.get("spline"):
+        spl = spline_row(ds)
+        if spl["d"] <= dj:
+            spl = None
+            for r in fw_std.ISO14_MEDIUM:   # the smallest row whose minor Ø clears the journal (the grooves run out)
+                if r[1] > dj:
+                    spl = {"n": r[0], "d": float(r[1]), "D": float(r[2]), "b": float(r[3])}
+                    break
+            if spl is None:
+                raise MakeError(f"No ISO 14 spline clears a Ø{dj:g} journal.")
+        if abs(spl["D"] - ds) > 1e-9:
+            ds = put("seat_d", spl["D"], f"ISO 14 spline major Ø (asked Ø{ds:g})"
+                     if vals["seat_d"]["src"] == "stated" else "ISO 14 spline major Ø")
+        put("spline_d", spl["d"], "ISO 14")
     dc = _num(spec.get("collar_d"))
     dc = put("collar_d", dc, "stated") if dc else put("collar_d", ds + 5, "assumed: a 2.5 mm shoulder for the hub")
     if not dj < ds < dc:
@@ -115,7 +130,13 @@ def design_shaft(spec: dict[str, Any]) -> dict[str, Any]:
                                         {"d": dc, "l": cl, "role": "collar"}, {"d": dj, "l": jl, "role": "journal"}],
                            "length": 2 * jl + sl + cl, "hub": (s1 - hw, s1), "keyseat": None, "groove": None,
                            "values": vals, "bearing": brg[0] if brg else None}
-    if spec.get("keyseat", True):
+    out["spline"] = None
+    if spl is not None:
+        if spec.get("groove"):
+            raise MakeError("A circlip groove on a splined seat isn't made directly: leave the groove out or use a "
+                            "keyseat.")
+        out["spline"] = {**spl, "z0": s0, "z1": s1, "series": "ISO 14 medium"}
+    elif spec.get("keyseat", True):
         try:
             k = din_key(ds)
         except toolbox.ToolboxError as e:
@@ -147,6 +168,10 @@ def shaft_script(lay: dict[str, Any]) -> str:
     ks, gr = lay["keyseat"], lay["groove"]
     lines = [f"journals Ø{_g(dj)} × {_g(jl)} at both ends" + (f" (bearing {lay['bearing']})" if lay["bearing"] else ""),
              f"hub seat Ø{_g(ds)} × {_g(sl)}, the hub ({_g(hw)} wide) against the Ø{_g(dc)} collar"]
+    sp = lay.get("spline")
+    if sp:
+        lines.append(f"spline {sp['n']} × {_g(sp['d'])} × {_g(sp['D'])} × {_g(sp['b'])} ({sp['series']}) over the "
+                     "whole seat, a tooth on +X")
     if ks:
         lines.append(f"keyseat {_g(ks['b'])} × {_g(ks['t1'])} (DIN 6885), {_g(ks['length'])} long, centred in the hub")
     if gr:
@@ -165,6 +190,10 @@ def shaft_script(lay: dict[str, Any]) -> str:
             f"L_SEAT = {_f(sl)}  # mm", f"L_COLLAR = {_f(cl)}  # mm", f"HUB_WIDTH = {_f(hw)}  # the hub on the seat, mm",
             f"CHAMFER = {_f(lay['values']['chamfer']['value'])}  # 45° on both ends, mm"]
     names = ["D_JOURNAL", "D_SEAT", "D_COLLAR", "L_JOURNAL", "L_SEAT", "L_COLLAR", "HUB_WIDTH", "CHAMFER"]
+    if sp:   # the spline is a table row: its sizes are not free parameters (the seat Ø is its major Ø)
+        out.append(f"SPLINE = ({sp['n']}, {_f(sp['d'])}, {_f(sp['D'])}, {_f(sp['b'])})  # n × minor Ø × major Ø × "
+                   f"width, {sp['series']} (verify)")
+        names.remove("D_SEAT")
     if ks:
         out.append(f"KEY_LENGTH = {_f(ks['length'])}  # keyseat length, mm (DIN 6885 {_g(ks['b'])} × {_g(ks['t1'])})")
         names.append("KEY_LENGTH")
@@ -173,8 +202,10 @@ def shaft_script(lay: dict[str, Any]) -> str:
         out.append(f"GROOVE_WIDTH = {_f(gr['m'])}  # mm")
         names += ["GROOVE_D", "GROOVE_WIDTH"]
     out += ["", "PARAMS = dict(" + ", ".join(f"{n}={n}" for n in names) + ")", "PARAM_META = {",
-            f'    "D_JOURNAL": {{"min": 3.0, "max": {_f(ds - 1)}, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Journal Ø"}},',
-            f'    "D_SEAT": {{"min": {_f(dj + 1)}, "max": {_f(dc - 1)}, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Seat Ø"}},',
+            f'    "D_JOURNAL": {{"min": 3.0, "max": {_f((sp["d"] - 0.5) if sp else ds - 1)}, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Journal Ø"}},']
+    if not sp:
+        out.append(f'    "D_SEAT": {{"min": {_f(dj + 1)}, "max": {_f(dc - 1)}, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Seat Ø"}},')
+    out += [
             f'    "D_COLLAR": {{"min": {_f(ds + 1)}, "max": {_f(2 * dc)}, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Collar Ø"}},',
             '    "L_JOURNAL": {"min": 2.0, "max": 500.0, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Journal length"},',
             f'    "L_SEAT": {{"min": {_f(hw)}, "max": 1000.0, "step": 0.5, "unit": "mm", "group": "Shaft", "label": "Seat length"}},',
@@ -191,6 +222,10 @@ def shaft_script(lay: dict[str, Any]) -> str:
             "part, shaft = fw.stepped_shaft(segments, chamfer=CHAMFER, name=NAME)",
             'volume = shaft["volume"]',
             "HUB_END = L_JOURNAL + L_SEAT  # the hub's face against the collar"]
+    if sp:
+        out += ["# ISO 14 straight-sided spline over the whole seat (a tooth on +X); the grooves run out at the journal",
+                "part, cut = fw.spline_shaft(part, SPLINE[2], SPLINE[1], SPLINE[0], SPLINE[3], L_JOURNAL, HUB_END)",
+                "volume -= cut"]
     if ks:
         out += [("part, cut = fw.shaft_keyway(part, d=D_SEAT, z_center=HUB_END - HUB_WIDTH / 2, length=KEY_LENGTH)"
                 "  # DIN 6885, centred in the hub"), "volume -= cut"]
@@ -227,6 +262,10 @@ def shaft_volume(lay: dict[str, Any]) -> float:
         hw = b / 2
         v -= (L - b) * fw_std._simpson(depth, -hw, hw)
         v -= fw_std._simpson(lambda t: 2 * hw * hw * math.cos(t) ** 2 * depth(hw * math.sin(t)), -math.pi / 2, math.pi / 2)
+    sp = lay.get("spline")
+    if sp:
+        v -= (math.pi / 4 * (sp["D"] ** 2 - sp["d"] ** 2)
+              - sp["n"] * fw_std.spline_tooth_area(sp["d"], sp["D"], sp["b"])) * (sp["z1"] - sp["z0"])
     gr = lay["groove"]
     if gr:
         v -= math.pi / 4 * (gr["d1"] ** 2 - gr["d2"] ** 2) * gr["m"]
@@ -241,16 +280,26 @@ def design_gear(spec: dict[str, Any]) -> dict[str, Any]:
         raise MakeError("Say the gear's module and number of teeth (for example m2, 40 teeth).")
     z = int(z)
     vals: dict[str, dict[str, Any]] = {"module": {"value": m, "src": "stated"}, "teeth": {"value": z, "src": "stated"}}
+    spl = spec.get("spline") if isinstance(spec.get("spline"), dict) else None
     bore = _num(spec.get("bore"))
-    vals["bore"] = {"value": bore or round(m * z / 4), "src": spec.get("bore_src") or ("stated" if bore else "assumed")}
+    if spl is not None:
+        try:
+            spl = {"n": int(spl["n"]), "d": float(spl["d"]), "D": float(spl["D"]), "b": float(spl["b"])}
+        except (KeyError, TypeError, ValueError):
+            raise MakeError("The spline needs its number of teeth, minor Ø, major Ø and width.") from None
+        vals["bore"] = {"value": spl["d"], "src": spec.get("bore_src") or "the spline's minor Ø"}
+    else:
+        vals["bore"] = {"value": bore or round(m * z / 4), "src": spec.get("bore_src") or ("stated" if bore else "assumed")}
     bore = float(vals["bore"]["value"])
+    rim_d = spl["D"] if spl else bore
     B = _num(spec.get("face_width"))
     vals["face_width"] = {"value": B or 10 * m, "src": spec.get("face_width_src") or ("stated" if B else "10 × module")}
     rf = m * z / 2 - 1.25 * m
-    if bore / 2 >= rf - 0.5 * m:
-        raise MakeError(f"A Ø{bore:g} bore leaves no rim on an m{m:g} z{z} gear: keep it below Ø{2 * (rf - 0.5 * m):.1f}.")
+    if rim_d / 2 >= rf - 0.5 * m:
+        raise MakeError(f"A Ø{rim_d:g} {'spline' if spl else 'bore'} leaves no rim on an m{m:g} z{z} gear: keep it "
+                        f"below Ø{2 * (rf - 0.5 * m):.1f}.")
     key = None
-    if spec.get("keyway"):
+    if spec.get("keyway") and spl is None:
         try:
             k = din_key(bore)
         except toolbox.ToolboxError as e:
@@ -258,11 +307,14 @@ def design_gear(spec: dict[str, Any]) -> dict[str, Any]:
         key = {"b": k["b"], "t2": k["t2"]}
     return {"kind": "gear", "name": str(spec.get("name") or f"Spur gear m{_g(m)} z{z}")[:80],
             "material": str(spec.get("material") or "Steel 1045 (medium carbon)")[:80], "module": m, "teeth": z,
-            "face_width": float(vals["face_width"]["value"]), "bore": bore, "keyway": key, "values": vals}
+            "face_width": float(vals["face_width"]["value"]), "bore": bore, "keyway": key, "values": vals,
+            "spline": spl}
 
 
 def gear_script(lay: dict[str, Any]) -> str:
     k = lay["keyway"]
+    if lay.get("spline"):
+        return _spline_gear_script(lay, lay["spline"])
     out = [f'"""{lay["name"]}: a spur gear made in Assembly Studio from the conversation (no AI geometry).\n\n'
            f"  m{_g(lay['module'])} × {lay['teeth']} teeth, α 20°, face width {_g(lay['face_width'])}, bore "
            f"Ø{_g(lay['bore'])}" + (f", hub keyway {_g(k['b'])} × {_g(k['t2'])} (DIN 6885)" if k else "") + "\n"
@@ -280,6 +332,35 @@ def gear_script(lay: dict[str, Any]) -> str:
            + (", keyway=True" if k else "") + ', name="Involute teeth")',
            "", "result = part", 'EXPECTED = {"bbox": gear["bbox"], "volume": gear["volume"], "solids": 1}', ""]
     return "\n".join(out)
+
+
+def _spline_gear_script(lay: dict[str, Any], sp: dict[str, Any]) -> str:
+    return "\n".join([
+        (f'"""{lay["name"]}: a spur gear on a splined shaft, made in Assembly Studio (no AI geometry).\n\n'
+         f"  m{_g(lay['module'])} × {lay['teeth']} teeth, α 20°, face width {_g(lay['face_width'])}; hub spline "
+         f"{sp['n']} × {_g(sp['d'])} × {_g(sp['D'])} × {_g(sp['b'])} (ISO 14, the shaft's spline), a groove on +X.\n"
+         "  True involute teeth, the axis along Z from Z = 0; a working backlash of 0.04 m. The spline is the mating\n"
+         "  shaft's: its fit is checked in the assembly.\n"
+         '"""\n'), "from build123d import *\n", "from aicad import fw\n", f'NAME = "{lay["name"]}"',
+        f'MATERIAL = "{lay["material"]}"', "", f"MODULE = {_f(lay['module'])}  # mm", f"TEETH = {lay['teeth']}",
+        f"FACE_WIDTH = {_f(lay['face_width'])}  # mm",
+        f"SPLINE = ({sp['n']}, {_f(sp['d'])}, {_f(sp['D'])}, {_f(sp['b'])})  # n × minor Ø × major Ø × width (ISO 14, verify)",
+        "", "PARAMS = dict(MODULE=MODULE, TEETH=TEETH, FACE_WIDTH=FACE_WIDTH)", "PARAM_META = {",
+        '    "MODULE": {"min": 0.5, "max": 10.0, "step": 0.25, "unit": "mm", "group": "Teeth", "label": "Module"},',
+        '    "TEETH": {"min": 12, "max": 200, "step": 1, "unit": "", "group": "Teeth", "label": "Number of teeth"},',
+        f'    "FACE_WIDTH": {{"min": 1.0, "max": {_f(math.ceil(4 * lay["face_width"]))}, "step": 0.5, "unit": "mm", "group": "Teeth", "label": "Face width"}},',
+        "}", "",
+        'part, gear = fw.spur_gear(MODULE, TEETH, FACE_WIDTH, backlash=0.04 * MODULE, name="Involute teeth")',
+        "part, cut = fw.spline_bore(part, SPLINE[2], SPLINE[1], SPLINE[0], SPLINE[3], 0, FACE_WIDTH)",
+        "", "result = part", 'EXPECTED = {"bbox": gear["bbox"], "volume": gear["volume"] - cut, "solids": 1}', ""])
+
+
+def spline_row(major_d: float) -> dict[str, float]:
+    """The ISO 14 medium-series row for a seat Ø (its major Ø), from the kernel's table."""
+    try:
+        return fw_std.iso14(major_d)
+    except ValueError as e:
+        raise MakeError(str(e)) from None
 
 
 def design_spacer(spec: dict[str, Any]) -> dict[str, Any]:
@@ -332,7 +413,7 @@ def assumed(lay: dict[str, Any]) -> list[str]:
     """The values the engineer did not state, in plain words ("seat Ø25 (assumed: a 2.5 mm shoulder ...)")."""
     labels = {"journal_l": "journal length", "seat_d": "seat Ø", "collar_d": "collar Ø", "hub_width": "hub width",
               "seat_l": "seat length", "collar_l": "collar length", "chamfer": "end chamfer", "key_length": "keyseat length",
-              "groove_d": "groove Ø", "bore": "bore", "face_width": "face width", "od": "outside Ø", "length": "length"}
+              "groove_d": "groove Ø", "spline_d": "spline minor Ø", "bore": "bore", "face_width": "face width", "od": "outside Ø", "length": "length"}
     out = []
     for k, v in lay.get("values", {}).items():
         if v["src"] == "stated":

@@ -1182,6 +1182,7 @@ def _no_sheet() -> Any:
 # High-level standard features (PS-03): gears, stepped shafts, keyways, Hole Wizard holes and bolt circles.
 from aicad.fw_std import (  # noqa: F401  (fw_std uses fw.feature, so it is imported once fw is defined)
     DIN6885_SOURCE,
+    ISO14_SOURCE,
     bolt_circle,
     cross_hole,
     cross_hole_volume,
@@ -1191,6 +1192,7 @@ from aicad.fw_std import (  # noqa: F401  (fw_std uses fw.feature, so it is impo
     hole_spec,
     holes_at,
     hub_keyway,
+    iso14,
     machined,
     machined_volume,
     meta,
@@ -1198,6 +1200,9 @@ from aicad.fw_std import (  # noqa: F401  (fw_std uses fw.feature, so it is impo
     revolved,
     revolved_volume,
     shaft_keyway,
+    spline_bore,
+    spline_shaft,
+    spline_tooth_area,
     spur_gear,
     stepped_shaft,
 )

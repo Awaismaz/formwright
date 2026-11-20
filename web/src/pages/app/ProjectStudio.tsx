@@ -421,7 +421,7 @@ export default function ProjectStudio() {
                     void guarded(ch, `Move “${f.name}” ${d < 0 ? "up" : "down"}`, () => void manualCall(() => api.post(`/api/projects/${id}/manual/reorder`, { ids }), "Features reordered", l => ids.map(i2 => l.find(x => x.id === i2)!))); }}
                   onDelete={f => void guarded(treeChange({ kind: "delete", feature: f }), `Delete “${f.name}”`,
                     () => void manualCall(() => api.del(`/api/projects/${id}/manual/${f.id}`), `${f.name} deleted`, l => l.filter(x => x.id !== f.id), true))} /></TabPanel>
-                <TabPanel value="checks"><ChecksPanel status={st} /></TabPanel>
+                <TabPanel value="checks"><ChecksPanel status={st} projectId={id} canEdit={!readOnly} onChanged={refresh} /></TabPanel>
                 <TabPanel value="params"><fieldset disabled={readOnly} title={readOnly ? whyNot(p.access, "edit", branch) ?? undefined : undefined}><ParamsPanel project={p} status={st} onChanged={() => { setRedo([]); refresh(); }} focus={paramFocus} usedIn={usedIn}
                   onModel={{ on: dimsOn, toggle: () => setDimsOn(!dimsOn), mapped: dimMapped, hover: paramHover, onHover: setParamHover }} /></fieldset></TabPanel>
                 <TabPanel value="mass"><MassPanel project={p} status={st} showCom={showCom} onShowCom={setShowCom} /></TabPanel>

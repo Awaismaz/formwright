@@ -4,6 +4,50 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-20 (b) — Assembly Studio as a one-window operation (ASM-OW-1..5, PD-240..244)
+
+Founder complaint: "stepped splined shaft and a spur gear on it" made only the shaft; the gear went to the Design
+Studio, which asked its questions there; the gear then "failed verification because the fit on the spline can't be
+confirmed"; the unverified gear could not be inserted by hand. "Make it a one-window operation." Addition: "I should
+have the option to make parts verified if I want."
+
+Root causes found
+- Only the shaft: a design-agent part got no label, so a later action "for" it raised (the part was not in the
+  assembly yet), and the turn loop broke at the first question; everything after it was dropped.
+- Navigating away: `watch_design` ignored the design session's `questions` events; the turn ended with "not verified,
+  open it in the Design Studio". The brief never told the design agent it was an assembly build.
+- What failed the gear: there was no spline standard feature, so the design agent hand-modelled the spline and could
+  not state a correct EXPECTED volume, so the gating CHK-05 (volume vs analytic, 0.1 %) failed. Its self-review then
+  blamed the absent shaft ("the fit can't be confirmed on the render"): that sentence is review text, not a check. The
+  prompt also did not say that a fit with an absent partner is never a part-level item.
+- Hand insert refused: `ensure_project_part` required `status.ok`; the dialog disabled unverified projects.
+
+Changed
+- Kernel: ISO 14 tables, `fw.iso14`, `fw.spline_shaft`, `fw.spline_bore` (exact volumes); feature records give each
+  build its spline interfaces; design-agent prompt: use them, never list a fit with an absent part,
+  "[Assembly Studio build]" means decide and state assumptions.
+- Assembly agent: every action runs; `Pending` defers actions on parts being designed (chat `deferred`, labels bound
+  as parts arrive); design jobs in parallel with an interface-first brief (the host's spline or seats, or the
+  partner's brief); questions relayed and answered in the chat (`SayIn.job`, `answer_job`); built parts with a failed
+  check come in labelled and are mated; makers: splined shaft, spline-hub gear from the host; `splines.place` /
+  `splines.check` (on mate and in the check action).
+- Verification: `runner.verification` / `accepted`; `is_verified` honours the engineer's mark on that build only;
+  `verify-override` endpoints (audit, viewers 403); labels in the Design Studio checks panel, project card, insert
+  dialog, tree badge, BOM, release notes; `MarkVerified` component with copilot ids.
+
+Verified how
+- `tests/test_assembly_one_window.py` 7 passed (kernel volumes by hand, layouts, states, the direct splined pair
+  through the API, parallel design jobs with a relayed question and an unverified gear, unverified insert, override,
+  rebuild revoke, viewer refused); `tests/test_assembly_agent.py` 10 passed (one assertion updated: "no geometry" is
+  said plainly, never "open the Design Studio"); `chat.test.ts` 5 passed; ruff and tsc clean.
+
+Not done / next
+- Not run live against the real design agent (fake design jobs in the tests). Next: a live run of the founder's request.
+- "fix the spline" re-design of a mismatched hub is offered in words; the chat does not start it by itself yet.
+- "assemble everything" (Fitz shaft lines) does not place spline hubs yet; mate and the direct path do.
+
+---
+
 ## 2026-11-20 (a) — Archie: whole-app copilot, agentic loop, the brief is the reference (CD-049, CD-050, PD-226..229)
 
 Founder asks: Archie's powers must not be limited to Design Office (navigate, point at buttons, fix things, re-plan

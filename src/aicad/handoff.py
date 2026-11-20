@@ -195,10 +195,17 @@ def gate(ws: Path, has_drawings: bool = True, leave_out: tuple[str, ...] | list[
     blocking: list[dict[str, str]] = []
     include: list[dict[str, str]] = []
     notes: list[str] = []
+    from aicad.agent.runner import accepted as _accepted
+
+    acc = _accepted(st)
+    if acc:   # ASM-OW: the engineer marked this build as verified with checks open: the pack says so
+        notes.append(f"Verified by {acc.get('by') or 'an engineer'} with checks open: "
+                     + (", ".join(f"{c['id']} {c['name']}" for c in acc.get("open") or []) or "none listed")
+                     + (f" (reason: {acc['reason']})" if acc.get("reason") else "") + ". Not a pass.")
     if st.get("ok") and not _verified(st):
         blocking.append({"kind": "model", "text": "The latest build is still being verified (STEP round trip and "
                                                   "repeatability). Try again in a moment."})
-    elif not st.get("ok") or not (ws / "out" / "part.step").is_file():
+    elif not (st.get("ok") or acc) or not (ws / "out" / "part.step").is_file():
         blocking.append({"kind": "model", "text": "The current model isn't verified. Fix the build in the Design Studio first."})
     elif not cur.get("step_sha256"):
         blocking.append({"kind": "model", "text": "The model's export files are still being written. Try again in a moment."})

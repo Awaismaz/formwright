@@ -7,6 +7,7 @@ import { cx } from "@/lib/format";
 import { Button, Input, Modal, PageLoader, Spinner, Tab, TabList, TabPanel, Tabs } from "@/components/ui";
 import { IsoThumb } from "@/components/ProjectCard";
 import type { AsmSummary, Sources, ToolboxComp } from "./types";
+import { MarkVerified, verificationLabel } from "@/components/MarkVerified";
 
 export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onInsertSub }: {
   open: boolean; onOpenChange: (v: boolean) => void; busy: boolean;
@@ -24,6 +25,7 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
   useEffect(() => { if (!busy) setPending(null); }, [busy]);
   useEffect(() => { if (open) api.post("/api/m/assembly/warm").catch(() => undefined); }, [open]);
   const comp = q.data?.toolbox.find(c => c.code === code) ?? null;
+  const can = (p: { verified: boolean; geometry?: boolean }) => p.verified || !!p.geometry;
   const groups = useMemo(() => {
     const g: Record<string, ToolboxComp[]> = {};
     for (const c of q.data?.toolbox ?? []) (g[c.category] ??= []).push(c);
@@ -35,7 +37,7 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
   };
   return (
     <Modal open={open} onOpenChange={onOpenChange} wide title="Insert component"
-      description="Project parts come in at their latest verified build. Toolbox parts are generated from standard tables.">
+      description="Project parts come in at their latest build; one with a check open is labelled Unverified until it passes or you mark it as verified. Toolbox parts are generated from standard tables.">
       {!q.data ? <PageLoader /> : (
         <Tabs value={tab} onValueChange={setTab}>
           <TabList><Tab value="projects"><Box className="h-4 w-4" />Project parts</Tab><Tab value="toolbox"><Wrench className="h-4 w-4" />Toolbox</Tab>
@@ -56,9 +58,10 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
           <TabPanel value="projects" className="pt-4">
             <div className="grid max-h-[52vh] gap-3 overflow-y-auto sm:grid-cols-3">
               {q.data.projects.map(p => (
-                <button key={p.id} type="button" disabled={!p.verified || busy} onClick={() => { setPending(p.id); onInsert({ project_id: p.id }); }} data-insert-project={p.id}
-                  title={p.verified ? `Insert ${p.name}` : "Build and verify this model in the Design Studio first"}
-                  className={cx("card flex flex-col overflow-hidden text-left transition", p.verified ? "hover:-translate-y-0.5 hover:shadow-pop" : "cursor-not-allowed opacity-60")}>
+                <div key={p.id} role="button" tabIndex={0} aria-disabled={!can(p) || busy} onClick={() => { if (!can(p) || busy) return; setPending(p.id); onInsert({ project_id: p.id }); }} data-insert-project={p.id}
+                  onKeyDown={e => { if (e.key === "Enter" && can(p) && !busy) { setPending(p.id); onInsert({ project_id: p.id }); } }}
+                  title={can(p) ? `Insert ${p.name}` : "Build this model in the Design Studio first"}
+                  className={cx("card flex cursor-pointer flex-col overflow-hidden text-left transition", can(p) ? "hover:-translate-y-0.5 hover:shadow-pop" : "cursor-not-allowed opacity-60")}>
                   <div className="viewport-bg relative flex aspect-[4/3] items-center justify-center overflow-hidden border-b border-border">
                     {p.thumbnail ? <IsoThumb src={p.thumbnail} /> : <Box className="h-8 w-8 text-muted/50" />}
                     {pending === p.id && busy && <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-panel/80 text-[12px] font-medium text-muted">
@@ -66,9 +69,15 @@ export function InsertDialog({ open, onOpenChange, onInsert, busy, current, onIn
                   </div>
                   <div className="p-2.5">
                     <div className="truncate text-[13px] font-semibold">{p.name}</div>
-                    <div className="flex items-center gap-1 truncate text-[11.5px] text-muted">{!p.verified && <Lock className="h-3 w-3" />}{p.verified ? (p.material ?? "material not set") : "No verified build"}</div>
+                    <div className="flex items-center gap-1 truncate text-[11.5px] text-muted">{!can(p) && <Lock className="h-3 w-3" />}{p.verified ? (p.material ?? "material not set") : can(p) ? (p.material ?? "material not set") : "No built geometry"}</div>
+                    {can(p) && !p.verified && <div className="mt-1 space-y-1" onClick={e => e.stopPropagation()}>
+                      <div className={cx("truncate rounded-full border px-1.5 text-[10.5px] font-semibold", p.verification === "accepted" ? "border-warning/40 bg-warning/10 text-warning" : "border-danger/40 bg-danger/10 text-danger")}
+                        data-verification={p.verification} title={verificationLabel(p.verification ?? "unverified", p.open_checks ?? [], p.accepted_by)}>
+                        {verificationLabel(p.verification ?? "unverified", p.open_checks ?? [], p.accepted_by)}</div>
+                      <MarkVerified compact projectId={p.id} open={p.open_checks ?? []} accepted={p.verification === "accepted"} onDone={() => void q.refetch()} />
+                    </div>}
                   </div>
-                </button>
+                </div>
               ))}
               {q.data.projects.length === 0 && <div className="col-span-3 py-8 text-center text-sm text-muted">No projects yet. <Link to="/app/projects" className="text-primary hover:underline">Create one</Link>.</div>}
             </div>

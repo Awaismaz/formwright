@@ -258,11 +258,20 @@ def summary(root: Path, doc: dict[str, Any], candidates: list[dict[str, Any]] | 
         lines.append(f"Motion check: {len(mo.get('colliding_steps') or [])} colliding steps of {len(mo.get('steps') or [])}")
     for j in jobs or []:
         if j.get("status") == "running":
-            lines.append(f"Being designed now in the Design Studio: \"{j['name']}\" (it comes in when it is verified)")
+            lines.append(f"Being designed now by the design agent: \"{j['name']}\" (it comes in when it is built)")
+        elif j.get("status") == "question":
+            lines.append(f"Waiting for the engineer's answer to the design agent's question on \"{j['name']}\"")
+    for i in doc["instances"]:
+        vt = service.verification_text(parts[i["part"]]) if not i.get("group") and \
+            parts[i["part"]].get("kind") == "project" else None
+        if vt:
+            lines.append(f"{i['id']} \"{names[i['id']]}\": {vt} (its own checks; you may offer to fix it or suggest "
+                         "the engineer marks it as verified, which only they can do)")
     if candidates:
-        lines.append("Workspace parts you can bring (verified builds):")
+        lines.append("Workspace parts you can bring (built):")
         for cd in candidates[:15]:
             lines.append(f"- {cd['id']} \"{service.clean_name(cd['name'])}\"" +
+                         ("" if cd.get("verified", True) else " [unverified]") +
                          (f": {cd['description'][:80]}" if cd.get("description") else ""))
     if context:
         lines.append("Project context:\n" + context[:1500])
@@ -342,15 +351,21 @@ keyway and face width; a key the keyseat's size; a circlip the groove's size). \
 Or {"do": "bring", "part": "<workspace part id>", "qty": 1, "as": "$label"} for one of the workspace parts. \
 Brought parts come in unplaced: follow with "mate" or "assemble" when they should be put somewhere.
 - {"do": "make", "kind": "shaft", "spec": {"journal_d": 20, "keyseat": true, "groove": false, "seat_d": null, \
-"collar_d": null, "hub_width": null, "journal_l": null, "seat_l": null}, "name": "...", "as": "$label"}: a stepped \
-shaft (journals | hub seat against a collar | journal); give what was stated, leave the rest null. \
+"collar_d": null, "hub_width": null, "journal_l": null, "seat_l": null, "spline": false}, "name": "...", "as": \
+"$label"}: a stepped shaft (journals | hub seat against a collar | journal); give what was stated, leave the rest \
+null; "spline": true makes the hub seat an ISO 14 straight-sided spline instead of a keyseat. \
 {"do": "make", "kind": "gear", "spec": {"module": 2, "teeth": 40, "face_width": null, "bore": null, "keyway": true}, \
-"for": "<shaft>"}: a spur gear (bore, keyway and face width from the shaft when "for" is given). \
+"for": "<shaft>"}: a spur gear (bore, keyway or hub spline, and face width from the shaft when "for" is given; \
+on a splined shaft its hub spline is the shaft's, and it is put on and its fit checked). \
 {"do": "make", "kind": "spacer", "spec": {"bore": null, "length": null, "od": null}, "between": ["<part>", "<part>"]}: \
 a spacer, sized from the gap between two parts on one shaft. \
 {"do": "make", "kind": "other", "name": "...", "brief": "<a full design brief with every size you know and the \
 mating features>", "for": "<part>"}: anything else, designed by the design agent in the Design Studio (it takes \
 minutes and costs more; the part comes in when it is verified). Prefer the direct kinds when they fit.
+- One request can name several parts ("a splined shaft and a spur gear on it"): make every one of them in this \
+turn, give each an "as" label and point the later ones "for" the earlier label ("for": "$shaft"); the software \
+sizes the interface from the host and runs what depends on a part still being designed when it arrives. \
+Ask only about what truly blocks; act on everything else in the same turn.
 - {"do": "mate", "part": "<part>", "to": "<part>", "how": "<kind>"}: put one part on another the intended way. \
 how: keyed_hub (gear / pulley / hub on a keyed shaft seat, with its key), hub_fit, shoulder_stop, bearing_journal, \
 gear_mesh (two gears, each on its shaft), ring_retained (circlip in its groove), key_in_seat, bolted_joint, \
@@ -365,7 +380,9 @@ everything) where they belong: shaft lines with their gears, keys, circlips and 
 - {"do": "explain"}: describe the assembly state in plain words (the software writes the facts).
 
 Rules: units are mm. A shaft line is assembled by its shoulders, keyseats and grooves; bearings go two per shaft. Never \
-claim a mate is satisfied, a part fits, or anything is fit for manufacture or validated. Unplaced parts are unplaced. \
+claim a mate is satisfied, a part fits, or anything is fit for manufacture or validated. A part's own checks \
+can't judge a fit with a partner: fits are checked here, in the assembly. Only the engineer can mark a part as \
+verified (a button on its badge): you may suggest it, never claim it. Unplaced parts are unplaced. \
 Keep "say" short. If the engineer only asks a question, answer it in "say" with no actions (or "explain").
 
 Toolbox components (code: name standard: parameters):
@@ -490,7 +507,8 @@ def offline(text: str) -> tuple[str, list[dict[str, Any]]]:
 def public(chat: dict[str, Any]) -> dict[str, Any]:
     """What the page shows (never the model's raw reply)."""
     return {"messages": chat["messages"], "busy": chat.get("busy"),
-            "jobs": [{k: j.get(k) for k in ("id", "name", "status", "step", "project_id", "started_at", "text")}
+            "jobs": [{k: j.get(k) for k in ("id", "name", "status", "step", "project_id", "started_at", "text",
+                                            "questions")}
                      for j in chat.get("jobs") or []][-6:]}
 
 

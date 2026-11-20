@@ -45,6 +45,7 @@ from aicad.assembly import (
     locks,
     makers,
     service,
+    splines,
     store,
     trains,
     xform,
@@ -66,6 +67,15 @@ class Ambiguous(Exception):
 
 class ToolError(Exception):
     """An action that can't run as asked (a plain sentence for the engineer)."""
+
+
+class Pending(Exception):
+    """An action refers to a part that is still being designed in this turn (``$label`` of a design job): it runs
+    when that part comes into the assembly."""
+
+    def __init__(self, label: str) -> None:
+        super().__init__(label)
+        self.label = label
 
 
 # ----------------------------------------------------------------------------- what the agent needs from the platform
@@ -96,8 +106,19 @@ class Env(ABC):
         """Start a Design Studio design-agent turn on a new part; its project id."""
 
     @abstractmethod
-    async def watch_design(self, project_id: str, on_step: Callable[[str], None]) -> bool:
-        """Wait for that design turn to finish; whether the part is verified."""
+    async def watch_design(self, project_id: str, on_step: Callable[[str], None],
+                           on_questions: Callable[[list[dict[str, Any]]], None] | None = None) -> bool:
+        """Wait for that design turn to finish; whether the part is verified. Questions the design agent asks are
+        handed to ``on_questions`` (relayed into the assembly chat)."""
+
+    async def answer_design(self, project_id: str, text: str) -> None:
+        """Send the engineer's answer to that design session (it continues the design)."""
+        raise ToolError("The design agent can't be reached from here.")
+
+    def build_state(self, project_id: str) -> dict[str, Any]:
+        """The part's latest build: {geometry: a built STEP exists, verified, accepted: {by, open} or None, open:
+        [{id, name}] the gating checks that failed}."""
+        return {"geometry": False, "verified": False, "accepted": None, "open": []}
 
     async def look(self, root: Path, doc: dict[str, Any]) -> dict[str, Any] | None:
         """The visual check (advisory); None when it isn't available."""
@@ -123,6 +144,9 @@ class Turn:
     questions: list[dict[str, Any]] = field(default_factory=list)
     on_step: Callable[[str], None] = lambda s: None
     jobs: list[dict[str, Any]] = field(default_factory=list)
+    pending: dict[str, dict[str, Any]] = field(default_factory=dict)   # $label -> the design job making that part
+    deferred: list[dict[str, Any]] = field(default_factory=list)       # actions waiting for a design job's part
+    tid: str = ""                                                      # this turn's id (labels outlive the turn)
 
 
 # ----------------------------------------------------------------------------- references
@@ -158,6 +182,8 @@ def resolve(t: Turn, doc: dict[str, Any], ref: Any, want: int | None = 1) -> lis
     if s in ids:
         return [s]
     if s.startswith("$"):
+        if s in t.pending and not t.labels.get(s):
+            raise Pending(s)
         got = [x for x in t.labels.get(s, []) if x in ids]
         if not got:
             raise ToolError(f"I lost track of {s.lstrip('$')}: it is not in the assembly.")
@@ -293,12 +319,15 @@ async def t_bring(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
         if hit is None:
             fp = librarian.find_parts(ref, cands, limit=2)
             if not fp or fp[0]["score"] < 0.5:
-                raise ToolError(f"I couldn't find {ref} among your verified parts.")
+                raise ToolError(f"I couldn't find {ref} among your built parts.")
             if len(fp) > 1 and fp[1]["score"] >= fp[0]["score"] - 1e-9:
                 raise Ambiguous(f"Which {ref} do you mean?", [h["name"] for h in fp])
             hit = next(c for c in cands if c["id"] == fp[0]["id"])
         key = await t.env.project_part(hit["id"])
         title, src = service.clean_name(hit["name"]), "your parts"
+        bs = t.env.build_state(hit["id"])
+        if bs.get("geometry") and not bs.get("verified"):
+            notes.append(unverified_note(bs))
     else:
         code = a.get("code")
         params = dict(a.get("params") or {})
@@ -326,6 +355,8 @@ async def t_bring(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
         t.labels[str(a["as"])] = ids
     lines = [f"From {src}" + (", sized for " + names.get(host, "the shaft") + ": " + "; ".join(notes)
                               if notes and host else "")]
+    if notes and not host:
+        lines += notes
     lines.append("The base part, fixed at the origin." if len(doc["instances"]) == len(ids) else
                  "Unplaced until it is mated." if qty == 1 else "Unplaced until they are mated.")
     return _step(f"Brought {qty} × {title}" if qty > 1 else f"Brought {title}", lines, "ok", parts=ids)
@@ -338,9 +369,23 @@ async def t_make(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
     doc = store.load(t.root, t.aid)
     if doc is None:
         raise ToolError("The assembly was deleted.")
-    host = one(t, doc, a["for"], "make it for") if a.get("for") else None
+    host_job = t.pending.get(str(a.get("for"))) if str(a.get("for") or "").startswith("$") and \
+        not t.labels.get(str(a.get("for"))) else None
+    if host_job is not None and kind in ("shaft", "gear", "spacer"):
+        raise Pending(str(a["for"]))      # sized from the host's real geometry once it is in the assembly
+    host = one(t, doc, a["for"], "make it for") if a.get("for") and host_job is None else None
     notes: list[str] = []
-    if kind == "gear" and host and chat.role_of(t.root, doc, host) == "shaft":
+    ext = splines.of(t.root, service._inst(doc, host)["part"], "external") if host else []
+    if kind == "gear" and host and ext:   # interface first: the hub spline is the shaft's spline
+        e = max(ext, key=lambda x: x["z1"] - x["z0"])
+        spec["spline"] = {k: e[k] for k in ("n", "d", "D", "b")}
+        spec["bore_src"] = "the shaft's spline minor Ø"
+        notes.append(f"hub spline {splines.spec_text(e)} = the shaft's spline (ISO 14)")
+        if not spec.get("face_width"):
+            m_ = float(spec.get("module") or 2)
+            spec["face_width"] = min(10 * m_, e["z1"] - e["z0"])
+            spec["face_width_src"] = "10 × module, at most the splined length"
+    elif kind == "gear" and host and chat.role_of(t.root, doc, host) == "shaft":
         hg = shaft_geo(t.root, doc, host)
         if hg:
             prm, notes = makers.size_for_host("spur_gear", {"M": spec.get("module", 2), "Z": spec.get("teeth", 24),
@@ -370,6 +415,16 @@ async def t_make(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
                 placed = _place_spacer(t, doc, iid, spec["_place"])
         if a.get("as"):
             t.labels[str(a["as"])] = [iid]
+        if host and lay.get("spline") and kind == "gear":
+            t.on_step(f"Putting {name} on its shaft")
+            async with DocEdit(t) as doc:
+                ins = splines.of(t.root, service._inst(doc, iid)["part"], "internal")
+                e = splines.of(t.root, service._inst(doc, host)["part"], "external")
+                if ins and e:
+                    placed = "; ".join(splines.place(t.root, doc, iid, host, ins[0], e[0]))
+                    service.run_solve(t.root, doc)
+                    _ok, fl = splines.check(t.root, doc, iid, host, ins[0], e[0])
+                    notes.append(fl[0])
         lines = [(f"Made {name} as a new part in your workspace: built from its dimensions (no AI geometry) and "
                  "passed the part checks")]
         asm = makers.assumed(lay)
@@ -384,17 +439,48 @@ async def t_make(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
     name = str(a.get("name") or "New part").strip()[:80]
     if len(brief) < 12:
         raise ToolError("Describe the part with its sizes so the design agent can make it.")
-    if host:
-        brief += f"\n\nIt goes into the assembly \"{service.clean_name(doc['name'])}\" and mates with " \
-                 f"{service.human_names(doc)[host]}."
+    brief += "\n\n" + assembly_brief(t, doc, host, host_job)
     pid = await t.env.design_part(name, brief)
-    job = {"id": f"j{int(time.time() * 1000) % 10_000_000}", "kind": "design", "name": name, "project_id": pid,
+    label = str(a.get("as") or f"$job{len(t.jobs) + 1}")
+    job = {"id": f"j{time.time_ns() // 1000 % 10_000_000_000}", "kind": "design", "name": name, "project_id": pid,
            "status": "running", "step": "Starting the design agent", "started_at": store.now(), "for": host,
-           "as": a.get("as")}
+           "as": label, "turn": t.tid, "brief": brief[:1500]}
     t.jobs.append(job)
-    return _step(f"Designing {name}", [(f"The design agent is designing {name} in the Design Studio. It comes into "
-                                        "the assembly when it is built and verified; you can keep working meanwhile.")],
+    t.pending[label] = job
+    if host_job is not None:     # both parts are being designed now: mate them when both are in
+        t.deferred.append({"action": {"do": "mate", "part": label, "to": str(a["for"]), "how": "auto"},
+                           "needs": [label, str(a["for"])]})
+    return _step(f"Designing {name}", [(f"The design agent is designing {name} now, in parallel; I relay its progress "
+                                        "and any question here, and bring it in and mate it when it is built.")],
                  "info", project_id=pid, job=job["id"])
+
+
+def assembly_brief(t: Turn, doc: dict[str, Any], host: str | None, host_job: dict[str, Any] | None) -> str:
+    """What the design agent is told about an assembly-initiated part: decide from the context, interface first,
+    and leave the fit with the mating part to the assembly."""
+    names = service.human_names(doc)
+    out = [f"[Assembly Studio build] This part goes into the assembly \"{service.clean_name(doc['name'])}\"."]
+    if host:
+        out.append(f"It mates with {names[host]}.")
+        ext = splines.of(t.root, service._inst(doc, host)["part"], "external")
+        if ext:
+            e = ext[0]
+            out.append(f"That shaft's spline: {splines.spec_text(e)} (n × minor Ø × major Ø × width, ISO 14), "
+                       f"{e['z1'] - e['z0']:g} mm long: make the hub with fw.spline_bore using exactly these sizes.")
+        else:
+            sg = shaft_geo(t.root, doc, host) if chat.role_of(t.root, doc, host) == "shaft" else None
+            if sg:
+                out.append("That shaft's seats: " + ", ".join(f"Ø{_g(x['d'])} × {_g(x['length'])}"
+                                                            for x in sorted(sg["seats"], key=lambda x: x["lo"])))
+    if host_job is not None:
+        out.append(f"It mates with {host_job['name']}, which is being designed at the same time from this brief:\n"
+                   f"\"\"\"{host_job.get('brief', '')[:900]}\"\"\"\nUse the same interface sizes (for a spline: "
+                   "the same fw.iso14 row, fw.spline_shaft on the shaft and fw.spline_bore in the hub).")
+    out.append("The engineer is working in Assembly Studio, not in the Design Studio: do not ask questions unless the "
+               "part can't be made at all. Decide reasonable values from this context and standard practice, build, "
+               "and state each assumption in your summary. The fit with the mating part is checked in the assembly "
+               "where both parts are: it is never an open item of this part's own checks or self-review.")
+    return "\n".join(out)
 
 
 def _spacer_between(t: Turn, doc: dict[str, Any], refs: Any) -> dict[str, Any]:
@@ -623,6 +709,16 @@ async def t_mate(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
         names = service.human_names(doc)
         rp, rq = chat.role_of(t.root, doc, p), chat.role_of(t.root, doc, q)
         label = f"Mated {names[p]} to {names[q]}"
+        sp = splines.pair(t.root, doc, p, q)
+        if sp is not None:          # a splined hub on a splined shaft: by the interface, then the fit check
+            hub, shaft, ins, ext = sp
+            lines = splines.place(t.root, doc, hub, shaft, ins, ext)
+            service.run_solve(t.root, doc)
+            ok, fl = splines.check(t.root, doc, hub, shaft, ins, ext)
+            lines += fl
+            if not ok:
+                lines.append("I can have the hub's spline remade to match the shaft: say \"fix the spline\".")
+            return _step(label, lines, "ok" if ok else "warn", parts=[p, q])
         if how in ("bolted_joint", "mounted_on") or rp in ("plate", "bracket", "housing", "other", "flange") and \
                 rq in ("plate", "bracket", "housing", "other", "flange"):
             ok, text = fitz.mount(t.root, doc, q, p)
@@ -817,6 +913,9 @@ async def t_check(t: Turn, a: dict[str, Any]) -> dict[str, Any]:
             lines.append("Visual check (advisory, measurements decide): " + {
                 "looks_assembled": "it looks assembled", "looks_wrong": "something looks wrong",
                 "unsure": "unsure"}.get(str(v.get("verdict")), "no verdict") + (f": {v['summary']}" if v.get("summary") else ""))
+    for ok, ln in splines.check_all(t.root, store.load(t.root, t.aid) or doc):
+        lines.append(ln)
+        status = status if ok else "warn"
     return _step("Checked the assembly", lines, status)
 
 
@@ -1002,7 +1101,7 @@ LABELS = {"find": "Looking for parts", "bring": "Bringing in a part", "make": "M
 async def run_turn(root: Path, aid: str, env: Env, text: str, ai: bool) -> dict[str, Any]:
     """Run one conversation turn end to end and store the reply. Never raises: a failure is said in the chat."""
     t0 = time.perf_counter()
-    turn = Turn(root, aid, env)
+    turn = Turn(root, aid, env, tid=f"t{time.time_ns() // 1000 % 10_000_000_000}")
 
     def busy(step: str) -> None:
         chat.update(root, aid, lambda c: c.__setitem__("busy", {**(c.get("busy") or {}), "step": step}))
@@ -1025,14 +1124,25 @@ async def run_turn(root: Path, aid: str, env: Env, text: str, ai: bool) -> dict[
                 offline = True
         if offline:
             say, actions = chat.offline(text)
+        held: set[str] = set()       # labels of actions that asked a question: what depends on them waits
         for a in actions:
-            if turn.questions:
-                break
+            # after a question, the parts still get made and brought (everything that can proceed does); what
+            # places, checks or edits them waits for the answer, as does anything naming the part asked about
+            if held & _labels_in(a) or turn.questions and a["do"] not in ("find", "bring", "make"):
+                continue
             busy(LABELS.get(a["do"], "Working"))
             try:
                 turn.steps.append(await TOOLS[a["do"]](turn, a))
+            except Pending as e:
+                turn.deferred.append({"action": a, "needs": sorted(_labels_in(a) & (set(turn.pending) | set(turn.labels)))
+                                      or [e.label]})
+                if a.get("as"):
+                    turn.pending.setdefault(str(a["as"]), turn.pending[e.label])
             except Ambiguous as e:
-                turn.questions.append(e.question)
+                if len(turn.questions) < 2:
+                    turn.questions.append({**e.question, "id": f"q{len(turn.questions) + 1}"})
+                if a.get("as"):
+                    held.add(str(a["as"]))
             except ToolError as e:
                 turn.steps.append(_step(FAILED.get(a["do"], "Not done"), [str(e)], "fail"))
             except (AssemblyInputError, toolbox.ToolboxError, makers.MakeError) as e:
@@ -1046,6 +1156,14 @@ async def run_turn(root: Path, aid: str, env: Env, text: str, ai: bool) -> dict[
                                             "it. Try again, or use the tools on the right.")], "fail"))
     doc = store.load(root, aid)
     st = chat.state_line(root, doc) if doc is not None and doc["instances"] else None
+    for d in turn.deferred:
+        job = turn.pending.get(d["needs"][0]) if d["needs"] else None
+        names = [turn.pending[x]["name"] for x in d["needs"] if x in turn.pending]
+        if names:
+            turn.steps.append(_step(f"Then: {LABELS.get(d['action']['do'], 'the next step').lower()}",
+                                    [(f"Runs when {' and '.join(dict.fromkeys(names))} "
+                                      f"{'is' if len(set(names)) == 1 else 'are'} in the assembly")], "info",
+                                    job=(job or {}).get("id")))
     reply = {"role": "agent", "text": say, "steps": turn.steps, "questions": (turn.questions or questions)[:2],
              "state": st, "state_text": chat.state_text(st) if st else "",
              "tokens": tokens, "seconds": round(time.perf_counter() - t0, 1), "offline": offline, "at": store.now()}
@@ -1057,6 +1175,10 @@ async def run_turn(root: Path, aid: str, env: Env, text: str, ai: bool) -> dict[
         c["messages"].append(reply)
         c["busy"] = None
         c["jobs"] = (c.get("jobs") or []) + turn.jobs
+        if turn.deferred or turn.jobs:
+            bound = c.setdefault("labels", {}).setdefault(turn.tid, {})
+            bound.update({k: v for k, v in turn.labels.items() if v})
+            c.setdefault("deferred", []).extend({**d, "turn": turn.tid} for d in turn.deferred)
 
     chat.update(root, aid, finish)
     for job in turn.jobs:
@@ -1073,47 +1195,175 @@ def _spawn(coro: Any) -> None:
     task.add_done_callback(_bg.discard)
 
 
+def _labels_in(a: dict[str, Any]) -> set[str]:
+    """The ``$labels`` an action refers to."""
+    out: set[str] = set()
+    for k in ("part", "for", "to", "parts", "between", "of"):
+        v = a.get(k)
+        for x in v if isinstance(v, list) else [v]:
+            if isinstance(x, str) and x.startswith("$"):
+                out.add(x)
+    return out
+
+
+def unverified_note(bs: dict[str, Any]) -> str:
+    """Honest words for a built part whose own checks are not all passed (or that the engineer accepted)."""
+    open_ = ", ".join(f"{c['id']} {c['name']}" for c in bs.get("open") or []) or "a check"
+    acc = bs.get("accepted")
+    if acc:
+        return f"Verified by {acc.get('by') or 'the engineer'} (open: {open_})"
+    return f"Unverified: {open_} did not pass"
+
+
+def _set_job(root: Path, aid: str, jid: str, **kw: Any) -> None:
+    def fn(c: dict[str, Any]) -> None:
+        for j in c.get("jobs") or []:
+            if j["id"] == jid:
+                j.update(kw)
+    chat.update(root, aid, fn)
+
+
+def _post(root: Path, aid: str, text: str, steps: list[dict[str, Any]], jid: str,
+          questions: list[dict[str, Any]] | None = None) -> None:
+    doc = store.load(root, aid)
+    st = chat.state_line(root, doc) if doc is not None and doc["instances"] else None
+
+    def post(c: dict[str, Any]) -> None:
+        c["messages"].append({"id": chat.next_id(c), "role": "agent", "text": text, "steps": steps,
+                              "questions": questions or [], "state": st, "state_text": chat.state_text(st) if st else "",
+                              "tokens": 0, "at": store.now(), "job": jid})
+    chat.update(root, aid, post)
+
+
+def relay_questions(qs: list[dict[str, Any]], name: str) -> list[dict[str, Any]]:
+    """The design agent's questions as the assembly chat's clickable questions, prefixed with the part's name."""
+    out = []
+    for k, q in enumerate(qs or []):
+        if not isinstance(q, dict) or not str(q.get("question") or "").strip():
+            continue
+        opts = [chat.scrub(str(o))[:80] for o in q.get("options") or [] if str(o).strip()][:6]
+        d = q.get("default")
+        out.append({"id": f"d{k + 1}", "question": chat.scrub(f"{name}: {q['question']}")[:220], "options": opts,
+                    "default": d if d in opts else None, "multi": bool(q.get("multi")), "other": True})
+    return out[:5]
+
+
 async def watch_job(root: Path, aid: str, env: Env, job: dict[str, Any]) -> None:
-    """A part the design agent makes: relay its progress into the chat; insert it when it is verified."""
-    def set_job(**kw: Any) -> None:
-        def fn(c: dict[str, Any]) -> None:
-            for j in c.get("jobs") or []:
-                if j["id"] == job["id"]:
-                    j.update(kw)
-        chat.update(root, aid, fn)
+    """A part the design agent makes: relay its progress and questions into the chat; bring it in when it is built
+    (verified, or built with a check open: then honestly labelled), mate it, and run what waited for it."""
+    asked: list[dict[str, Any]] = []
+
+    def on_questions(qs: list[dict[str, Any]]) -> None:
+        asked.extend(qs)
 
     text = ""
     steps: list[dict[str, Any]] = []
     try:
-        ok = await env.watch_design(job["project_id"], lambda s: set_job(step=s))
-        if ok:
+        verified = await env.watch_design(job["project_id"], lambda s: _set_job(root, aid, job["id"], step=s),
+                                          on_questions)
+        bs = env.build_state(job["project_id"])
+        if asked and not bs.get("geometry"):
+            qs = relay_questions(asked, job["name"])
+            _set_job(root, aid, job["id"], status="question", step="Waiting for your answer", questions=qs)
+            _post(root, aid, (f"The design agent needs an answer to finish {job['name']}. Pick one (or type your "
+                              "own) and it continues from here."), [], job["id"], qs)
+            return
+        if bs.get("geometry"):
             key = await env.project_part(job["project_id"])
             turn = Turn(root, aid, env)
             async with DocEdit(turn) as doc:
                 iid = service.add_instance(root, doc, key)["id"]
                 name = service.human_names(doc)[iid]
-            steps.append(_step(f"Brought {name}", [f"{job['name']} is built and verified: brought it into the assembly",
-                                                   "Unplaced until it is mated."], parts=[iid]))
+            lines = [f"{job['name']} is built: brought it into the assembly"]
+            status = "ok"
+            if not (verified or bs.get("verified")):
+                lines.append(unverified_note(bs) + ". It is in the assembly with that label; I can fix it, or you can "
+                             "mark it as verified.")
+                status = "warn"
+            steps.append(_step(f"Brought {name}", lines, status, parts=[iid], project_id=job["project_id"],
+                               unverified=not (verified or bs.get("verified")) and not bs.get("accepted"),
+                               open=bs.get("open") or []))
+            _bind(root, aid, job, iid)
             if job.get("for"):
                 try:
                     steps.append(await t_mate(turn, {"part": iid, "to": job["for"], "how": "auto"}))
                 except (ToolError, Ambiguous, AssemblyInputError) as e:
                     steps.append(_step("Not mated", [str(e)], "warn"))
-            text = f"{job['name']} is ready."
-            set_job(status="done", step="Verified and brought in")
+            text = f"{job['name']} is ready." if status == "ok" else f"{job['name']} is in, with a check open."
+            _set_job(root, aid, job["id"], status="done", step="Brought in" if status == "ok" else "Brought in, unverified",
+                     questions=None)
         else:
-            text = (f"The design agent finished {job['name']}, but the part is not verified, so I left it out of the "
-                    "assembly. Open it in the Design Studio to finish it.")
-            set_job(status="failed", step="Not verified")
+            text = (f"The design agent stopped before {job['name']} had any geometry. Tell me what to change and I'll "
+                    "start it again.")
+            _set_job(root, aid, job["id"], status="failed", step="No geometry")
     except Exception:
         log.exception("design job failed")
-        text = f"The design of {job['name']} stopped. Open it in the Design Studio to continue."
-        set_job(status="failed", step="Stopped")
-    doc = store.load(root, aid)
-    st = chat.state_line(root, doc) if doc is not None and doc["instances"] else None
+        text = f"The design of {job['name']} stopped. Say \"try {job['name']} again\" and I'll restart it."
+        _set_job(root, aid, job["id"], status="failed", step="Stopped")
+    steps += await run_deferred(root, aid, env)
+    _post(root, aid, text, steps, job["id"])
 
-    def post(c: dict[str, Any]) -> None:
-        c["messages"].append({"id": chat.next_id(c), "role": "agent", "text": text, "steps": steps, "questions": [],
-                              "state": st, "state_text": chat.state_text(st) if st else "", "tokens": 0,
-                              "at": store.now(), "job": job["id"]})
-    chat.update(root, aid, post)
+
+def _bind(root: Path, aid: str, job: dict[str, Any], iid: str) -> None:
+    if not job.get("as") or not job.get("turn"):
+        return
+
+    def fn(c: dict[str, Any]) -> None:
+        c.setdefault("labels", {}).setdefault(job["turn"], {})[job["as"]] = [iid]
+    chat.update(root, aid, fn)
+
+
+async def run_deferred(root: Path, aid: str, env: Env) -> list[dict[str, Any]]:
+    """Run the actions that waited for parts being designed, once every part they name is in the assembly."""
+    steps: list[dict[str, Any]] = []
+    for _round in range(8):    # an action that ran can bind a label another one waits for
+        ready: list[dict[str, Any]] = []
+
+        def take(c: dict[str, Any], ready: list[dict[str, Any]] = ready) -> None:
+            keep = []
+            for d in c.get("deferred") or []:
+                bound = (c.get("labels") or {}).get(d.get("turn"), {})
+                (ready if all(bound.get(x) for x in d.get("needs") or []) else keep).append(d)
+            c["deferred"] = keep
+        c = chat.update(root, aid, take)
+        if not ready:
+            break
+        steps += await _run_ready(root, aid, env, c, ready)
+    return steps
+
+
+async def _run_ready(root: Path, aid: str, env: Env, c: dict[str, Any], ready: list[dict[str, Any]]
+                     ) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for d in ready:
+        t = Turn(root, aid, env, tid=str(d.get("turn")))
+        t.labels = {k: list(v) for k, v in ((c.get("labels") or {}).get(d.get("turn"), {})).items()}
+        a = d["action"]
+        try:
+            steps.append(await TOOLS[a["do"]](t, a))
+        except (ToolError, Ambiguous, Pending) as e:
+            steps.append(_step(FAILED.get(a["do"], "Not done"), [str(getattr(e, "question", {}).get("question")
+                                                                    if isinstance(e, Ambiguous) else e)], "warn"))
+        except (AssemblyInputError, toolbox.ToolboxError, makers.MakeError, service.WorkerError) as e:
+            steps.append(_step(FAILED.get(a["do"], "Not done"), [str(e)], "warn"))
+        if t.labels:
+            def keep_labels(cc: dict[str, Any], tl: dict[str, list[str]] = t.labels, tid: str = t.tid) -> None:
+                cc.setdefault("labels", {}).setdefault(tid, {}).update({k: v for k, v in tl.items() if v})
+            chat.update(root, aid, keep_labels)
+        for j in t.jobs:
+            chat.update(root, aid, lambda cc, j=j: cc.setdefault("jobs", []).append(j))
+            _spawn(watch_job(root, aid, env, j))
+    return steps
+
+
+async def answer_job(root: Path, aid: str, env: Env, jid: str, text: str) -> dict[str, Any]:
+    """The engineer answered a design job's question in the assembly chat: pass it on and follow the design again."""
+    c = chat.load(root, aid)
+    job = next((j for j in c.get("jobs") or [] if j["id"] == jid), None)
+    if job is None or job.get("status") != "question":
+        raise ToolError("That design isn't waiting for an answer any more.")
+    await env.answer_design(job["project_id"], text)
+    _set_job(root, aid, jid, status="running", step="Continuing with your answer", questions=None)
+    _post(root, aid, f"Passed your answer to the design agent for {job['name']}; it continues.", [], jid)
+    _spawn(watch_job(root, aid, env, {**job, "status": "running"}))
+    return job

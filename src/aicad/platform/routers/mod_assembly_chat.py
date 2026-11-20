@@ -39,6 +39,7 @@ STALE_S = 900
 class SayIn(BaseModel):
     text: str = Field(min_length=1, max_length=chat.MAX_TEXT)
     wait: bool = False
+    job: str | None = None     # the answer is for this design job's question (relayed to the design agent)
 
 
 # ----------------------------------------------------------------------------- the platform side of a turn
@@ -143,7 +144,8 @@ class PlatformEnv(agent.Env):
                 raise agent.ToolError(_detail(e)) from None
             return str(p.id)
 
-    async def watch_design(self, project_id: str, on_step: Callable[[str], None]) -> bool:
+    async def watch_design(self, project_id: str, on_step: Callable[[str], None],
+                           on_questions: Callable[[list[dict[str, Any]]], None] | None = None) -> bool:
         from aicad.agent.runner import is_verified
         from aicad.platform.routers import projects as prj
 
@@ -163,6 +165,8 @@ class PlatformEnv(agent.Env):
                         continue
                     if ev.get("type") == "tool" and ev.get("brief"):
                         on_step(str(ev["brief"]))
+                    if ev.get("type") == "questions" and on_questions is not None:
+                        on_questions(list(ev.get("questions") or []))
                     if ev.get("type") == "result" or ev.get("type") == "busy" and ev.get("value") is False:
                         break
             finally:
@@ -171,6 +175,27 @@ class PlatformEnv(agent.Env):
         with self.ctx() as c:
             p = asm._project(c, project_id)
             return bool(is_verified(asm._status(prj.workspace_for(p))))
+
+    async def answer_design(self, project_id: str, text: str) -> None:
+        from aicad.platform.routers.projects import ChatIn, agent_chat
+
+        with self.ctx() as c:
+            try:
+                await agent_chat(project_id, ChatIn(prompt=text), c)
+            except HTTPException as e:
+                raise agent.ToolError(_detail(e)) from None
+
+    def build_state(self, project_id: str) -> dict[str, Any]:
+        from aicad.agent.runner import verification
+        from aicad.platform.routers import projects as prj
+
+        with self.ctx() as c:
+            ws = prj.workspace_for(asm._project(c, project_id))
+        st = asm._status(ws)
+        vf = verification(st)
+        geo = vf["state"] != "none" and (ws / "out" / "part.step").is_file()
+        return {"geometry": geo, "verified": vf["state"] in ("verified", "pending"), "state": vf["state"],
+                "accepted": vf["accepted"], "open": vf["open"]}
 
     async def look(self, root: Path, doc: dict[str, Any]) -> dict[str, Any] | None:
         with self.ctx() as c:
@@ -276,6 +301,17 @@ async def say(aid: str, body: SayIn, ctx: Ctx = Depends(asm.asm_ctx)) -> dict[st
     if aid in _running and not _running[aid].done():
         raise HTTPException(409, "I'm still working on your last message.")
     ai, cap = _ai(ctx)
+    jid = body.job or _answers_job(chat.load(root, aid), text)
+    if jid:   # the engineer answered a design agent's question here: it goes to that design, no turn of mine
+        chat.update(root, aid, lambda c: chat.user_message(c, text, ctx.user.name))
+        try:
+            await agent.answer_job(root, aid, PlatformEnv(ctx, root, aid, cap), jid, text)
+        except agent.ToolError as e:
+            msg = str(e)
+            chat.update(root, aid, lambda c: c["messages"].append(
+                {"id": chat.next_id(c), "role": "agent", "text": msg, "steps": [], "questions": [], "at": store.now(),
+                 "tokens": 0}))
+        return _view(ctx, aid)
 
     def add(c: dict[str, Any]) -> None:
         chat.user_message(c, text, ctx.user.name)
@@ -297,6 +333,20 @@ async def say(aid: str, body: SayIn, ctx: Ctx = Depends(asm.asm_ctx)) -> dict[st
     if body.wait:
         await task
     return _view(ctx, aid)
+
+
+def _answers_job(c: dict[str, Any], text: str) -> str | None:
+    """A message that answers a design job's question: a clicked chip ("<question> <answer>") or, when exactly one
+    design is waiting and the last thing said was its question, whatever the engineer types next."""
+    waiting = [j for j in c.get("jobs") or [] if j.get("status") == "question"]
+    for j in waiting:
+        if any(text.startswith(str(q.get("question") or "")) for q in j.get("questions") or []):
+            return str(j["id"])
+    last = c["messages"][-1] if c.get("messages") else None
+    if len(waiting) == 1 and last and last.get("role") == "agent" and last.get("job") == waiting[0]["id"] \
+            and last.get("questions"):
+        return str(waiting[0]["id"])
+    return None
 
 
 @router.post("/assemblies/{aid}/chat/reset")

@@ -131,6 +131,19 @@ def _status(ws: Path) -> dict[str, Any]:
         return {}
 
 
+def _accepted(projects: dict[str, Project], parts: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Part key -> the engineer's acceptance, for project snapshots of a build that was later marked as verified."""
+    from aicad.agent.runner import accepted
+
+    out: dict[str, dict[str, Any]] = {}
+    for k, p in parts.items():
+        if p.get("kind") == "project" and p.get("project_id") in projects:
+            acc = accepted(_status(workspace_for(projects[p["project_id"]])))
+            if acc and str(acc.get("build_id")) == str(p.get("build_id")):
+                out[k] = acc
+    return out
+
+
 def _model_rev(ws: Path, build_id: Any) -> str | None:
     root = ws / "revisions"
     if not root.is_dir():
@@ -203,9 +216,13 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
                       "a_lost": bool(m["a"].get("lost")), "b_lost": bool(m["b"].get("lost")),
                       "residual_mm": st.get("residual_mm"), "residual_deg": st.get("residual_deg")})
     pview = {}
+    acc = _accepted(projects, parts)
     for k, p in parts.items():
         info = p["info"]
         pview[k] = {"key": k, "name": p["name"], "kind": p["kind"], "material": p.get("material"),
+                    "verification": service.verification_text(p, acc.get(k)) if p["kind"] == "project" else None,
+                    "accepted": bool(acc.get(k)), "project_id": p.get("project_id"),
+                    "open_checks": (acc.get(k) or {}).get("open") or p.get("open_checks") or [],
                     "standard": p.get("standard"), "code": p.get("code"), "params": p.get("params"),
                     "bbox": info["bbox"], "center": info["center"], "volume": info["volume"],
                     "holes": [{kk: h.get(kk) for kk in ("id", "d", "axis", "center", "depth", "through", "faces")}
@@ -233,7 +250,7 @@ def _view(ctx: Ctx, doc: dict[str, Any]) -> dict[str, Any]:
         "joints": doc.get("joints") or [],
         "office": doc.get("office"), "office_busy": locks.holder(doc["id"]) == OFFICE, "solve": solve or None,
         "explode": service.explode(root, doc), "analysis": analysis, "export": exp,
-        "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}),
+        "bom": service.bom(root, doc, {pid: p.name for pid, p in projects.items()}, acc),
         "can_edit": ctx.role != "viewer",
         "thumb_rev": (store.read_json(ddir / "thumb.json") or {}).get("rev"),
     }
@@ -458,6 +475,10 @@ def for_project(project_id: str, ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
 
 @router.get("/sources")
 def sources(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
+    """Project parts with any built geometry can be inserted (ASM-OW); ``verification`` says how each stands:
+    verified (every check passed), accepted (marked verified by an engineer, checks listed), unverified, none."""
+    from aicad.agent.runner import verification
+
     org = ctx.require_org()
     rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
         select(Project).where(Project.org_id == org.id, Project.archived.is_(False))
@@ -466,9 +487,12 @@ def sources(ctx: Ctx = Depends(asm_ctx)) -> dict[str, Any]:
     for p in rows:
         ws = workspace_for(p)
         st = _status(ws)
+        geo = bool(st.get("build_id")) and not st.get("error") and (ws / "out" / "part.step").is_file()
+        vf = verification(st)
         projects.append({"id": p.id, "name": p.name, "thumbnail": _thumb(p), "material": st.get("material"),
-                         "verified": bool(st.get("ok")) and (ws / "out" / "part.step").is_file(),
-                         "part": st.get("part")})
+                         "verified": geo and vf["state"] in ("verified", "pending"), "geometry": geo,
+                         "verification": vf["state"] if geo else "none", "open_checks": vf["open"],
+                         "accepted_by": (vf["accepted"] or {}).get("by"), "part": st.get("part")})
     tb = [c for c in toolbox.catalog()]
     return {"projects": projects, "toolbox": tb, "mate_types": [{"type": t, "label": solver.LABEL[t],
                                                                   "needs": solver.NEEDS[t]} for t in solver.MATE_TYPES]}
@@ -909,7 +933,8 @@ def get_bom(aid: str, format: Literal["json", "csv"] = "json", ctx: Ctx = Depend
     doc = _doc(ctx, aid)
     projects = _projects_for(ctx, doc)
     try:
-        b = service.bom(_root(ctx), doc, {pid: p.name for pid, p in projects.items()})
+        b = service.bom(_root(ctx), doc, {pid: p.name for pid, p in projects.items()},
+                        _accepted(projects, service._parts(_root(ctx), doc)))
     except AssemblyInputError as e:
         raise _err(e) from e
     if format == "csv":
@@ -1113,7 +1138,9 @@ class SmartRunIn(BaseModel):
 
 
 def _part_candidates(ctx: Ctx) -> list[dict[str, Any]]:
-    """The workspace's own parts Hex may reuse: projects with a verified build (shape signature when available)."""
+    """The workspace's own parts Hex and the assembly agent may reuse: projects with built geometry (shape signature
+    when available); ``verified`` says whether every check passed or the engineer accepted the build."""
+    from aicad.agent.runner import is_verified
     rows = permissions.visible(ctx.db, ctx.user, ctx.db.scalars(
         select(Project).where(Project.org_id == ctx.require_org().id, Project.archived.is_(False))
         .order_by(Project.updated_at.desc())).all())
@@ -1121,9 +1148,10 @@ def _part_candidates(ctx: Ctx) -> list[dict[str, Any]]:
     for p in rows:
         ws = workspace_for(p)
         st = _status(ws)
-        if not st.get("ok") or not (ws / "out" / "part.step").is_file():
+        if not st.get("build_id") or st.get("error") or not (ws / "out" / "part.step").is_file():
             continue
-        out.append({"id": p.id, "name": p.name, "description": p.description or "", "sig": similarity.signature(ws)})
+        out.append({"id": p.id, "name": p.name, "description": p.description or "", "sig": similarity.signature(ws),
+                    "verified": is_verified(st)})
     return out
 
 

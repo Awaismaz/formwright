@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerText, liveQuestions, replyMeta, stateTone, type ChatMessage } from "./chat";
+import { answerText, liveQuestions, replyMeta, sayBody, stateTone, type ChatMessage } from "./chat";
 
 describe("assembly chat helpers", () => {
   it("sends the question with the chosen chip", () => {
@@ -25,5 +25,13 @@ describe("assembly chat helpers", () => {
     expect(liveQuestions(msgs, 1, false)).toBe(true);
     expect(liveQuestions(msgs, 1, true)).toBe(false);
     expect(liveQuestions([...msgs, m("user")], 1, false)).toBe(false);
+  });
+});
+
+describe("ASM-OW: answers to a design job's question", () => {
+  it("go to that job, anything else is a normal turn", () => {
+    expect(sayBody("Spline gear: Hub length? 20 mm", "j12")).toEqual({ text: "Spline gear: Hub length? 20 mm", job: "j12" });
+    expect(sayBody("check for clashes")).toEqual({ text: "check for clashes" });
+    expect(sayBody("x", null)).toEqual({ text: "x" });
   });
 });

@@ -14,6 +14,7 @@ import HandoffCard from "./HandoffCard";
 import { ImportProvenance, PartExportDialog } from "@/components/NativeExport";
 import { SolidworksExportDialog } from "@/components/SolidworksExport";
 import VariantsBar from "./Variants";
+import { MarkVerified } from "@/components/MarkVerified";
 import ImpactPanel from "./ImpactPanel";
 
 /* ------------------------------------------------------------------ checks */
@@ -39,12 +40,18 @@ export function checkSentence(c: CheckResult): string {
   }
 }
 
-export function ChecksPanel({ status }: { status?: BuildStatus }) {
+export function ChecksPanel({ status, projectId, canEdit, onChanged }: { status?: BuildStatus; projectId?: string; canEdit?: boolean; onChanged?: () => void }) {
   if (!status) return <p className="p-4 text-sm text-muted">No build yet.</p>;
   if (status.error) return <div className="m-3 rounded-lg border border-danger/40 bg-danger/5 p-3 text-[13px] text-danger"><b>Build failed</b><div className="mt-1 text-[12px]">{status.error_plain ?? "The model couldn't be built."}</div></div>;
   return (
     <div className="space-y-3 p-3" data-tour="checks">
       <div className={cx("rounded-lg px-3 py-2 text-sm font-semibold", !status.ok ? "bg-danger/10 text-danger" : status.pending_checks?.length ? "bg-primary-soft text-primary" : "bg-success/10 text-success")} data-testid="checks-verdict">{!status.ok ? "Some checks fail" : status.pending_checks?.length ? "Checks so far pass · finishing verification…" : "All gating checks pass"}</div>
+      {status.accepted && <div className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-[12.5px]" data-testid="checks-accepted">
+        <b>Verified by {status.accepted.by}</b>; open: {status.accepted.open.map(c => c.id).join(", ") || "none"}{status.accepted.reason ? ` · “${status.accepted.reason}”` : ""}
+        <div className="text-[11px] text-muted">An engineering decision on this build, not a pass. A rebuild needs a new decision.</div></div>}
+      {projectId && canEdit && (!status.ok || status.accepted) && !status.pending_checks?.length && <div className="flex justify-end">
+        <MarkVerified projectId={projectId} accepted={!!status.accepted} onDone={onChanged}
+          open={(status.checks ?? []).filter(c => c.gating && !c.passed).map(c => ({ id: c.id, name: CHECK_TITLE[c.id] ?? c.name }))} /></div>}
       <ul className="divide-y divide-border rounded-lg border border-border">
         {(status.checks ?? []).map(c => {
           const raw = Object.entries(c.detail).filter(([k]) => !["original", "reimported"].includes(k)).map(([k, v]) => `${k.replace(/_/g, " ")}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("\n");

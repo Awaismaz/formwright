@@ -68,6 +68,10 @@ export interface BuildStatus {
   timings_s?: Record<string, number>; traceback?: string;
   /** PS-01: exports / checks still running in the background; `verified` = ok and nothing pending */
   exports_pending?: boolean; pending_checks?: string[]; verified?: boolean;
+  /** ASM-OW: the engineer marked this build as verified with checks open (revoked by a rebuild) */
+  accepted?: { by: string; at: string; reason?: string; open: { id: string; name: string }[]; build_id?: number } | null;
+  /** project cards: who accepted the latest build (null unless it was marked as verified) */
+  accepted_by?: string | null;
   param_meta?: Record<string, { min?: number; max?: number; step?: number; unit?: string; group?: string; label?: string; help?: string }>;
   mass?: { volume_mm3: number; area_mm2: number; com_mm: [number, number, number]; inertia_com_mm5: number[][]; principal_mm5: number[] };
   features?: { name: string; kind: string; params: Record<string, unknown>; chain?: boolean; suppressed?: boolean; error?: string }[];

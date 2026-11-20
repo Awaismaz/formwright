@@ -387,9 +387,43 @@ def recompute_ok(status: dict[str, Any]) -> None:
     status["verified"] = bool(status["ok"] and not pend and not status.get("error"))
 
 
+def open_checks(status: dict[str, Any] | None) -> list[dict[str, str]]:
+    """The gating checks of a build that did not pass (still pending ones included): [{id, name}]."""
+    return [{"id": str(c.get("id")), "name": str(c.get("name") or "")} for c in (status or {}).get("checks", [])
+            if c.get("gating") and not c.get("passed")]
+
+
+def accepted(status: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The engineer's "mark as verified" record when it applies to this very build (a rebuild writes a new status
+    without it, so it is revoked automatically)."""
+    acc = (status or {}).get("accepted")
+    if not isinstance(acc, dict) or status is None or status.get("error"):
+        return None
+    return acc if str(acc.get("build_id")) == str(status.get("build_id")) else None
+
+
+def verification(status: dict[str, Any] | None) -> dict[str, Any]:
+    """How a build stands, for every label in the app: state "verified" (every check passed), "accepted" (the
+    engineer marked it verified with checks open: never shown as passed), "unverified" or "none" (no build)."""
+    if not status or status.get("error") or not status.get("build_id"):
+        return {"state": "none", "open": [], "accepted": None}
+    acc = accepted(status)
+    passed = bool(status.get("ok")) and (status.get("verified") if "verified" in status
+                                         else not status.get("exports_pending"))
+    if passed:
+        return {"state": "verified", "open": [], "accepted": None}
+    if not acc and status.get("ok") and not open_checks(status):   # nothing failed: deferred checks still running
+        return {"state": "pending", "open": [], "accepted": None}
+    return {"state": "accepted" if acc else "unverified", "open": acc.get("open") if acc else open_checks(status),
+            "accepted": acc}
+
+
 def is_verified(status: dict[str, Any] | None) -> bool:
-    """A build counts as verified only when its gating checks passed and no deferred check is still pending.
+    """A build counts as verified only when its gating checks passed and no deferred check is still pending, or
+    when the engineer accepted this exact build (``accepted``; the label then names who and the open checks).
     (Status files written before pending_checks existed are judged on `ok`.)"""
+    if accepted(status) is not None:
+        return True
     if not status or status.get("error") or not status.get("ok"):
         return False
     if "verified" in status:

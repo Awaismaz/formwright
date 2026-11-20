@@ -333,7 +333,8 @@ def test_chat_api_rules(app_client: Any) -> None:  # noqa: F811
 
 def test_a_part_with_no_direct_builder_goes_to_the_design_agent(app_client: Any) -> None:  # noqa: F811
     """Unclear geometry: a Design Studio design-agent turn on a new part, followed in the chat; the offline stand-in
-    design agent changes nothing, so the part is not verified and is honestly left out of the assembly."""
+    design agent builds nothing, so there is no geometry and nothing comes into the assembly (ASM-OW: a part with
+    geometry would come in, labelled; the engineer is never sent to the Design Studio)."""
     import time
 
     c = app_client
@@ -351,6 +352,6 @@ def test_a_part_with_no_direct_builder_goes_to_the_design_agent(app_client: Any)
             time.sleep(0.5)
     job = v["jobs"][-1]
     assert job["status"] == "failed" and job["project_id"] == pid
-    assert "not verified" in v["messages"][-1]["text"] and "Design Studio" in v["messages"][-1]["text"]
+    assert "any geometry" in v["messages"][-1]["text"] and "Design Studio" not in v["messages"][-1]["text"]
     assert c.get(f"/api/projects/{pid}").status_code == 200        # the part exists in the workspace to finish
     assert len(_view(c, aid)["instances"]) == 3                      # and nothing unverified came into the assembly
