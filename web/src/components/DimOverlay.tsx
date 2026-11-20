@@ -73,7 +73,7 @@ export default function DimOverlay({ eng, topo, specs, values, meta, whole, hove
         const m = meta[d.param] ?? {};
         const on = d.param === hover;
         if (edit?.param === d.param) {
-          const range = m.min !== undefined || m.max !== undefined ? `${m.min ?? "−∞"}–${m.max ?? "∞"}${m.unit ? ` ${m.unit}` : ""}` : null;
+          const range = m.min !== undefined || m.max !== undefined ? `${m.min ?? "−∞"} to ${m.max ?? "∞"}${m.unit ? ` ${m.unit}` : ""}` : null;
           return (
             <div key={`${d.param}-${i}`} className="pointer-events-auto absolute z-10 -translate-x-1/2 -translate-y-1/2 rounded-md border border-primary bg-panel p-1 shadow-pop" style={{ left: p.x, top: p.y }} data-dim-edit={d.param}>
               <input autoFocus value={edit.text} inputMode="decimal" aria-label={`${nameOf(d.param, m)} value`}

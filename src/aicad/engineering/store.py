@@ -198,7 +198,7 @@ def sign(cs: dict[str, Any], load_cases: list[dict[str, Any]], user: dict[str, A
         cs.setdefault("history", []).append({"at": so["at"], "by": {"id": user["id"], "name": user["name"]},
                                              "event": "resigned_on_new_model",
                                              "detail": f"Earlier sign-off by {prev['name']} was on model revision "
-                                                       f"{(prev.get('build') or {}).get('model_rev') or '—'}"})
+                                                       f"{(prev.get('build') or {}).get('model_rev') or '-'}"})
     cs["signoff"] = so
     rev = (build or {}).get("model_rev")
     cs.setdefault("history", []).append({"at": so["at"], "by": {"id": user["id"], "name": user["name"]},

@@ -198,11 +198,11 @@ export default function Projects() {
                 return (
                   <tr key={p.id} className="hover:bg-panel2/60">
                     <td className="px-4 py-2.5"><Link to={`/app/projects/${p.id}`} className="font-medium hover:text-primary">{p.name}</Link><div className="text-xs text-muted">{p.created_by ? `by ${p.created_by}` : ""}</div></td>
-                    <td className="max-w-[160px] truncate px-4 py-2.5">{p.design_project ? <Link to={`/app/p/${p.design_project.id}`} className="text-primary hover:underline">{p.design_project.name}</Link> : <span className="text-muted">—</span>}</td>
+                    <td className="max-w-[160px] truncate px-4 py-2.5">{p.design_project ? <Link to={`/app/p/${p.design_project.id}`} className="text-primary hover:underline">{p.design_project.name}</Link> : <span className="text-muted">-</span>}</td>
                     <td className="px-4 py-2.5"><ProjectStatus p={p} /></td>
-                    <td className="max-w-[180px] truncate px-4 py-2.5 text-muted">{p.last_status?.material ?? "—"}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-muted">{size(p.last_status?.fingerprint?.bbox, units).replace(/ (mm|in)$/, "") || "—"}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-muted">{v ? (units === "in" ? `${(v / 16387.064).toFixed(2)} in³` : `${(v / 1000).toFixed(1)} cm³`) : "—"}</td>
+                    <td className="max-w-[180px] truncate px-4 py-2.5 text-muted">{p.last_status?.material ?? "-"}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted">{size(p.last_status?.fingerprint?.bbox, units).replace(/ (mm|in)$/, "") || "-"}</td>
+                    <td className="px-4 py-2.5 tabular-nums text-muted">{v ? (units === "in" ? `${(v / 16387.064).toFixed(2)} in³` : `${(v / 1000).toFixed(1)} cm³`) : "-"}</td>
                     <td className="px-4 py-2.5 tabular-nums">{p.builds}</td>
                     <td className="px-4 py-2.5 text-muted">{ago(p.updated_at)}</td>
                     <td className="px-4 py-2.5 text-right">{rowMenu(p)}</td>

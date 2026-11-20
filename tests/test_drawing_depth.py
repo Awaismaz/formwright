@@ -387,7 +387,7 @@ def test_imported_step_drawing_is_all_inferred(tmp_path: Path) -> None:
     assert rec["mapping"]["mapped"] == {} and rec["imported"] == {"inferred_only": True, "component": None,
                                                                   "unrecognised_faces": 2}
     texts = [p["txt"] for p in sheet["prims"] if p["t"] == "text"]
-    assert any("DIMENSIONS INFERRED FROM IMPORTED GEOMETRY — VERIFY" in t for t in texts)
+    assert any("DIMENSIONS INFERRED FROM IMPORTED GEOMETRY: VERIFY" in t for t in texts)
     assert any("2 FACE(S) NOT RECOGNISED" in t for t in texts)
 
 

@@ -333,6 +333,6 @@ export function checkEdit(text: string, whole: boolean, meta: { min?: number; ma
   if (!Number.isFinite(v)) return { ok: false, error: "Enter a number" };
   if (whole && !Number.isInteger(v)) return { ok: false, error: `${meta.label ?? "This value"} must be a whole number` };
   if ((meta.min !== undefined && v < meta.min) || (meta.max !== undefined && v > meta.max))
-    return { ok: false, error: `${meta.label ?? "Value"} must be ${meta.min ?? "−∞"}–${meta.max ?? "∞"}${meta.unit ? ` ${meta.unit}` : ""}` };
+    return { ok: false, error: `${meta.label ?? "Value"} must be ${meta.min ?? "−∞"} to ${meta.max ?? "∞"}${meta.unit ? ` ${meta.unit}` : ""}` };
   return { ok: true, value: v };
 }

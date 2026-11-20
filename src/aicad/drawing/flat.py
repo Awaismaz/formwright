@@ -68,7 +68,7 @@ def flat_sheet(flat: dict[str, Any], meta: dict[str, Any], revisions: list[dict[
     left, top = FRAME["left"] + 6.0, FRAME["top"] + 6.0
     right = W - FRAME["right"] - 6.0
     # title block (+ revision table) bottom right; bend table top right; notes bottom left
-    title_meta = {**meta, "title": f"{meta.get('title') or 'Part'} — FLAT PATTERN"}
+    title_meta = {**meta, "title": f"{meta.get('title') or 'Part'} (FLAT PATTERN)"}
     tb, tb_box = _info_blocks(W, H, title_meta, "", first_angle, revisions, size)
     rows = bends[:MAX_ROWS]
     tab_w = sum(w for _, w in TABLE_COLS)
@@ -193,7 +193,7 @@ def write(flat: dict[str, Any], dest: Any, meta: dict[str, Any], revisions: list
     from aicad.drawing.render import to_dxf, to_pdf, to_svg
 
     sheet = flat_sheet(flat, meta, revisions, size, first_angle)
-    title = f"{meta.get('title') or 'Part'} — flat pattern {meta.get('drawing_no', '')}".strip()
+    title = f"{meta.get('title') or 'Part'}, flat pattern {meta.get('drawing_no', '')}".strip()
     (dest / "flat_sheet.svg").write_text(to_svg(sheet, title), encoding="utf-8", newline="\n")
     to_pdf(sheet, dest / "flat_sheet.pdf", title)
     to_dxf(sheet, dest / "flat_sheet.dxf")

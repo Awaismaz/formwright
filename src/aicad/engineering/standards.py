@@ -103,7 +103,7 @@ SURFACE_FACTOR: dict[str, tuple[float, float]] = {
 # Reliability factor ke. Shigley Table 6-5 (10th ed.).
 RELIABILITY_KE: dict[str, float] = {"50": 1.000, "90": 0.897, "95": 0.868, "99": 0.814, "99.9": 0.753,
                                     "99.99": 0.702, "99.999": 0.659}
-MARIN_SOURCE = "Shigley §6-9, Eqs. (6-8), (6-18)–(6-20), Tables 6-2 and 6-5"
+MARIN_SOURCE = "Shigley §6-9, Eqs. (6-8), (6-18) to (6-20), Tables 6-2 and 6-5"
 
 # ----------------------------------------------------------------------------- bearings
 # ISO 281:2007 life modification factor for reliability a1 (Table 12).

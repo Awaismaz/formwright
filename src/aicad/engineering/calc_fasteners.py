@@ -218,7 +218,7 @@ def _bolt(v: dict[str, Any]) -> Work:
             w.sf_check("Bolt fatigue (Goodman screening)", n_f, sf_req, sf_src, "nf, Shigley Eq. (8-38)")
     else:
         w.notes.append("No external load given: only stiffness, preload and torque were computed.")
-    w.notes.append("Torque–preload scatter with the nut factor K is large (±25 % or more); critical joints need "
+    w.notes.append("Torque-preload scatter with the nut factor K is large (±25 % or more); critical joints need "
                    "preload control (angle, tension or ultrasonic) and VDI 2230-level analysis.")
     return w
 
@@ -275,7 +275,7 @@ register(Calculator(
               show_if={"se_mode": ["user"]}),
     ],
     func=_bolt, safety_factor=True,
-    references=[(f"{SHIGLEY_REF}, ch. 8: Eqs. (8-17), (8-18), (8-20), (8-24), (8-27)–(8-31), (8-35)–(8-38); "
+    references=[(f"{SHIGLEY_REF}, ch. 8: Eqs. (8-17), (8-18), (8-20), (8-24), (8-27) to (8-31), (8-35) to (8-38); "
                 "Tables 8-7, 8-11, 8-15, 8-17"), "ISO 898-1:2013 (property classes, tensile stress area)",
                 "ISO 724 (basic thread dimensions)"],
     assumptions=["Concentric tensile load, no prying", "30° pressure-cone member stiffness (frusta)",
@@ -287,7 +287,7 @@ register(Calculator(
                       ("Shigley 11th ed. Probs. 8-19 / 8-20 solutions (layered aluminium/steel members): "
                       "km = 692.5 and 623.5 MN/m, kb = 292.1 and 247.6 MN/m"),
                       "Shigley 11th ed. Prob. 8-30 solution: T = K·Fi·d = 115 lbf·ft",
-                      "ISO 898-1 tabulated stress areas M3–M36"],
+                      "ISO 898-1 tabulated stress areas M3 to M36"],
     keywords=["bolt", "screw", "preload", "torque", "clamp", "joint", "fatigue", "vdi 2230"],
     prefill=["Bolt size from a recognised clearance-hole pattern (ISO 273)", "Grip from the plate thickness",
              "Member modulus from the project material"],

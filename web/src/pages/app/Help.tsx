@@ -84,7 +84,7 @@ export default function Help() {
             <div className="mt-3 flex items-center gap-1">{[1, 2, 3, 4, 5].map(n => <button key={n} onClick={() => setRating(n)} aria-label={`${n} stars`}><Star className={cx("h-5 w-5", rating && n <= rating ? "fill-accent text-accent" : "text-muted")} /></button>)}<span className="ml-2 text-xs text-muted">How's Formwright so far?</span></div>
             <Button className="mt-4" loading={busy} disabled={!msg.trim()} onClick={async () => {
               setBusy(true);
-              try { await api.post("/api/feedback", { kind, message: msg, rating }); toast.success("Thanks — the team reads every message."); setMsg(""); setRating(null); }
+              try { await api.post("/api/feedback", { kind, message: msg, rating }); toast.success("Thanks. The team reads every message."); setMsg(""); setRating(null); }
               catch (e) { toast.error(e instanceof ApiError ? e.message : "Failed"); } finally { setBusy(false); }
             }}>Send</Button>
           </Card>

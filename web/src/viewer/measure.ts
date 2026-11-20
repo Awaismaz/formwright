@@ -46,7 +46,7 @@ export function agentDescriptor(p: Pick, t: Topo): string {
 }
 
 /** The point halfway along an edge (by arc length along its polyline). For a straight edge: the average of its
- *  two ends — never an end vertex, which would also touch the neighbouring edges (STU-01). */
+ *  two ends, never an end vertex, which would also touch the neighbouring edges (STU-01). */
 export function edgeMid(t: Topo, id: number): V3 {
   const p = t.edges[id]!.pts;
   const n = p.length / 3;

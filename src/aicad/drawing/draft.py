@@ -43,7 +43,7 @@ LAYER_ORDER = ("visible", "hidden", "center", "dimension", "construction")
 #: ISO 128-2 line type and width (mm) per layer, shown in the layer panel and used for the DXF layers
 ISO128 = {"visible": ("01.2", "Continuous wide", 0.5), "hidden": ("02.1", "Dashed narrow", 0.25),
           "center": ("04.1", "Long-dashed dotted narrow", 0.25), "dimension": ("01.1", "Continuous narrow", 0.25),
-          "construction": ("—", "Construction (not printed)", 0.13)}
+          "construction": ("-", "Construction (not printed)", 0.13)}
 GDT_SYMBOLS = ("straightness", "flatness", "circularity", "cylindricity", "profile_line", "profile_surface",
                "parallelism", "perpendicularity", "angularity", "position", "concentricity", "symmetry",
                "circular_runout", "total_runout")
@@ -273,7 +273,7 @@ def _anno(a: dict[str, Any]) -> dict[str, Any]:
     elif t == "datum":
         letter = str(a.get("letter") or "").strip().upper()
         if not re.fullmatch(r"[A-Z]{1,2}", letter):
-            raise DrawingInputError("A datum letter must be A–Z")
+            raise DrawingInputError("A datum letter must be A to Z")
         rec |= {"pos": _pt(a.get("pos")), "tip": _pt(a.get("tip")), "letter": letter}
     elif t == "centermark":
         rec["ent"] = _id(a.get("ent"))

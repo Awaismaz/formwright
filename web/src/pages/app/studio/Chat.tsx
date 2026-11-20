@@ -199,7 +199,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
     const m = forceMode ?? mode;
     let t = (override ?? text).trim(); if ((!t && !atts.length) || busy) return;
     if (!t) t = "Model the part shown in the attached reference image(s).";
-    // A standard component? Offer the Toolbox (repeatable generator) — the user decides; the agent stays available.
+    // A standard component? Offer the Toolbox (repeatable generator). The user decides; the agent stays available.
     const hasModel = (project.builds ?? 0) > 0;
     if (m === "build" && !override && !skipToolbox && !selection.length && !features.length && !atts.length && onToolbox && !(hasModel && EDIT.test(t))) {
       try {
@@ -273,7 +273,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
             <div key={n} className="flex items-start gap-2 px-1 text-[12px] text-muted">
               <span className="mt-0.5">{i.state === "run" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : i.state === "ok" ? <Check className="h-3.5 w-3.5 text-success" /> : <X className="h-3.5 w-3.5 text-danger" />}</span>
               <span><span className="text-text">{i.brief}</span>{(i.ids?.length ?? 1) > 1 && <span className="ml-1.5 rounded-full bg-text/5 px-1.5 py-px text-[10.5px] tabular-nums">{stepCount(i.brief, i.ids!.length)}</span>}
-                {i.result && <span className={cx("ml-1", /passed/.test(i.result) ? "text-success" : "text-warning")}>— {i.result}</span>}</span>
+                {i.result && <span className={cx("ml-1", /passed/.test(i.result) ? "text-success" : "text-warning")}>· {i.result}</span>}</span>
             </div>);
           return (
             <div key={n} className="flex flex-wrap items-center justify-center gap-x-2 border-b border-dashed border-border pb-2 text-[11px] text-muted">
@@ -332,7 +332,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
           <textarea value={text} onChange={e => setText(e.target.value)} rows={4}
             onPaste={e => { const fs = Array.from(e.clipboardData.files); if (fs.length) { e.preventDefault(); addFiles(fs); } }}
             onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !busy) { e.preventDefault(); send(); } }}
-            placeholder={mode === "discuss" ? "Ask anything or plan the design, e.g. “How should I retain a bearing on a Ø20 shaft?” — nothing will be changed" : features.length ? "Say what to change, e.g. “make these Ø12” or “move it 10 mm towards the edge”" : selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
+            placeholder={mode === "discuss" ? "Ask anything or plan the design, e.g. “How should I retain a bearing on a Ø20 shaft?” Nothing will be changed" : features.length ? "Say what to change, e.g. “make these Ø12” or “move it 10 mm towards the edge”" : selection.length ? "Say what to do with the selection, e.g. “fillet these edges R2”" : "e.g. 6061 aluminium L-bracket, 60 × 40 mm legs, 50 mm wide, 5 mm thick, two M5 clearance holes per leg, 3 mm inside fillet"}
             className="input h-auto min-h-[84px] resize-y py-2 leading-relaxed" />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }} />
@@ -343,7 +343,7 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
               <Tip content="Build: the agent designs and changes the model" side="top">
                 <button role="radio" aria-checked={mode === "build"} onClick={() => setMode("build")} className={cx("flex items-center gap-1 px-2 py-1", mode === "build" ? "bg-primary text-white" : "text-muted hover:text-text")}><Hammer className="h-3.5 w-3.5" />Build</button>
               </Tip>
-              <Tip content="Discuss: ask questions or plan the design — the model is never changed" side="top">
+              <Tip content="Discuss: ask questions or plan the design; the model is never changed" side="top">
                 <button role="radio" aria-checked={mode === "discuss"} onClick={() => setMode("discuss")} className={cx("flex items-center gap-1 px-2 py-1", mode === "discuss" ? "bg-accent text-white" : "text-muted hover:text-text")}><MessagesSquare className="h-3.5 w-3.5" />Discuss</button>
               </Tip>
             </div>
@@ -358,14 +358,14 @@ export default function Chat({ project, topo, selection, onSelectionChange, onAc
       </div>
       {offer && (
         <Modal open onOpenChange={v => !v && setOffer(null)} title="A standard component fits this request"
-          description="Toolbox components come from repeatable generators: the same sizes always give the identical, verified model — instantly and without using tokens."
+          description="Toolbox components come from repeatable generators: the same sizes always give the identical, verified model, instantly and without using tokens."
           footer={<Button variant="secondary" icon={<Sparkles className="h-4 w-4" />} onClick={() => { const p = offer.prompt; setOffer(null); send(p, true); }}>Continue with custom design</Button>}>
           <div className="space-y-2">
             {offer.matches.map(m => (
               <button key={m.code} onClick={() => { setOffer(null); setText(""); onToolbox?.(m); }}
                 className="flex w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5 text-left hover:border-primary hover:bg-primary-soft">
                 <span><span className="block text-[13.5px] font-medium">Use Toolbox: {m.title}</span>
-                  <span className="text-[12px] text-muted">{[m.standard !== "—" ? m.standard : null, m.prefilled.length ? `sizes read from your request: ${m.prefilled.join(", ")}` : "default sizes, adjust before creating"].filter(Boolean).join(" · ")}</span>
+                  <span className="text-[12px] text-muted">{[m.standard !== "-" ? m.standard : null, m.prefilled.length ? `sizes read from your request: ${m.prefilled.join(", ")}` : "default sizes, adjust before creating"].filter(Boolean).join(" · ")}</span>
                   {(project.builds ?? 0) > 0 && <span className="mt-0.5 block text-[11.5px] font-medium text-warning">Replaces the current model (it stays in Revisions)</span>}</span>
                 <span className="text-[12px] font-medium text-primary">Choose →</span>
               </button>))}

@@ -1,5 +1,5 @@
 /**
- * CadViewer — renders an exact B-rep topology (topo.json) the way CAD tools do:
+ * CadViewer: renders an exact B-rep topology (topo.json) the way CAD tools do:
  * Z-up, orthographic by default, real model edges (not mesh triangles), face/edge/vertex picking with
  * snapping, persistent selection, capped section, part explode, compare overlays.
  */

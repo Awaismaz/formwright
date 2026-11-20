@@ -101,7 +101,7 @@ function Chart({ tl, program, mode, onOpen }: { tl: Timeline; program: Program; 
               <Markers markers={tl.markers.filter(m => !m.ticket || m.ticket === r.id)} span={span} now={tl.now} running={running} />
             </div>
             <div className="text-right text-[11px] tabular-nums leading-tight">
-              <div><span className="text-muted">{fmtMinutes(r.estimate_min)}</span> → <b>{r.actual_min ? fmtMinutes(r.actual_min) : "—"}</b></div>
+              <div><span className="text-muted">{fmtMinutes(r.estimate_min)}</span> → <b>{r.actual_min ? fmtMinutes(r.actual_min) : "-"}</b></div>
               <div className={TONE_TEXT[tone]}>{r.error_pct !== null ? fmtError(r.error_pct) : br.waitCapacity > 0 || br.blocked > 0
                 ? <span className="text-warning">{br.blocked > 0 ? "waited for you" : "waited for capacity"}</span> : r.actual_min ? "in progress" : ""}</div>
             </div>

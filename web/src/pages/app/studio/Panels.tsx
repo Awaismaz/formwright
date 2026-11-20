@@ -21,8 +21,8 @@ import ImpactPanel from "./ImpactPanel";
 const CHECK_TITLE: Record<string, string> = { "CHK-02": "Valid solid", "CHK-03": "Closed (watertight)", "CHK-04": "Overall size", "CHK-05": "Volume",
   "CHK-06": "Holes and cylinders", "CHK-07": "STEP round trip", "CHK-08": "Repeatable rebuild", "CHK-09": "Matches the imported part" };
 const n3 = (v: unknown) => (typeof v === "number" ? num(v, Math.abs(v) >= 100 ? 2 : 3) : String(v));
-const pct = (v: unknown) => (typeof v === "number" ? (v < 1e-6 ? "< 0.0001 %" : `${+(v * 100).toPrecision(2)} %`) : "—");
-const dims = (v: unknown) => (Array.isArray(v) ? v.map(x => n3(x)).join(" × ") : "—");
+const pct = (v: unknown) => (typeof v === "number" ? (v < 1e-6 ? "< 0.0001 %" : `${+(v * 100).toPrecision(2)} %`) : "-");
+const dims = (v: unknown) => (Array.isArray(v) ? v.map(x => n3(x)).join(" × ") : "-");
 
 /** One check as a sentence an engineer reads (raw values stay in the tooltip). */
 export function checkSentence(c: CheckResult): string {
@@ -67,7 +67,7 @@ export function ChecksPanel({ status, projectId, canEdit, onChanged }: { status?
             </li>);
         })}
       </ul>
-      <p className="text-[11px] text-muted">Checks prove geometric consistency with the stated expectations — not strength, fit or manufacturability. Engineering sign-off stays with you.</p>
+      <p className="text-[11px] text-muted">Checks prove geometric consistency with the stated expectations, not strength, fit or manufacturability. Engineering sign-off stays with you.</p>
     </div>
   );
 }
@@ -97,7 +97,7 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, 
   const apply = async (values: Record<string, number>, force = false) => {
     if (!Object.keys(values).length) return;
     if (Object.values(values).some(v => !Number.isFinite(v))) { toast.error("Enter valid numbers"); return; }
-    const bad = Object.entries(values).map(([k, v]) => { const m = meta[k] ?? {}; return (m.min !== undefined && v < m.min) || (m.max !== undefined && v > m.max) ? `${m.label ?? k} must be ${m.min}–${m.max}${m.unit ? ` ${m.unit}` : ""}` : null; }).find(Boolean);
+    const bad = Object.entries(values).map(([k, v]) => { const m = meta[k] ?? {}; return (m.min !== undefined && v < m.min) || (m.max !== undefined && v > m.max) ? `${m.label ?? k} must be ${m.min} to ${m.max}${m.unit ? ` ${m.unit}` : ""}` : null; }).find(Boolean);
     if (bad) { toast.error(bad); return; }
     setBusy(true);
     if (usedIn > 0 && !force) { // ASM-018: preview the change on the assemblies first (trial rebuild, nothing applied)
@@ -168,10 +168,10 @@ export function ParamsPanel({ project, status, onChanged, focus, onChangedInfo, 
                     <span className="flex min-w-0 items-center gap-1 truncate text-[12.5px]" title={m.help ?? (m.label ? `${m.label} (${k} in the design)` : k)}>{m.label ?? k.replace(/_/g, " ").toLowerCase().replace(/^\w/, c => c.toUpperCase())}
                       {onModel?.mapped.has(k) && <MoveHorizontal className="h-3 w-3 shrink-0 text-primary/70" aria-label="Shown as a dimension on the model" />}</span>
                     {can ? <span className="flex items-center gap-1"><Input className={cx("h-7 w-20 text-right font-mono text-[12px]", ((m.min !== undefined && Number(cur) < m.min) || (m.max !== undefined && Number(cur) > m.max)) && "border-danger text-danger")} value={cur} inputMode="decimal" disabled={busy}
-                        title={m.min !== undefined && m.max !== undefined ? `${m.min}–${m.max}${m.unit ? ` ${m.unit}` : ""}` : undefined}
+                        title={m.min !== undefined && m.max !== undefined ? `${m.min} to ${m.max}${m.unit ? ` ${m.unit}` : ""}` : undefined}
                         onChange={e => setVals({ ...vals, [k]: e.target.value })} onBlur={() => schedule(vals)} onKeyDown={e => e.key === "Enter" && schedule(vals)} />
                         {m.unit && <span className="w-6 text-[11px] text-muted">{m.unit}</span>}</span>
-                      : <Tip content="Derived value — ask the agent to change it" side="left"><span className="font-mono text-[12px] text-muted">{String(shown[k])}</span></Tip>}
+                      : <Tip content="Derived value. Ask the agent to change it" side="left"><span className="font-mono text-[12px] text-muted">{String(shown[k])}</span></Tip>}
                   </div>
                   {hasRange && <input type="range" min={m.min} max={m.max} step={m.step ?? (m.max! - m.min!) / 200} value={Number(cur)} disabled={busy}
                     onChange={e => setVals({ ...vals, [k]: e.target.value })} onPointerUp={() => schedule(vals)} onKeyUp={() => schedule(vals)} className="mt-1 w-full" aria-label={m.label ?? k} />}
@@ -214,7 +214,7 @@ export function MassPanel({ project, status, showCom, onShowCom }: { project: Pr
         <div className="label mb-1">Material</div>
         <select className="input" value={chosen ?? ""} onChange={e => save({ material: e.target.value })}>
           {!chosen && <option value="" disabled>No material: pick one</option>}
-          {groups.map(g => <optgroup key={g} label={g}>{mats.data!.items.filter(m => m.group === g).map(m => <option key={m.code} value={m.code}>{m.name} — {m.density_g_cm3} g/cm³</option>)}</optgroup>)}
+          {groups.map(g => <optgroup key={g} label={g}>{mats.data!.items.filter(m => m.group === g).map(m => <option key={m.code} value={m.code}>{m.name} · {m.density_g_cm3} g/cm³</option>)}</optgroup>)}
           <option value="custom">Custom density…</option>
         </select>
         {code === "custom" && <div className="mt-2 flex gap-2"><Input placeholder={String(density)} value={custom} onChange={e => setCustom(e.target.value)} inputMode="decimal" />
@@ -223,7 +223,7 @@ export function MassPanel({ project, status, showCom, onShowCom }: { project: Pr
         {!chosen && <p className="mt-1 text-[11px] text-warning">No material chosen yet: mass below is at 6061 aluminium density, for orientation only.</p>}
       </div>
       <div className="rounded-lg border border-border">
-        {[["Mass", chosen ? (mass >= 1 ? `${num(mass, 4)} kg` : `${num(mass * 1000, 2)} g`) : `≈ ${mass >= 1 ? `${num(mass, 3)} kg` : `${num(mass * 1000, 1)} g`} (no material)`, !!chosen], ["Volume", `${num(status.mass.volume_mm3, 2)} mm³`], ["Surface area", `${num(status.mass.area_mm2, 2)} mm²`], ["Density", chosen ? `${density} g/cm³` : "—"]].map(([l, v, p]) => (
+        {[["Mass", chosen ? (mass >= 1 ? `${num(mass, 4)} kg` : `${num(mass * 1000, 2)} g`) : `≈ ${mass >= 1 ? `${num(mass, 3)} kg` : `${num(mass * 1000, 1)} g`} (no material)`, !!chosen], ["Volume", `${num(status.mass.volume_mm3, 2)} mm³`], ["Surface area", `${num(status.mass.area_mm2, 2)} mm²`], ["Density", chosen ? `${density} g/cm³` : "-"]].map(([l, v, p]) => (
           <div key={l as string} className="flex justify-between border-b border-border px-3 py-1.5 last:border-0"><span className="text-muted">{l as string}</span><span className={cx("tabular-nums", p ? "font-semibold text-primary" : "")}>{v as string}</span></div>))}
       </div>
       <div>
@@ -382,7 +382,7 @@ export function TreePanel({ status, topo, manual, onHover, onEdit, onToggle, onM
             {extraAi.map(f => <li key={f.id} className="rounded px-2 py-1"><div className="truncate">{f.name}</div>
               {(f.note || Object.keys(f.params).length > 0) && <div className="truncate text-[11px] text-muted" title={f.note}>{f.note || fmtParams(f.params)}</div>}</li>)}
           </ul>
-          <p className="mt-1.5 text-[11px] text-muted">Hover to highlight. Ask the design agent to change any of these — it edits the exact solid even where features are unresolved.</p>
+          <p className="mt-1.5 text-[11px] text-muted">Hover to highlight. Ask the design agent to change any of these. It edits the exact solid even where features are unresolved.</p>
         </div>)}
 
       {/* one tree in build order: the design's steps above, then the features added by hand (STU-14) */}

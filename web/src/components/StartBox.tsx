@@ -139,7 +139,7 @@ export default function StartBox({ existing }: { existing: string[] }) {
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] text-muted max-sm:order-last max-sm:basis-full">
             {busy ? <><Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />{busy}</>
               : viewer ? "Viewers can open parts but not create them."
-              : <><Coins className="h-3.5 w-3.5 text-accent" />{unlimited ? "Unlimited tokens (God mode)" : run ? `A new part typically uses ${run.low}–${run.high} tokens · balance ${num(me?.org?.token_balance)}` : ""}
+              : <><Coins className="h-3.5 w-3.5 text-accent" />{unlimited ? "Unlimited tokens (God mode)" : run ? `A new part typically uses ${run.low} to ${run.high} tokens · balance ${num(me?.org?.token_balance)}` : ""}
                 <span className="kbd ml-1 max-sm:hidden">Ctrl ↵</span></>}
           </span>
           <Button className="max-sm:ml-auto" icon={<ArrowRight className="h-4 w-4" />} disabled={!text.trim() || !!busy || viewer} onClick={() => void start()}>Design it</Button>

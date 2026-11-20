@@ -303,7 +303,7 @@ export default function ProjectStudio() {
       qc.setQueryData(["recognition", id, status.data?.build_id], r);
       if (!ai) { toast.success("Features recognised from the exact geometry (no AI)"); return; }
       openChat();
-      try { await api.post(`/api/projects/${id}/recognition/ai`); toast.success("Geometry analysed — the design agent is classifying the features (see chat)"); }
+      try { await api.post(`/api/projects/${id}/recognition/ai`); toast.success("Geometry analysed. The design agent is classifying the features (see chat)"); }
       catch (e) { toast.warning(e instanceof ApiError ? `Geometric recognition done. AI step unavailable: ${e.message}` : "Geometric recognition done; AI step unavailable"); }
     } catch (e) { toast.error(e instanceof ApiError ? e.message : "Recognition failed"); }
     finally { setRecognizing(false); }
@@ -322,7 +322,7 @@ export default function ProjectStudio() {
     else if (c.kind === "normal") normalTo();
   };
 
-  // Keyboard (STU-11): Ctrl+Z/Y undo/redo, F fit, Ctrl+1–7 views, Esc, ? shortcuts, Ctrl+K typed commands (IDEA 5).
+  // Keyboard (STU-11): Ctrl+Z/Y undo/redo, F fit, Ctrl+1 to 7 views, Esc, ? shortcuts, Ctrl+K typed commands (IDEA 5).
   const keyState = useRef({ undo, redoNow, pm, sk, tool, dimsOn, setDimsOn });
   keyState.current = { undo, redoNow, pm, sk, tool, dimsOn, setDimsOn };
   useEffect(() => {
@@ -511,7 +511,7 @@ export default function ProjectStudio() {
               onDone={() => { setSk(null); refresh(); agentStepDone(); }} onCancel={() => { setSk(null); setAgentQueue(null); }} />)}
           {st?.error && (
             <div className="absolute left-1/2 top-16 max-w-md -translate-x-1/2 rounded-lg border border-danger/40 bg-panel/95 px-3 py-2 text-[12.5px] shadow-card">
-              <b className="text-danger">Last build failed</b> — showing the last successful geometry.{project.data?.agent?.busy ? " The agent is working on it." : ""}
+              <b className="text-danger">Last build failed</b>. Showing the last successful geometry.{project.data?.agent?.busy ? " The agent is working on it." : ""}
             </div>)}
           {!st?.error && repairs.length > 0 && !pm && (
             <button onClick={() => { openLeft(); setTab("tree"); }} data-repair-banner

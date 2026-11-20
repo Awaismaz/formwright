@@ -1,4 +1,4 @@
-/** Typed Studio commands (IDEA 5): short verbs with numbers, parsed deterministically — no AI, no tokens. */
+/** Typed Studio commands (IDEA 5): short verbs with numbers, parsed deterministically (no AI, no tokens). */
 import type { ViewName } from "@/viewer/types";
 
 export type Parsed =

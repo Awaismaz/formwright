@@ -309,7 +309,7 @@ export default function AppLayout() {
             <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
               {me?.god?.available && <div className="mr-1 max-sm:hidden"><GodPanel /></div>}
               {org && (
-                <Tip content={unlimited ? "God mode: unlimited tokens — runs are not charged" : "Token balance for design-agent runs"} side="bottom">
+                <Tip content={unlimited ? "God mode: unlimited tokens; runs are not charged" : "Token balance for design-agent runs"} side="bottom">
                   <Link to="/app/billing#tokens" data-tour="tokens"
                     className={cx("mr-1 inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium tabular-nums",
                       lowTokens ? "border-warning/40 bg-warning/10 text-warning" : "border-border bg-panel2 text-text hover:border-primary/40")}>

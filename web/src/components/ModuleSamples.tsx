@@ -16,7 +16,7 @@ function SampleFrame({ title, children }: { title: string; children: React.React
 
 function DrawingSample() {
   return (
-    <SampleFrame title="Drawing sheet — Mounting plate (A3)">
+    <SampleFrame title="Drawing sheet: Mounting plate (A3)">
       <svg viewBox="0 0 600 380" className="w-full rounded border border-border bg-white">
         <rect x="8" y="8" width="584" height="364" fill="none" stroke="#1d2330" strokeWidth="1.5" />
         <g fill="none" stroke="#1d2330" strokeWidth="1.2">
@@ -59,7 +59,7 @@ function FindingsTable({ rows }: { rows: [string, string, "high" | "med" | "low"
 const SAMPLES: Record<string, () => JSX.Element> = {
   drawings: DrawingSample,
   manufacturing: () => (
-    <SampleFrame title="DFM report — CNC milling, qty 50, 6061-T6">
+    <SampleFrame title="DFM report: CNC milling, qty 50, 6061-T6">
       <div className="mb-4 grid gap-3 sm:grid-cols-3">
         {[["CNC milling", "Recommended", "2 setups · est. relative cost 1.0×"], ["Waterjet + drill", "Alternative", "1.3× · loses pocket"], ["Sheet metal", "Not suitable", "10 mm thickness"]].map(([p, l, d], i) => (
           <div key={p} className={cx("rounded-lg border p-3", i === 0 ? "border-success/40 bg-success/5" : "border-border")}><div className="text-sm font-medium">{p}</div><div className="text-xs text-muted">{l} · {d}</div></div>))}
@@ -72,11 +72,11 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       ]} />
     </SampleFrame>),
   engineering: () => (
-    <SampleFrame title="Engineering review — L-bracket, cantilever 200 N">
+    <SampleFrame title="Engineering review: L-bracket, cantilever 200 N">
       <ul className="space-y-2 text-[13px]">
         {[["Bending stress at fillet", "Preliminary estimate", "σ ≈ 38 MPa vs Sy 276 MPa (SF ≈ 7)", CheckCircle2, "text-success"],
-          ["Stress concentration at R3 fillet", "Recommended check", "Kt ≈ 1.6 from chart — confirm with FEA", Info, "text-primary"],
-          ["Fatigue (vibrating pump)", "Recommended check", "Load spectrum unknown — needs input", AlertTriangle, "text-warning"],
+          ["Stress concentration at R3 fillet", "Recommended check", "Kt ≈ 1.6 from chart; confirm with FEA", Info, "text-primary"],
+          ["Fatigue (vibrating pump)", "Recommended check", "Load spectrum unknown; needs input", AlertTriangle, "text-warning"],
           ["Bolt preload M5 8.8", "Verified calculation", "Fp = 6.4 kN at 70% proof (tested calculator)", CheckCircle2, "text-success"],
           ["Validated simulation", "Not performed", "Requires external FEA + engineer sign-off", CircleDashed, "text-muted"],
         ].map(([t, lvl, d, I, c]) => { const C = I as typeof Info; return (
@@ -85,7 +85,7 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       </ul>
     </SampleFrame>),
   assembly: () => (
-    <SampleFrame title="Assembly — demo L bracket on the demo mounting plate">
+    <SampleFrame title="Assembly: demo L bracket on the demo mounting plate">
       <div className="grid gap-4 md:grid-cols-2">
         <div><div className="label mb-2">Tree & mates</div>
           <ul className="space-y-1 font-mono text-[12px]">{["▾ Mounting Plate assembly", "   ├ (f) Mounting Plate<1>", "   ├ (−) L Bracket<1>", "   └ ▸ Fastener stack 1 M5×25", "Coincident  +Z face ↔ −Z face", "Concentric  Ø6.6 hole ↔ Ø5.5 hole"].map(l => <li key={l} className="whitespace-pre">{l}</li>)}</ul>
@@ -112,8 +112,8 @@ const SAMPLES: Record<string, () => JSX.Element> = {
       </div>
     </SampleFrame>),
   print: () => (
-    <SampleFrame title="Print readiness — enclosure lid, PLA, 0.4 mm nozzle">
-      <FindingsTable rows={[["mesh", "Watertight, 1 shell", "ok", "—"], ["boss_ribs", "Wall 0.8 mm < 2 perimeters", "med", "Increase to 1.2 mm"], ["lid_lip", "Overhang 62° unsupported", "high", "Rotate 180° or add chamfer"], ["orientation", "Best: top face down", "ok", "Support area −71%"]]} />
+    <SampleFrame title="Print readiness: enclosure lid, PLA, 0.4 mm nozzle">
+      <FindingsTable rows={[["mesh", "Watertight, 1 shell", "ok", "-"], ["boss_ribs", "Wall 0.8 mm < 2 perimeters", "med", "Increase to 1.2 mm"], ["lid_lip", "Overhang 62° unsupported", "high", "Rotate 180° or add chamfer"], ["orientation", "Best: top face down", "ok", "Support area −71%"]]} />
     </SampleFrame>),
   mesh: () => (
     <SampleFrame title="Mesh Studio: product renders of the demo Pipe Flange">

@@ -94,7 +94,7 @@ MECHANICAL: dict[str, dict[str, object]] = {
                 "nu": 0.27, "source": "ASTM A564 Type 630 H900 (minimum); E, ν typical (ASM)"},
     "cast_iron_gray": {"condition": "ASTM A48 class 30", "basis": "minimum", "Sut_MPa": 214, "Sy_MPa": None,
                        "E_GPa": 100, "nu": 0.26, "brittle": True,
-                       "source": "ASTM A48 class 30 / Shigley Table A-24; E varies 90–115 GPa with stress level"},
+                       "source": "ASTM A48 class 30 / Shigley Table A-24; E varies 90 to 115 GPa with stress level"},
     "ti_6al4v": {"condition": "annealed (Grade 5)", "basis": "minimum", "Sut_MPa": 895, "Sy_MPa": 828,
                  "E_GPa": 114, "nu": 0.34, "source": "ASTM B348 Grade 5 (minimum); E, ν typical (ASM)"},
 }

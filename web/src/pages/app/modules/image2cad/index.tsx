@@ -159,7 +159,7 @@ function Row({ u, onOpen, onDelete }: { u: UploadSummary; onOpen: (id: string) =
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13.5px] font-medium">{u.name}</div>
           <div className="truncate text-xs text-muted">
-            {u.type.toUpperCase()} · {u.method === "vector" ? "read from drawing text" : u.method === "vision" ? "read by AI vision" : "—"}
+            {u.type.toUpperCase()} · {u.method === "vector" ? "read from drawing text" : u.method === "vision" ? "read by AI vision" : "-"}
             {u.counts ? ` · ${u.counts.dims} values` : ""} · {ago(u.created_at)}
           </div>
           {u.status === "failed" && u.error && <div className="truncate text-xs text-danger">{u.error}</div>}

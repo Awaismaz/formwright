@@ -4,7 +4,7 @@ export function money(cents: number, interval?: string | null) {
 }
 
 export function num(n: number | undefined | null, digits = 0) {
-  if (n === undefined || n === null || Number.isNaN(n)) return "—";
+  if (n === undefined || n === null || Number.isNaN(n)) return "-";
   return n.toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 }
 
@@ -20,7 +20,7 @@ export function ago(iso: string | null | undefined) {
 }
 
 export function date(iso: string | null | undefined) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   return new Date(iso.endsWith("Z") ? iso : iso + "Z").toLocaleDateString(undefined,
     { year: "numeric", month: "short", day: "numeric" });
 }

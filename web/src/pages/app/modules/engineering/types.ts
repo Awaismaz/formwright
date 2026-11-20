@@ -58,7 +58,7 @@ export interface Review { available: boolean; reason?: string; items: ReviewItem
 
 /* ---- number formatting: engineering significant figures */
 export function fmt(v: unknown, sig = 4): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "-";
   if (typeof v === "string") return v;
   if (typeof v !== "number" || Number.isNaN(v)) return String(v);
   if (!Number.isFinite(v)) return "∞";

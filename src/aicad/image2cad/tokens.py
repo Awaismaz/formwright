@@ -21,7 +21,7 @@ from typing import Any
 NUM = r"(?:\d+(?:[.,]\d+)?|[.,]\d+)"
 _N = re.compile(NUM)
 
-_SYMBOLS = str.maketrans({"⌀": "Ø", "∅": "Ø", "ø": "Ø", "Φ": "Ø", "φ": "Ø", "×": "x", "−": "-", "–": "-",
+_SYMBOLS = str.maketrans({"⌀": "Ø", "∅": "Ø", "ø": "Ø", "Φ": "Ø", "φ": "Ø", "×": "x", "−": "-", "\u2013": "-",
                           "º": "°", "˚": "°", " ": " "})
 def _tol_re(k: str = "") -> str:
     return (rf"(?:±\s*(?P<pm{k}>{NUM})"

@@ -140,9 +140,9 @@
     <div id="measure-out"></div>
   </div>
   <aside>
-    <h1 id="name">—</h1>
+    <h1 id="name">-</h1>
     <div class="sub" id="material"></div>
-    <div class="banner">NOT APPROVED FOR MANUFACTURE — engineer review required</div>
+    <div class="banner">NOT APPROVED FOR MANUFACTURE: engineer review required</div>
     <div class="overall" id="overall"></div>
     <div class="err" id="error"></div>
     <h2>Checks (deterministic, gating)</h2>
@@ -347,7 +347,7 @@ async function poll() {
         liveText.textContent = "live · updated " + new Date().toLocaleTimeString();
       }
     }
-  } catch { liveText.textContent = "disconnected — is `aicad live` running?"; }
+  } catch { liveText.textContent = "disconnected. Is `aicad live` running?"; }
   setTimeout(poll, 1000);
 }
 poll();
@@ -399,11 +399,11 @@ function onEvent(ev) {
       st.textContent = ev.is_error ? "✕" : "✓";
       if (ev.brief && (ev.is_error || /build/.test(r.textContent))) r.title = ev.brief;
       if (/build_model/.test(r.textContent) && ev.brief)
-        r.querySelector("span:last-child").insertAdjacentHTML("beforeend", ` — ${esc(ev.brief)}`);
+        r.querySelector("span:last-child").insertAdjacentHTML("beforeend", `: ${esc(ev.brief)}`);
       break; }
     case "result": {
       const cost = ev.cost_est_usd != null ? ` · API-equiv. est. $${ev.cost_est_usd.toFixed(2)}` +
-        (ev.auth === "none" ? " (subscription — not billed)" : "") : "";
+        (ev.auth === "none" ? " (subscription, not billed)" : "") : "";
       add(div("result", `${esc(ev.subtype)} · ${ev.turns} turns · ${ev.duration_s} s${cost}`)); break; }
     case "error": add(div("msg error", esc(ev.text))); break;
     case "busy": setBusy(ev.value); break;

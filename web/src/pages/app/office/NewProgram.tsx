@@ -14,7 +14,7 @@ import type { Program } from "./types";
 const EXAMPLES = [
   { name: "Gear reducer", brief: "Single-stage spur gear reducer, 3:1 ratio, 1.5 kW input at 1450 rpm. Foot-mounted cast aluminium housing split at the shaft centreline, 6204 bearings on both shafts, keyed Ø20 input and Ø28 output shafts, oil bath lubrication." },
   { name: "Belt conveyor", brief: "Bench-top belt conveyor, 1200 mm long, 200 mm belt, 10 kg parts at 0.3 m/s. Bent sheet-steel side rails on four adjustable legs, crowned drive pulley driven by a small gear motor, tail pulley with belt take-up, carry rollers every 200 mm." },
-  { name: "Robot gripper", brief: "Parallel two-jaw gripper for a cobot with an ISO 9409-1-50-4-M6 flange. 40 mm stroke, 150 N grip force, pneumatic actuator in a machined aluminium housing, replaceable printed nylon fingers for 30–60 mm round parts." },
+  { name: "Robot gripper", brief: "Parallel two-jaw gripper for a cobot with an ISO 9409-1-50-4-M6 flange. 40 mm stroke, 150 N grip force, pneumatic actuator in a machined aluminium housing, replaceable printed nylon fingers for 30 to 60 mm round parts." },
 ];
 
 const DEFAULT_BUDGET = 3000; // service.DEFAULT_BUDGET_TOKENS

@@ -27,7 +27,7 @@ DISCLAIMER = ("Hand-calculation methods from the cited references, run by determ
 
 
 def _e(s: Any) -> str:
-    return html.escape(str(s if s is not None else "—"))
+    return html.escape(str(s if s is not None else "-"))
 
 
 def _font() -> tuple[str, str]:
@@ -55,7 +55,7 @@ def _font() -> tuple[str, str]:
 
 def _value(p: core.Param | None, v: Any) -> str:
     if v is None or v == "":
-        return "—"
+        return "-"
     if isinstance(v, bool):
         return "yes" if v else "no"
     if isinstance(v, list):
@@ -74,7 +74,7 @@ def _value(p: core.Param | None, v: Any) -> str:
         s = str(v)
     if p and p.kind == "enum":
         s = next((o["label"] for o in p.options or [] if o["value"] == v), s)
-    if p and p.kind in units.KINDS and units.KINDS[p.kind].label not in ("", "–"):
+    if p and p.kind in units.KINDS and units.KINDS[p.kind].label not in ("", "-"):
         s += f" {units.KINDS[p.kind].label}"
     return s
 
@@ -142,9 +142,9 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
                         P(f"Calculation package: {cs['name']}", h1), P(project_name, sm), Spacer(1, 6)]
     signed_rev = st.get("signed_on_rev")
     cover = [[P("Project"), P(project_name)],
-             [P("Part"), P(status.get("part") or "—")],
-             [P("Material (model)"), P(status.get("material") or "—")],
-             [P("Model"), P(f"revision {cur.get('model_rev') or '—'} · build {str(cur.get('build_id') or '—')[-8:]}")],
+             [P("Part"), P(status.get("part") or "-")],
+             [P("Material (model)"), P(status.get("material") or "-")],
+             [P("Model"), P(f"revision {cur.get('model_rev') or '-'} · build {str(cur.get('build_id') or '-')[-8:]}")],
              [P("Advice level"), P(level)]]
     if st["state"] != "signed":
         cover.append([P("Sign-off"), P(st["label"])])
@@ -153,7 +153,7 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
             else "independent check (the signer did not author these calculations)"
         cover += [[P("Signed by"), P(f"{so.get('name')} ({so.get('role')}) · {str(so.get('at') or '').replace('T', ' ').replace('Z', ' UTC')}")],
                   [P("Check type"), P(who)],
-                  [P("Signed on model"), P(f"revision {signed_rev or '—'}")],
+                  [P("Signed on model"), P(f"revision {signed_rev or '-'}")],
                   [P("Statement"), P(f"“{so.get('statement')}”")]]
         if so.get("facts") and so["facts"].strip().strip("“”\"") != (so.get("statement") or "").strip().strip("“”\""):
             cover.append([P("Recorded facts"), P(so["facts"])])
@@ -162,8 +162,8 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
     t.setStyle(kv)
     story.append(t)
     if st["state"] == "model_changed":
-        story += [Spacer(1, 5), P(f"The model has changed since sign-off (signed on revision {signed_rev or '—'}, "
-                                  f"current revision {cur.get('model_rev') or '—'}). Re-check the calculations "
+        story += [Spacer(1, 5), P(f"The model has changed since sign-off (signed on revision {signed_rev or '-'}, "
+                                  f"current revision {cur.get('model_rev') or '-'}). Re-check the calculations "
                                   "against the current model and sign again before relying on them.", ban)]
     elif st["state"] == "invalidated":
         story += [Spacer(1, 5), P("The set was edited after it was signed: the signature does not cover this content.",
@@ -208,10 +208,10 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
             story.append(P("Checks", h3))
             rows = [[P("Check"), P("Achieved"), P("Required"), P("Result"), P("Basis / source")]]
             for c in r["checks"]:
-                res = "—" if c["passed"] is None else ("meets" if c["passed"] else "BELOW REQUIREMENT")
+                res = "-" if c["passed"] is None else ("meets" if c["passed"] else "BELOW REQUIREMENT")
                 rows.append([P(c["label"]), P(core.g(c["achieved"]) if isinstance(c["achieved"], float)
                                               else _e(c["achieved"])),
-                             P(core.g(c["required"]) if c.get("required") is not None else "—"), P(res),
+                             P(core.g(c["required"]) if c.get("required") is not None else "-"), P(res),
                              P(c["basis"] + (f" · {c['source']}" if c.get("source") else ""), sm)])
             tb = Table(rows, colWidths=[46 * mm, 22 * mm, 20 * mm, 30 * mm, 64 * mm], repeatRows=1)
             tb.setStyle(grid)
@@ -229,8 +229,8 @@ def build_pdf(ws: Path, set_id: str, project_name: str) -> bytes:
         loads = "; ".join(f"{ld['name']} {core.g(float(ld['value']))} {str(ld['unit']).replace('*', '·')} ({ld['basis']}"
                           f"{', ' + ld['source'] if ld.get('source') else ''})" for ld in c.get("loads") or [])
         sup = "; ".join(f"{s_['type']} {s_.get('location') or ''}".strip() for s_ in c.get("supports") or [])
-        story.append(KeepTogether([P(f"{c['name']} ({c['kind']})", h3), P(f"Loads: {loads or '—'}"),
-                                   P(f"Supports: {sup or '—'}"),
+        story.append(KeepTogether([P(f"{c['name']} ({c['kind']})", h3), P(f"Loads: {loads or '-'}"),
+                                   P(f"Supports: {sup or '-'}"),
                                    *([P(c["description"], sm)] if c.get("description") else []),
                                    *([P(f"Source: {c['source']}", sm)] if c.get("source") else [])]))
     if raw.get("notes") or raw.get("conclusion"):

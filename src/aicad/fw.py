@@ -794,7 +794,7 @@ def _op(part: Any, f: dict[str, Any], diag: float, done: dict[str, dict[str, Any
         r = float(f["r"])
         try:
             return fillet(edges, r)
-        except Exception as e:  # OCCT: "Failed creating a fillet ..." — say what fits instead
+        except Exception as e:  # OCCT: "Failed creating a fillet ...": say what fits instead
             raise ValueError(_too_large(part, edges, r)) from e
     if op == "chamfer":
         edges = _resolve_edges(part, f)

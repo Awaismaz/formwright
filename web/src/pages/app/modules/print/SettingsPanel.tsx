@@ -13,7 +13,7 @@ const ADV: { key: string; label: string; unit: string; step: number; processes?:
   { key: "min_gap_mm", label: "Minimum clearance", unit: "mm", step: 0.05 },
   { key: "max_bridge_mm", label: "Maximum bridge", unit: "mm", step: 1, processes: ["fdm"] },
   { key: "nozzle_mm", label: "Nozzle", unit: "mm", step: 0.05, processes: ["fdm"] },
-  { key: "infill", label: "Infill", unit: "0–1", step: 0.05, processes: ["fdm"] },
+  { key: "infill", label: "Infill", unit: "0 to 1", step: 0.05, processes: ["fdm"] },
   { key: "flow_mm3_s", label: "Average flow", unit: "mm³/s", step: 0.5, processes: ["fdm"] },
   { key: "layer_overhead_s", label: "Time per layer", unit: "s", step: 0.5 },
 ];

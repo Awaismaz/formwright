@@ -189,7 +189,7 @@ def fulfil(db: Session, pay: Payment, provider_ref: str | None = None) -> None:
     track(db, "purchase", user, org.id, product=prod.code, kind=prod.kind, amount_cents=pay.amount_cents)
     if user:
         notify(db, user.id, f"Payment received: {prod.name}",
-               f"${pay.amount_cents / 100:,.2f} — thank you. Your workspace has been updated.", "/app/billing")
+               f"${pay.amount_cents / 100:,.2f}. Thank you. Your workspace has been updated.", "/app/billing")
 
 
 @router.post("/checkout")

@@ -238,7 +238,7 @@ export function assignable(kind: Ticket["kind"], deliverable?: Ticket["deliverab
 
 
 // ------------------------------------------------------------------ Phase 4: interfaces and the live assembly
-const n = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000)) : String(v ?? "—"));
+const n = (v: unknown) => (typeof v === "number" ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000)) : String(v ?? "-"));
 
 /** The program axis an interface runs along (Phase 6: gearbox shafts along Y); "z" when not stated. */
 export function ifaceAxis(data: Record<string, unknown>): "x" | "y" | "z" {

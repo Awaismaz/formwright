@@ -339,7 +339,7 @@ export function addSlot(s0: Sketch, c1: string, c2: string, r: number): Sketch {
  * vertices on (or sides tangent to) the construction circle, so it stays regular when dragged or dimensioned.
  */
 export function addPolygon(s0: Sketch, center: string, v: P2, n: number, mode: "inscribed" | "circumscribed" = "inscribed"): Sketch {
-  if (!Number.isInteger(n) || n < 3 || n > 64) throw new Error("A polygon needs 3–64 sides");
+  if (!Number.isInteger(n) || n < 3 || n > 64) throw new Error("A polygon needs 3 to 64 sides");
   const s = clone(s0);
   const c = ptOf(s, center); const r = dist(c, v);
   if (r < 1e-6) throw new Error("Drag out the polygon's size");

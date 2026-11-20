@@ -14,7 +14,7 @@ export function seriesColor(p: string): string {
 }
 
 export function money(v: number | null | undefined, cur: string, digits = 2) {
-  if (v === null || v === undefined || !isFinite(v)) return "—";
+  if (v === null || v === undefined || !isFinite(v)) return "-";
   return `${cur} ${v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 

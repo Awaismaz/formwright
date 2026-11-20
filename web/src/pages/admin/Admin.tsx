@@ -41,7 +41,7 @@ function Overview() {
   if (!q.data) return <PageLoader />;
   const { kpis, funnel, signups_30d, plans, note, economics: ec, funnel_cohort: cohort } = q.data;
   const top = Math.max(1, cohort, ...funnel.map(f => f.users));
-  const pct = (n: number) => (ec.runs_30d ? `${Math.round((n / ec.runs_30d) * 100)}%` : "—");
+  const pct = (n: number) => (ec.runs_30d ? `${Math.round((n / ec.runs_30d) * 100)}%` : "-");
   const maxS = Math.max(1, ...signups_30d.map(s => s.count));
   return (
     <div className="space-y-6">
@@ -55,8 +55,8 @@ function Overview() {
       <div>
         <h3 className="mb-2 font-semibold">Unit economics · design-agent runs, 30 days</h3>
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat label="Tokens per first verified part" value={ec.median_first_part_tokens ?? "—"} sub="Median; the estimate users see should match it" />
-          <Stat label="Tokens per change" value={ec.median_change_tokens ?? "—"} sub="Median of follow-up runs" />
+          <Stat label="Tokens per first verified part" value={ec.median_first_part_tokens ?? "-"} sub="Median; the estimate users see should match it" />
+          <Stat label="Tokens per change" value={ec.median_change_tokens ?? "-"} sub="Median of follow-up runs" />
           <Stat label="Runs above the shown range" value={pct(ec.over_estimate)} sub={`${ec.over_estimate} of ${ec.runs_30d} runs · ${ec.budget_stops} stopped at budget`} />
           <Stat label="Failed or failing checks" value={pct(ec.failed)} sub={`Estimated AI cost $${ec.cost_usd_30d.toFixed(2)}`} />
         </div>
@@ -182,7 +182,7 @@ function CatalogTab() {
   };
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted">Prices and allowances are pricing hypotheses — change them here and every pricing surface updates. With Stripe configured, new checkouts use the new price.</p>
+      <p className="text-sm text-muted">Prices and allowances are pricing hypotheses. Change them here and every pricing surface updates. With Stripe configured, new checkouts use the new price.</p>
       <Table head={["Product", "Kind", "Price (USD)", "Tokens", "Active", ""]}>
         {q.data.items.map(p => {
           const e = edit[p.code] ?? { price: String(p.price_cents / 100), tokens: String(p.tokens) };
@@ -244,7 +244,7 @@ export default function Admin() {
           row={r => <tr key={r.id}><td className="px-4 py-2.5 text-muted">{date(r.created_at)}</td><td className="px-4 py-2.5">{r.org}</td><td className="px-4 py-2.5 font-mono text-xs">{r.product_code}</td><td className="px-4 py-2.5 tabular-nums">{money(r.amount_cents)}</td><td className="px-4 py-2.5"><Badge tone={r.status === "paid" ? "success" : r.status === "failed" ? "danger" : "neutral"}>{r.status}</Badge></td><td className="px-4 py-2.5 text-muted">{r.provider}</td></tr>} />} />
         <Route path="feedback" element={<SimpleList<{ id: string; user: string; kind: string; topic: string | null; message: string; rating: number | null; created_at: string }> path="feedback"
           head={["Date", "User", "Type", "Message", "Rating"]}
-          row={r => <tr key={r.id}><td className="px-4 py-2.5 text-muted">{date(r.created_at)}</td><td className="px-4 py-2.5 text-xs">{r.user}</td><td className="px-4 py-2.5"><Badge tone={r.kind === "waitlist" ? "accent" : r.kind === "bug" ? "danger" : "neutral"}>{r.kind}{r.topic ? ` · ${r.topic}` : ""}</Badge></td><td className="max-w-md px-4 py-2.5">{r.message}</td><td className="px-4 py-2.5">{r.rating ? "★".repeat(r.rating) : "—"}</td></tr>} />} />
+          row={r => <tr key={r.id}><td className="px-4 py-2.5 text-muted">{date(r.created_at)}</td><td className="px-4 py-2.5 text-xs">{r.user}</td><td className="px-4 py-2.5"><Badge tone={r.kind === "waitlist" ? "accent" : r.kind === "bug" ? "danger" : "neutral"}>{r.kind}{r.topic ? ` · ${r.topic}` : ""}</Badge></td><td className="max-w-md px-4 py-2.5">{r.message}</td><td className="px-4 py-2.5">{r.rating ? "★".repeat(r.rating) : "-"}</td></tr>} />} />
         <Route path="audit" element={<SimpleList<{ id: string; actor: string; action: string; target: string | null; meta: Record<string, unknown>; ip: string | null; created_at: string }> path="audit"
           head={["When", "Actor", "Action", "Target", "Details"]}
           row={r => <tr key={r.id}><td className="whitespace-nowrap px-4 py-2 text-muted">{ago(r.created_at)}</td><td className="px-4 py-2 text-xs">{r.actor}</td><td className="px-4 py-2 font-mono text-xs">{r.action}</td><td className="px-4 py-2 text-xs text-muted">{r.target}</td><td className="max-w-sm truncate px-4 py-2 font-mono text-[11px] text-muted">{JSON.stringify(r.meta)}</td></tr>} />} />

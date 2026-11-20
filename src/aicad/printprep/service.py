@@ -497,7 +497,7 @@ def export_summary(ws: Path, name: str = "part") -> dict[str, Any]:
     if cur:
         label = f"{len(cur)} export{'s' if len(cur) > 1 else ''} · current" + (f" · {n_out} outdated" if n_out else "")
     else:
-        label = f"Exports from model rev {rows[0]['made_from_rev'] or '—'} · outdated"
+        label = f"Exports from model rev {rows[0]['made_from_rev'] or '-'} · outdated"
     return {"state": "current" if cur else "stale", "exports": len(rows), "outdated": n_out, "label": label,
             "current_files": [r["name"] for r in cur]}
 

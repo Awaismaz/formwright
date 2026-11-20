@@ -295,7 +295,7 @@ def _key_for(D: float) -> tuple[float, float]:
     for (lo, hi), v in KEYS:
         if lo < D <= hi:
             return v
-    raise ToolboxError("shaft diameter outside the DIN 6885 key table (8–65 mm)")
+    raise ToolboxError("shaft diameter outside the DIN 6885 key table (8 to 65 mm)")
 
 
 def _shaft(D: float, L: float, KEY_L: float, C: float) -> tuple[Any, dict[str, Any]]:
@@ -432,7 +432,7 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
               [_m()], "Steel 8", _hex_nut, lambda p: f"Hex nut ISO 4032 M{p['D']:g}", "Bore at nominal Ø (thread cosmetic).", "nut"),
     Component("washer", "Plain washer", "Fasteners", "ISO 7089", ["washer", "7089", "flat washer"],
               [_m()], "Steel", _washer, lambda p: f"Washer ISO 7089 M{p['D']:g}", "", "circle"),
-    Component("standoff", "Hex standoff (spacer)", "Fasteners", "—", ["standoff", "spacer", "hex spacer", "pillar"],
+    Component("standoff", "Hex standoff (spacer)", "Fasteners", "-", ["standoff", "spacer", "hex spacer", "pillar"],
               [_m("Thread size", 3), P("AF", "Across flats", 5.5, min=3, max=40), P("L", "Length", 10, min=2, max=200)],
               "Brass", _standoff, lambda p: f"Hex standoff M{p['D']:g} AF{p['AF']:g}×{p['L']:g}", "Through bore at nominal Ø.", "hexagon"),
     Component("dowel", "Dowel pin", "Pins & keys", "ISO 8734 (envelope)", ["dowel", "pin", "8734", "locating pin"],
@@ -480,12 +480,12 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
               [P("D", "Diameter", 25, min=9, max=65), P("L", "Length", 120, min=20, max=2000), P("KEY_L", "Keyway length", 40, min=5, max=1000),
                P("C", "End chamfer", 1, min=0, max=5)], "Steel C45", _shaft,
               lambda p: f"Shaft Ø{p['D']:g}×{p['L']:g} with keyway", "Key width/depth from DIN 6885 for the diameter.", "minus"),
-    Component("flange", "Bolted flange", "Structural", "—", ["flange", "pipe flange", "bolt circle", "pcd"],
+    Component("flange", "Bolted flange", "Structural", "-", ["flange", "pipe flange", "bolt circle", "pcd"],
               [P("OD", "Outside Ø", 150, min=20, max=2000), P("T", "Thickness", 16, min=2, max=200), P("BORE", "Bore", 60, min=1, max=1900),
                P("N", "Bolt holes", 6, unit="", min=2, max=64, integer=True), P("HOLE", "Bolt hole Ø", 14, min=1, max=100),
                P("PCD", "Pitch circle Ø", 120, min=10, max=2000)], "Steel S235", _flange,
               lambda p: f"Flange Ø{p['OD']:g}×{p['T']:g}, {int(p['N'])}×Ø{p['HOLE']:g} on PCD {p['PCD']:g}", "", "circle-dot"),
-    Component("l_bracket", "L-bracket", "Structural", "—", ["bracket", "l-bracket", "angle bracket", "l bracket"],
+    Component("l_bracket", "L-bracket", "Structural", "-", ["bracket", "l-bracket", "angle bracket", "l bracket"],
               [P("A", "Base leg", 80, min=10, max=1000), P("B", "Upright leg", 60, min=10, max=1000), P("W", "Width", 40, min=5, max=1000),
                P("T", "Thickness", 6, min=1, max=50), P("HOLE", "Hole Ø", 8.4, min=1, max=50)], "Steel S235", _l_bracket,
               lambda p: f"L-bracket {p['A']:g}×{p['B']:g}×{p['W']:g}, t{p['T']:g}", "Two holes per leg.", "corner-down-right"),
@@ -536,7 +536,7 @@ def model_source(code: str, values: dict[str, Any]) -> str:
     c = spec(code)
     p = normalize(code, values)
     title = c.title(p)
-    lines = [f'"""{title} — Formwright Toolbox ({c.standard}), generator v{VERSION}.',
+    lines = [f'"""{title}: Formwright Toolbox ({c.standard}), generator v{VERSION}.',
              "",
              "Deterministic: the same parameters always give the same geometry. Edit the parameters in the app",
              "(or ask the design agent to modify / extend this part).",

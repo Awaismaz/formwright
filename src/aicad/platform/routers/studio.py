@@ -190,7 +190,7 @@ def _segs(segs: Any) -> list[dict[str, Any]]:
 
 def _face_refs(faces: Any, what: str) -> list[dict[str, Any]]:
     if not isinstance(faces, list) or not 1 <= len(faces) <= 50:
-        raise HTTPException(422, f"Select 1–50 {what}")
+        raise HTTPException(422, f"Select 1 to 50 {what}")
     out = []
     for x in faces:
         item = {"point": _pt(x.get("point"), "face point")}
@@ -202,7 +202,7 @@ def _face_refs(faces: Any, what: str) -> list[dict[str, Any]]:
 
 def _profiles(profs: list[Any]) -> list[dict[str, Any]]:
     if not 1 <= len(profs) <= 100:
-        raise HTTPException(422, "The sketch needs 1–100 closed profiles")
+        raise HTTPException(422, "The sketch needs 1 to 100 closed profiles")
     clean: list[dict[str, Any]] = []
     for pr in profs:
         if pr.get("kind") == "circle":
@@ -254,7 +254,7 @@ def _place(pl: Any, normal: list[float]) -> dict[str, Any]:
     else:
         pts = pl.get("pts") or []
         if not isinstance(pts, list) or not 1 <= len(pts) <= 100:
-            raise HTTPException(422, "Place 1–100 holes")
+            raise HTTPException(422, "Place 1 to 100 holes")
         out["pts"] = [_pt2(q, "hole position") for q in pts]
     return out
 
@@ -270,7 +270,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     if op in ("fillet", "chamfer"):
         edges = f.get("edges") or []
         if not edges or len(edges) > 200:
-            raise HTTPException(422, "Select 1–200 edges")
+            raise HTTPException(422, "Select 1 to 200 edges")
         out["edges"] = [_pt(e, "edge") for e in edges]
         refs = f.get("edge_refs")
         if isinstance(refs, list) and len(refs) == len(edges):
@@ -305,7 +305,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     if op == "shell":
         faces = f.get("faces") or []
         if not 1 <= len(faces) <= 50:
-            raise HTTPException(422, "Select 1–50 faces to remove")
+            raise HTTPException(422, "Select 1 to 50 faces to remove")
         out["faces"] = [{"point": _pt(x.get("point"), "face point"), "normal": _pt(x.get("normal"), "face normal")}
                         for x in faces]
         out["t"] = _num(f.get("t"), "thickness", 0.01, 1e4)
@@ -347,7 +347,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     elif op == "pattern":
         src = f.get("source") or []
         if not isinstance(src, list) or not 1 <= len(src) <= 20:
-            raise HTTPException(422, "Choose 1–20 features to pattern")
+            raise HTTPException(422, "Choose 1 to 20 features to pattern")
         out["source"] = [str(s)[:40] for s in src]
         out["count"] = int(_num(f.get("count"), "instances", 2, 200))
         if f.get("kind") == "circular":
@@ -458,7 +458,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
     elif op == "loft":
         secs = f.get("sections") or []
         if not isinstance(secs, list) or not 2 <= len(secs) <= 20 or len(set(map(str, secs))) != len(secs):
-            raise HTTPException(422, "Choose 2–20 different section sketches, in order")
+            raise HTTPException(422, "Choose 2 to 20 different section sketches, in order")
         out["sections"] = [str(s)[:40] for s in secs]
         out["ruled"] = bool(f.get("ruled"))
         out["mode"] = "cut" if f.get("mode") == "cut" else "add"
@@ -477,7 +477,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         src = f.get("source")
         if src:  # mirror features (otherwise the whole body)
             if not isinstance(src, list) or len(src) > 20:
-                raise HTTPException(422, "Choose 1–20 features to mirror")
+                raise HTTPException(422, "Choose 1 to 20 features to mirror")
             out["source"] = [str(s)[:40] for s in src]
     elif op == "extrude":
         pl = f.get("plane") or {}
@@ -496,7 +496,7 @@ def validate_feature(f: dict[str, Any]) -> dict[str, Any]:
         elif kind == "poly":
             pts = sk.get("pts") or []
             if not 3 <= len(pts) <= 200:
-                raise HTTPException(422, "Polygon needs 3–200 points")
+                raise HTTPException(422, "Polygon needs 3 to 200 points")
             out["sketch"] = {"kind": "poly", "pts": [[_num(a, "u"), _num(b, "v")] for a, b in pts]}
         else:
             raise HTTPException(422, "Sketch must be rect, circle or poly")
@@ -551,7 +551,7 @@ async def _apply_manual(ctx: Ctx, project_id: str, mutate: Any, action: str, tra
         raise HTTPException(403)
     s = _sessions.get(p.id)
     if s and s.busy:
-        raise HTTPException(409, "The agent is working — try again when it finishes")
+        raise HTTPException(409, "The agent is working; try again when it finishes")
     ws = workspace_for(p)
     f = ws / "model.py"
     fresh = not f.is_file()
@@ -640,7 +640,7 @@ def trial_source(src: str, ws: Path, change: dict[str, Any]) -> tuple[str, set[s
     if kind == "sequence":
         steps = change.get("changes")
         if not isinstance(steps, list) or not 1 <= len(steps) <= TRIAL_STEPS:
-            raise HTTPException(422, f"Preview 1–{TRIAL_STEPS} changes at a time")
+            raise HTTPException(422, f"Preview 1 to {TRIAL_STEPS} changes at a time")
         strict: set[str] = set()
         for step in steps:
             if not isinstance(step, dict) or step.get("kind") == "sequence":

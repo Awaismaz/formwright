@@ -573,7 +573,7 @@ function Editor({ initial, onBack }: { initial: DraftState; onBack: () => void }
     if (tool === "rotate" && step.pts.length === 1 && /^-?\d+(\.\d+)?$/.test(t)) { commit(transformSelection(doc, sel, rotateAbout(step.pts[0]!, +t), { copy: opts.copyMode })); finishStep(); return; }
     if ((tool === "circle" && step.pts.length === 1) && /^\d+(\.\d+)?$/.test(t)) { const c = step.pts[0]!; placePoint([c[0] + +t, c[1]], null); return; }
     const p = parsePointInput(t, lastPt, cursor);
-    if (!p) { toast.error("Type x,y — @dx,dy — @length<angle — or a length along the cursor"); return; }
+    if (!p) { toast.error("Type x,y or @dx,dy or @length<angle, or a length along the cursor"); return; }
     placePoint(p, null);
   };
 

@@ -14,7 +14,7 @@ never dimensionally exact. Every image is captioned with `CAPTION`.
 
 from __future__ import annotations
 
-CAPTION = ("AI-generated visual — not dimensionally exact; use Mesh Studio renders or drawings for exact "
+CAPTION = ("AI-generated visual, not dimensionally exact; use Mesh Studio renders or drawings for exact "
            "geometry")
 
 CONSENT_TEXT = ("To make AI renders, Formwright sends the reference image of your part and the image prompt to "

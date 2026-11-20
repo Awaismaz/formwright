@@ -1,4 +1,4 @@
-"""Structural calculators: section properties, beams (Euler–Bernoulli, superposition), pin/dowel shear, interference
+"""Structural calculators: section properties, beams (Euler-Bernoulli, superposition), pin/dowel shear, interference
 fits (Lamé thick-walled cylinders)."""
 
 from __future__ import annotations
@@ -173,7 +173,7 @@ def _beam(v: dict[str, Any]) -> Work:
                ref="Statics")
         tip = beam_response("cantilever", L, EI, loads, wq, L)[0]
         w.step("Tip deflection", "y = Σ P·a²(3L − a)/(6EI) + w·L⁴/(8EI)", "superposition of Table A-9 beams 2 and 3",
-               tip, "mm", ref="Shigley Table A-9, beams 1–3")
+               tip, "mm", ref="Shigley Table A-9, beams 1 to 3")
         w.out("R1", "Wall reaction", R, "force")
     else:
         R1 = sum(P * (L - a) / L for P, a in loads) + wq * L / 2
@@ -188,7 +188,7 @@ def _beam(v: dict[str, Any]) -> Work:
     w.step("Maximum bending stress", "σ = M·c / I", f"{g(abs(Mmax))} × {g(c)} / {g(I)}", sigma, "MPa",
            ref="Shigley Eq. (3-24)")
     w.step("Maximum deflection", "|y|max over the span (superposition)", f"at x = {g(xd)} mm", abs(ymax), "mm",
-           ref="Shigley Table A-9, beams 1–3, 6, 7")
+           ref="Shigley Table A-9, beams 1 to 3, 6, 7")
     w.out("y_max", "Maximum deflection", abs(ymax), "length", primary=True)
     w.out("x_ymax", "Position of maximum deflection", xd, "length")
     w.out("M_max", "Maximum bending moment", abs(Mmax), "moment")
@@ -212,7 +212,7 @@ def _beam(v: dict[str, Any]) -> Work:
                 f"|y|max = {g(abs(ymax))} mm vs allowable {g(v['y_allow'])} mm", abs(ymax))
     if v["section"] == "rect" and L < 10 * v["h"]:
         w.warnings.append("Span is less than 10× the section depth: shear deflection is no longer negligible "
-                          "(Euler–Bernoulli theory under-predicts deflection).")
+                          "(Euler-Bernoulli theory under-predicts deflection).")
     w.notes.append("Deflection and stress are for the uniform section given; holes, notches and fillets raise "
                    "local stress (apply Kt separately).")
     return w
@@ -243,7 +243,7 @@ register(Calculator(
     func=_beam, safety_factor=True,
     references=[f"{SHIGLEY_REF}, Table A-9 (beam deflections and slopes), Eq. (3-24)",
                 "Roark's Formulas for Stress and Strain, 8th ed., Table 8.1"],
-    assumptions=["Linear-elastic, small deflections (Euler–Bernoulli)", ("Prismatic beam, symmetric section, "
+    assumptions=["Linear-elastic, small deflections (Euler-Bernoulli)", ("Prismatic beam, symmetric section, "
                  "loads in a plane of symmetry"), "Shear deformation neglected", ("Ideal supports (rigid wall, "
                  "frictionless pins)")],
     verified_against=[("Shigley 11th ed. Prob. 4-10 solution (cantilever, point + uniform load): y = 25.4 mm, "
@@ -403,7 +403,7 @@ register(Calculator(
                    "from test or your company standard."),
     ],
     func=_fit, safety_factor=True,
-    references=[f"{SHIGLEY_REF}, §3-16 Eqs. (3-56)–(3-59) (press and shrink fits)",
+    references=[f"{SHIGLEY_REF}, §3-16 Eqs. (3-56) to (3-59) (press and shrink fits)",
                 "Roark's Formulas for Stress and Strain, 8th ed., Table 13.5 (thick-walled cylinders)"],
     assumptions=["Long cylinders, plane stress, linear-elastic", "Uniform interference along the length",
                  "No surface roughness loss of interference (subtract smoothing allowance separately)"],

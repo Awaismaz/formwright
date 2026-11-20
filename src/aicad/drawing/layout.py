@@ -899,11 +899,11 @@ def _info_blocks(W: float, H: float, meta: dict[str, Any], scale_txt: str, first
     cell(x0 + 140, r2, 40, h2, "SHEET", f"{size}   1 / 1")
     cell(x0, r3, 48, h3, "DRAWN BY", meta.get("drawn_by", ""))
     cell(x0 + 48, r3, 30, h3, "DATE", meta.get("date", ""))
-    cell(x0 + 78, r3, 18, h3, "REV", meta.get("rev", "—"), font="bold")
+    cell(x0 + 78, r3, 18, h3, "REV", meta.get("rev", "-"), font="bold")
     cell(x0 + 96, r3, 84, h3, "GENERAL TOLERANCES", meta.get("tolerance", "Not specified"), val - 0.4)
-    cell(x0, r4, 48, h4, "CHECKED", meta.get("checked_by") or "—", val - 0.4)
-    cell(x0 + 48, r4, 48, h4, "APPROVED", "— (not approved)", val - 0.4)
-    cell(x0 + 96, r4, 84, h4, "COMPANY", meta.get("company") or "—", val - 0.4)
+    cell(x0, r4, 48, h4, "CHECKED", meta.get("checked_by") or "-", val - 0.4)
+    cell(x0 + 48, r4, 48, h4, "APPROVED", "- (not approved)", val - 0.4)
+    cell(x0 + 96, r4, 84, h4, "COMPANY", meta.get("company") or "-", val - 0.4)
 
     top = y0
     # revision table: issued revisions only (ISO 7200 / ASME Y14.35), newest last, at most 3 rows

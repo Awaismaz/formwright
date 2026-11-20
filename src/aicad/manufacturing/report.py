@@ -156,7 +156,7 @@ def _e(s: Any) -> str:
 
 
 def _money(v: float | None, cur: str) -> str:
-    return "—" if v is None else f"{cur} {v:,.2f}"
+    return "-" if v is None else f"{cur} {v:,.2f}"
 
 
 def _summary(a: dict[str, Any]) -> dict[str, int]:

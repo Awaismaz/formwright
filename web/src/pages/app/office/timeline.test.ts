@@ -23,7 +23,7 @@ describe("timeline axis", () => {
 
 describe("estimate vs actual", () => {
   it("formats the error and its tone", () => {
-    expect([fmtError(-85), fmtError(25.4), fmtError(3), fmtError(null)]).toEqual(["−85 %", "+25 %", "on estimate", "—"]);
+    expect([fmtError(-85), fmtError(25.4), fmtError(3), fmtError(null)]).toEqual(["−85 %", "+25 %", "on estimate", "-"]);
     expect([errorTone(20), errorTone(-60), errorTone(150), errorTone(undefined)]).toEqual(["success", "warning", "danger", "neutral"]);
   });
   it("sums work and waits of a row", () => {

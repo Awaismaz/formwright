@@ -14,9 +14,9 @@ export default function LibraryPanel({ cat }: { cat: Catalog }) {
             <tbody>{L.materials.map(m => (
               <tr key={m.code} className="border-t border-border align-top">
                 <td className="px-3 py-1.5 font-medium">{m.name}</td><td className="px-3 py-1.5">{m.condition}</td><td className="px-3 py-1.5">{m.basis}</td>
-                <td className="px-3 py-1.5 tabular-nums">{fmt(m.Sut_MPa)}</td><td className="px-3 py-1.5 tabular-nums">{m.Sy_MPa === null ? "— (brittle)" : fmt(m.Sy_MPa)}</td>
+                <td className="px-3 py-1.5 tabular-nums">{fmt(m.Sut_MPa)}</td><td className="px-3 py-1.5 tabular-nums">{m.Sy_MPa === null ? "- (brittle)" : fmt(m.Sy_MPa)}</td>
                 <td className="px-3 py-1.5 tabular-nums">{fmt(m.E_GPa)}</td><td className="px-3 py-1.5 tabular-nums">{fmt(m.nu)}</td>
-                <td className="px-3 py-1.5 tabular-nums" title={m.fatigue_note}>{m.fatigue_MPa ? fmt(m.fatigue_MPa) : "—"}</td>
+                <td className="px-3 py-1.5 tabular-nums" title={m.fatigue_note}>{m.fatigue_MPa ? fmt(m.fatigue_MPa) : "-"}</td>
                 <td className="px-3 py-1.5 text-[11.5px] text-muted">{m.source}</td>
               </tr>))}</tbody>
           </table>

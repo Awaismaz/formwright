@@ -431,7 +431,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
                 : <p className="text-[12px] text-muted">{e?.faces?.length ? `${e.faces.length} face(s) from the original selection. Click faces to replace.` : "Click the side faces to taper (Ctrl+click for several)."}</p>}
             </button>))}
           <div className="flex items-end gap-2">
-            <div className="flex-1">{numField("Draft angle", draftAngle, setDraftAngle, "°", "0–45°")}</div>
+            <div className="flex-1">{numField("Draft angle", draftAngle, setDraftAngle, "°", "0 to 45°")}</div>
             <Tip content="Reverse the pull direction" side="top"><button onClick={() => setDraftRev(!draftRev)} className={cx("mb-1 rounded border p-1.5", draftRev ? "border-primary bg-primary-soft text-primary" : "border-border text-muted")} aria-label="Reverse pull direction"><ArrowLeftRight className="h-4 w-4" /></button></Tip>
           </div>
           <p className="flex gap-1 text-[11px] text-muted"><Info className="mt-0.5 h-3 w-3 shrink-0" />{draftRev ? "The faces lean outwards going away from the neutral face." : "The faces lean inwards going away from the neutral face (the part narrows away from it)."}</p>
@@ -532,7 +532,7 @@ export default function FeatureManager({ project, op, editing, preset, topo, sel
             : <p className="text-[12px] text-muted">{e?.edges?.length ? `${e.edges.length} edge(s) from the original selection. Click edges to replace.` : "Click edges in the viewer (Ctrl+click for several)."}</p>)
           : op === "shell" ? (planarFaces.length ? <ul className="space-y-0.5">{planarFaces.map(p => <li key={p.id} className="text-[12px]">{topo ? describe(p, topo) : `Face ${p.id}`}</li>)}</ul>
               : <p className="text-[12px] text-muted">{e?.faces?.length ? `${e.faces.length} face(s) from the original selection.` : "Click the face(s) to open (Ctrl+click for several)."}</p>)
-          : (face && topo ? <p className="text-[12px]">{describe(face, topo)}{op === "hole" ? "" : " — origin at the picked point"}</p>
+          : (face && topo ? <p className="text-[12px]">{describe(face, topo)}{op === "hole" ? "" : ", origin at the picked point"}</p>
               : <p className="text-[12px] text-muted">{plane ? "Using the original placement. Click a planar face to move it." : op === "hole" ? "Click the flat face to drill." : "Click a planar face in the viewer. The point you click becomes the origin."}</p>)}
         </div>
         <Field label="Name"><Input value={name} onChange={ev => setName(ev.target.value)} className="h-8" /></Field>

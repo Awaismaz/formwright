@@ -1,4 +1,4 @@
-/** 2D sketch model + geometric constraint solver (Levenberg–Marquardt, numeric Jacobian). Units: mm. */
+/** 2D sketch model + geometric constraint solver (Levenberg-Marquardt, numeric Jacobian). Units: mm. */
 
 export interface SPoint { id: string; x: number; y: number; fixed?: boolean }
 export type SEntity =

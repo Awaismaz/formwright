@@ -87,7 +87,7 @@ export default function Billing() {
   useEffect(() => {
     const c = params.get("checkout");
     if (c === "success") {
-      toast.success("Payment successful — your workspace is updated."); refresh();
+      toast.success("Payment successful. Your workspace is updated."); refresh();
       const next = afterCheckout();   // real-provider return: continue where the user was
       if (next) { try { sessionStorage.removeItem(AFTER_CHECKOUT); } catch { /* storage unavailable */ } nav(next.to); }
     }
@@ -133,7 +133,7 @@ export default function Billing() {
       {mode !== "live" && (
         <div className="mb-6 flex items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
           <FlaskConical className="h-4 w-4 text-accent" />
-          {mode === "simulated" ? <span><b>Simulated payments.</b> No payment provider is configured in this environment — checkouts run through a labelled test page and no money moves.</span>
+          {mode === "simulated" ? <span><b>Simulated payments.</b> No payment provider is configured in this environment. Checkouts run through a labelled test page and no money moves.</span>
             : <span><b>Stripe test mode.</b> Use card 4242 4242 4242 4242 with any future date and CVC.</span>}
         </div>
       )}
@@ -146,9 +146,9 @@ export default function Billing() {
           </div>
           <dl className="mt-5 grid grid-cols-2 gap-4 text-sm">
             <div><dt className="text-muted">{org.on_trial ? "Trial ends" : "Renews"}</dt><dd className="font-medium">{org.on_trial ? date(org.trial_ends_at) : date(org.current_period_end)}</dd></div>
-            <div><dt className="text-muted">Price</dt><dd className="font-medium">{planProduct ? (planProduct.price_cents ? money(planProduct.price_cents, planProduct.interval) : "Free") : "—"}</dd></div>
+            <div><dt className="text-muted">Price</dt><dd className="font-medium">{planProduct ? (planProduct.price_cents ? money(planProduct.price_cents, planProduct.interval) : "Free") : "-"}</dd></div>
             <div><dt className="text-muted">Seats</dt><dd className={cx("font-medium", org.seats_used > org.seat_limit && "text-warning")}>{org.seats_used} / {org.seat_limit >= 1000 ? "∞" : org.seat_limit}{org.seats_used > org.seat_limit && " · over the plan"}</dd></div>
-            <div><dt className="text-muted">Monthly tokens</dt><dd className="font-medium">{org.on_trial ? "—" : num(org.plan_tokens)}</dd></div>
+            <div><dt className="text-muted">Monthly tokens</dt><dd className="font-medium">{org.on_trial ? "-" : num(org.plan_tokens)}</dd></div>
           </dl>
           {org.on_trial && <div className="mt-4"><Progress value={14 - (org.days_left ?? 0)} max={14} tone={org.expired ? "danger" : "primary"} /><div className="mt-1 text-xs text-muted">{org.expired ? "Trial ended" : `${org.days_left} of 14 days left`}</div></div>}
           {q.data.account_credit_cents > 0 && <p className="mt-4 text-xs text-muted">Account credit: <b className="text-text">{money(q.data.account_credit_cents)}</b>, applied to your next plan charge.</p>}
@@ -223,7 +223,7 @@ export default function Billing() {
                     return <tr key={p.id}><td className="px-4 py-2.5 text-muted">{date(p.created_at)}</td><td className="px-4 py-2.5">{prod?.name ?? p.product_code}</td>
                       <td className="px-4 py-2.5 tabular-nums">{money(p.amount_cents)}</td>
                       <td className="px-4 py-2.5"><Badge tone={p.status === "paid" ? "success" : p.status === "failed" ? "danger" : "neutral"}>{label(p.status)}</Badge></td>
-                      <td className="px-4 py-2.5 text-right">{p.status === "paid" ? <a href={`/api/billing/payments/${p.id}/receipt`} target="_blank" rel="noopener" className="link text-[13px]">View</a> : <span className="text-muted">—</span>}</td></tr>;
+                      <td className="px-4 py-2.5 text-right">{p.status === "paid" ? <a href={`/api/billing/payments/${p.id}/receipt`} target="_blank" rel="noopener" className="link text-[13px]">View</a> : <span className="text-muted">-</span>}</td></tr>;
                   })}
                 </tbody>
               </table>
@@ -234,7 +234,7 @@ export default function Billing() {
               <table className="w-full min-w-[600px] text-sm">
                 <thead className="bg-panel2 text-left text-xs text-muted"><tr><th className="px-4 py-2.5 font-medium">Date</th><th className="px-4 py-2.5 font-medium">Description</th><th className="px-4 py-2.5 font-medium">By</th><th className="px-4 py-2.5 text-right font-medium">Change</th><th className="px-4 py-2.5 text-right font-medium">Balance</th></tr></thead>
                 <tbody className="divide-y divide-border">
-                  {ledger.map(r => <tr key={r.id}><td className="px-4 py-2.5 text-muted">{date(r.created_at)}</td><td className="px-4 py-2.5"><Badge className="mr-2">{label(r.reason)}</Badge>{r.detail}</td><td className="px-4 py-2.5 text-muted">{r.user ?? "—"}</td>
+                  {ledger.map(r => <tr key={r.id}><td className="px-4 py-2.5 text-muted">{date(r.created_at)}</td><td className="px-4 py-2.5"><Badge className="mr-2">{label(r.reason)}</Badge>{r.detail}</td><td className="px-4 py-2.5 text-muted">{r.user ?? "-"}</td>
                     <td className={cx("px-4 py-2.5 text-right tabular-nums font-medium", r.delta > 0 ? "text-success" : "text-text")}>{r.delta > 0 ? "+" : ""}{num(r.delta)}</td><td className="px-4 py-2.5 text-right tabular-nums text-muted">{num(r.balance_after)}</td></tr>)}
                 </tbody>
               </table>
