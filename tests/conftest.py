@@ -15,6 +15,14 @@ def _no_live_visual_check(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _old_planner_unless_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The design-graph planner is the product default (PD-110, 2026-11-20). Existing office tests assert the old
+    planner's plans and replay its recorded replies, so tests pin it off unless they opt in with FW_DESIGN_GRAPH=1
+    (``tests/test_design_graph.py``, the golden graph runs)."""
+    monkeypatch.setenv("FW_DESIGN_GRAPH", "0")
+
+
+@pytest.fixture(autouse=True)
 def _no_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
     """WORKLIST 49: Archie supervises running programs and acts on blocked tickets. Existing tests assert the office's
     own behaviour, so he is off unless a test turns him on (``tests/test_office_supervisor.py``)."""

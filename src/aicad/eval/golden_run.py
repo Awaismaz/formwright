@@ -125,7 +125,9 @@ def _replay_master(src: str | None) -> Any:
 
 
 def graph_on(flags: dict[str, str] | None) -> bool:
-    return str((flags or {}).get("FW_DESIGN_GRAPH", "")).lower() in ("1", "true", "yes", "on")
+    """The design-graph planner is the product default (PD-110); a run's flags, else the environment, can turn it off."""
+    v = (flags or {}).get("FW_DESIGN_GRAPH", os.environ.get("FW_DESIGN_GRAPH", ""))
+    return str(v).strip().lower() not in ("0", "false", "no", "off")
 
 
 def reap_workers() -> None:

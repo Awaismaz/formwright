@@ -437,6 +437,8 @@ def _start(c: Any, email: str, case: str) -> str:
 
 def test_flag_off_keeps_the_old_planner(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
     monkeypatch.delenv(goffice.ENV, raising=False)
+    assert goffice.enabled()  # the default for everyone since 2026-11-20 (PD-110)
+    monkeypatch.setenv(goffice.ENV, "0")  # the off switch keeps the old planner
     assert not goffice.enabled()
     stub = _stub("keyed_gear")
     with llm.use_provider(stub, roles=("intent",)):

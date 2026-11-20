@@ -29,8 +29,13 @@ from aicad.graph.model import DesignGraph
 ENV = "FW_DESIGN_GRAPH"
 
 
+OFF = ("0", "false", "no", "off")
+
+
 def enabled() -> bool:
-    return os.environ.get(ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    """On by default for everyone (founder 2026-11-20, PD-110: the graph path beat the old planner on every golden
+    case); ``FW_DESIGN_GRAPH=0`` switches back to the old planner."""
+    return os.environ.get(ENV, "").strip().lower() not in OFF
 
 
 @dataclass

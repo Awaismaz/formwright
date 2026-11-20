@@ -234,4 +234,4 @@ def test_design_graph_runs_replay_the_recorded_intent_reply_and_nothing_else() -
     assert res.data["components"][0]["kind"] == "shaft" and res.metering.provider == "replay"
     with pytest.raises(RuntimeError, match="live model call"):
         asyncio.run(complete(CallRequest(role="supervisor", system="", prompt="x")))
-    assert golden_run.graph_on({"FW_DESIGN_GRAPH": "1"}) and not golden_run.graph_on({})
+    assert golden_run.graph_on({"FW_DESIGN_GRAPH": "1"}) and not golden_run.graph_on({"FW_DESIGN_GRAPH": "0"})
