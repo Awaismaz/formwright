@@ -2387,11 +2387,26 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
                         "label": f"clearance opening {n + 1} Ø{dw:g} through (across the joint)"})
     elif f["kind"] == "gear_mesh":
         z = d["teeth_a"] if which == "a" else d["teeth_b"]
-        out.append({"type": "gear", "module": d["module"], "teeth": z, "c": [0.0, 0.0], "tol": tol,
-                    "label": f"m{d['module']:g} × {z} teeth"})
+        g = {"type": "gear", "module": d["module"], "teeth": z, "c": [0.0, 0.0], "tol": tol,
+             "label": f"m{d['module']:g} × {z} teeth"}
+        if d.get("internal") and _internal_member(skel, f, which):
+            g.update(internal=True, label=f"m{d['module']:g} × {z} internal teeth")  # the ring of a planet / ring mesh
+        out.append(g)
     for o in out:
         o["if"] = f["id"]
     return out
+
+
+def _internal_member(skel: dict[str, Any], f: dict[str, Any], which: str) -> bool:
+    """Of an internal gear mesh, is side ``which`` the internal (ring) gear? The item says so (``internal``), else
+    the member with more teeth (a ring always has more teeth than the pinion inside it)."""
+    items = skel.get("items") or {}
+    flags = {w: bool((items.get(f[w]["item"]) or {}).get("internal")) for w in ("a", "b")}
+    if any(flags.values()):
+        return flags[which]
+    d = f["data"]
+    za, zb = int(d["teeth_a"]), int(d["teeth_b"])
+    return (za > zb) if which == "a" else (zb > za)
 
 
 def item_features(skel: dict[str, Any], ifs: list[dict[str, Any]], item: str) -> list[dict[str, Any]]:
@@ -3105,8 +3120,9 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
     shape = (f"box {L:g} × {W:g} × {H:g} mm (X × Y × Z)" if it["shape"] == "box"
              else f"cylinder Ø{L:g} × {H:g} mm along Z")
     turn = (f"turned {int(it['rot'])}° about +Z from the program axes" if it.get("rot")
-            else f"turned {it['phase']:g}° about +Z from the program axes (tooth phasing for its mesh: a tooth is "
-                 "centred on +X of the part frame)" if it.get("phase") else "axes parallel to the program axes")
+            else f"turned {it['phase']:g}° about +Z from the program axes (tooth phasing for its mesh: a tooth "
+                 f"{'space ' if it.get('internal') else ''}is centred on +X of the part frame)" if it.get("phase")
+            else "axes parallel to the program axes")
     if it.get("ax"):
         turn = (f"its +Z laid along program +{it['ax'].upper()} (a horizontal shaft line; model it along Z as "
                 "usual)" + ("" if turn.startswith("axes") else f", then {turn}"))
@@ -3222,6 +3238,9 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                           "their Z: ax y -> part (X, Y, Z) = (c0, z, -c1); ax x -> (z, c1, -c0)")
     if it["role"] == "gear":
         data["gear"] = {"module": it["module"], "teeth": it["teeth"], "face_width": it["face_width"]}
+        if it.get("internal"):  # a ring gear: internal teeth (tip inside, root outside), a tooth space on +X
+            m, z = float(it["module"]), int(it["teeth"])
+            data["gear"].update(internal=True, tip_d=round(m * (z - 2), 4), root_d=round(m * (z + 2.5), 4))
     lines.append("```fw-icd\n" + json.dumps(data, separators=(",", ":")) + "\n```")
     return "\n".join(lines)
 

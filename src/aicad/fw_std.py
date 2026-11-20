@@ -118,12 +118,14 @@ def _keyway_segment(radius: float, b: float) -> float:
 def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle: float = 20.0, bore: float = 0.0,
               hub_d: float = 0.0, hub_l: float = 0.0, keyway: bool | tuple[float, float] = False,
               helix_angle: float = 0.0, name: str = "Gear teeth", z0: float = 0.0,
-              keyway_angle: float = 90.0, backlash: float = 0.0) -> tuple[Any, dict[str, Any]]:
+              keyway_angle: float = 90.0, backlash: float = 0.0, seats: Any = ()) -> tuple[Any, dict[str, Any]]:
     """Spur (or helical) gear from Z = z0 up, axis Z, true involute flanks (no root fillet), standard addendum m and
     dedendum 1.25 m, profile shift 0, a tooth centred on +X. Optional hub (Ø hub_d, length hub_l on the +Z face),
     through bore, and a hub keyway (keyway=True: DIN 6885-1 for the bore; or (b, t2)) on the side keyway_angle
     degrees from +X about Z (default 90: +Y). helix_angle (deg, at the pitch circle) twists the teeth over the face
-    width. Returns (part, expected) with expected = {"bbox", "volume", "solids", "gear"}."""
+    width. seats: bearing seats bored into the gear, ``[(D, depth, side)]`` with side -1 (from the Z = z0 face) or +1
+    (from the top face): Ø D to ``depth``, ending on a shoulder at the through ``bore`` (a planet gear on its
+    bearing). Returns (part, expected) with expected = {"bbox", "volume", "solids", "gear"}."""
     from build123d import Align, Box, Cylinder, Edge, Face, Pos, Rot, Solid, Vector, Wire, extrude
 
     from aicad import fw
@@ -138,6 +140,20 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
         raise ValueError(f"bore Ø{bore:g} leaves no rim: keep it below Ø{2 * (g.rf - 0.5 * module):.1f}")
     if hub_d and (hub_l <= 0 or hub_d <= bore):
         raise ValueError("a hub needs hub_l > 0 and hub_d larger than the bore")
+    seat_list = [(float(d), float(dp), int(sd)) for d, dp, sd in (seats or ())]
+    if seat_list:
+        sides = [sd for _d, _dp, sd in seat_list]
+        if not bore or hub_d or helix_angle or keyway or any(sd not in (-1, 1) for sd in sides) \
+                or len(set(sides)) != len(sides):
+            raise ValueError("bearing seats need a through bore (the shoulder), no hub, keyway or helix, and at most "
+                             "one seat per face (side -1 or +1)")
+        if sum(dp for _d, dp, _s in seat_list) >= face_width - 0.5:
+            raise ValueError("the bearing seats leave no shoulder: keep their depths below the face width")
+        for d, dp, _sd in seat_list:
+            if not bore < d or dp <= 0:
+                raise ValueError(f"a Ø{d:g} seat must be larger than the Ø{bore:g} bore and have a depth")
+            if d / 2 >= g.rf - 0.5 * module:
+                raise ValueError(f"a Ø{d:g} seat leaves no rim: keep it below Ø{2 * (g.rf - 0.5 * module):.1f}")
 
     edges: list[Any] = []
     pitch = 2 * math.pi / z
@@ -183,6 +199,11 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
         part = fw.feature(f"Bore Ø{bore:g}", part - Pos(0, 0, z0 - 0.5) * Cylinder(
             bore / 2, top + 1, align=(Align.CENTER, Align.CENTER, Align.MIN)), d=bore)
         vol -= math.pi * bore ** 2 / 4 * top
+    for d, dp, sd in seat_list:  # Ø d to depth dp from its face, ending on the shoulder at the through bore
+        zs = z0 - 0.5 if sd < 0 else z0 + top - dp
+        part = fw.feature(f"Bearing seat Ø{d:g}", part - Pos(0, 0, zs) * Cylinder(
+            d / 2, dp + 0.5, align=(Align.CENTER, Align.CENTER, Align.MIN)), d=d, depth=dp)
+        vol -= math.pi / 4 * (d ** 2 - bore ** 2) * dp
     if keyway:
         if not bore:
             raise ValueError("a keyway needs a bore")
@@ -201,6 +222,121 @@ def spur_gear(module: float, teeth: float, face_width: float, *, pressure_angle:
     gear = {"pitch_d": 2 * g.rp, "tip_d": 2 * g.ra, "root_d": 2 * g.rf, "base_d": 2 * g.rb,
             "profile_area": area, "twist_deg": twist}
     return part, {"bbox": [sx, sy, top], "volume": vol, "solids": 1, "gear": gear}
+
+
+class _InternalInvolute:
+    """Standard (x = 0) internal gear tooth geometry, the ISO 53 basic rack mirrored: the tooth spaces are where an
+    external gear of the same z has its teeth (a space is centred where that gear's tooth is centred), addendum
+    inward (tip Ø m (z - 2)), dedendum outward (root Ø m (z + 2.5)). backlash: circumferential widening of each space
+    at the pitch circle (mm), half on each flank, so the ring and its pinion clear instead of touching."""
+
+    def __init__(self, m: float, z: int, alpha_deg: float, backlash: float = 0.0) -> None:
+        self.ext = _Involute(m, z, alpha_deg, -backlash)  # a space's half angle = an external tooth's, widened
+        self.m, self.z, self.a = m, z, self.ext.a
+        self.rp, self.rb = self.ext.rp, self.ext.rb
+        self.ri = self.rp - m            # tip circle (inner)
+        self.ro = self.rp + 1.25 * m     # root circle (outer)
+        self.r0 = max(self.rb, self.ri)  # where the involute starts (a radial flank inside the base circle)
+
+    def sigma(self, r: float) -> float:
+        """Half the tooth space's angular width at radius r (involute part; constant inside the base circle)."""
+        return self.ext.psi(r)
+
+    def bore_area(self) -> float:
+        """Area inside the toothed boundary: the tip disc plus z spaces (2 sigma(r) r dr above r0, radial below)."""
+        space = _simpson(lambda r: 2 * self.sigma(r) * r, self.r0, self.ro) \
+            + self.sigma(self.r0) * (self.r0 ** 2 - self.ri ** 2)
+        return math.pi * self.ri ** 2 + self.z * space
+
+
+def internal_gear(module: float, teeth: float, face_width: float, *, rim_od: float = 0.0, rim: float = 0.0,
+                  pressure_angle: float = 20.0, backlash: float = 0.0, holes: Any = None, hole_angle: float = 0.0,
+                  flange_od: float = 0.0, flange_t: float = 0.0, name: str = "Internal teeth",
+                  z0: float = 0.0) -> tuple[Any, dict[str, Any]]:
+    """Internal (ring) spur gear from Z = z0 up, axis Z, true involute flanks as splines (no root fillet), profile
+    shift 0: tip Ø m (z - 2), root Ø m (z + 2.5), a tooth SPACE centred on +X (where an external gear of the same z
+    has a tooth). The teeth run through the whole face width. Outside: a plain rim Ø ``rim_od`` (or the root Ø plus
+    2 ``rim``; default rim 3 m) to press into a housing, and with ``flange_od`` / ``flange_t`` a flange on the Z = z0
+    face. ``holes`` = (n, pcd, d): axial through holes on a bolt circle, the first ``hole_angle`` degrees from +X (in
+    the rim when they fit there, else in the flange). Returns (part, expected) with expected = {"bbox", "volume",
+    "solids", "gear"}; the volume is the rim disc less the hand-integrated toothed bore (no CAD kernel)."""
+    from build123d import Align, Cylinder, Edge, Face, Pos, Vector, Wire, extrude
+
+    from aicad import fw
+
+    z = round(float(teeth))
+    if z != teeth or not 20 <= z <= 400:
+        raise ValueError("an internal gear needs a whole number of teeth from 20 to 400")
+    if module <= 0 or face_width <= 0:
+        raise ValueError("module and face width must be positive")
+    g = _InternalInvolute(float(module), z, float(pressure_angle), float(backlash))
+    if g.sigma(g.ro) * g.ro <= 0.05 * module:
+        raise ValueError(f"the tooth spaces of z{z} come to a point at the root: use more teeth")
+    Ro = rim_od / 2 if rim_od else g.ro + (rim if rim else 3.0 * module)
+    if Ro < g.ro + 0.5 * module:
+        raise ValueError(f"a Ø{2 * Ro:g} rim leaves nothing behind the teeth: keep it above Ø{2 * g.ro + module:.1f}")
+    if (flange_od or flange_t) and not (flange_od > 2 * Ro + 1 and 0 < flange_t < face_width):
+        raise ValueError("a flange needs flange_od larger than the rim and 0 < flange_t < face width")
+
+    def pol(r: float, t: float) -> Any:
+        return Vector(r * math.cos(t), r * math.sin(t), 0)
+
+    pitch = 2 * math.pi / z
+    nflank = 9
+    s0, so = g.sigma(g.r0), g.sigma(g.ro)
+    edges: list[Any] = []
+    for k in range(z):
+        c = k * pitch  # a tooth space centred here
+        if g.ri < g.r0:
+            edges.append(Edge.make_line(pol(g.ri, c - s0), pol(g.r0, c - s0)))
+        rs = [g.r0 + (g.ro - g.r0) * (i / nflank) ** 1.5 for i in range(nflank + 1)]  # denser near the base
+        edges.append(Edge.make_spline([pol(r, c - g.sigma(r)) for r in rs]))
+        edges.append(Edge.make_three_point_arc(pol(g.ro, c - so), pol(g.ro, c), pol(g.ro, c + so)))
+        edges.append(Edge.make_spline([pol(r, c + g.sigma(r)) for r in reversed(rs)]))
+        if g.ri < g.r0:
+            edges.append(Edge.make_line(pol(g.r0, c + s0), pol(g.ri, c + s0)))
+        a0, a1 = c + s0, c + pitch - s0  # the ring tooth's tip land
+        edges.append(Edge.make_three_point_arc(pol(g.ri, a0), pol(g.ri, (a0 + a1) / 2), pol(g.ri, a1)))
+    face = Face(Wire([Edge.make_circle(Ro)]), [Wire(edges)])
+    body = extrude(face, face_width)
+    if z0:
+        body = Pos(0, 0, z0) * body
+    label = f"{name} (m{module:g}, z{z} internal, α{pressure_angle:g}°)"
+    part = fw.feature(label, body, module=module, teeth=z, face_width=face_width, internal=True)
+    area = math.pi * Ro ** 2 - g.bore_area()
+    vol = area * face_width
+    r_out = Ro
+    if flange_od:
+        ring = Cylinder(flange_od / 2, flange_t, align=(Align.CENTER, Align.CENTER, Align.MIN)) \
+            - Cylinder(Ro - 0.25, flange_t + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        part = fw.feature("Flange", part + Pos(0, 0, z0) * ring, d=flange_od, t=flange_t)
+        vol += math.pi / 4 * (flange_od ** 2 - (2 * Ro) ** 2) * flange_t
+        r_out = flange_od / 2
+    if holes:
+        n, pcd, d = int(holes[0]), float(holes[1]), float(holes[2])
+        if n < 1 or d <= 0:
+            raise ValueError("holes = (n, pcd, d) with n >= 1 and d > 0")
+        lo, hi = pcd / 2 - d / 2, pcd / 2 + d / 2
+        if lo >= g.ro + 0.5 and hi <= Ro - 0.5:
+            span = face_width  # through the rim
+        elif flange_od and lo >= Ro + 0.5 and hi <= flange_od / 2 - 0.5:
+            span = flange_t  # through the flange
+        else:
+            raise ValueError(f"Ø{d:g} holes on Ø{pcd:g} fit neither inside the rim (Ø{2 * g.ro + 1:.1f} to "
+                             f"Ø{2 * Ro - 1:.1f}) nor inside a flange")
+        if n > 1 and pcd * math.sin(math.pi / n) <= d + 0.5:
+            raise ValueError(f"{n} Ø{d:g} holes don't fit side by side on Ø{pcd:g}")
+        tools = None
+        for i in range(n):
+            a = math.radians(hole_angle) + 2 * math.pi * i / n
+            t = Pos(pcd / 2 * math.cos(a), pcd / 2 * math.sin(a), z0 - 0.5) * Cylinder(
+                d / 2, span + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            tools = t if tools is None else tools + t
+        part = fw.feature(f"{n} × Ø{d:g} holes on Ø{pcd:g}", part - tools, n=n, pcd=pcd, d=d)
+        vol -= n * math.pi / 4 * d ** 2 * span
+    gear = {"pitch_d": 2 * g.rp, "tip_d": 2 * g.ri, "root_d": 2 * g.ro, "base_d": 2 * g.rb, "rim_d": 2 * Ro,
+            "profile_area": area, "internal": True}
+    return part, {"bbox": [2 * r_out, 2 * r_out, face_width], "volume": vol, "solids": 1, "gear": gear}
 
 
 # ------------------------------------------------------------------ shafts

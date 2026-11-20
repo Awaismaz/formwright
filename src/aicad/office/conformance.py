@@ -9,7 +9,8 @@ Per feature:
          callout); through when the ICD says through
   boss   an exact cylinder along Z (not a hole) on the stated axis; Ø inside the fit zone or at nominal
   face   an exact plane with the stated normal at the stated Z (± position tolerance)
-  gear   a recognised spur gear: tooth count equal, module within 1 %, axis on the part axis
+  gear   a recognised spur gear: tooth count equal, module within 1 %, axis on the part axis; the internal member
+         of an internal mesh (``internal``: a ring gear) must be recognised as an internal gear, the other as external
   seat   an exact cylinder along Z (a bearing seat or the shaft clearance under it) on the stated axis, Ø in the
          housing fit's zone (or nominal); the seat depth is the shoulder face next to it
   keyway two exact side planes at ±b/2 from the keyway's centre line (width ±0.05) and the groove bottom (shaft) or
@@ -125,9 +126,13 @@ def _face(f: dict[str, Any], refs: dict[str, Any]) -> dict[str, Any]:
 
 def _gear(f: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     comp = info.get("component") or {}
-    spec_txt = f"spur gear m{f['module']:g} × {f['teeth']} teeth on the part axis"
-    if comp.get("kind") != "spur_gear":
-        return {"feature": f["label"], "spec": spec_txt, "measured": "no gear teeth recognised", "ok": False}
+    internal = bool(f.get("internal"))
+    want = "internal_gear" if internal else "spur_gear"
+    spec_txt = f"{'internal' if internal else 'spur'} gear m{f['module']:g} × {f['teeth']} teeth on the part axis"
+    if comp.get("kind") != want:
+        got = {"internal_gear": "internal gear teeth, the ICD asks for external teeth",
+               "spur_gear": "external gear teeth, the ICD asks for internal (ring) teeth"}.get(str(comp.get("kind")))
+        return {"feature": f["label"], "spec": spec_txt, "measured": got or "no gear teeth recognised", "ok": False}
     p = comp.get("params") or {}
     teeth, mod = int(p.get("teeth") or 0), float(p.get("module") or p.get("module_est") or 0)
     o = comp.get("origin") or [0, 0, 0]
