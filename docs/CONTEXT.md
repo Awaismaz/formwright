@@ -188,7 +188,20 @@ size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/c
 
 ## Where things stand (handoff, updated 2026-11-20)
 
-**Latest (2026-11-20, end of the v2 wave):** WORKLIST 41-51, 54 and 56 are done and pushed; architecture v2 steps 1-2 (design graph, connection layout), program revision, Archie supervisor, hybrid master model, plan preview, generators and templates, Assembly Studio chat. Golden suite 13/13 on the graph path (`aicad golden --simulated`, the default). Nothing in flight. Remaining plan: 52 Motion Studio and 53 Simulation (later, founder's order), 55 catalogues (backlog), the name choice (MechBrains, KineCAD, Machinica...). The design graph is the default for everyone (PD-110, founder 2026-11-20).
+**Latest (2026-11-20, late, main at the commit after 9369f3e):** nothing in flight, no worktrees, all merged and pushed.
+This day's later work: Archie as the whole-app copilot (`office/copilot.py`, `/api/copilot`, global drawer, Ctrl J;
+navigate/point run at once, every other action incl. running the design agent needs Apply; agentic propose-check-retry
+loop; the brief is the reference, plan/ICD are Archie's own assumptions; `amend_brief` when infeasible; CD-049/050,
+PD-226..229). Planetary gearbox layout fix (`graph/planetary.py`, CD-051, PD-230..234); the founder's live gearbox
+program recovers by telling Archie "lay the program out again" then Apply and approve ICD v2. Assembly Studio: SOLIDWORKS
+style command bar (ASM-027), tools in left tabs with the tree and only the "Assembly Agent" chat on the right,
+one-window build (all parts in one turn, design questions answered in the assembly chat, ISO 14 splines + deterministic
+spline fit, unverified parts inserted with badges, engineer's Mark as verified; ASM-028..032, PD-240..244).
+Open next: live run of "stepped splined shaft + spur gear on it" against the real design agent; auto re-design of a
+mismatched spline hub; "Assemble everything" for splined hubs; browser walkthrough of copilot + assembly layout;
+command bar button for Mark as verified. Rule: targeted tests only, no full suite (founder 2026-11-20).
+
+**Earlier (2026-11-20, end of the v2 wave):** WORKLIST 41-51, 54 and 56 are done and pushed; architecture v2 steps 1-2 (design graph, connection layout), program revision, Archie supervisor, hybrid master model, plan preview, generators and templates, Assembly Studio chat. Golden suite 13/13 on the graph path (`aicad golden --simulated`, the default). Nothing in flight. Remaining plan: 52 Motion Studio and 53 Simulation (later, founder's order), 55 catalogues (backlog), the name choice (MechBrains, KineCAD, Machinica...). The design graph is the default for everyone (PD-110, founder 2026-11-20).
 
 **Earlier (2026-11-19 night):** batch WORKLIST 36-39 merged and pushed (CD-040, ASM-024/025, DS-038/039/040;
 PD-73..87; SESSION_LOG 2026-11-19 (i)). In flight: live Design Office run of the test case (`wip/live-gear`) and
