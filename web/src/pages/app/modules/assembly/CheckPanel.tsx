@@ -58,7 +58,7 @@ export function CheckPanel({ view, onRun, busy, focus, onFocus, rowFocus, onRowF
             {threads.length > 0 && <p className="mt-2 text-[11.5px] leading-snug text-muted">{threads.length} thread engagement{threads.length > 1 ? "s" : ""} (overlap inside a fastener's
               nominal thread Ø, expected with cosmetic threads) not counted.</p>}
           </Section>
-          <Section title="Clearance" right={<span className="text-[11.5px] text-muted">min clear {an.clearance.min_clear_mm === null ? "—" : `${mm(an.clearance.min_clear_mm, 3)} mm`}</span>}>
+          <Section title="Clearance" right={<span className="text-[11.5px] text-muted">min clear {an.clearance.min_clear_mm === null ? "n/a" : `${mm(an.clearance.min_clear_mm, 3)} mm`}</span>}>
             <div className="-mx-1 max-h-[340px] overflow-y-auto">
               <table className="w-full text-[12px]" data-testid="clearance-table">
                 <thead><tr className="text-left text-[11px] text-muted"><th className="px-1 pb-1 font-medium">Pair</th><th className="px-1 pb-1 text-right font-medium">Min. distance</th><th className="px-1 pb-1" /></tr></thead>

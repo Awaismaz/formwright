@@ -35,6 +35,9 @@ DEFAULT_ROUTES: dict[str, str] = {
     "reviewer": "opus",               # Gage's note can send a part back: Haiku not benchmarked yet (parked)
     "librarian": "opus",              # parts-list parsing: Haiku not benchmarked yet (parked)
     "assembly_check": "haiku",        # PD-73: measured on the visual check (assembly/visual.py uses the alias)
+    "assembly_agent": "opus",         # Assembly Studio chat (WORKLIST 51, PD-170): job size from assembly/chat.job_of
+    "assembly_agent.complex": "opus",  # assemble everything, several kinds of work at once, a part with no sizes
+    "assembly_agent.simple": "sonnet",  # bring, mate, check, a sized part, an edit
     "render_refine": "opus",
     "draft_assist": "opus",
 }

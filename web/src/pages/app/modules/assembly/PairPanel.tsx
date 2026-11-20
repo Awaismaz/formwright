@@ -61,7 +61,7 @@ export function PairPanel({ view, aid, pair, onPair, style, washers, onInsert, o
                   <div key={k} className="rounded border border-border px-2.5 py-2 text-[12px]" data-pair={k}>
                     <div className="flex items-center gap-1.5 text-muted">
                       <span>Ø{p.a_d}</span><ArrowLeftRight className="h-3 w-3" /><span>Ø{p.b_d}</span>
-                      <span className="ml-auto tabular-nums">grip {p.grip === null ? "—" : `${mm(p.grip, 2)} mm`}</span>
+                      <span className="ml-auto tabular-nums">grip {p.grip === null ? "n/a" : `${mm(p.grip, 2)} mm`}</span>
                     </div>
                     {p.proposal.ok
                       ? <div className="mt-0.5 flex items-center gap-1.5 font-medium"><CheckCircle2 className="h-3.5 w-3.5 text-success" />{p.proposal.summary}</div>

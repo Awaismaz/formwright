@@ -80,3 +80,13 @@ No test may make a paid or subscription model call: drive agent turns with a rep
 - Every compile is cross-checked against its ICD (`compile.check`); a non-empty check is a bug in the compile.
 - Pitfall: Python written through a Git Bash heredoc can turn `\b` into a backspace byte; write scripts with the
   Write tool and grep new files for `\x08`.
+
+## Assembly agent (Assembly Studio chat, WORKLIST 51)
+- Role `assembly_agent` (`llm/base.ROLES`), routed by `assembly/chat.job_of`: `simple` Sonnet, `complex` Opus. One
+  single call per turn (`standalone_system=True`, the JSON contract appended with `schema_instruction`, parsed with
+  `parse_json_answer` so a bad answer is still metered), capped at `chat.TURN_MAX_TOKENS` platform tokens.
+- The model only chooses typed actions (`chat.ACTIONS`); `assembly/agent.py` runs them deterministically and writes
+  every result line. Add a tool there + its line in `chat.INSTRUCTIONS` + a recorded reply in
+  `tests/golden/assembly_agent/replies.json`. Scrub new identifiers in `chat._INTERNAL`.
+- A part it can't make directly (`assembly/makers.py`) becomes a normal Design Studio turn (`projects.agent_chat`),
+  metered by the Studio; the chat follows it as a job and inserts the part only when `runner.is_verified`.
