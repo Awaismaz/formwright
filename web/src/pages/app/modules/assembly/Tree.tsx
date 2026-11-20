@@ -6,6 +6,8 @@ import {
 import { cx } from "@/lib/format";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger, Tip } from "@/components/ui";
 import type { AsmView, Instance, Mate, MateType } from "./types";
+import { useQueryClient } from "@tanstack/react-query";
+import { MarkVerified } from "@/components/MarkVerified";
 
 export const MATE_ICON: Record<MateType, ReactNode> = {
   coincident: <Layers className="h-3.5 w-3.5" />, flush: <Equal className="h-3.5 w-3.5" />,
@@ -142,7 +144,25 @@ export function Tree(p: TreeProps) {
   );
 }
 
-function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh }: { i: Instance } & TreeProps) {
+/** ASM-OW: the honest label of a part whose own checks did not all pass, with the engineer's override. */
+function VerifyBadge({ i, view, canEdit }: { i: Instance; view: AsmView; canEdit: boolean }) {
+  const qc = useQueryClient();
+  const part = view.parts[i.part];
+  if (!part?.verification) return null;
+  const open = part.open_checks ?? [];
+  return (
+    <Tip content={<div className="max-w-[260px] space-y-1.5 text-[12px]"><div>{part.verification}</div>
+      <div className="text-muted">{part.accepted ? "Marked as verified by an engineer: the checks are still open." : "Its own checks didn't all pass. A fit with another part is checked here, in the assembly."}</div>
+      {canEdit && part.project_id && <MarkVerified compact projectId={part.project_id} open={open} accepted={part.accepted}
+        onDone={() => { void qc.invalidateQueries({ queryKey: ["asm", view.assembly.id] }); void qc.invalidateQueries({ queryKey: ["asm-sources"] }); }} />}</div>}>
+      <span data-verification={part.accepted ? "accepted" : "unverified"}
+        className={cx("inline-flex shrink-0 items-center rounded-full border px-1.5 text-[10.5px] font-semibold",
+          part.accepted ? "border-warning/40 bg-warning/10 text-warning" : "border-danger/40 bg-danger/10 text-danger")}>
+        {part.accepted ? "Verified by engineer" : "Unverified"}</span>
+    </Tip>);
+}
+
+function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh, view }: { i: Instance } & TreeProps) {
   const sel = selected === i.id;
   return (
     <div className={cx("group flex items-center gap-1.5 px-2 py-1 text-[12.5px]", sel ? "bg-primary-soft text-primary" : "hover:bg-text/[.04]")}
@@ -157,6 +177,7 @@ function Row({ i, selected, onSelect, canEdit, onPatch, onDelete, onRefresh }: {
       <StatePrefix i={i} />
       <button type="button" onClick={() => onSelect(sel ? null : i.id)} className={cx("min-w-0 flex-1 truncate text-left", !i.visible && "text-muted")}
         title={i.display}>{i.display}</button>
+      <VerifyBadge i={i} view={view} canEdit={canEdit} />
       {i.stale && (
         <Tip content="The part changed in the Design Studio. Refresh to use the latest verified build.">
           <button type="button" disabled={!canEdit} onClick={() => onRefresh(i.id)}

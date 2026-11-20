@@ -838,3 +838,113 @@ def revolved(profile: list[tuple[float, float]], *, name: str = "Revolved body")
     R = max(r for r, _z in pts)
     return part, {"bbox": [2 * R, 2 * R, max(z for _r, z in pts) - min(z for _r, z in pts)],
                   "volume": revolved_volume(pts), "solids": 1}
+
+
+# ------------------------------------------------------------------ splines (ASM-OW: a splined shaft and its hub)
+# ISO 14 straight-sided splines (parallel flanks, inside centring): (n splines, d minor Ø, D major Ø, B width), mm.
+# Light and medium series (verify against the standard before release).
+ISO14_LIGHT = [(6, 23, 26, 6), (6, 26, 30, 6), (6, 28, 32, 7), (8, 32, 36, 6), (8, 36, 40, 7), (8, 42, 46, 8),
+               (8, 46, 50, 9), (8, 52, 58, 10), (8, 56, 62, 10), (8, 62, 68, 12), (10, 72, 78, 12), (10, 82, 88, 12),
+               (10, 92, 98, 14), (10, 102, 108, 16), (10, 112, 120, 18)]
+ISO14_MEDIUM = [(6, 11, 14, 3), (6, 13, 16, 3.5), (6, 16, 20, 4), (6, 18, 22, 5), (6, 21, 25, 5), (6, 23, 28, 6),
+                (6, 26, 32, 6), (6, 28, 34, 7), (8, 32, 38, 6), (8, 36, 42, 7), (8, 42, 48, 8), (8, 46, 54, 9),
+                (8, 52, 60, 10), (8, 56, 65, 10), (8, 62, 72, 12), (10, 72, 82, 12), (10, 82, 92, 12),
+                (10, 92, 102, 14), (10, 102, 112, 16), (10, 112, 125, 18)]
+ISO14_SOURCE = "ISO 14 straight-sided splines (verify against the standard before release)"
+
+
+def iso14(major_d: float, series: str = "medium") -> dict[str, float]:
+    """The ISO 14 row whose major Ø is ``major_d`` (else the largest major Ø below it): {"n", "d", "D", "b"}."""
+    rows = ISO14_LIGHT if series == "light" else ISO14_MEDIUM
+    fit = [r for r in rows if r[2] <= major_d + 1e-9]
+    if not fit:
+        raise ValueError(f"no ISO 14 {series} spline with a major Ø up to {major_d:g} (smallest Ø{rows[0][2]:g})")
+    n, d, D, b = max(fit, key=lambda r: r[2])
+    return {"n": n, "d": float(d), "D": float(D), "b": float(b)}
+
+
+def _strip(rho: float, h: float) -> float:
+    """Area of the half disc x > 0 of radius rho inside the strip |y| <= h (h < rho)."""
+    return h * math.sqrt(rho * rho - h * h) + rho * rho * math.asin(h / rho)
+
+
+def spline_tooth_area(d: float, D: float, b: float) -> float:
+    """One straight-sided tooth's cross-section: the strip |y| <= b/2, x > 0 between the Ø d and Ø D circles."""
+    return _strip(D / 2, b / 2) - _strip(d / 2, b / 2)
+
+
+def _check_spline(n: int, d: float, D: float, b: float) -> None:
+    if n < 3 or not 0 < b < d < D:
+        raise ValueError("a spline needs n >= 3 and 0 < width < minor Ø < major Ø")
+    if n * 2 * math.asin(b / d) >= 2 * math.pi * 0.95:
+        raise ValueError("the spline teeth overlap at the minor Ø: fewer or narrower teeth")
+
+
+def _spline_profile(n: int, d: float, D: float, b: float, outer: float) -> Any:
+    """The cross-section of the material between the teeth (the grooves): the annulus Ø d..outer minus the teeth."""
+    from build123d import Circle, Pos, Rectangle, Rot, Sketch
+
+    ring = Sketch() + Circle(outer / 2) - Circle(d / 2)
+    for k in range(n):
+        ring -= Rot(0, 0, 360.0 * k / n) * Pos(outer / 4 + d / 8, 0) * Rectangle(outer / 2 - d / 4 + 1, b)
+    return ring
+
+
+def spline_shaft(part: Any, D: float, d: float, n: int, b: float, z0: float, z1: float, *,
+                 name: str | None = None) -> tuple[Any, float]:
+    """Straight-sided external spline (ISO 14 sizes: ``fw.iso14(D)``) on a Ø D stretch of a shaft whose axis is Z,
+    from Z z0 to z1, n teeth b wide, a tooth centred on +X. The stretch must be a plain Ø D cylinder from z0 to z1
+    (the grooves run into whatever is beyond: a smaller step lets them run out, a larger one stops them). Returns
+    (part, removed volume) = (π/4 (D² − d²) − n · tooth area) × (z1 − z0) (hand formula)."""
+    from build123d import Pos, extrude
+
+    from aicad import fw
+
+    _check_spline(n, d, D, b)
+    if z1 <= z0:
+        raise ValueError("z1 must be above z0")
+    tool = Pos(0, 0, z0) * extrude(_spline_profile(n, d, D, b, D + 2), z1 - z0)
+    label = name or f"Spline {n}×{d:g}×{D:g}×{b:g} (ISO 14)"
+    part = fw.feature(label, part - tool, spline="external", spline_n=n, spline_d=d, spline_D=D, spline_b=b,
+                      z0=z0, z1=z1)
+    return part, (math.pi / 4 * (D * D - d * d) - n * spline_tooth_area(d, D, b)) * (z1 - z0)
+
+
+def spline_bore(part: Any, D: float, d: float, n: int, b: float, z0: float, z1: float, *,
+                name: str | None = None) -> tuple[Any, float]:
+    """Straight-sided internal spline (the hub of ``spline_shaft``): a Ø d bore with n grooves b wide out to Ø D,
+    axis Z, from Z z0 to z1 (through the hub: give the hub's full extent), a groove centred on +X so it takes a
+    shaft tooth on +X. The hub must be solid inside Ø D there (no other bore). Returns (part, removed volume) =
+    (π/4 d² + n · tooth area) × (z1 − z0) (hand formula)."""
+    from build123d import Circle, Pos, Rectangle, Rot, Sketch, extrude
+
+    from aicad import fw
+
+    _check_spline(n, d, D, b)
+    if z1 <= z0:
+        raise ValueError("z1 must be above z0")
+    grooves = Sketch()
+    for k in range(n):
+        grooves += Rot(0, 0, 360.0 * k / n) * Pos(D / 4 + d / 8 + 0.5, 0) * Rectangle(D / 2 - d / 4 + 1, b)
+    prof = Sketch() + Circle(d / 2) + (grooves & Circle(D / 2))
+    tool = Pos(0, 0, z0) * extrude(prof, z1 - z0)
+    label = name or f"Spline hub {n}×{d:g}×{D:g}×{b:g} (ISO 14)"
+    part = fw.feature(label, part - tool, spline="internal", spline_n=n, spline_d=d, spline_D=D, spline_b=b,
+                      z0=z0, z1=z1)
+    return part, (math.pi / 4 * d * d + n * spline_tooth_area(d, D, b)) * (z1 - z0)
+
+
+def spline_interfaces(features: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """The splines a build recorded (``status["features"]``): [{kind: external|internal, n, d, D, b, z0, z1}]."""
+    out = []
+    for f in features or []:
+        p = f.get("params") or {}
+        if f.get("suppressed") or p.get("spline") not in ("external", "internal"):
+            continue
+        try:
+            out.append({"kind": p["spline"], "n": int(p["spline_n"]), "d": float(p["spline_d"]),
+                        "D": float(p["spline_D"]), "b": float(p["spline_b"]), "z0": float(p["z0"]),
+                        "z1": float(p["z1"]), "feature": str(f.get("name") or "")})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out

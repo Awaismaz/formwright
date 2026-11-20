@@ -47,9 +47,15 @@ def clean_name(name: str) -> str:
 
 async def ensure_project_part(root: Path, org_id: str, project_id: str, project_name: str, ws: Path,
                               status: dict[str, Any], rev: str | None) -> str:
+    """The assembly part of a project's latest build. Any build with geometry (a STEP) comes in: one whose own
+    checks did not all pass is snapshotted with them (``open_checks``) and labelled Unverified wherever it shows,
+    never refused (ASM-OW). Only a project with no built geometry is refused."""
+    from aicad.agent.runner import open_checks
+    from aicad.fw_std import spline_interfaces
+
     step = ws / "out" / "part.step"
-    if not status.get("ok") or not step.is_file():
-        raise AssemblyInputError(f"{clean_name(project_name)} has no verified build yet. Build it in the Design "
+    if status.get("error") or not status.get("build_id") or not step.is_file():
+        raise AssemblyInputError(f"{clean_name(project_name)} has no built geometry yet. Build it in the Design "
                                  "Studio first.")
     key = store.project_key(project_id, status.get("build_id"))
     if not store.part_ready(root, key):
@@ -58,6 +64,7 @@ async def ensure_project_part(root: Path, org_id: str, project_id: str, project_
         store.write_json(d / "meta.json", {
             "key": key, "kind": "project", "project_id": project_id, "build_id": str(status.get("build_id")),
             "rev": rev, "name": clean_name(project_name), "material": status.get("material"), "standard": None,
+            "open_checks": open_checks(status), "splines": spline_interfaces(status.get("features")),
             "created_at": store.now()})
     return key
 
@@ -578,7 +585,21 @@ def _density(material: str | None) -> float | None:
     return float(m["density_g_cm3"]) if m else None  # type: ignore[arg-type]
 
 
-def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = None) -> dict[str, Any]:
+def verification_text(p: dict[str, Any], accepted: dict[str, Any] | None = None) -> str | None:
+    """The honest label of a project part snapshot whose own checks did not all pass: "Unverified: CHK-05 ..." or,
+    when the engineer accepted that build, "Verified by <name>; open: CHK-05". None for a verified build."""
+    open_ = (accepted or {}).get("open") or p.get("open_checks") or []
+    if not open_ and not accepted:
+        return None
+    ids = ", ".join(str(c.get("id")) for c in open_) or "a check"
+    if accepted:
+        return f"Verified by {accepted.get('by') or 'the engineer'}; open: {ids}"
+    return f"Unverified: {ids}"
+
+
+def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = None,
+        accepted: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    """``accepted``: part key -> the engineer's acceptance of that build (labels the row "Verified by ...")."""
     parts = _parts(root, doc)
     groups: dict[str, list[dict[str, Any]]] = {}
     for i in doc["instances"]:
@@ -617,7 +638,10 @@ def bom(root: Path, doc: dict[str, Any], project_names: dict[str, str] | None = 
             "material": p.get("material"), "density_g_cm3": rho,
             "mass_each_g": None if each is None else round(each, 2),
             "mass_total_g": None if each is None else round(each * qty, 2),
-            "instances": [i["id"] for i in groups[key]], "part_key": key})
+            "instances": [i["id"] for i in groups[key]], "part_key": key,
+            "verification": verification_text(p, (accepted or {}).get(key)) if p["kind"] == "project" else None})
+        if rows[-1]["verification"]:
+            rows[-1]["description"] += f" · {rows[-1]['verification']}"
     return {"rows": rows, "total_qty": sum(r["qty"] for r in rows), "total_mass_g": round(total, 2),
             "mass_unknown_qty": unknown,
             "note": "Masses use nominal densities for the stated materials (verify with your supplier). Toolbox "

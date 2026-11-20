@@ -33,6 +33,9 @@ export interface PartView {
   key: string; name: string; kind: "project" | "toolbox" | "placeholder"; material: string | null; standard: string | null;
   code: string | null; params: Record<string, number> | null; bbox: number[]; center: V3; volume: number;
   holes: Hole[]; patterns: HolePattern[]; topo_url: string;
+  /** ASM-OW: "Unverified: CHK-05" or "Verified by <name>; open: CHK-05" for a project build whose checks didn't all
+   * pass; null when every check passed (or not a project part) */
+  verification?: string | null; accepted?: boolean; project_id?: string | null; open_checks?: { id: string; name: string }[];
 }
 
 export type MateType = "coincident" | "flush" | "distance" | "angle" | "concentric" | "gear";
@@ -115,7 +118,12 @@ export interface MotionResult {
   pairs_per_step: number | null; joints: Joint[]; stale?: boolean; notes?: string[]; at?: string;
 }
 
-export interface SourceProject { id: string; name: string; thumbnail: string | null; material: string | null; verified: boolean }
+export interface SourceProject {
+  id: string; name: string; thumbnail: string | null; material: string | null; verified: boolean;
+  /** ASM-OW: any built geometry can be inserted; how it stands and which checks are open */
+  geometry?: boolean; verification?: "verified" | "accepted" | "unverified" | "none";
+  open_checks?: { id: string; name: string }[]; accepted_by?: string | null;
+}
 export interface ToolboxParam {
   name: string; label: string; default: number; unit: string; min: number | null; max: number | null;
   options: number[] | null; help: string; integer: boolean;

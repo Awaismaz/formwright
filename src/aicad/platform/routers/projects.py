@@ -663,7 +663,10 @@ def _read_status(ws: Path) -> dict[str, Any]:
 
 
 def _status_summary(st: dict[str, Any]) -> dict[str, Any]:
-    return {k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")}
+    from aicad.agent.runner import accepted
+
+    return {**{k: st.get(k) for k in ("ok", "part", "material", "fingerprint", "error", "build_id", "params")},
+            "accepted_by": (accepted(st) or {}).get("by")}
 
 
 _finalizing: dict[str, asyncio.Task[None]] = branches.BranchKeyed()
@@ -1157,3 +1160,83 @@ async def agent_events(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> Str
             s.subscribers.discard(q)
 
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+# ----------------------------------------------------------------------------- engineer's verification override
+class VerifyOverrideIn(BaseModel):
+    reason: str = ""
+
+
+def _write_status(ws: Path, st: dict[str, Any]) -> None:
+    """Rewrite the latest build's status in place (same build id), here and in its revision snapshot."""
+    from aicad.agent.runner import _write
+
+    _write(ws / "out", st, keep_id=True)
+    root = ws / "revisions"
+    if root.is_dir():
+        for d in sorted((d for d in root.iterdir() if d.name.isdigit()), key=lambda d: -int(d.name))[:3]:
+            f = d / "status.json"
+            try:
+                if f.is_file() and json.loads(f.read_text(encoding="utf-8")).get("build_id") == st.get("build_id"):
+                    shutil.copy2(ws / "out" / "status.json", f)
+                    break
+            except (OSError, ValueError):
+                continue
+
+
+@router.post("/projects/{project_id}/verify-override")
+async def verify_override(project_id: str, body: VerifyOverrideIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The engineer marks the latest build as verified although a check is open (ASM-OW, PD-241). Recorded on that
+    build (who, when, reason, the open checks, build id); every gate then treats it as verified, every label says
+    "Verified by <name>" with the open checks, never "passed". A rebuild writes a new status: the mark is gone."""
+    from aicad.agent.runner import open_checks, verification
+
+    if ctx.role == "viewer":
+        raise HTTPException(403, "Viewers can't mark parts as verified.")
+    p = _project(ctx, project_id, "edit")
+    ws = workspace_for(p)
+    await wait_finalized(p.id)
+    st = _read_status(ws)
+    if not st.get("build_id") or st.get("error") or not (ws / "out" / "part.step").is_file():
+        raise HTTPException(409, "There is no built geometry to mark as verified.")
+    if verification(st)["state"] == "verified":
+        raise HTTPException(409, "Every check of this build passed: it is already verified.")
+    from aicad.agent import deferred as _deferred
+
+    if _deferred.has_pending(st):
+        raise HTTPException(409, "Checks are still running on this build: wait for them first.")
+    rev = None
+    root = ws / "revisions"
+    if root.is_dir():
+        revs = sorted((int(d.name) for d in root.iterdir() if d.name.isdigit()), reverse=True)
+        rev = revs[0] if revs else None
+    acc = {"by": ctx.user.name or ctx.user.email, "user_id": ctx.user.id, "at": utcnow().isoformat(),
+           "reason": body.reason.strip()[:500], "open": open_checks(st), "build_id": st.get("build_id"),
+           "revision": rev}
+    st["accepted"] = acc
+    _write_status(ws, st)
+    p.last_status = _status_summary(st)
+    audit(ctx.db, "project.verify_override", ctx.user, p.org_id, target=p.id, build=str(st.get("build_id")),
+          open=",".join(c["id"] for c in acc["open"]), reason=acc["reason"][:200])
+    ctx.db.commit()
+    return {"verification": verification(st)}
+
+
+@router.delete("/projects/{project_id}/verify-override")
+async def withdraw_verify_override(project_id: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    from aicad.agent.runner import verification
+
+    if ctx.role == "viewer":
+        raise HTTPException(403, "Viewers can't change a part's verification.")
+    p = _project(ctx, project_id, "edit")
+    ws = workspace_for(p)
+    await wait_finalized(p.id)
+    st = _read_status(ws)
+    if "accepted" in st:
+        st.pop("accepted")
+        _write_status(ws, st)
+        p.last_status = _status_summary(st)
+        audit(ctx.db, "project.verify_override_withdrawn", ctx.user, p.org_id, target=p.id,
+              build=str(st.get("build_id")))
+        ctx.db.commit()
+    return {"verification": verification(st)}

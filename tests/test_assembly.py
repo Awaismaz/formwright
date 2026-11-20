@@ -352,7 +352,7 @@ def test_api_full_flow(app_client: Any, tmp_path: Path) -> None:
     assert c.get("/api/m/assembly/assemblies").json()["items"] == []
     # not built yet → honest 409
     r = c.post("/api/m/assembly/assemblies", json={"project_id": plate_id})
-    assert r.status_code == 409 and "no verified build" in r.json()["detail"]
+    assert r.status_code == 409 and "no built geometry" in r.json()["detail"]
     write_plate(ws_plate / "out")
     write_block(ws_block / "out")
     v = c.post("/api/m/assembly/assemblies", json={"project_id": plate_id}).json()

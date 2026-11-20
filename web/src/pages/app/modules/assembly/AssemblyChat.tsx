@@ -10,7 +10,8 @@ import { Badge, Button, Tip } from "@/components/ui";
 import { AgentBadge } from "@/components/AgentBadge";
 import ShopStatus, { type ShopPhase } from "@/pages/app/studio/ShopStatus";
 import type { AsmView } from "./types";
-import { EXAMPLES, answerText, liveQuestions, replyMeta, stateTone, type ChatMessage, type ChatQuestion, type ChatStep, type ChatView } from "./chat";
+import { EXAMPLES, answerText, liveQuestions, replyMeta, sayBody, stateTone, type ChatMessage, type ChatQuestion, type ChatStep, type ChatView } from "./chat";
+import { MarkVerified } from "@/components/MarkVerified";
 
 /** WORKLIST 51: one flowing conversation per assembly with the assembly agent. It keeps the context (the server
  * stores the conversation), decides from the history and the assembly what is needed, and acts: makes parts, brings
@@ -41,12 +42,12 @@ export function AssemblyChat({ aid, view, onChanged, onSelect }: {
   }, [msgs, busy, onChanged]);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" }); }, [msgs.length, data?.busy?.step]);
 
-  const send = async (t: string) => {
+  const send = async (t: string, job?: string | null) => {
     const s = t.trim();
     if (!s || busy || sending) return;
     setSending(true);
     try {
-      qc.setQueryData(key, await api.post<ChatView>(`/api/m/assembly/assemblies/${aid}/chat`, { text: s }));
+      qc.setQueryData(key, await api.post<ChatView>(`/api/m/assembly/assemblies/${aid}/chat`, sayBody(s, job)));
       setText("");
     } catch (e) { toast.error((e as Error).message); } finally { setSending(false); }
   };
@@ -85,14 +86,15 @@ export function AssemblyChat({ aid, view, onChanged, onSelect }: {
           </div>)}
         {msgs.map((m, n) => m.role === "user"
           ? <div key={m.id} className="ml-8 whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-white" data-msg="user">{m.text}</div>
-          : <AgentReply key={m.id} m={m} names={names} onSelect={onSelect}
-              live={liveQuestions(msgs, n, busy) && view.can_edit} onAnswer={send} />)}
-        {(data?.jobs ?? []).filter(j => j.status === "running").map(j => (
-          <div key={j.id} className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-[12px]" data-job={j.id}>
-            <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-accent" />
-            <div className="min-w-0 flex-1"><div className="font-medium">Designing {j.name} in the Design Studio</div>
+          : <AgentReply key={m.id} m={m} names={names} onSelect={onSelect} canEdit={view.can_edit} onChanged={onChanged}
+              live={(liveQuestions(msgs, n, busy) || (!!m.job && data?.jobs.some(j => j.id === m.job && j.status === "question") === true)) && view.can_edit}
+              onAnswer={t => send(t, m.job && m.questions?.length ? m.job : null)} />)}
+        {(data?.jobs ?? []).filter(j => j.status === "running" || j.status === "question").map(j => (
+          <div key={j.id} className="flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-[12px]" data-job={j.id} data-job-status={j.status}>
+            {j.status === "running" ? <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-accent" /> : <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />}
+            <div className="min-w-0 flex-1"><div className="font-medium">{j.status === "question" ? `${j.name}: waiting for your answer above` : `Designing ${j.name}`}</div>
               <div className="truncate text-muted">{j.step}</div></div>
-            <Link to={`/app/projects/${j.project_id}`} target="_blank" className="shrink-0 text-primary hover:underline" title="Open it in the Design Studio">
+            <Link to={`/app/projects/${j.project_id}`} target="_blank" className="shrink-0 text-muted hover:text-primary" title="Optional: watch it in the Design Studio (everything is answered here)">
               <ExternalLink className="h-3.5 w-3.5" /></Link>
           </div>))}
         {busy && <ShopStatus phase={phaseOf(step)} since={since} step={step} />}
@@ -122,13 +124,14 @@ function phaseOf(step: string | null): ShopPhase {
   return "plan";
 }
 
-function AgentReply({ m, names, onSelect, live, onAnswer }: {
+function AgentReply({ m, names, onSelect, live, onAnswer, canEdit, onChanged }: {
   m: ChatMessage; names: Map<string, string>; onSelect: (iid: string) => void; live: boolean; onAnswer: (t: string) => void;
+  canEdit: boolean; onChanged: () => void;
 }) {
   return (
     <div className="space-y-1.5" data-msg="agent">
       {m.text && <div className="rounded-lg border border-border bg-panel2 px-3 py-2"><Markdown text={m.text} /></div>}
-      {(m.steps ?? []).map((s, k) => <StepRow key={k} s={s} names={names} onSelect={onSelect} />)}
+      {(m.steps ?? []).map((s, k) => <StepRow key={k} s={s} names={names} onSelect={onSelect} canEdit={canEdit} onChanged={onChanged} />)}
       {(m.questions ?? []).length > 0 && <Chips qs={m.questions!} live={live} onAnswer={onAnswer} />}
       {(m.state || m.seconds !== undefined) && (
         <div className="px-1 text-[11px] text-muted" data-state>
@@ -142,7 +145,7 @@ function AgentReply({ m, names, onSelect, live, onAnswer }: {
   );
 }
 
-function StepRow({ s, names, onSelect }: { s: ChatStep; names: Map<string, string>; onSelect: (iid: string) => void }) {
+function StepRow({ s, names, onSelect, canEdit, onChanged }: { s: ChatStep; names: Map<string, string>; onSelect: (iid: string) => void; canEdit?: boolean; onChanged?: () => void }) {
   const Icon = s.status === "ok" ? Check : s.status === "fail" ? X : s.status === "warn" ? AlertTriangle : Info;
   const tone = s.status === "ok" ? "text-success" : s.status === "fail" ? "text-danger" : s.status === "warn" ? "text-warning" : "text-muted";
   const [open, setOpen] = useState(s.status !== "ok" || s.lines.length <= 3);
@@ -156,6 +159,7 @@ function StepRow({ s, names, onSelect }: { s: ChatStep; names: Map<string, strin
       {open && <ul className="ml-5 mt-0.5 space-y-0.5 text-muted">
         {s.lines.map((l, k) => <li key={k} className={cx(s.status === "fail" && "text-danger")}>{l}</li>)}
       </ul>}
+      {s.unverified && s.project_id && canEdit && <div className="ml-5 mt-1"><MarkVerified compact projectId={s.project_id} open={s.open ?? []} onDone={onChanged} /></div>}
       {s.parts.length > 0 && <div className="ml-5 mt-1 flex flex-wrap gap-1">
         {s.parts.filter(p => names.has(p)).slice(0, 8).map(p => <button key={p} type="button" onClick={() => onSelect(p)}
           className="rounded-full border border-border bg-panel px-2 py-px text-[11px] text-muted hover:border-primary hover:text-primary" title="Show it in the view">{names.get(p)}</button>)}

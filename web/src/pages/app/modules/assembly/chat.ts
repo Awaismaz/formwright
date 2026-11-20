@@ -5,6 +5,8 @@ export interface ChatStep {
   label: string; status: "ok" | "warn" | "fail" | "info"; lines: string[]; parts: string[];
   matches?: { kind: "instance" | "part" | "toolbox"; id?: string; code?: string; name: string }[];
   project_id?: string; job?: string;
+  /** ASM-OW: a part brought in with a check open (the engineer may fix it or mark it as verified) */
+  unverified?: boolean; open?: { id: string; name: string }[];
 }
 export interface ChatState { parts: number; mates: number; ok: number; bad: number; unplaced: number; unplaced_names: string[]; clashes: number | null }
 export interface ChatMessage {
@@ -12,7 +14,11 @@ export interface ChatMessage {
   steps?: ChatStep[]; questions?: ChatQuestion[]; state?: ChatState | null; state_text?: string;
   tokens?: number; seconds?: number; offline?: boolean; job?: string;
 }
-export interface ChatJob { id: string; name: string; status: "running" | "done" | "failed"; step: string; project_id: string; started_at: string }
+export interface ChatJob {
+  id: string; name: string; status: "running" | "question" | "done" | "failed"; step: string; project_id: string; started_at: string;
+  /** the design agent's questions, relayed here (answered in this chat, never in the Design Studio) */
+  questions?: ChatQuestion[] | null;
+}
 export interface ChatView {
   messages: ChatMessage[]; busy: { since: string; step: string } | null; jobs: ChatJob[]; ai: boolean; can_edit: boolean;
 }
@@ -43,6 +49,11 @@ export function stateTone(s: ChatState | null | undefined): "success" | "warning
   if (s.bad || (s.clashes ?? 0) > 0) return "danger";
   if (s.unplaced) return "warning";
   return "success";
+}
+
+/** What a reply posts: a design job's question is answered for that job (relayed to its design agent). */
+export function sayBody(text: string, job?: string | null): { text: string; job?: string } {
+  return job ? { text, job } : { text };
 }
 
 /** The questions of the last agent message are live until the engineer says something newer. */

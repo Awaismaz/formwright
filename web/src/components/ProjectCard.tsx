@@ -16,6 +16,7 @@ export function IsoThumb({ src }: { src: string }) {
 export function ProjectStatus({ p }: { p: Project }) {
   if (!p.builds) return <Badge><Clock className="h-3 w-3" />No builds yet</Badge>;
   if (p.last_status?.ok) return <Badge tone="success"><CircleCheck className="h-3 w-3" />Verified</Badge>;
+  if (p.last_status?.accepted_by) return <Badge tone="warning"><CircleCheck className="h-3 w-3" />Verified by {p.last_status.accepted_by}</Badge>;
   return <Badge tone="danger"><CircleAlert className="h-3 w-3" />Checks failing</Badge>;
 }
 
