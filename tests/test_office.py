@@ -35,10 +35,11 @@ TICKETS = [
 
 
 def test_estimate_constants_and_milestones() -> None:
-    assert estimates.estimate_minutes("machined", 3) == 12.0  # 3 x 4.0
-    assert estimates.estimate_minutes("turned", 2) == 7.0  # 2 x 3.5
-    assert estimates.estimate_minutes("standard", 1) == 0.5
-    assert estimates.estimate_minutes("machined", 9) == 20.0  # complexity clamps to 5
+    # the AI designer's rates per complexity unit, from measured turns (60 to 100 s each, PD-190)
+    assert estimates.estimate_minutes("machined", 3) == 3.6  # 3 x 1.2
+    assert estimates.estimate_minutes("turned", 2) == 2.2  # 2 x 1.1
+    assert estimates.estimate_minutes("standard", 1) == 0.05
+    assert estimates.estimate_minutes("machined", 9) == 6.0  # complexity clamps to 5
     assert estimates.integration_complexity(2) == 1 and estimates.integration_complexity(7) == 3
     assert estimates.progress_of([]) == 0
     assert estimates.progress_of(["brief_read"]) == 5
@@ -157,7 +158,10 @@ def test_build_tickets_from_plan() -> None:
     assert final["item_id"] == "root" and final["kind"] == "integration" and final["specialist"] == "fitz"
     assert len(final["depends_on"]) == len(plan["subassemblies"])
     shaft = next(t for t in tickets if t["title"] == "Input shaft")
-    assert shaft["specialist"] == "chuck" and shaft["estimate_min"] == 3 * 3.5 and shaft["column"] == "ready"
+    # on the path it will take: the drafted layout fixes the shaft (built from the interfaces, 3 to 9 s) or the AI
+    # designer takes it (0.6 to 1.5 x complexity x 1.1 min)
+    lo, hi = estimates.estimate_range("turned", 3, shaft["estimate_path"])
+    assert shaft["specialist"] == "chuck" and (shaft["estimate_lo"], shaft["estimate_hi"]) == (lo, hi)         and shaft["estimate_min"] == round((lo + hi) / 2, 3) and shaft["column"] == "ready"
     assert "Design the Input shaft" in shaft["brief"] and "spur gearbox 3:1" in shaft["brief"]
     assert service.key_prefix("Gear reducer") == "GR" and service.key_prefix("winch") == "WIN"
 
@@ -278,7 +282,8 @@ def test_api_ticket_moves_milestones_comments_and_events(app_client: Any) -> Non
     assert t["progress"] == 35 and t["agent_state"] == "blocked"
     v = c.patch(base, json={"complexity": 5, "specialist": "mill"}).json()
     t = next(x for x in v["tickets"] if x["id"] == tid)
-    assert t["specialist"] == "mill" and t["estimate_min"] == estimates.estimate_minutes(t["family"], 5)
+    lo, hi = estimates.estimate_range(t["family"], 5, t.get("estimate_path"))
+    assert t["specialist"] == "mill" and t["estimate_min"] == round((lo + hi) / 2, 3)
     assert c.patch(base, json={"specialist": "nobody"}).status_code == 409
     assert c.post(base + "/comments", json={"text": "  "}).status_code == 409
     v = c.post(base + "/comments", json={"text": "Keep the bore H7."}).json()

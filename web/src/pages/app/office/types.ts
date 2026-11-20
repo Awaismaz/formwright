@@ -68,6 +68,8 @@ export interface DesignPath {
 export interface Ticket {
   id: string; key: string; item_id: string; kind: "part" | "standard" | "integration" | "deliverable"; title: string; brief: string;
   family: Family; specialist: string; complexity: number; estimate_min: number; qty: number; column: Column;
+  /** The estimate's range and the build path it is for (Toolbox, from the interfaces, template, AI designer). */
+  estimate_lo?: number; estimate_hi?: number; estimate_path?: "toolbox" | "direct" | "template" | "agent";
   milestones: string[]; progress: number; project_id: string | null; assembly_id: string | null;
   depends_on: string[]; comments: Comment[]; checks: { ok: boolean } | null; tokens: number;
   agent_state: AgentState; updated_at: string;
@@ -163,7 +165,8 @@ export interface LiveInstance {
 export interface LiveAssembly {
   status: AssemblyState["status"] | null; summary?: string | null; at?: string | null;
   /** PD-73: the visual checks (layout, each integrated level), advisory. */
-  looks?: (VisualRecord & { image: string | null; name: string; level: string })[];
+  /** A look that no longer describes the program (revision, re-run) carries why; its old verdict is history. */
+  looks?: (VisualRecord & { image: string | null; name: string; level: string; superseded?: string | null })[];
   /** PD-71: the whole-program clash check after the final assembly (advisory, never blocks). */
   check?: { status: "running" | "done" | "failed" | "skipped"; text?: string; at?: string; count?: number } | null;
   clashes: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
@@ -193,12 +196,19 @@ export interface Gate { code: string; name: string; mandatory: boolean; status: 
 export interface Constants {
   minutes_per_unit: Record<Family, number>; complexity: [number, number];
   milestones: { code: string; label: string; weight: number }[]; default_concurrency: number; eta_factors: [number, number];
+  /** Minutes per part on the paths with no AI turn (Toolbox, built from the interfaces, workspace template). */
+  path_minutes?: Partial<Record<"toolbox" | "direct" | "template", [number, number]>>;
+  /** The AI designer's range around complexity x rate. */
+  agent_spread?: [number, number];
+  path_labels?: Record<string, string>;
 }
 
 export interface Program {
   id: string; name: string; brief: string; key: string; status: ProgramStatus; planner: "archie" | "standard";
   planning: { started_at: string; notes: string; stage?: "master" } | null; plan: Plan | null;
-  plan_estimate?: { tickets: number; estimate_min: number; eta: Eta };
+  plan_estimate?: { tickets: number; estimate_min: number; estimate_lo?: number; estimate_hi?: number; eta: Eta;
+    /** The build path per plan part: the direct builder's decision on the drafted layout, else the prediction. */
+    paths?: Record<string, "toolbox" | "direct" | "template" | "agent" | null> };
   gates: Gate[]; items: Item[]; tickets: Ticket[]; columns: { code: Column; label: string }[];
   counts: Record<Column, number>; rollup: Rollup | null; eta: Eta | null; concurrency: number;
   budget: { tokens: number; planning_tokens: number; spent: number; pct?: number; level?: "ok" | "warn" | "stop" };

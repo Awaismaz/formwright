@@ -334,6 +334,21 @@ def _fastener_hint(text: str) -> int | None:
     return int(m.group(1)) if m and int(m.group(1)) in CLEARANCE else None
 
 
+# a metric thread size as the engineer writes it ("4 M6 bolts", "M6x20", "M6 x 20"); upper case only, so a gear
+# module ("m2, 20/60 teeth") never reads as a screw, and not when "module" stands next to it ("M2 module")
+_BRIEF_M = re.compile(r"(?<!module )(?<![A-Za-z0-9])M(\d{1,2})(?![0-9.])(?!\s*module)")
+
+
+def brief_fastener(brief: str) -> int | None:
+    """The one fastener size the brief states explicitly ("joined by 4 M6 bolts"), else None. It wins over the
+    plan's own hints and the layout's size-from-span rule, so the interface says what the engineer asked for
+    (Archie's live run 2026-11-20: the brief said M6, the ICD said M5). A brief that names several sizes leaves
+    the choice per joint to the plan's fasteners (``fast_hint``)."""
+    sizes = {int(m.group(1)) for m in _BRIEF_M.finditer(brief or "")}
+    sizes &= set(CLEARANCE)
+    return next(iter(sizes)) if len(sizes) == 1 else None
+
+
 def parts_from(doc: dict[str, Any]) -> list[dict[str, Any]]:
     """The designed and standard parts of an approved program, in plan order, with what the layout needs."""
     plan = doc.get("plan") or {}
@@ -659,6 +674,10 @@ def build(parts: list[dict[str, Any]], brief: str = "", overrides: dict[str, Any
             fast_item[sb] = c["id"]
             if c["m"]:
                 fast_hint.setdefault(sb, c["m"])
+    bm = brief_fastener(brief)
+    if bm:  # an explicit size in the brief wins over the plan's hints and the span rule (the cap screws the plan
+        for p in parts:  # names for the bearing caps keep their own size: ``cap_fast`` is read first there)
+            fast_hint[p["sub"]] = bm
 
     def take_key(sub: str, size: tuple[float, float]) -> str | None:
         """The key item of ``sub`` one more keyed joint gets (one Toolbox size per item, at most its quantity), else
@@ -2268,7 +2287,12 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
                                  "cap bears on the bearing's outer ring only, clear of the turning inner ring and shaft)"})
     elif f["kind"] == "shaft_bore":
         g = _axial(skel, side, d, d["axis"], d["z"][0])
-        if which == "a":
+        if which == "a" and d.get("bore_z"):  # one bore of a stepped (two-bore) coupling: through its own half
+            bz = d["bore_z"]
+            out.append({"type": "hole", **_axial(skel, side, d, d["axis"], bz[0], bz[1]), "d": d["d"],
+                        "fit": d["fit"].split("/")[0], "tol": tol, "span": True,
+                        "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]} through its half"})
+        elif which == "a":
             out.append({"type": "hole", **g, "d": d["d"], "fit": d["fit"].split("/")[0],
                         "tol": tol, "label": f"bore Ø{d['d']:g} {d['fit'].split('/')[0]}"})
         elif d.get("seat_z"):  # a stepped shaft: the seat Ø over its span, up to the shoulder
@@ -3125,7 +3149,10 @@ def excerpt(skel: dict[str, Any], icd: dict[str, Any], item: str) -> str:
                         f"{abs(h0['z1'] - h0['z0']):g} deep from the mounting face, along {lax.upper()}) at ({u}, {v}) "
                         + ", ".join(where(h) for h in holes))
         elif holes:
-            if f["kind"] == "shaft_bore":
+            if f["kind"] == "shaft_bore" and holes[0].get("span"):
+                bits.append(f"{holes[0]['label']}, {_at(holes[0])}, {_span(holes[0])} (a stepped bore: it runs from "
+                            "the coupling's end face to the middle, where the other shaft's bore meets it)")
+            elif f["kind"] == "shaft_bore":
                 bits.append(f"{holes[0]['label']} through, {_at(holes[0])}")
             elif f["kind"] == "dowel":
                 bits.append(f"{len(holes)} × Ø{holes[0]['d']:g} {holes[0].get('fit') or ''} dowel holes through for "

@@ -12,6 +12,7 @@ The user reviews and edits the plan at the brief approval gate before any ticket
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -331,7 +332,8 @@ def finish(plan: dict[str, Any], name: str, brief: str) -> tuple[dict[str, Any],
     one sub-assembly, one unit to assemble (a "keyed shaft" and a "gear" group are one physical unit)."""
     from aicad.office import scope
 
-    out, _dropped, note = scope.respect(plan, brief)
+    out, _dropped, note = scope.respect(copy.deepcopy(plan), brief)
+    out = brief_fasteners(out, brief)
     if scope.small(out) and len(out.get("subassemblies") or []) > 1 and scope.rides_on_shafts(out):
         out = scope.one_unit(out)
         out["subassemblies"][0]["description"] = (out["subassemblies"][0].get("description") or
@@ -343,6 +345,36 @@ def finish(plan: dict[str, Any], name: str, brief: str) -> tuple[dict[str, Any],
         if out.get(k):
             p2[k] = out[k]
     return p2, note
+
+
+_BOLTY = re.compile(r"\bbolt|\bscrew", re.IGNORECASE)
+_M_SIZE = re.compile(r"\bM\d{1,2}(?![0-9.])")
+
+
+def brief_fasteners(plan: dict[str, Any], brief: str) -> dict[str, Any]:
+    """The brief's explicit fastener size (and count, "joined by 4 M6 bolts") written onto the plan's bolts and
+    screws, so the plan, the Toolbox pick and the interface all say what the engineer asked for (Archie's live run
+    2026-11-20: the brief said M6, the plan's "Frame bolt" said nothing and the ICD fell back to M5). Only when the
+    brief names one size; the screws that hold bearing caps keep their own size (the ICD reads those first); a
+    count only when the plan has one bolt line."""
+    from aicad.office import icd
+
+    m = icd.brief_fastener(brief)
+    if not m:
+        return plan
+    rows = [q for s in plan.get("subassemblies") or [] for q in s.get("parts") or []
+            if q.get("family") == "standard" and _BOLTY.search(str(q.get("name") or ""))
+            and not icd._CAP_FIXY.search(f"{q.get('name')} {q.get('description')}")]
+    for q in rows:
+        d = str(q.get("description") or "").strip()
+        if _M_SIZE.search(d):
+            q["description"] = _M_SIZE.sub(f"M{m}", d)
+        else:
+            q["description"] = (f"{d.rstrip('.')}, " if d else "") + f"M{m} as the brief states."
+    n = re.search(rf"\b(\d{{1,3}})\s*(?:x\s*)?M{m}\b[^.;,]{{0,20}}?\b(?:bolt|screw)s?\b", brief or "", re.IGNORECASE)
+    if n and len(rows) == 1 and 0 < int(n.group(1)) <= 200:
+        rows[0]["qty"] = int(n.group(1))
+    return plan
 
 
 def standard_plan(name: str, brief: str) -> dict[str, Any]:
@@ -362,7 +394,7 @@ def standard_plan(name: str, brief: str) -> dict[str, Any]:
         if named is not None:
             plan = normalise_plan(named, "standard")
             assert plan is not None
-            return plan
+            return brief_fasteners(plan, brief)
     bump = 1 if re.search(r"precision|tight toleranc|\bh7\b|\bh6\b|ground|lapped", t) else 0
     plastic = bool(re.search(r"\bplastic|moulded|molded|\babs\b|nylon|3d[- ]?print", t))
     sheet = bool(re.search(r"sheet metal|sheet-metal|\bbent\b|folded", t))
@@ -390,4 +422,4 @@ def standard_plan(name: str, brief: str) -> dict[str, Any]:
         assumptions.append("The brief asks for precision, so designed parts are one complexity step higher.")
     plan = normalise_plan({"summary": summary, "assumptions": assumptions, "subassemblies": raw_subs}, "standard")
     assert plan is not None
-    return plan
+    return brief_fasteners(plan, brief)

@@ -37,7 +37,7 @@ SOURCE_WORD = {"brief": "from the brief", "answer": "your answer", "standard": "
                "assumed": "assumed", "layout": "laid out", "plan": "from the plan",
                "measured": "measured from the master model"}
 PATH_WORD = {"spec": "Built from the interface spec (no AI)", "toolbox": "Toolbox standard part",
-             "ai": "Modelled by an AI designer"}
+             "template": "Workspace template (no AI)", "ai": "Modelled by an AI designer"}
 MAX_SCREWS = 400      # screws drawn (a large program has hundreds; the rest are counted)
 _FASTY = re.compile(r"screw|bolt|\bnut\b|washer|\bstud", re.IGNORECASE)
 
@@ -144,6 +144,10 @@ def build_paths(doc: dict[str, Any], skel: dict[str, Any], ifs: list[dict[str, A
             out[iid] = {"path": "spec", "why": str(dp.get("summary") or "")}
         else:
             out[iid] = {"path": "ai", "why": "; ".join(str(x) for x in (dp.get("reasons") or [])[:2])}
+        # the ticket's own build path (its estimate's, PD-190) wins: the board, the estimates and the preview agree
+        est = {"direct": "spec", "template": "template", "agent": "ai"}.get(str(t.get("estimate_path") or ""))
+        if est and est != out[iid]["path"]:
+            out[iid] = {"path": est, "why": out[iid]["why"] if est == "ai" else ""}
     return out
 
 
@@ -490,7 +494,7 @@ def scene(skel: dict[str, Any], ifs: list[dict[str, Any]], *, plan: dict[str, An
         "counts": {"bodies": len(bodies), "screws": n_screws, "dims": len(dims),
                    "errors": sum(1 for x in issues if x["severity"] == "error" and not x["acknowledged"]),
                    "warnings": sum(1 for x in issues if x["severity"] != "error" or x["acknowledged"])},
-        "paths": {k: sum(1 for r in rows.values() if r["path"] == k) for k in ("spec", "toolbox", "ai")},
+        "paths": {k: sum(1 for r in rows.values() if r["path"] == k) for k in ("spec", "toolbox", "template", "ai")},
         "ms": {"scene": _r((time.perf_counter() - t0) * 1000, 1)},
     }
     return out

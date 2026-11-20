@@ -40,7 +40,7 @@ export default function SpeedPanel({ program, plan, className }: { program: Prog
   const spec = (f: Family) => program.families.find(x => x.code === f)?.specialist ?? "mill";
   const model = useMemo(() => {
     if (plan) {
-      const p = (c: number, t: Threads | null) => planPreview(plan, k, c, t, spec);
+      const p = (c: number, t: Threads | null) => planPreview(plan, k, c, t, spec, program.plan_estimate?.paths);
       const base = p(saved.conc, saved.threads), next = p(conc, threads);
       return { before: base.eta, after: next.eta, work: next.work, parts: next.parts };
     }

@@ -208,6 +208,74 @@ def public(r: dict[str, Any]) -> dict[str, Any]:
             "uses": int(r.get("uses") or 0), "material": r.get("material")}
 
 
+def get(root: Path, tid: str) -> dict[str, Any] | None:
+    """One template of this workspace (``root`` is the organisation's office root: tenant scoped), or None."""
+    if not _ID.fullmatch(tid or ""):
+        return None
+    try:
+        r = json.loads((_dir(root) / f"{tid}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return r if isinstance(r, dict) and r.get("schema") == "fw-template" else None
+
+
+def param_meta(src: str) -> dict[str, dict[str, Any]]:
+    """The script's ``PARAM_META`` literal (labels, units, limits), read without running anything."""
+    import ast
+
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "PARAM_META" for t in node.targets):
+            try:
+                v = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError, TypeError):
+                return {}
+            return {str(k): x for k, x in v.items() if isinstance(x, dict)} if isinstance(v, dict) else {}
+    return {}
+
+
+def studio_view(r: dict[str, Any]) -> dict[str, Any]:
+    """A template as the Design Studio's Toolbox shows it: the library card plus its editable parameters (value,
+    label, unit, limits) so the engineer can start a part from it."""
+    meta = param_meta(str(r.get("script") or ""))
+    rows = []
+    for name, value in (r.get("params") or {}).items():
+        m = meta.get(name) or {}
+        words = [w if len(w) <= 3 else w.capitalize() for w in name.split("_")]  # OD, BORE_D -> "OD", "Bore D"
+        rows.append({"name": name, "value": float(value), "label": str(m.get("label") or " ".join(words)),
+                     "unit": str(m.get("unit") or ""), "group": str(m.get("group") or ""),
+                     "min": m.get("min"), "max": m.get("max")})
+    return {**public(r), "param_list": rows}
+
+
+def studio_source(r: dict[str, Any], values: dict[str, Any] | None = None, name: str | None = None) -> str:
+    """The template's model script with the engineer's values (only its own parameters, finite numbers inside the
+    script's own limits), ready to build as a Design Studio part."""
+    import math
+
+    params = r.get("params") or {}
+    meta = param_meta(str(r.get("script") or ""))
+    clean: dict[str, float] = {}
+    for k, v in (values or {}).items():
+        if k not in params:
+            raise TemplateError(f"{k} is not a parameter of this template")
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise TemplateError(f"{k} must be a number") from None
+        if not math.isfinite(x):
+            raise TemplateError(f"{k} must be a number")
+        m = meta.get(k) or {}
+        lo, hi = m.get("min"), m.get("max")
+        if isinstance(lo, (int, float)) and x < float(lo) - TOL or isinstance(hi, (int, float)) and x > float(hi) + TOL:
+            raise TemplateError(f"{m.get('label') or k} must be between {lo:g} and {hi:g}")
+        clean[k] = x
+    return substitute(str(r.get("script") or ""), clean, name)
+
+
 def delete(root: Path, tid: str) -> bool:
     if not _ID.fullmatch(tid or ""):
         return False

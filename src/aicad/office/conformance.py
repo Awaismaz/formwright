@@ -274,6 +274,8 @@ def in_canon(lax: str | None, info: dict[str, Any], refs: dict[str, Any]) -> tup
 
 def _row(f: dict[str, Any], info: dict[str, Any], refs: dict[str, Any]) -> dict[str, Any]:
     info, refs = in_canon(f.get("ax"), info, refs)
+    if f["type"] == "hole" and f.get("span"):  # a bore over its own span (one step of a stepped bore): measured
+        return _seat(f, refs)                      # like a seat, Ø with its fit and an end inside the span
     if f["type"] == "hole":
         return _hole(f, info)
     if f["type"] == "boss":

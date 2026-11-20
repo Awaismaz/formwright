@@ -79,7 +79,7 @@ def test_keyed_gear_preview_hand_checked() -> None:
     assert _axis(key) == [1, 0, 0]  # the key's Z (its height) points out of the keyseat, along +X
     # how each part will be made: both designed parts from the spec (no AI), the key from the Toolbox
     assert (shaft["path"], gear["path"], key["path"]) == ("spec", "spec", "toolbox")
-    assert pv["paths"] == {"spec": 2, "toolbox": 1, "ai": 0}
+    assert pv["paths"] == {"spec": 2, "toolbox": 1, "template": 0, "ai": 0}
     assert pv["envelope"] == {"min": [-32, -22, -32], "max": [32, 58, 32]}
     env = {d["id"]: d["value"] for d in _dim(pv, "env:")}
     assert env == {"env:X": 64, "env:Y": 80, "env:Z": 64}

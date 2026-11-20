@@ -9,7 +9,9 @@ import { Avatar, Badge, Button, Modal } from "@/components/ui";
 import { AgentAvatar, AGENT, AGENTS, STATE_LABEL } from "./Avatars";
 import { BASE } from "./api";
 import { useMoveTicket } from "./Board";
-import { assignable, fmtMinutes, runChip } from "./model";
+import { assignable, fmtMinutes, fmtRange, runChip } from "./model";
+
+const PATH_WORDS = { toolbox: "Toolbox", direct: "from the interfaces", template: "workspace template", agent: "AI designer" } as const;
 import PartPreview from "./PartPreview";
 import { errorTone, fmtError } from "./timeline";
 import type { Column, DesignPath, OfficeEvent, Program, Ticket } from "./types";
@@ -198,7 +200,8 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               onChange={e => call("cx", () => api.patch<Program>(`${BASE}/programs/${program.id}/tickets/${t.id}`, { complexity: Number(e.target.value) }))}>
               {[1, 2, 3, 4, 5].map(c => <option key={c} value={c}>{c}</option>)}</select></label>}
           <div className="rounded-md border border-border p-2.5 text-[12px]">
-            <div className="flex justify-between"><span className="text-muted">Estimate</span><b>{fmtMinutes(t.estimate_min)}</b></div>
+            <div className="flex justify-between" data-ticket-estimate={t.estimate_path}><span className="text-muted">Estimate{t.estimate_path ? ` (${PATH_WORDS[t.estimate_path]})` : ""}</span>
+              <b>{t.estimate_lo !== undefined && t.estimate_hi !== undefined ? fmtRange(t.estimate_lo, t.estimate_hi) : fmtMinutes(t.estimate_min)}</b></div>
             {(t.actual_min ?? 0) > 0 && <div className="flex justify-between" data-actual><span className="text-muted">Actual agent time</span>
               <b>{fmtMinutes(t.actual_min ?? 0)}{t.error_pct !== null && t.error_pct !== undefined && <span className={cx("ml-1 font-medium",
                 { success: "text-success", warning: "text-warning", danger: "text-danger", neutral: "text-muted" }[errorTone(t.error_pct)])}>({fmtError(t.error_pct)})</span>}</b></div>}

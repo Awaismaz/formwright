@@ -8,7 +8,7 @@ import { layout, placeLabels, type DimDraw } from "@/viewer/dims";
 import type { V3 } from "@/viewer/types";
 import { BASE } from "../api";
 import type { Plan, Program } from "../types";
-import { ERROR_COLOR, PATH_COLOR, PATH_LABEL, sig, toResolved, visibleDims, worldBounds } from "./build";
+import { ERROR_COLOR, PATH_COLOR, PATH_LABEL, sig, toResolved, visibleDims, withPaths, worldBounds } from "./build";
 import { PreviewScene, type PreviewView } from "./scene3d";
 import type { BuildPath, PreviewData, PreviewDim } from "./types";
 
@@ -54,6 +54,8 @@ interface Props {
   testId?: string;
   /** items to highlight as well (the selected interface's two sides) */
   highlight?: string[];
+  /** build path per item id (the plan review's per-part paths, the source of its estimates) */
+  paths?: Record<string, BuildPath> | null;
 }
 
 /**
@@ -61,7 +63,9 @@ interface Props {
  * made, with the key numbers on the model in the viewport dimension style (DS-038). Click a number to see where it
  * came from; problems are drawn in red with their text. A picture of the layout, not an acceptance check.
  */
-export default function PlanPreview({ data, loading, error, hot, onHot, height = 420, title, compact = false, testId, highlight }: Props) {
+export default function PlanPreview({ data: raw, loading, error, hot, onHot, height = 420, title, compact = false, testId, highlight, paths }: Props) {
+  const pathSig = paths ? sig(paths) : "";
+  const data = useMemo(() => (raw ? withPaths(raw, paths) : raw), [raw, pathSig]); // eslint-disable-line react-hooks/exhaustive-deps
   const host = useRef<HTMLDivElement>(null);
   const eng = useRef<PreviewScene | null>(null);
   const [, setTick] = useState(0);
@@ -225,7 +229,7 @@ export default function PlanPreview({ data, loading, error, hot, onHot, height =
 
         {/* legend: how each part will be made */}
         {data && <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-panel/85 px-2 py-1 text-[11px] text-muted">
-          {(["spec", "toolbox", "ai"] as BuildPath[]).filter(k => data.paths[k] > 0).map(k => (
+          {(["spec", "template", "toolbox", "ai"] as BuildPath[]).filter(k => data.paths[k] > 0).map(k => (
             <span key={k} className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: PATH_COLOR[k] }} />{PATH_LABEL[k]} ({data.paths[k]})</span>))}
           {errors.length > 0 && <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm" style={{ background: ERROR_COLOR }} />Problem</span>}
         </div>}

@@ -1,7 +1,7 @@
 /** The instant layout preview served by GET/POST /api/office/programs/{pid}/preview (``graph/preview.py``). */
 import type { V3 } from "@/viewer/types";
 
-export type BuildPath = "spec" | "toolbox" | "ai";
+export type BuildPath = "spec" | "toolbox" | "template" | "ai";
 
 export type BodyGeom =
   | { kind: "box"; g: { s: [number, number, number]; open?: boolean } }

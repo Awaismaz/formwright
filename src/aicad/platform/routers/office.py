@@ -613,8 +613,8 @@ async def approve_express(pid: str, body: ApproveIn, ctx: Ctx = Depends(verified
         _look_at_layout(ctx, pid, doc)
         return _view(doc)
     root = _root(ctx)
-    _spawn_task(platform_env.build_program_assembly(root, pid, ctx.require_org().id, ctx.user.id,
-                                                    ctx.god_on("bypass_paywall")))
+    platform_env.spawn_program_assembly(root, pid, ctx.require_org().id, ctx.user.id,
+                                        ctx.god_on("bypass_paywall"))
     allowed, reason, _cta = can_run_agent(ctx)
 
     def run(r: Path, d: dict[str, Any]) -> None:
@@ -697,8 +697,8 @@ async def approve_icd(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, A
     from aicad.office import platform_env
 
     doc = _mutate(ctx, pid, lambda root, d: interfaces.approve(root, d, _actor(ctx)))
-    _spawn_task(platform_env.build_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
-                                                    ctx.god_on("bypass_paywall")))
+    platform_env.spawn_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
+                                        ctx.god_on("bypass_paywall"))
     audit(ctx.db, "office.icd_approved", ctx.user, doc["org_id"], target=pid, version=doc["icd"]["version"])
     track(ctx.db, "office_icd_approved", ctx.user, doc["org_id"], interfaces=len(doc["icd"]["interfaces"]))
     ctx.db.commit()
@@ -754,25 +754,11 @@ def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
 
 
 def _looks(ctx: Ctx, pid: str, doc: dict[str, Any]) -> list[dict[str, Any]]:
-    """The latest visual check of the layout and of each integrated level (advisory), newest level last."""
+    """The latest visual check of the layout and of each integrated level (advisory), stale ones marked superseded."""
     from aicad.assembly import store as astore
-    from aicad.assembly import visual
+    from aicad.office import visual_office
 
-    out: list[dict[str, Any]] = []
-    lay = visual.public(visual.load_record(store.program_dir(_root(ctx), pid) / "visual" / "layout"))
-    if lay:
-        out.append({**lay, "level": "layout", "name": "Layout (interfaces gate)",
-                    "image": f"/api/office/programs/{pid}/visual/layout.png" if lay.get("status") == "done" else None})
-    aroot = astore.org_root(get_settings().data_dir, ctx.require_org().id)
-    for t in doc["tickets"]:
-        if t["kind"] != "integration" or not t.get("assembly_id"):
-            continue
-        rec = visual.public(visual.load_record(astore.doc_dir(aroot, t["assembly_id"]) / "visual"))
-        if rec:
-            out.append({**rec, "level": t["item_id"], "name": t["title"],
-                        "image": f"/api/m/assembly/assemblies/{t['assembly_id']}/visual.png"
-                        if rec.get("status") == "done" else None})
-    return out
+    return visual_office.looks(_root(ctx), astore.org_root(get_settings().data_dir, ctx.require_org().id), pid, doc)
 
 
 @router.post("/programs/{pid}/visual/layout")
@@ -813,8 +799,8 @@ async def rebuild_assembly(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[s
         service.emit(root, d, "assembly.rebuild", f"{ctx.user.name or 'Someone'} asked Fitz to rebuild the program "
                      "assembly.", _actor(ctx))
     doc = _mutate(ctx, pid, fn)
-    _spawn_task(platform_env.build_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
-                                                    ctx.god_on("bypass_paywall")))
+    platform_env.spawn_program_assembly(_root(ctx), pid, ctx.require_org().id, ctx.user.id,
+                                        ctx.god_on("bypass_paywall"))
     return _view(doc)
 
 

@@ -12,9 +12,9 @@ import type { BodyGeom, BuildPath, PreviewBody, PreviewDim } from "./types";
 /** Triangles (local frame, flat arrays) and feature lines (pairs of points). */
 export interface Geo { pos: number[]; idx: number[]; edges: number[] }
 
-export const PATH_COLOR: Record<BuildPath, string> = { spec: "#2a9d8f", toolbox: "#8d97a6", ai: "#7c6fd6" };
+export const PATH_COLOR: Record<BuildPath, string> = { spec: "#2a9d8f", toolbox: "#8d97a6", template: "#b7950b", ai: "#7c6fd6" };
 export const PATH_LABEL: Record<BuildPath, string> = {
-  spec: "Built from the spec (no AI)", toolbox: "Toolbox standard part", ai: "AI designer models it",
+  spec: "Built from the interfaces (no AI)", toolbox: "Toolbox standard part", template: "Workspace template (no AI)", ai: "AI designer models it",
 };
 export const ERROR_COLOR = "#e5484d";
 
@@ -178,6 +178,19 @@ export function itemOfRow(rows: Record<string, { name: string; at?: [number, num
   for (const [k, r] of Object.entries(rows)) if (r.at && r.at[0] === si && r.at[1] === pi && r.name.trim() === name.trim()) return k;
   for (const [k, r] of Object.entries(rows)) if (r.name.trim() === name.trim()) return k;
   return rows[direct] ? direct : null;
+}
+
+/** The plan review's build path words (``model.partPath``) in the preview's terms. */
+export const FROM_PART_PATH: Record<string, BuildPath> = { direct: "spec", agent: "ai", toolbox: "toolbox", template: "template" };
+
+/** The preview with each part's build path taken from ``paths`` (item id -> path) where given: the plan review colours
+ * by the same per-part path its estimates use, so the two never disagree. Legend counts follow. */
+export function withPaths<T extends { bodies: PreviewBody[]; rows: Record<string, { path: BuildPath }>; paths: Record<BuildPath, number> }>(d: T, paths?: Record<string, BuildPath> | null): T {
+  if (!paths) return d;
+  const rows = Object.fromEntries(Object.entries(d.rows).map(([k, r]) => [k, paths[k] ? { ...r, path: paths[k]! } : r]));
+  const counts: Record<BuildPath, number> = { spec: 0, toolbox: 0, template: 0, ai: 0 };
+  for (const r of Object.values(rows)) counts[r.path] += 1;
+  return { ...d, rows, paths: counts, bodies: d.bodies.map(b => (paths[b.item] ? { ...b, path: paths[b.item]! } : b)) };
 }
 
 /** A short stable signature of anything JSON (query keys for live updates). */
