@@ -472,3 +472,24 @@ def test_a5_cover_bolts_are_planned_to_the_holes_of_the_lid_grid() -> None:
     b2 = next(c for c in g2.components if c.kind == "fastener" and "cover" in c.name.lower())
     b2.qty = 6
     assert not goffice.fit_fastener_counts(g2, gc.to_plan(g2, resolved=True), _icd(g2)[1])
+
+
+# ============================================================================ benchmark A6: no blind caps in a coaxial set
+def test_a6_blind_caps_are_left_out_of_a_planetary_set_and_the_screws_follow() -> None:
+    from aicad.master import decide
+
+    reply = copy.deepcopy(REPLY["reply"])
+    screws = next(x["via"][0] for x in reply["connections"] if x["guest"] == "input_open_cap")
+    for c in reply["components"]:
+        if c["id"] == screws:
+            c["qty"] = 16  # A6: four caps of four screws
+    for side in ("input", "output"):  # A6's reply: an open and a blind cap on each shaft
+        reply["components"].append({"id": f"{side}_blind_cap", "kind": "bearing_cap",
+                                    "name": f"{side.capitalize()} blind cap", "params": {"style": "blind"}})
+        reply["connections"].append({"kind": "bolted_joint", "host": "housing", "guest": f"{side}_blind_cap",
+                                     "via": [screws]})
+    g = _graph(reply)
+    assert sorted(c.name for c in g.components if c.kind == "bearing_cap") == ["Input open cap", "Output open cap"]
+    assert g.comp(screws).qty == 8
+    assert any("Input blind cap, Output blind cap: left out" in n for n in g.notes)
+    assert decide.decide(gc.to_plan(g, resolved=True), BRIEF, "Planetary")["path"] == "fast"

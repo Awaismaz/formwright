@@ -162,7 +162,13 @@ def test_bearing_screening_is_exact(tmp_path: Path, seat_d: float) -> None:
         assert n_fast < n_slow
     else:  # an undersized seat: the outer ring clashes, found exactly as before
         assert [(p["a"][:7], p["b"][:7]) for p in fast["pairs"]] == [("housing", "bearing")]
-        want = math.pi / 4 * (52.0 ** 2 - 51.0 ** 2) * 15.0
+        # the annulus Ø51..52 x 15 less the outer ring's ISO 582 corner chamfers (Toolbox v2, 45° x r_s min c = 1.0 for
+        # 6205) inside the band: per end 2 pi int_0^w (R - u)(c - u) du, R 26, w 0.5
+        from aicad import toolbox
+
+        R, w, c = 26.0, 0.5, toolbox.BEARING_RS[6205]
+        want = math.pi / 4 * (52.0 ** 2 - 51.0 ** 2) * 15.0 - 2 * 2 * math.pi * (
+            R * c * w - (R + c) * w * w / 2 + w ** 3 / 3)
         assert fast["pairs"][0]["volume_mm3"] == pytest.approx(want, rel=1e-3)
     print(f"seat Ø{seat_d}: screened {t_fast:.2f} s / {n_fast} booleans, plain {t_slow:.2f} s / {n_slow} booleans")
 

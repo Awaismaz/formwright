@@ -188,6 +188,21 @@ size: Opus orchestrates, Sonnet does smaller design jobs, Haiku parses/matches/c
 
 ## Where things stand (handoff, updated 2026-11-20)
 
+**Latest (2026-11-21):** the founder's planetary benchmark (EVAL-010) is the standing task.
+
+- **Status:** "Build a single stage planetary Gearbox" now comes out right through the Design Office (A5, A7: complete
+  in about 3 min on the fast path, 0 part tokens, 0 clashes, all planetary checks). History in
+  `docs/reports/planetary-benchmark.md`.
+- **How each attempt runs:** a program "Planetary benchmark A<n>" on his account.
+  - Driver and judge scripts live in the session scratchpad.
+  - The judge runs the golden `k_planetary` rows on the live program.
+- **Merged today:**
+  - planetary geometry and orchestration;
+  - the master-model ICD fix;
+  - the app-wide no-dashes sweep, guarded by tests.
+- **Open:** Studio STEP recognition sums cylinder angles (PD-276); the master path models planetary sets poorly, so the
+  planetary normalisation keeps them on the fast path.
+
 **Latest (2026-11-20, late, main at the commit after 9369f3e):** nothing in flight, no worktrees, all merged and pushed.
 This day's later work: Archie as the whole-app copilot (`office/copilot.py`, `/api/copilot`, global drawer, Ctrl J;
 navigate/point run at once, every other action incl. running the design agent needs Apply; agentic propose-check-retry

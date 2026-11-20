@@ -104,7 +104,7 @@
      "name": "Cover bolt",
      "family": "standard",
      "complexity": 1,
-     "qty": 6,
+     "qty": 4,
      "description": "Hex bolt M8x30 joining the cover to the base.",
      "toolbox": "hex_bolt"
     }

@@ -4,6 +4,42 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-21 (a): Planetary benchmark, attempts A2 to A7 (EVAL-010, PD-250..278)
+
+**Founder's standing task:** "Build a single stage planetary Gearbox" through the Design Office on his account, fixed and
+retried until right. Full history: `docs/reports/planetary-benchmark.md`.
+
+**Attempts:**
+| # | Result | What changed after it |
+|---|---|---|
+| A2 | 22 of 25 tickets in 3.4 min | Pin vs carrier rounding clash; fit band; supervisor retry and question loop |
+| A3 | Not a planetary (generic gearbox) | Default answers applied by code; long structured answers trimmed; a failed re-plan keeps the plan |
+| A4 | Master path, gate blocked | Caps on the cover go on the housing; master ICD fix (agent, `wip/master-icd-fix`) |
+| A5 | **Right** | Bolts planned to the grid's holes; internal mesh wording |
+| A6 | Master path, 31 clashes | Blind caps left out of a coaxial set; screws scaled |
+| A7 | **Right**, 23 of 23 rows | None |
+
+**Also done:**
+- `wip/master-icd-fix` merged. The master measurement reads half bores, split bores, bearing seats and meshes, and Fix
+  with Archie re-measures a stale master (PD-270..277).
+- `wip/no-dashes` merged. 286 long dashes replaced across `web/src` and `src/aicad`, guarded by tests. The founder rule
+  covers everything.
+- Two stale tests fixed:
+  - `test_assembly_motion`: the bearing r_s chamfer integral.
+  - `test_golden` head nouns: A1's plan now has 4 cover bolts.
+
+**Verified how:**
+- Each attempt judged by `planetary_judge.py`, which runs the golden `k_planetary` rows on the live program, plus the
+  final assembly picture.
+- Full Python suite run file by file: 2 stale failures, both fixed.
+- Simulated golden suite: 14 of 14.
+- ruff, tsc, vitest 186, vite build.
+
+**Not done:** the Studio STEP recognition still sums cylinder angles over a whole line (PD-276).
+
+**Next:** keep running attempts; on a failure, fix and log it. The master path for a planetary set is weak (A6), so the
+fast path must hold.
+
 ## 2026-11-20 (c) — Assembly Studio as a one-window operation (ASM-028..5, PD-240..244)
 
 Founder complaint: "stepped splined shaft and a spur gear on it" made only the shaft; the gear went to the Design

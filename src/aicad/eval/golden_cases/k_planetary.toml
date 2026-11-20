@@ -34,8 +34,8 @@ wall_live_s = 3600
 
 [expect]
 complete = true
-parts = 18               # A1's plan: 18 part lines, 38 pieces (3 planets, 3 pins, 3 planet bearings, 2 + 2 shaft
-pieces = 38              # bearings, 8 cap screws, 6 cover bolts, ...)
+parts = 18               # A1's plan: 18 part lines, 36 pieces (3 planets, 3 pins, 3 planet bearings, 2 + 2 shaft
+pieces = 36              # bearings, 8 cap screws, 4 cover bolts (A1 planned 6 for a grid of 4 holes), ...)
 only_simulated = ["parts", "pieces"]
 # pieces by head noun: gears = sun, 3 planets, ring; bearings = 2 + 2 shaft and 3 planet; caps = cover and 2 open
 # caps; supports = housing base and carrier; fasteners = 8 cap screws and 6 cover bolts

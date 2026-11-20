@@ -419,6 +419,31 @@ def normalise(graph: DesignGraph) -> DesignGraph:
                 x.host = ps.housing
                 notes.append(f"{gu.name} is bolted to the {hs.name if hs else 'housing'}'s end wall, over its "
                              "bearing seat (the shaft bearings sit in the housing walls; the cover is the lid).")
+    # a coaxial set has one end wall per shaft, where it leaves the housing, so each shaft gets one open cap; blind
+    # caps (a parallel-shaft gearbox's far side) have no seat to cover (benchmark A6, 2026-11-21: an open and a blind
+    # cap per shaft, the blind ones reached by no connection, so the fast layout gave way to a master model)
+    caps = [c for c in g.components if c.kind == "bearing_cap"]
+    blind = [c for c in caps if str(c.v("style") or "").lower() == "blind" or (
+        not c.v("style") and "blind" in c.name.lower())]
+    if blind and len(caps) - len(blind) >= 1:
+        gone = {c.id for c in blind}
+        screws: dict[str, list[int]] = {}  # fastener id -> [cap joints before, cap joints kept]
+        for x in g.connections:
+            if x.kind == "bolted_joint" and g.comp(x.guest) is not None and g.comp(x.guest).kind == "bearing_cap":
+                for v in x.via:
+                    s = screws.setdefault(v, [0, 0])
+                    s[0] += 1
+                    s[1] += x.guest not in gone
+        g.connections = [x for x in g.connections if x.guest not in gone and x.host not in gone]
+        g.components = [c for c in g.components if c.id not in gone]
+        for v, (before, kept) in screws.items():
+            f = g.comp(v)
+            if f is not None and before and kept and not any(x.kind != "bolted_joint" or (
+                    g.comp(x.guest) is not None and g.comp(x.guest).kind != "bearing_cap")
+                    for x in g.connections if v in x.via):
+                f.qty = max(1, round(f.qty * kept / before))
+        notes.append(f"{', '.join(c.name for c in blind)}: left out. In a planetary set each shaft leaves the housing "
+                     "through its own end wall, so each has one open cap and there is no far-side seat to close.")
     if pin is not None and pin.kind == "shaft":
         pin.set("role", "intermediate", "rule", "a planet pin")
     # centre distances (the internal mesh by the difference)
