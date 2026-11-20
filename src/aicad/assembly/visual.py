@@ -125,8 +125,11 @@ def relations_from_skeleton(skel: dict[str, Any], ifaces: list[dict[str, Any]], 
         d = f.get("data") or {}
         k = f["kind"]
         if k == "gear_mesh":
+            ins = [items.get(str((f.get(s) or {}).get("item"))) or {} for s in ("a", "b")]
+            internal = bool(d.get("internal")) or any(x.get("internal") for x in ins)
             mesh.append(f"{a} meshes with {b}: axes parallel, {_num(d.get('centre_distance', '?'))} mm apart "
-                        "(m (z1 + z2) / 2), the two gears in one plane")
+                        + ("(m (z_ring - z_planet) / 2: the planet runs inside the ring's internal teeth)"
+                           if internal else "(m (z1 + z2) / 2)") + ", the two gears in one plane")
         elif k == "shaft_bore" and d.get("shoulder_z") is not None:  # a stepped shaft: the hub against its shoulder
             out.append(f"{a} sits on the seat of {b} (the shaft passes through its bore), its face against the "
                        "shoulder of the larger step")

@@ -77,6 +77,41 @@ async def plan(folder: Path | None, name: str, brief: str, notes: str = "", budg
     return finish(out, res.graph, res.issues, time.perf_counter() - t0)
 
 
+def fit_fastener_counts(g: DesignGraph, p: dict[str, Any], ifs: list[dict[str, Any]]) -> bool:
+    """Bolts and screws planned to the holes the layout made for them: the bolt patterns are the authority (benchmark
+    A5, 2026-11-21: 6 cover bolts planned, a grid of 4 laid out, so 2 were bought and never placed). A count the
+    brief states is kept. Returns whether a count changed (the caller compiles again)."""
+    import re
+
+    holes: dict[str, int] = {}
+    other: set[str] = set()  # fasteners that also fill another kind of pattern: their count is not the grid's
+    for f in ifs:
+        d = f.get("data") or {}
+        if f.get("kind") == "hole_pattern" and d.get("fastener_item"):
+            if d.get("pattern") == "grid" and int(d.get("count") or 0) >= 2:
+                holes[d["fastener_item"]] = holes.get(d["fastener_item"], 0) + int(d["count"])
+            else:
+                other.add(d["fastener_item"])
+    for k in other:
+        holes.pop(k, None)
+    changed = False
+    for sb in p.get("subassemblies") or []:
+        for part in sb.get("parts") or []:
+            n = holes.get(f"i_{sb['id']}_{part['id']}")
+            if not n or int(part.get("qty") or 1) == n:
+                continue
+            c = next((c for c in g.components if c.kind == "fastener" and c.name == part["name"]), None)
+            if c is None or c.qty == n:
+                continue
+            noun = (c.name.split() or [""])[-1].lower().rstrip("s")
+            if noun and re.search(rf"\b{c.qty}\s+(?:\w+\s+){{0,3}}{re.escape(noun)}", g.brief or "", re.IGNORECASE):
+                continue  # the brief's own count
+            g.notes.append(f"{c.name}: {n}, one per hole the layout made for them ({c.qty} were planned).")
+            c.qty = n
+            changed = True
+    return changed
+
+
 def finish(out: OfficePlan, g: DesignGraph, iss: list[dict[str, Any]], seconds: float | None = None) -> OfficePlan:
     errs = [i for i in iss if i["severity"] == "error"]
     out.graph = g
@@ -85,6 +120,9 @@ def finish(out: OfficePlan, g: DesignGraph, iss: list[dict[str, Any]], seconds: 
         return out
     p = gc.to_plan(g, resolved=True)
     skel, ifs = gc.to_icd(g, p)
+    if fit_fastener_counts(g, p, ifs):
+        p = gc.to_plan(g, resolved=True)
+        skel, ifs = gc.to_icd(g, p)
     g2 = gc.read_layout(g, skel)
     chk = gc.check(g2, skel, ifs)
     lim = gc.limits(g2, skel, ifs)

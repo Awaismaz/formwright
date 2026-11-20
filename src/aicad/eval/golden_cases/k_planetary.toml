@@ -39,7 +39,9 @@ pieces = 38              # bearings, 8 cap screws, 6 cover bolts, ...)
 only_simulated = ["parts", "pieces"]
 # pieces by head noun: gears = sun, 3 planets, ring; bearings = 2 + 2 shaft and 3 planet; caps = cover and 2 open
 # caps; supports = housing base and carrier; fasteners = 8 cap screws and 6 cover bolts
-kinds = { gear = 5, bearing = 7, pin = 3, shaft = 2, key = 2, cap = 3, support = 2, fastener = 14 }
+# fasteners: 8 cap screws (2 caps x 4) and 4 cover bolts, one per hole of the lid's grid (A5: 6 were planned for 4
+# holes; bolts and screws now follow the holes the layout makes)
+kinds = { gear = 5, bearing = 7, pin = 3, shaft = 2, key = 2, cap = 3, support = 2, fastener = 12 }
 clashes = 0
 binned = 0
 loose = 0

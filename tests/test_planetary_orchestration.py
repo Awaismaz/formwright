@@ -450,3 +450,25 @@ def test_a4_a_cap_the_model_bolted_to_the_cover_goes_on_the_housing_and_the_fast
     p = gc.to_plan(g, resolved=True)
     d = decide.decide(p, BRIEF, "Planetary")
     assert d["path"] == "fast", d["reasons"]
+
+
+# ============================================================================ benchmark A5: bolts to the holes
+def test_a5_cover_bolts_are_planned_to_the_holes_of_the_lid_grid() -> None:
+    from aicad.graph import office as goffice
+    from aicad.graph import validate
+
+    g = _graph()
+    bolts = next(c for c in g.components if c.kind == "fastener" and "cover" in c.name.lower())
+    bolts.qty = 6  # A5's reply: six cover bolts for a grid of four holes
+    out = goffice.finish(goffice.OfficePlan(None), g, validate.issues(g))
+    parts = {p["name"]: p["qty"] for s in out.plan["subassemblies"] for p in s["parts"]}
+    _sk, ifs = _icd(out.graph)
+    lid = next(f for f in ifs if f["kind"] == "hole_pattern" and f["data"].get("pattern") == "grid")
+    assert parts[bolts.name] == lid["data"]["count"] == 4
+    assert any(f"{bolts.name}: 4, one per hole" in n and "(6 were planned)" in n for n in out.graph.notes)
+    caps = next(c for c in out.graph.components if c.kind == "fastener" and c is not bolts and "cap" in c.name.lower())
+    assert parts[caps.name] == 8  # the caps' circular patterns are not touched
+    g2 = _graph(brief=BRIEF + " with 6 cover bolts")  # a count the brief states is kept
+    b2 = next(c for c in g2.components if c.kind == "fastener" and "cover" in c.name.lower())
+    b2.qty = 6
+    assert not goffice.fit_fastener_counts(g2, gc.to_plan(g2, resolved=True), _icd(g2)[1])
