@@ -76,6 +76,7 @@ export default function PlanPreview({ data: raw, loading, error, hot, onHot, hei
   const [hoverIssue, setHoverIssue] = useState<number | null>(null);
   const [openDim, setOpenDim] = useState<string | null>(null);
   const [renderMs, setRenderMs] = useState<number | null>(null);
+  const [allIssues, setAllIssues] = useState(false);
   const dirs = useRef(new Map<string, V3>());
   const loadedFor = useRef<string | null>(null);
   const hotRef = useRef(onHot);
@@ -133,8 +134,11 @@ export default function PlanPreview({ data: raw, loading, error, hot, onHot, hei
       bbox: bounds, values: Object.fromEntries(shown.map(d => [d.id, d.value ?? 0])), units: {}, dirs: dirs.current,
     }).map(d => ({ ...d, text: texts.get(d.param) ?? d.text }));
     spots = placeLabels(draws.map(d => ({ x: d.lx, y: d.ly, w: labelW(d.text), h: LABEL_H, angle: d.angle })), { width: cam.width, height: cam.height });
-    errors.forEach(x => {
+    const seen = new Set<string>();
+    errors.forEach(x => {   // one badge per body: the first problem that names it
       for (const b of x.bodies.slice(0, 4)) {
+        if (seen.has(b)) continue;
+        seen.add(b);
         const c = s.centreOf(b);
         if (!c) continue;
         const [px, py] = cam.project(c);
@@ -159,7 +163,7 @@ export default function PlanPreview({ data: raw, loading, error, hot, onHot, hei
         {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" aria-label="Updating" />}
         {data && (errors.length ? <Badge tone="danger">{errors.length} problem{errors.length === 1 ? "" : "s"}</Badge> : <Badge tone="success">Places every part</Badge>)}
         <div className="ml-auto flex items-center gap-1">
-          {(["Iso", "Front", "Top", "Right"] as PreviewView[]).map(v => (
+          {!compact && (["Iso", "Front", "Top", "Right"] as PreviewView[]).map(v => (
             <button key={v} type="button" className="rounded px-1.5 py-0.5 text-[11.5px] text-muted hover:bg-text/[.06] hover:text-text" onClick={() => eng.current?.setView(v)}>{v}</button>))}
           <button type="button" title="Zoom to fit" aria-label="Zoom to fit" className="rounded p-1 text-muted hover:bg-text/[.06] hover:text-text" onClick={() => eng.current?.fit()}><Maximize2 className="h-3.5 w-3.5" /></button>
           <button type="button" aria-pressed={dimsOn} title="Dimensions" className={cx("flex items-center gap-1 rounded px-1.5 py-0.5 text-[11.5px]", dimsOn ? "bg-primary/10 text-primary" : "text-muted hover:bg-text/[.06]")} onClick={() => setDimsOn(v => !v)} data-preview-dims-toggle>
@@ -212,14 +216,16 @@ export default function PlanPreview({ data: raw, loading, error, hot, onHot, hei
         </div>}
 
         {/* problems before approval: red on the model, the text here */}
-        {data && issues.length > 0 && <div className={cx("absolute left-2 top-2 z-10 max-h-[60%] overflow-y-auto rounded-md border bg-panel/95 p-2 text-[11.5px] shadow-card", compact ? "max-w-[70%]" : "max-w-[46%]",
+        {data && issues.length > 0 && <div className={cx("absolute left-2 top-2 z-10 max-h-[60%] overflow-y-auto rounded-md border bg-panel/95 p-2 text-[11.5px] shadow-card", compact ? "max-w-[70%]" : "max-w-[40%]",
           errors.length ? "border-danger/40" : "border-warning/40")} data-preview-issues>
           <div className={cx("mb-1 flex items-center gap-1 font-semibold", errors.length ? "text-danger" : "text-warning")}><AlertTriangle className="h-3.5 w-3.5" />
             {errors.length ? `${errors.length} problem${errors.length === 1 ? "" : "s"} to clear before the interfaces gate` : `${issues.length} note${issues.length === 1 ? "" : "s"}`}</div>
-          <ol className="space-y-1">{issues.map((x, i) => (
+          <ol className="space-y-1">{issues.slice(0, allIssues ? issues.length : 3).map((x, i) => (
             <li key={i} className={cx("flex gap-1.5 rounded px-1 py-0.5", hoverIssue === i && "bg-text/[.05]")} onPointerEnter={() => setHoverIssue(i)} onPointerLeave={() => setHoverIssue(null)} data-preview-issue={x.code}>
               <span className={cx("mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white", x.severity === "error" ? "bg-danger" : "bg-warning")}>{i + 1}</span>
               <span className={x.severity === "error" ? "text-text" : "text-muted"}>{x.text}</span></li>))}</ol>
+          {issues.length > 3 && <button type="button" className="mt-1 text-primary hover:underline" onClick={() => setAllIssues(v => !v)} data-preview-issues-more>
+            {allIssues ? "Show fewer" : `Show all ${issues.length}`}</button>}
         </div>}
 
         {/* what is under the cursor */}

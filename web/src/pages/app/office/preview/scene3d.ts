@@ -206,7 +206,7 @@ export class PreviewScene {
       w = Math.max(w, Math.abs(d.dot(right))); h = Math.max(h, Math.abs(d.dot(up)));
     }
     const halfW = (this.cam.right - this.cam.left) / 2, halfH = (this.cam.top - this.cam.bottom) / 2;
-    this.cam.zoom = Math.min(halfW / Math.max(w, 1e-3), halfH / Math.max(h, 1e-3)) * 0.7;  // room for dimensions
+    this.cam.zoom = Math.min(halfW / Math.max(w, 1e-3), halfH / Math.max(h, 1e-3)) * 0.84;  // room for dimensions
     this.cam.updateProjectionMatrix();
     this.request();
   }

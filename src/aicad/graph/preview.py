@@ -192,7 +192,7 @@ class _Sources:
             if isinstance(p, dict) and p.get("value") is not None:
                 src = str(p.get("source") or "rule")
                 return {"what": what, "value": value, "source": src, "word": SOURCE_WORD.get(src, src),
-                        "note": str(p.get("note") or note)}
+                        "note": note or str(p.get("note") or "")}   # the formula with this program's numbers
         return {"what": what, "value": value, "source": default, "word": SOURCE_WORD.get(default, default),
                 "note": note}
 
