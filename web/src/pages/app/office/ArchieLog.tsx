@@ -7,6 +7,7 @@ import { ago, cx } from "@/lib/format";
 import { Badge, Button, Card, EmptyState } from "@/components/ui";
 import { AgentAvatar } from "./Avatars";
 import { BASE } from "./api";
+import RevisionCompare from "./preview/RevisionCompare";
 import type { ArchieChat as Chat, ArchieQuestion, Program, RevisionImpact, RevisionRecord, RuleOverride, SupervisorEntry } from "./types";
 
 const CLASS: Record<RevisionImpact["parts"][number]["class"], { label: string; tone: "success" | "warning" | "neutral" | "danger" | "primary" }> = {
@@ -73,6 +74,7 @@ function Revisions({ program, canEdit }: { program: Program; canEdit: boolean })
             </div>
             {r.why && <div className="text-muted">Why: {r.why}</div>}
             <RevisionImpactList imp={r.impact} compact />
+            {r.status === "applied" && <RevisionCompare program={program} rkey={r.id} title={`${r.id}: ICD v${r.icd_from} to v${r.icd_to}`} />}
             {r.undone && <div className="mt-1 text-[12px] text-muted">Undone by {r.undone.by} {ago(r.undone.at)}</div>}
             {r.status === "applied" && !r.undoable && r.undo_why && <div className="mt-1 text-[11.5px] text-muted">Undo is no longer possible: {r.undo_why}.</div>}
           </div>
@@ -176,6 +178,7 @@ function Entry({ e, program, canEdit }: { e: SupervisorEntry; program: Program; 
         <div className="mt-1 font-medium">{e.title}</div>
         {e.why && <div className="text-muted">Why: {e.why}</div>}
         {e.impact && <RevisionImpactList imp={e.impact} compact={e.status !== "asking"} />}
+        {e.impact && e.tool === "revise_program" && (e.status === "asking" || e.status === "applied") && <RevisionCompare program={program} rkey={e.id} title={e.title} />}
         {e.outcome && e.status !== "asking" && <div>Outcome: {e.outcome}</div>}
         {e.decided && <div className="text-[12px] text-muted">{e.decided.choice === "approve" ? "Approved" : "Declined"} by {e.decided.by} {ago(e.decided.at)}</div>}
         {e.undone && <div className="text-[12px] text-muted">Undone by {e.undone.by} {ago(e.undone.at)}: {e.undone.outcome}</div>}
