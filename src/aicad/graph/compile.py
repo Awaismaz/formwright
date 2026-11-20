@@ -333,12 +333,15 @@ def check(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -
     def ifs_of(kind: str) -> list[dict[str, Any]]:
         return [f for f in ifs if f["kind"] == kind]
 
+    def nm(side: dict[str, Any]) -> str:  # a copy's name without its number ("Planet gear #2": one part design)
+        return re.sub(r" #\d+$", "", str(side.get("name") or ""))
+
     for x in g.connections:
         h, gu = g.comp(x.host), g.comp(x.guest)
         if h is None or gu is None:
             continue
         if x.kind == "gear_mesh":
-            f = next((f for f in ifs_of("gear_mesh") if {f["a"].get("name"), f["b"].get("name")} == {h.name, gu.name}),
+            f = next((f for f in ifs_of("gear_mesh") if {nm(f["a"]), nm(f["b"])} == {h.name, gu.name}),
                      None)
             if f is None:
                 out.append(f"No gear mesh between {h.name} and {gu.name} in the interfaces.")
@@ -356,7 +359,7 @@ def check(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -
                 if abs(dist - a) > 1e-6:
                     out.append(f"{h.name} and {gu.name} are laid out {dist:g} mm apart, the mesh needs {a:g}.")
         elif x.kind in ("keyed_hub", "hub_fit"):
-            f = next((f for f in ifs_of("shaft_bore") if {f["a"].get("name"), f["b"].get("name")} == {h.name, gu.name}),
+            f = next((f for f in ifs_of("shaft_bore") if {nm(f["a"]), nm(f["b"])} == {h.name, gu.name}),
                      None)
             if f is None:
                 out.append(f"No shaft / bore fit between {gu.name} and {h.name} in the interfaces.")
@@ -369,7 +372,7 @@ def check(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -
                 out.append(f"{h.name}: the interfaces step to Ø{f['data']['shoulder_d']:g}, the graph to Ø"
                            f"{float(h.v('shoulder_d')):g}.")
             if x.kind == "keyed_hub":
-                k = next((f for f in ifs_of("key") if {f["a"].get("name"), f["b"].get("name")} == {h.name, gu.name}),
+                k = next((f for f in ifs_of("key") if {nm(f["a"]), nm(f["b"])} == {h.name, gu.name}),
                          None)
                 if k is None:
                     out.append(f"No keyed joint between {gu.name} and {h.name} in the interfaces.")
@@ -388,7 +391,7 @@ def check(graph: DesignGraph, skel: dict[str, Any], ifs: list[dict[str, Any]]) -
         elif x.kind == "bearing_journal":
             des = gu.v("designation")
             got = [f for f in ifs if f["kind"] in ("bearing_journal", "bearing_seat")
-                   and h.name in (f["a"].get("name"), f["b"].get("name"))]
+                   and h.name in (nm(f["a"]), nm(f["b"]))]
             if not got:
                 out.append(f"No bearing on {h.name} in the interfaces.")
             elif des is not None and any(str(f["data"].get("designation")) != str(int(des)) for f in got):

@@ -4,6 +4,48 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
+## 2026-11-20 (gbx): Planetary gearbox lays out from its connections; revisions leave a stale master layout (CD-GBX-1)
+
+Founder report: "Planetary Gearbox" stuck at the ICD gate (Ø210 openings at the envelope edge, holes "-72.5 mm
+apart"), gears hosted on the base and cover as blocks, and Archie's revision refused with "The revised layout is the
+same as the one the program has".
+
+**Root causes**
+- The intent reply gave the ring the planets' 30 teeth and seated the planet bearings in the housing; no code knew a
+  planetary set. The connection solver raised Unsupported ("Planet gear meshes or belts but sits on no shaft"), so the
+  plan went to the master model. The master skeleton made every part a block and took hosts from a breadth-first walk
+  over touching bodies (gears on the housing and cover); its measured passages put a Ø210 opening at the split face,
+  over the cap screw holes (the negative spacing: a Ø5 hole inside the Ø210 opening).
+- A revision re-derived the layout through the master skeleton, which places parts where the master bodies sat: mount
+  and size ops could not move anything, so the impact was empty. The graph sync also re-hosted the first connection
+  naming the part, which for a gear is its mesh.
+
+**Done**
+- `graph/planetary.py` (new): find and normalise a planetary set (internal ring, teeth rules, assembly condition,
+  ratio, mounting chain, internal centre distance), run at the end of `resolve` and in `layout.build`; the intent
+  prompt describes planetary sets; `spur_gear` has an `internal` param.
+- `graph/layout.py`: planetary mode (`_planetary`, `_planet_seat`, `_emit_planetary`), parents by the kinematic
+  chain, the ring item marked internal; planet copies and internal meshes skipped in tooth phasing.
+- `office/revision.py`: `_leave_master` (a structural revision of a master-path plan goes back to the solver when it
+  lays the design out cleanly, envelopes restored from the graph); on the master path hosts and sizes become
+  overrides; the graph sync re-hosts only carrying connections; `parent` is a placement key.
+- `master/skeleton.py`: hosts from the design graph (what carries a part), parent overrides.
+- `office/icd.py`: `outgrown` is a warning (founder rule: only the brief binds); GROW_CAP 4x for Archie's self-fix
+  (`interfaces._grow`); overlapping holes in plain words ("run into each other", "lies inside").
+- `graph/compile.check` copy-aware; `assembly/visual.py` internal and per-copy planet meshes, coaxial gears are not a
+  mesh; `graph/preview.py` draws the ring as a rim; `office/direct.py` sends internal rings to the agent.
+
+**Verified**: `tests/test_planetary_layout.py` (7 new) and the touched suites (`test_office_layout_envelopes`,
+`test_connection_layout`, `test_master_model`, `test_assembly_visual`, `test_program_revision`, `test_design_graph`,
+`test_office_phase6_layout`, `test_generators`, `test_assembly_trains`, `test_office_icd`, `test_office_direct`,
+`test_plan_preview`) pass; ruff clean. On a temp copy of the founder's program a relayout revision, or Archie's
+mount and size revision, is accepted with 0 ICD problems.
+
+**Not done**: an internal-gear generator (PD-234); brief outline caps on growth (PD-232); Archie chat wording (other
+engineer's files); golden suite not re-run.
+
+**Next**: merge; then on the founder's program ask Archie at the ICD gate to lay the program out again.
+
 ## 2026-11-20: Architecture v2 begins; Archie supervises; agents cheaper and faster; site revamp
 
 Founder (night of 11-19 to 11-20): fix the Design Office on his real programs, make it as reliable as the Studio,

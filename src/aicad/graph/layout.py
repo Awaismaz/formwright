@@ -52,7 +52,7 @@ import re
 from collections import deque
 from typing import Any
 
-from aicad.graph import registry
+from aicad.graph import planetary, registry
 from aicad.graph.model import Connection, DesignGraph
 from aicad.office import frames, icd
 from aicad.office.icd import (
@@ -95,6 +95,8 @@ BRACKET_MIN = 10.0        # mm: the least bracket under a motor
 BEARING_SPAN = 4.0        # x the shaft Ø (at least 2 x the bearing OD): bearings of a shaft that carries nothing
 MOTOR = {"shaft_d": 14.0, "shaft_length": 30.0, "L": 180.0, "W": 120.0, "H": 120.0}  # assumed envelope (IEC 71-ish)
 CORNER = 30.0             # mm from a base's edges to a connector at its corner (a table's leg brackets)
+PLANET_GAP = 3.0          # mm: the planetary set's gears to the -Y wall face and to the carrier (the ring's lands)
+PIN_END = 2.0             # mm of planet pin beyond its bearing / planet on the free (-Y) side
 PIVOT_CLEAR = 2.0         # mm between a pivoting member's upper end and the base it hangs under
 _TOPPY = re.compile(r"\btop\b|table|desk|deck|shelf|seat|worktop|\blid\b", re.IGNORECASE)
 ROLE = {"shaft": "shaft", "spur_gear": "gear", "pulley": "hub", "hub": "hub", "spacer": "hub", "bearing_cap": "hub",
@@ -139,6 +141,8 @@ def build(graph: DesignGraph, parts: list[dict[str, Any]], brief: str = "", over
     from aicad.graph.resolve import resolve
 
     g = graph if resolved else resolve(graph)
+    if planetary.find(g) is not None:  # (a graph resolved before the planetary rules: made consistent here)
+        g = planetary.normalise(g.model_copy(deep=True))
     return _Layout(g, parts, brief or g.brief, overrides).run()
 
 
@@ -219,6 +223,12 @@ class _Layout:
     def run(self) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         self._sizes()
         self._topology()
+        if self.ps is not None:
+            self.kind, self.sub_line, self.ctx, self.tree = "planetary", False, {}, set()
+            self._planetary()
+            self._loose()
+            self._emit()
+            return self._skeleton(), self.ifs
         self._context()
         self._axes()
         if self.kind == "gearbox":
@@ -376,6 +386,11 @@ class _Layout:
                 self.rings.append(x)
             elif x.kind in ("bolted_joint", "mounted_on"):
                 self.joints.append(x)
+        self.ps = planetary.find(g)
+        if self.ps is not None:  # the planetary set's meshes are placed by its own rule (``_planetary``)
+            gears = {self.ps.sun, self.ps.planet, self.ps.ring}
+            self.pmesh = [e for e in self.edges if e["kind"] == "gear_mesh" and {e["ra"], e["rb"]} <= gears]
+            self.edges = [e for e in self.edges if e not in self.pmesh]
         for s in self.shafts:  # a shoulder stop on a part the shaft doesn't carry
             for r in sorted(self.stops[s]):
                 if r not in self.riders[s]:
@@ -1300,6 +1315,303 @@ class _Layout:
             self.at[hm["lid"]] = [[0.0, 0.0, _r2(top + float(ls["H"]) / 2)]]
         self.base = h
 
+    # ------------------------------------------------------------------ 5c'. a planetary set in a housing
+    def _planetary(self) -> None:
+        """A single-stage planetary set (``graph/planetary.py``) in a housing: the input and output shafts coaxial
+        along +Y, each in its two bearings in its end wall (seats open to the outside, the cap over them); the sun on
+        the input shaft's inboard end; N planets on their bearings on their pins, equally spaced on the radius
+        a = m (z_s + z_p) / 2, the pins fixed in the carrier, the carrier on the output shaft; the internal ring
+        against the inner face of the -Y wall, on the planets' mid-plane. The housing is sized from what it holds
+        (the ring's OD, the axial stack, the bearings and caps): a planned envelope is Archie's starting guess, not a
+        limit (founder rule 2026-11-20)."""
+        ps = self.ps
+        need = [("housing", ps.housing), ("input shaft (the sun's)", ps.input), ("output shaft (the carrier's)",
+                ps.output), ("planet carrier", ps.carrier), ("planet pin", ps.pin)]
+        missing = [w for w, c in need if not c or c not in self.spec]
+        if missing:
+            raise Unsupported("a planetary set without its " + ", ".join(missing))
+        h, inp, out, car, pin, sun, pl, ring = (ps.housing, ps.input, ps.output, ps.carrier, ps.pin, ps.sun,
+                                               ps.planet, ps.ring)
+        self.housing = h
+        n = self.ncopies(pl)
+        if self.ncopies(pin) < n:
+            self.conflict(f"{n} planets but {self.ncopies(pin)} x {self.name(pin)}: each planet runs on its own pin.",
+                          [pl, pin], [])
+        sg, sp, sr = self.spec[sun], self.spec[pl], self.spec[ring]
+        m = float(sg["module"])
+        zs, zp, zr = int(sg["teeth"]), int(sp["teeth"]), int(sr["teeth"])
+        if zr != zs + 2 * zp:
+            self.conflict(f"{self.name(ring)} has {zr} teeth; a sun of {zs} and planets of {zp} need "
+                          f"{zs + 2 * zp} (z_ring = z_sun + 2 z_planet) for the sun and ring to be coaxial.",
+                          [ring, sun, pl], list(ps.meshes))
+        a = m * (zs + zp) / 2
+        b = min(float(sg["b"]), float(sp["b"]))
+        G = PLANET_GAP
+        # the ring: internal teeth, a rim under them
+        rim = max(3.0 * m, 6.0)
+        od_r = _r2(m * (zr + 2.5) + 2 * rim)
+        if "OD" in self.o(ring):
+            od_r = float(self.o(ring)["OD"])
+        wr = _r2(b + 2 * G)
+        sr.update(env=[od_r, od_r, wr], internal=True, b=float(sr["b"]))
+        # bearings: the shafts' (two per shaft, in the end walls) and the planets'
+        pieces_in, pieces_out = self.brg[inp], self.brg[out]
+        if not pieces_in or not pieces_out:
+            raise Unsupported("a planetary set whose input or output shaft has no bearings")
+        B_in = max(BEARINGS[self._des(bb)][2] for bb, _k, _x in pieces_in)
+        B_out = max(BEARINGS[self._des(bb)][2] for bb, _k, _x in pieces_out)
+        D_in = BEARINGS[self._des(pieces_in[0][0])][1]
+        D_out = BEARINGS[self._des(pieces_out[0][0])][1]
+        pb = ps.bearing if ps.bearing and ps.bearing in self.comp else None
+        dp = float(self.spec[pin]["seat"])
+        if pb is not None:
+            bd, bD, bB = BEARINGS[self._des(pb)]
+            if abs(bd - dp) > 1e-6:
+                self.conflict(f"{self.name(pb)} ({bd:g} bore) doesn't fit the Ø{dp:g} {self.name(pin)}.", [pb, pin], [])
+            rf = m * zp / 2 - 1.25 * m
+            if bD / 2 > rf - m + 1e-6:
+                self.conflict(f"{self.name(pb)} (OD {bD:g}) leaves no rim under the teeth of {self.name(pl)} (root "
+                              f"Ø{2 * rf:g}): use a smaller bearing, a smaller pin or larger planets.", [pl, pb], [])
+            if bB > b + 1e-6:
+                self.notes.append(f"{self.name(pb)} ({bB:g} wide) is wider than the {b:g} mm planet face.")
+        else:
+            bd, bD, bB = dp, dp, b
+        # the carrier: a disc carrying the pins on the planet radius
+        cs = self.spec[car]
+        Hc = float(self.o(car).get("H") or max(15.0, dp))
+        od_c = float(self.o(car).get("OD") or _r2(2 * (a + dp / 2 + max(6.0, 0.5 * dp))))
+        cs.update(OD=od_c, H=Hc, od_given=True)
+        if od_c / 2 > m * (zr - 2) / 2 - 1.0 and "OD" not in self.o(car):
+            self.notes.append(f"{self.name(car)}: Ø{od_c:g} reaches the ring's tooth tips; it runs beside the ring.")
+        # caps: one over each end wall's outer bearing (open where a shaft leaves)
+        cap_joints = [x for x in self.joints if x.host == h and self.comp[x.guest].kind == "bearing_cap"]
+        cap_sts = [(x.guest, c) for x in cap_joints for c in range(self.ncopies(x.guest))]
+        by_end: dict[int, tuple[str, int]] = {}
+        for cid, c in cap_sts:
+            nm = self.name(cid).lower()
+            side = 1 if "output" in nm else -1 if "input" in nm else (-1 if -1 not in by_end else 1)
+            if side not in by_end:
+                by_end[side] = (cid, c)
+        cap_m, cap_item = 0, None
+        if by_end:
+            x0 = cap_joints[0]
+            want = self._fastener(x0, 0.6 * max(D_in, D_out))
+            cap_m = max([mm for mm in CLEARANCE if mm <= max(want, 3)] or [6])
+            cap_item = self._fastener_item(x0)
+            lig = max(LIGAMENT, LIGAMENT_D * cap_m)
+            for side, (cid, _c) in by_end.items():
+                sh = inp if side < 0 else out
+                Dc = D_in if side < 0 else D_out
+                ks, ko = self.spec[cid], self.o(cid)
+                pcd = math.ceil(2 * (Dc + TAP_DRILL[cap_m] + 2 * lig) - 1e-9) / 2
+                ks.update(OD=float(ko["OD"]) if "OD" in ko else _r2(pcd + WASHER_OD[cap_m]), od_given=True,
+                          pcd=_r2(pcd), cap_d=Dc)
+                if "H" not in ko and ks["source"] == "assumed":
+                    ks["H"] = float(round(max(8.0, 0.25 * Dc)))
+                style = self.comp[cid].v("style") or icd._cap_kind(self.p(cid))
+                if style != "blind":
+                    ks["bore"] = _r2(float(self.spec[sh]["seat"]) + 2.0)
+                    ks["cap"] = "open"
+                else:
+                    ks.pop("bore", None)
+                    ks["cap"] = "blind"
+                bdes = BEARINGS[self._des(self.brg[sh][0][0])]
+                ks["relief"] = _r2((bdes[0] + bdes[1]) / 2)
+        caps_od = max([self.spec[c]["OD"] for c, _k in by_end.values()] or [0.0])
+        lid_x = next((x for x in self.joints if x.host == h and self.comp[x.guest].kind == "cover"), None)
+        # the housing: walls, the stack along +Y, the cavity around the ring
+        t = 12.0
+        if lid_x is not None:
+            lm = self._fastener(lid_x, od_r)
+            lm = lm if lm in CLEARANCE else 6
+            t = max(t, 2.5 * CLEARANCE[lm] + 1.5, icd.tap_depth(lm) - 6.0)
+        t_in = 2 * B_in + SHOULDER
+        t_out = 2 * B_out + SHOULDER
+        if cap_m:
+            t_in = max(t_in, icd.tap_depth(cap_m) + 3.0)
+            t_out = max(t_out, icd.tap_depth(cap_m) + 3.0)
+        stack = wr + Hc + CAV_Y   # ring (with the gears in it), the carrier, room to the +Y wall
+        above = max(od_r / 2 + CAV, caps_od / 2 + 2.0, max(D_in, D_out) / 2 + 3.0)
+        below = above + FLOOR
+        hs, ho = self.spec[h], self.o(h)
+        want_sz = {"L": _r2(2 * (max(od_r / 2 + CAV, od_c / 2 + CAV) + t)), "W": _r2(t_in + stack + t_out),
+                   "H": _r2(above + below)}
+        for k, v in want_sz.items():
+            if k in ho:
+                continue
+            hs[k] = v if hs["source"] == "assumed" else _r2(max(float(hs[k]), v))  # a stated size: at least
+        W, Hh = float(hs["W"]), float(hs["H"])
+        y0, y1 = -W / 2, W / 2
+        yc0 = y0 + t_in
+        ym = yc0 + G + b / 2
+        yr0 = yc0
+        yc_car0 = ym + b / 2 + G
+        yc_car1 = yc_car0 + Hc
+        za = -(above + (Hh - want_sz["H"]) / 2)  # (a taller housing than needed: the axis at mid-height)
+        self.at[h] = [[0.0, 0.0, _r2(-Hh / 2)]]
+        self.hm = {"shafts": [inp, out], "y0": y0, "y1": y1, "cap_m": cap_m, "cap_item": cap_item,
+                   "caps": [(st, 0 if side < 0 else 1, side) for side, st in sorted(by_end.items())],
+                   "lid": lid_x.guest if lid_x is not None else None, "lid_x": lid_x, "t": _r2(t),
+                   "t_in": _r2(t_in), "t_out": _r2(t_out), "za": za, "ym": ym, "a": a, "n": n}
+        hs["cavity"] = {"min": [_r2(-float(hs["L"]) / 2 + t), _r2(y0 + t_in), _r2(-Hh / 2 + FLOOR)],
+                        "max": [_r2(float(hs["L"]) / 2 - t), _r2(y1 - t_out), _r2(Hh / 2)],
+                        "wall": _r2(t), "end_wall": _r2(min(t_in, t_out)), "floor": FLOOR,
+                        "note": "Gear cavity: keep it clear (the planetary set turns there); open at the top under "
+                                "the lid. The ring sits against the inner face of the -Y wall."}
+        cap_h = {side: float(self.spec[c]["H"]) for side, (c, _k) in by_end.items()}
+        # the shafts
+        self.yoff, self.local = {}, {}
+        for sh in (inp, out):
+            ks = self.spec[sh]
+            ks["body"], ks["collar"], ks["ax"] = None, None, "y"
+            ext = max(15.0, float(ks["seat"]))
+            if sh == inp:
+                lo, hi = y0 - cap_h.get(-1, 0.0) - ext, ym + b / 2
+                B = B_in
+                brg = [(-1, y0 + k * B, y0 + (k + 1) * B, (bb, kk)) for k, (bb, kk, _x) in enumerate(pieces_in[:2])]
+            else:
+                lo, hi = yc_car0, y1 + cap_h.get(1, 0.0) + ext
+                B = B_out
+                brg = [(1, y1 - (k + 1) * B, y1 - k * B, (bb, kk)) for k, (bb, kk, _x) in enumerate(pieces_out[:2])]
+            if "length" in self.o(sh):
+                hi = lo + float(self.o(sh)["length"]) if sh == out else hi
+                lo = hi - float(self.o(sh)["length"]) if sh == inp else lo
+            ks["length"] = _r2(hi - lo)
+            ks["y0"], ks["y1"], ks["brg"] = _r2(lo), _r2(hi), brg
+            self.at[sh] = [[0.0, _r2((lo + hi) / 2), _r2(za)]]
+            self.yoff[sh] = 0.0
+            self.local[sh] = {}
+        for r in self.riders[inp]:
+            self.local[inp][r] = ym if r == sun else ym - b / 2 - self.height(r) / 2
+        for r in self.riders[out]:
+            self.local[out][r] = (yc_car0 + yc_car1) / 2 if r == car else yc_car1 + self.height(r) / 2
+        for sh in (inp, out):
+            for r in self.riders[sh]:
+                self.spec[r]["ax"] = "y"
+                self.at[r] = [[0.0, _r2(self.local[sh][r]), _r2(za)]]
+        # the planets, their pins and bearings, on the planet radius
+        py0 = ym - max(bB, b) / 2 - PIN_END
+        ks = self.spec[pin]
+        ks.update(body=None, collar=None, ax="y", y0=_r2(py0), y1=_r2(yc_car1), length=_r2(yc_car1 - py0))
+        ks["brg"] = [(-1, ym - bB / 2, ym + bB / 2, (pb, 0))] if pb else []
+        self.planet_at: list[list[float]] = []
+        for k in range(n):
+            th = math.pi / 2 + 2 * math.pi * k / n
+            self.planet_at.append([_r2(a * math.cos(th)), _r2(za + a * math.sin(th))])
+        sp["ax"] = "y"
+        self.at[pl] = [[c[0], _r2(ym), c[1]] for c in self.planet_at]
+        self.at[pin] = [[c[0], _r2((py0 + yc_car1) / 2), c[1]] for c in self.planet_at][:self.ncopies(pin)]
+        sr["ax"] = "y"
+        self.at[ring] = [[0.0, _r2(yr0 + wr / 2), _r2(za)]]
+        self.pdata = {"ym": ym, "b": b, "B": bB, "bd": bd, "bD": bD, "pb": pb, "yr0": yr0, "wr": wr, "zr": zr,
+                      "car": (yc_car0, yc_car1), "od_r": od_r}
+        for (cid, cc), _n, side in self.hm["caps"]:
+            hc = float(self.spec[cid]["H"])
+            self.spec[cid]["ax"] = "y"
+            self.at.setdefault(cid, [None] * self.ncopies(cid))
+            self.at[cid][cc] = [0.0, _r2((y0 - hc / 2) if side < 0 else (y1 + hc / 2)), _r2(za)]
+        if self.hm["lid"]:
+            ls, lo_ = self.spec[self.hm["lid"]], self.o(self.hm["lid"])
+            if "L" not in lo_:
+                ls["L"] = hs["L"]
+            if "W" not in lo_:
+                ls["W"] = hs["W"]
+            self.at[self.hm["lid"]] = [[0.0, 0.0, _r2(float(ls["H"]) / 2)]]
+        self.parent_of = {pl: pin, pin: car, ring: h, inp: h, out: h}
+        for x in self.joints:
+            if x.host == h and x.guest in self.spec and x.guest not in self.parent_of:
+                self.parent_of[x.guest] = h
+        self.base = h
+
+    def _planet_seat(self, sh: str) -> None:
+        """A shaft of a planetary set in its two bearings, both in its end wall (seats open to the outside, the
+        shoulder of the inner one towards the cavity)."""
+        s = self.spec[sh]
+        pos = self.at[sh][0]
+        assert pos is not None
+        bitem, _k = s["brg"][0][3]
+        des = self._des(bitem)
+        bd, bD, bB = BEARINGS[des]
+        o = self.nxt()
+        hf = str(o.get("housing_fit") or "H7")
+        side = s["brg"][0][0]
+        face = "-Y wall" if side < 0 else "+Y wall"
+        seats = [{"face": face, "open": side, "z": [_r2(b0), _r2(b1)]} for _sd, b0, b1, _p in s["brg"]]
+        lo = min(b0 for _sd, b0, _b1, _p in s["brg"])
+        hi = max(b1 for _sd, _b0, b1, _p in s["brg"])
+        self.add("bearing_seat", (self.item[self.housing], 0), (self.item[sh], 0), {
+            "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": bd, "D": bD, "B": bB,
+            "housing_fit": hf if hf in HOUSING_FITS else "H7", "shaft_fit": SHAFT_FIT_BEARING, "ax": "y",
+            "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(lo), _r2(hi)], "seats": seats,
+            "clearance_d": _r2(bd + 2), "flush_z": None, "bearing_item": self.item[bitem], "shaft_d": s["seat"],
+            "count": len(seats), "r_s_min": icd._BEARING_RS[int(des)], "standard": "ISO 15 (Toolbox table)",
+            "position_tol": POS_TOL, "journals": [[_r2(lo), _r2(hi)]]},
+            ["A", "B", "C"], f"shaft in {len(seats)} bearings {des} ({face})")
+
+    def _emit_planetary(self) -> None:
+        hm, ps, P = self.hm, self.ps, self.pdata
+        h, pl, pin, car, ring, sun = ps.housing, ps.planet, ps.pin, ps.carrier, ps.ring, ps.sun
+        if hm["lid"]:
+            self._grid_joint(h, 0, hm["lid"], 0, hm["lid_x"], tapped=True)
+        for sh in hm["shafts"]:
+            self._planet_seat(sh)
+            self._riders(sh)
+        for st, nn, side in hm["caps"]:
+            self._cap_joint((self.item[st[0]], st[1]), nn, side)
+        o = self.nxt()  # the ring against the inner face of the -Y wall
+        self.add("face", (self.item[h], 0), (self.item[ring], 0), {
+            "plane_z": _r2(P["yr0"]), "normal": [0, 1, 0], "ax": "y",
+            "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
+            ["A", "B"], "ring gear against the inner face of the -Y wall")
+        y_c0, y_c1 = P["car"]
+        dp = float(self.spec[pin]["seat"])
+        sg, sp = self.spec[sun], self.spec[pl]
+        m = float(sg["module"])
+        for k, (x, z) in enumerate(self.planet_at):
+            if k >= self.ncopies(pin):
+                break
+            o = self.nxt()  # the pin pressed into the carrier
+            fit = str(o.get("fit") or "H7/p6")
+            self.add("shaft_bore", (self.item[car], 0), (self.item[pin], k), {
+                "d": dp, "fit": fit if fit in FITS else "H7/p6", "length": _r2(y_c1 - y_c0), "ax": "y",
+                "axis": [x, z], "z": [_r2(y_c0), _r2(y_c1)], "flush_z": None, "position_tol": POS_TOL},
+                ["A", "B", "C"], "planet pin pressed into the carrier")
+            if P["pb"]:  # the planet's bearing: its outer ring in the planet's bore, its inner ring on the pin
+                pb = P["pb"]
+                des = self._des(pb)
+                o = self.nxt()
+                hf = str(o.get("housing_fit") or "H7")
+                z0, z1 = P["ym"] - P["B"] / 2, P["ym"] + P["B"] / 2
+                self.add("bearing_seat", (self.item[pl], k), (self.item[pin], k), {
+                    "designation": str(des), "bearing": f"Deep-groove ball bearing {des}", "d": P["bd"],
+                    "D": P["bD"], "B": P["B"], "housing_fit": hf if hf in HOUSING_FITS else "H7",
+                    "shaft_fit": SHAFT_FIT_BEARING, "ax": "y", "axis": [x, z], "z": [_r2(z0), _r2(z1)],
+                    "seats": [{"face": "planet bore", "open": -1, "z": [_r2(z0), _r2(z1)]}],
+                    "clearance_d": _r2(P["bd"] + 2), "flush_z": None, "bearing_item": self.item[pb],
+                    "shaft_d": dp, "count": 1, "r_s_min": icd._BEARING_RS[int(des)], "planet": True,
+                    "journals": [[_r2(z0), _r2(z1)]], "standard": "ISO 15 (Toolbox table)", "position_tol": POS_TOL},
+                    ["A", "B", "C"], f"planet on its bearing {des} on the pin")
+            else:
+                o = self.nxt()
+                self.add("shaft_bore", (self.item[pl], k), (self.item[pin], 0 if k >= self.ncopies(pin) else k), {
+                    "d": dp, "fit": "H7/g6", "length": _r2(P["b"]), "ax": "y", "axis": [x, z],
+                    "z": [_r2(P["ym"] - P["b"] / 2), _r2(P["ym"] + P["b"] / 2)], "flush_z": None,
+                    "position_tol": POS_TOL}, ["A", "B", "C"], "planet running on its pin")
+            za = self.hm["za"]
+            self.add("gear_mesh", (self.item[sun], 0), (self.item[pl], k), {
+                "module": m, "teeth_a": int(sg["teeth"]), "teeth_b": int(sp["teeth"]),
+                "centre_distance": _r2(m * (int(sg["teeth"]) + int(sp["teeth"])) / 2),
+                "face_width": _r2(P["b"]), "pressure_angle": PRESSURE_ANGLE,
+                "ratio": round(int(sp["teeth"]) / int(sg["teeth"]), 4), "axis_a": [0.0, _r2(za)], "axis_b": [x, z],
+                "ax": "y", "plane_a": _r2(P["ym"]), "plane_b": _r2(P["ym"])}, ["A", "B"], "sun / planet mesh")
+            self.add("gear_mesh", (self.item[pl], k), (self.item[ring], 0), {
+                "module": m, "teeth_a": int(sp["teeth"]), "teeth_b": int(P["zr"]), "internal": True,
+                "centre_distance": _r2(m * (int(P["zr"]) - int(sp["teeth"])) / 2),
+                "face_width": _r2(P["b"]), "pressure_angle": PRESSURE_ANGLE,
+                "ratio": round(int(P["zr"]) / int(sp["teeth"]), 4), "axis_a": [x, z], "axis_b": [0.0, _r2(za)],
+                "ax": "y", "plane_a": _r2(P["ym"]), "plane_b": _r2(P["ym"])}, ["A", "B"],
+                "planet / ring mesh (internal)")
+
     def _exit_d(self, sh: str) -> float:
         """The shaft Ø where it leaves the housing (the +Y journal, which runs to the end on a stepped shaft)."""
         s = self.spec[sh]
@@ -1684,7 +1996,9 @@ class _Layout:
         return self.fov.get(f"IF-{len(self.ifs) + 1:02d}") or {}
 
     def _emit(self) -> None:
-        if self.kind == "gearbox":
+        if self.kind == "planetary":
+            self._emit_planetary()
+        elif self.kind == "gearbox":
             hm = self.hm
             if hm["lid"]:
                 self._grid_joint(self.housing, 0, hm["lid"], 0, hm["lid_x"], tapped=True)
@@ -2114,8 +2428,8 @@ class _Layout:
         """Tooth phasing (the template's rule): gear b turns so a tooth space faces gear a's tooth, v = 1/2 - u."""
         self.phase: dict[str, float] = {}
         for f in self.ifs:
-            if f["kind"] != "gear_mesh":
-                continue
+            if f["kind"] != "gear_mesh" or f["data"].get("internal") or int(f["b"].get("copy") or 0) > 0:
+                continue  # (an internal mesh, a planet copy: the first external mesh phases the part)
             ga, gb = f["a"]["item"], f["b"]["item"]
             d = f["data"]
             v = frames.apply(frames.transpose(icd.CANON[icd.ax_of(d)]),
@@ -2142,7 +2456,7 @@ class _Layout:
                 s["d"] = float(s.get("body") or s["seat"])
                 if s["role"] == "shaft" and not s.get("length"):
                     s["length"] = 40.0
-            size = icd._size_of(s)
+            size = list(s["env"]) if s.get("env") else icd._size_of(s)
             Rw = frames.item_rotation(s.get("ax") or "z", float(s.get("rot") or 0) if s["role"] == "block" else 0.0)
             wsize = [sum(abs(Rw[r][j]) * size[j] for j in range(3)) for r in range(3)]
             cps = [c for c in self.at[cid] if c is not None]
@@ -2168,7 +2482,8 @@ class _Layout:
                         **({"bearing": bearing} if bearing else {}),
                         **({"bore": s["bore"]} if s.get("bore") else {}),
                         **({"module": s["module"], "teeth": int(s["teeth"]), "face_width": s["b"]}
-                           if s["role"] == "gear" else {})}
+                           if s["role"] == "gear" else {}),
+                        **({"internal": True} if s.get("internal") else {})}
         axes = [{"id": f"AX{n + 1}", "name": f"{items[i]['name']} axis", "item": i, "origin": [items[i]["copies"][0][0],
                  0.0, items[i]["copies"][0][2]], "dir": [0.0, 1.0, 0.0]}
                 for n, i in enumerate(i for i in items if items[i]["role"] == "shaft")]
@@ -2187,7 +2502,7 @@ class _Layout:
         parts_std = [{"item": p["id"], "name": p["name"], "qty": p["qty"], "sub": p["sub"]}
                      for p in self.parts if p["family"] == "standard"]
         skel = {"units": "mm", "base": self.item[self.base],
-                "layout": {"gearbox": "gearbox", "plate": "block", "line": "shaft_line", "guide": "block",
+                "layout": {"gearbox": "gearbox", "planetary": "gearbox", "plate": "block", "line": "shaft_line", "guide": "block",
                            "pin": "block", "blocks": "block", "mount": "block"}[self.kind],
                 "csys": csys, "datums": datums, "axes": axes,
                 "envelope": {"min": [_r2(x) for x in lo], "max": [_r2(x) for x in hi],
@@ -2203,6 +2518,13 @@ class _Layout:
         return skel
 
     def _parent_item(self, cid: str) -> str | None:
+        if self.kind == "planetary":  # the kinematic chain: planet on its pin, pin in the carrier, ring in the housing
+            if cid in self.rider_of:
+                return self.item[self.rider_of[cid]]
+            host = self.parent_of.get(cid)
+            if host is not None:
+                return self.item[host]
+            return None if cid == self.housing else self.item[self.housing]
         if cid in self.rider_of:
             return self.item[self.rider_of[cid]]
         if self.kind == "gearbox":
@@ -2266,7 +2588,19 @@ class _Layout:
             elif e["kind"] == "coupling":
                 words.append(f"{self.name(e['motor'] or e['a'])} coupled to {self.name(e['b'])}")
         head = "Laid out from the design's connections: " + ("; ".join(words) + ". " if words else "")
-        if self.kind == "gearbox":
+        if self.kind == "planetary":
+            ps, hm = self.ps, self.hm
+            sg, sp, sr = self.spec[ps.sun], self.spec[ps.planet], self.spec[ps.ring]
+            zs, zr = int(sg["teeth"]), int(sr["teeth"])
+            head += (f"Planetary set: {self.name(ps.sun)} ({zs} teeth) on the {self.name(ps.input)}; "
+                     f"{hm['n']} x {self.name(ps.planet)} ({int(sp['teeth'])} teeth) on the radius a = {hm['a']:g} mm, "
+                     f"each on its own {self.name(ps.pin)}" + (f" and {self.name(ps.bearing)}" if ps.bearing else "")
+                     + f", the pins fixed in the {self.name(ps.carrier)} on the {self.name(ps.output)}; "
+                     f"{self.name(ps.ring)} ({zr} internal teeth, a = m (z_r - z_p) / 2) fixed in the "
+                     f"{self.name(ps.housing)} against its -Y wall. Ring fixed, sun in, carrier out: i = 1 + z_r / z_s "
+                     f"= {1 + zr / zs:.3g}. The input and output shafts are coaxial along +Y, each in two bearings in "
+                     f"its end wall; the housing is sized for the ring (Ø{self.pdata['od_r']:g}) and the stack.")
+        elif self.kind == "gearbox":
             names = self.name(self.housing)
             head += (f"Gearbox: the shafts run along +Y in the side walls of the {names}, each in a bearing seat per "
                      "wall, so the bores are at the centre distances (the loop through the housing is consistent by "

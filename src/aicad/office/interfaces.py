@@ -371,8 +371,9 @@ def autofix(doc: dict[str, Any], overrides: dict[str, Any]) -> tuple[dict[str, A
 
 
 def _grow(it: dict[str, Any]) -> list[dict[str, Any]]:
-    """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot. Never
-    past ``icd.PLAN_SLACK`` times the planned envelope (CD-029): beyond that the plan, not the layout, must change."""
+    """Envelope changes for a part too small for its holes: the thinnest sizes first, a little before a lot. The
+    planned envelope is Archie's estimate, not a limit (founder rule 2026-11-20: only the brief is binding), so the
+    growth may pass it, up to ``icd.GROW_CAP`` times it (a sanity cap: beyond that the part is not this design's)."""
     L, W, H = (float(x) for x in it["size"])
     out: list[dict[str, Any]] = []
     if it["role"] == "block":
@@ -389,7 +390,7 @@ def _grow(it: dict[str, Any]) -> list[dict[str, Any]]:
     if not pl:
         return out
     keys = icd.SIZE_KEYS.get(it["role"], ())
-    cap = {k: icd.PLAN_SLACK * float(pl[n]) for n, k in enumerate(keys)}
+    cap = {k: icd.GROW_CAP * float(pl[n]) for n, k in enumerate(keys)}
     return [ch for ch in out if all(v <= cap.get(k, float("inf")) + 1e-6 for k, v in ch.items())]
 
 

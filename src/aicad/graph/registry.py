@@ -77,7 +77,8 @@ COMPONENTS: dict[str, ComponentType] = {c.kind: c for c in [
         "teeth": ParamSpec(unit="", lo=8, hi=300, integer=True, label="teeth z"),
         "face_width": ParamSpec(lo=1, hi=500, label="face width b"),
         "bore": _D, "pressure_angle": ParamSpec(unit="deg", lo=14.5, hi=25, label="pressure angle"),
-        "role": ParamSpec(unit="", choices=("pinion", "wheel", ""), label="pinion / wheel")},
+        "role": ParamSpec(unit="", choices=("pinion", "wheel", ""), label="pinion / wheel"),
+        "internal": ParamSpec(unit="", choices=(True, False), label="internal teeth (a ring gear)")},
         required=("module", "teeth"), complexity=2, rotates=True, standard="ISO 53 profile, 20 deg"),
     ComponentType("key", "Parallel key", "standard", "key", {
         "shaft_d": _D, "b": MM, "h": MM, "t1": MM, "t2": MM, "length": _L},

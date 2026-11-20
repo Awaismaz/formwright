@@ -96,7 +96,9 @@ def test_a_crowded_plan_keeps_its_planned_envelopes() -> None:
                                                                                                 sort_keys=True)
 
 
-def test_an_envelope_beyond_the_plan_is_an_icd_problem_and_self_fix_respects_it() -> None:
+def test_an_envelope_beyond_the_plan_is_a_warning_and_self_fix_may_pass_it() -> None:
+    """Founder rule 2026-11-20: only the brief is binding; the planned envelope is Archie's estimate. A part laid out
+    past it is shown at the gate (a warning) and never blocks; Archie's self-fix may grow past it, up to GROW_CAP."""
     plan = json.loads(json.dumps(ROVER))
     # a 12 x 6 tab told to take the sub-assembly's M6 screws: two M6 bolts need 12 + 6.6 + 2 = 20.6 mm (1.7 x)
     body = plan["subassemblies"][0]["parts"]
@@ -105,28 +107,16 @@ def test_an_envelope_beyond_the_plan_is_an_icd_problem_and_self_fix_respects_it(
     next(p for p in body if p["family"] == "standard").update(name="M6 cap screw", description="ISO 4762 M6x16.")
     parts = _parts(plan)
     sk, ifs = icd.build(parts, "")
-    probs = icd.problems(sk, ifs)
-    tab = [p for p in probs if p.startswith("Tab:")]
-    assert tab and "laid out at 20.6 × 8.6 × 8 mm" in tab[0] and "planned 12 × 6 × 8 mm" in tab[0]
-    # Archie's self-fix may grow a part only up to 1.5 x its plan
+    assert not [p for p in icd.problems(sk, ifs) if p.startswith("Tab:")]
+    tab = [w for w in icd.warnings(sk, ifs) if w.startswith("Tab:")]
+    assert tab and "laid out at 20.6 × 8.6 × 8 mm" in tab[0] and "12 × 6 × 8 mm first planned" in tab[0]
+    assert "does not block" in tab[0]
     it = _by_name(sk)["Tab"]
     for ch in interfaces._grow(it):
-        assert all(v <= 1.5 * dict(zip(("L", "W", "H"), it["planned"], strict=True))[k] + 1e-6
+        assert all(v <= icd.GROW_CAP * dict(zip(("L", "W", "H"), it["planned"], strict=True))[k] + 1e-6
                    for k, v in ch.items())
-    assert interfaces._grow({"role": "block", "size": [12, 6, 8], "planned": [12, 6, 8]})  # small growth allowed
-    assert interfaces._grow({"role": "block", "size": [18, 9, 12], "planned": [12, 6, 8]}) == []
-    # a smaller bolt (an interface change the engineer sees) brings it back inside the plan
-    doc = {"brief": "", "plan": planner.normalise_plan(plan, "archie"), "items": [], "tickets": []}
-    for s in doc["plan"]["subassemblies"]:
-        for q in s["parts"]:
-            doc["items"].append({"id": f"i_{s['id']}_{q['id']}", "kind": "part", "name": q["name"],
-                                 "family": q["family"], "qty": q["qty"], "description": q["description"],
-                                 "parent_id": f"i_{s['id']}"})
-    ov, steps, left = interfaces.autofix(doc, {"items": {}, "interfaces": {}})
-    assert left == [] and steps
-    sk2, _ifs2 = icd.build(icd.parts_from(doc), "", ov)
-    t2 = _by_name(sk2)["Tab"]
-    assert all(s <= 1.5 * q + 1e-6 for s, q in zip(t2["size"], t2["planned"], strict=True))
+    assert interfaces._grow({"role": "block", "size": [18, 9, 12], "planned": [12, 6, 8]})  # past 1.5 x: allowed
+    assert interfaces._grow({"role": "block", "size": [48, 24, 32], "planned": [12, 6, 8]}) == []  # the sanity cap
 
 
 def test_a_resize_by_the_engineer_replaces_the_plan() -> None:
@@ -137,7 +127,8 @@ def test_a_resize_by_the_engineer_replaces_the_plan() -> None:
     assert not [p for p in icd.problems(sk, ifs) if p.startswith("Body shell:")]
     # the same size reached by Archie's growth (``grown``) is still measured against the plan
     sk2, ifs2 = icd.build(parts, "", {"items": {shell: {"L": 420.0, "grown": ["L"]}}, "interfaces": {}})
-    assert any(p.startswith("Body shell: laid out at 420 × 110 × 60 mm") for p in icd.problems(sk2, ifs2))
+    assert any(p.startswith("Body shell: laid out at 420 × 110 × 60 mm") for p in icd.warnings(sk2, ifs2))
+    assert not [p for p in icd.problems(sk2, ifs2) if p.startswith("Body shell:")]  # (a warning, never blocking)
 
 
 def test_unplanned_layouts_are_unchanged() -> None:

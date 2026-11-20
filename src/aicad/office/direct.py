@@ -174,8 +174,8 @@ def _kind(it: dict[str, Any], text: str) -> str | None:
     role = it.get("role")
     if role == "shaft" and it.get("shape") == "cylinder":
         return "shaft"
-    if role == "gear" and it.get("module") and it.get("teeth"):
-        return "gear"
+    if role == "gear" and it.get("module") and it.get("teeth") and not it.get("internal"):
+        return "gear"  # (an internal ring gear has no generator here: the design agent makes it)
     if role == "hub" and it.get("shape") == "cylinder" and _SPACERY.search(text) and not _GEARY.search(text):
         return "spacer"
     return None
