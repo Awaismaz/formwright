@@ -169,13 +169,16 @@ async def apply(ctx: Ctx, a: dict[str, Any]) -> dict[str, Any]:
 
     typ = a["type"]
     if typ in copilot.CLIENT_ACTIONS:
-        return {"navigate": a["to"]} if typ == "navigate" else (
-            {"navigate": copilot.studio_path(a["project"], a["text"])} if typ == "studio_request" else {})
+        return {"navigate": a["to"]} if typ == "navigate" else {}
     if ctx.role == "viewer":
         raise HTTPException(403, "Viewers can look around but not change things.")
+    if typ == "studio_request":  # the engineer's Apply is the approval of this design-agent run (metered as theirs)
+        await projects.agent_chat(a["project"], projects.ChatIn(prompt=a["text"], mode="build"), ctx)
+        return {"navigate": f"/app/projects/{a['project']}"}
     if typ == "new_part":
         p = projects.create_project(projects.ProjectIn(name=a["name"], description=a["brief"][:2000]), ctx)
-        return {"navigate": copilot.studio_path(p["id"], a["brief"])}
+        await projects.agent_chat(p["id"], projects.ChatIn(prompt=a["brief"], mode="build"), ctx)
+        return {"navigate": f"/app/projects/{p['id']}"}
     if typ == "stop_studio_agent":
         await projects.agent_interrupt(a["project"], ctx)
         return {"navigate": f"/app/projects/{a['project']}"}

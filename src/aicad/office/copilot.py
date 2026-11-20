@@ -5,8 +5,8 @@ Archie is reachable from every page. Besides the program actions in ``archie_cha
 
 * ``navigate`` / ``point``: take the engineer to a page (optionally a program tab) and highlight a button on it.
   They run at once on the engineer's screen (nothing changes in their data), so they need no Apply.
-* ``studio_request``: open a part in Design Studio with a request typed into its design chat (the engineer sends
-  it, so the design agent's run and its cost stay theirs to start).
+* ``studio_request``: run the design agent on a part with Archie's request (the engineer approves it with Apply,
+  founder 2026-11-20: Archie runs design agents with approval), then open the part to watch the run.
 * ``new_program`` / ``restart_program``: start a program from a new prompt; a restart pauses the old program
   (kept, never deleted) and opens the new one.
 * ``heal_program``: the office repairs a program in place: work left running by a stopped server is queued
@@ -31,7 +31,7 @@ from aicad.office import store
 APP_ACTION_TYPES = ("navigate", "point", "studio_request", "new_program", "restart_program", "heal_program",
                     "rebuild_assembly", "run_program", "new_part", "stop_studio_agent")
 # run on the engineer's screen when the reply arrives (no data changes): shown as "Show me" instead of Apply
-CLIENT_ACTIONS = frozenset({"navigate", "point", "studio_request"})
+CLIENT_ACTIONS = frozenset({"navigate", "point"})
 PROGRAM_TABS = ("board", "interfaces", "assembly", "deliverables", "timeline", "tree", "archie", "activity", "brief")
 MAX_BRIEF = 20000
 MAX_TARGETS = 80
@@ -75,10 +75,11 @@ APP_ACTIONS_DOC = """App actions (use ids exactly as listed; a program or projec
 pages listed under Pages, with real ids). For a program tab: "/app/office/programs/ID?tab=interfaces".
 - {"type": "point", "target": "control id or label as listed under Controls", "note": "what to press it for"}: \
 highlight a control on the current page.
-- {"type": "studio_request", "project": "ID", "text": "the request for the design agent"}: open that part in \
-Design Studio with the request typed into its design chat, ready for the engineer to send.
-- {"type": "new_part", "name": "...", "brief": "..."}: a new part project, opened in Design Studio with the brief \
-ready to send.
+- {"type": "studio_request", "project": "ID", "text": "the request for the design agent"}: run the design agent \
+on that part with this request (a precise engineering instruction: what to change, sizes, features); the engineer \
+approves the run, then watches it in Design Studio.
+- {"type": "new_part", "name": "...", "brief": "full part brief"}: a new part project, and the design agent starts \
+modelling it from the brief once the engineer approves.
 - {"type": "new_program", "name": "...", "brief": "full brief"}: a new Design Office program planned from this brief.
 - {"type": "restart_program", "program": "ID", "brief": "the new full brief", "name": "optional"}: the program is \
 wrong at its root (a different product or a brief that changes most parts): start again from the new prompt. The \
@@ -309,11 +310,11 @@ def describe(a: dict[str, Any], known: dict[str, Any] | None = None) -> str:
     if typ == "point":
         return f"Show {a.get('label') or a['target']}" + (f": {a['note']}" if a.get("note") else "")
     if typ == "studio_request":
-        return f"Open {nm('projects', a['project'])} in Design Studio with the request: {a['text']}"
+        return f"Run the design agent on {nm('projects', a['project'])}: {a['text']}"
     if typ == "stop_studio_agent":
         return f"Stop the design agent run on {nm('projects', a['project'])}"
     if typ == "new_part":
-        return f"New part {a['name']}, opened in Design Studio with the brief ready to send"
+        return f"New part {a['name']}: the design agent models it from the brief"
     if typ == "new_program":
         return f"Start a new program {a['name']} from: {a['brief'][:200]}"
     if typ == "restart_program":

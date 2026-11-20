@@ -21,7 +21,7 @@ const QUICK: Record<string, string[]> = {
   app: ["What can you do?", "Where are my tokens?", "Start a new program", "Show me how to model by hand"],
 };
 /** Actions that run on the engineer's screen (no data changes): shown as "Show me", run when the reply arrives. */
-const CLIENT = new Set(["navigate", "point", "studio_request"]);
+const CLIENT = new Set(["navigate", "point"]);
 
 export function openArchie() { window.dispatchEvent(new Event("fw-open-archie")); }
 
@@ -66,8 +66,6 @@ export default function ArchieChat() {
     if (a.type === "navigate" && a.to) {
       nav(a.to);
       if (a.highlight) void pointAt(`t:${a.highlight}`, a.highlight, undefined, 6000);
-    } else if (a.type === "studio_request" && a.project) {
-      nav(`/app/projects/${a.project}?ask=${encodeURIComponent((a.text ?? "").slice(0, 1500))}`);
     } else if (a.type === "point" && a.target) {
       const ok = await pointAt(a.target, a.label, a.note);
       if (!ok) toast.message(`I can't see ${a.label ?? "that control"} on this page right now.`);
@@ -84,7 +82,7 @@ export default function ArchieChat() {
       qc.setQueryData(key, r);
       const last = r.messages[r.messages.length - 1];
       // navigation and pointing run at once: one navigation, then the pointing on the page it lands on
-      const client = (last?.actions ?? []).filter(a => CLIENT.has(a.type) && a.type !== "studio_request");
+      const client = (last?.actions ?? []).filter(a => CLIENT.has(a.type));
       const go = client.find(a => a.type === "navigate");
       if (go) await show(go);
       for (const a of client.filter(a => a.type === "point")) { await show(a); break; }
@@ -124,7 +122,7 @@ export default function ArchieChat() {
         {msgs.length === 0 && !q.isLoading && <div className="rounded-lg border border-dashed border-border p-3 text-[12.5px] text-muted">
           {program
             ? "Ask for a status report at any time, or tell me what should change: a part, more agents, a bigger budget, an interface number, or a fresh start from a new brief. I check every change before I propose it; you apply it. Status reports are free."
-            : "Ask me anything about Formwright: where something is, how to do it, or what's wrong. I can take you to a page and point at the button, open a part with a request for the design agent, start or repair a program. Changes wait for you to apply them."}
+            : "Ask me anything about Formwright: where something is, how to do it, or what's wrong. I can take you to a page and point at the button, run the design agent on a part, start or repair a program. Changes wait for you to apply them."}
         </div>}
         {msgs.map(m => m.role === "user"
           ? <div key={m.id} className="ml-10 rounded-lg bg-primary-soft px-3 py-2 text-[13px] whitespace-pre-line">{m.text}</div>
@@ -140,7 +138,7 @@ export default function ArchieChat() {
               {(m.actions ?? []).map(a => CLIENT.has(a.type)
                 ? <button key={a.id} className="mt-1.5 flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-left text-[12.5px] hover:border-primary/40" data-archie-action={a.type} onClick={() => void show(a)}>
                   <Eye className="h-3.5 w-3.5 shrink-0 text-primary" /><span className="min-w-0 flex-1">{a.label}</span>
-                  <span className="text-[11px] text-muted">{a.type === "studio_request" ? "Open" : "Show me"}</span></button>
+                  <span className="text-[11px] text-muted">Show me</span></button>
                 : <div key={a.id} className={cx("mt-1.5 rounded-md border px-2.5 py-2 text-[12.5px]", a.status === "proposed" && !a.stale ? "border-primary/30" : "border-border opacity-75")} data-archie-action={a.type}>
                   <div>{a.label}</div>
                   <div className="mt-1.5 flex items-center gap-2">

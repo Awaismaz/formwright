@@ -141,3 +141,33 @@ def test_copilot_outside_a_program_navigates_and_starts_a_program(app_client: An
     assert out.status_code == 200, out.text
     assert out.json()["navigate"].startswith("/app/office/programs/")
     assert c.get("/api/copilot").json()["messages"][-1]["actions"][1]["status"] == "applied"
+
+
+def test_archie_runs_the_design_agent_only_when_the_engineer_applies(app_client: Any,  # noqa: F811
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    from test_platform import signup
+
+    from aicad.platform.routers import copilot as routes
+    from aicad.platform.routers import projects
+
+    runs: list[tuple[str, str]] = []
+
+    async def fake_agent(project_id: str, body: Any, ctx: Any) -> dict[str, Any]:
+        runs.append((project_id, body.prompt))
+        return {"accepted": True}
+
+    monkeypatch.setattr(projects, "agent_chat", fake_agent)
+    c = app_client
+    signup(c, "runagent@x.com")
+    pid = c.post("/api/projects", json={"name": "Motor bracket"}).json()["id"]
+
+    async def fake(folder: Any, prompt: str, budget_usd: float | None = None) -> tuple[str, float | None]:
+        return (f'I will thicken it.\n```fw-office-actions\n[{{"type": "studio_request", "project": "{pid}", '
+                '"text": "Make the base 8 mm thick"}]\n```'), 0.01
+
+    monkeypatch.setattr(routes, "run_copilot", fake)
+    m = c.post("/api/copilot", json={"text": "make the bracket stiffer"}).json()["messages"][-1]
+    assert m["actions"][0]["label"] == "Run the design agent on Motor bracket: Make the base 8 mm thick"
+    assert not runs  # proposed, not run
+    out = c.post("/api/copilot/actions", json={"message": m["id"], "action": "a1"}).json()
+    assert runs == [(pid, "Make the base 8 mm thick")] and out["navigate"] == f"/app/projects/{pid}"

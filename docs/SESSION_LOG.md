@@ -13,8 +13,8 @@ revision "was the same layout"); "safe" means within the original brief, not clo
 Done:
 - **Copilot everywhere** (CD-049): Archie drawer on every page (header "Ask Archie", Ctrl J). The app sends the page
   path and its visible controls; Archie sees pages, the engineer's programs and projects. App actions
-  (`office/copilot.py`): navigate, point (driver.js spotlight), studio_request (opens a part with the request typed
-  into its design chat), new_part, new_program, restart_program (old program paused and kept), heal_program
+  (`office/copilot.py`): navigate, point (driver.js spotlight), studio_request (runs the design agent on a part, with Apply), new_part
+  (creates it and runs the agent), new_program, restart_program (old program paused and kept), heal_program
   (requeue half-done work when no runner holds it, heal review blocks, retry blocked, run), rebuild_assembly,
   run_program, stop_studio_agent. Navigation and pointing run at once; everything else is Apply. On a program page
   the program's own chat is used with the same powers; elsewhere a per-user thread (`<org>/_copilot/<user>.json`,
