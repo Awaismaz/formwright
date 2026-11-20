@@ -9,6 +9,7 @@ import { VisualCheck } from "@/components/VisualCheck";
 import { BASE } from "./api";
 import { changedValues, crDelta, crTone, FIELD_LABEL, fieldValue, fixLines, axisChip, axisLabel, ifaceAxis, ifaceStatus, ifaceSummary, sideStatus, type SideStatus } from "./model";
 import type { ChangeRequest, CheckRow, GateFix, Icd, IcdSide, Interface, Program } from "./types";
+import PlanPreview, { useProgramPreview } from "./preview/PlanPreview";
 
 const STATUS: Record<SideStatus, { icon: JSX.Element; label: string }> = {
   pass: { icon: <CheckCircle2 className="h-3.5 w-3.5 text-success" />, label: "Measured: conforms" },
@@ -224,6 +225,8 @@ export default function Interfaces({ program }: { program: Program }) {
   const [lastFix, setLastFix] = useState<ReturnType<typeof fixLines> | null>(null);
   const [separating, setSeparating] = useState(false);
   const crs = useMemo(() => program.change_requests ?? [], [program.change_requests]);
+  const pv = useProgramPreview(program, null);   // the laid-out interfaces in 3D, dimensioned (WORKLIST 47)
+  const [hot, setHot] = useState<string | null>(null);
   if (!icd) return <EmptyState icon={<FileDiff />} title="No interfaces document" body="This program was planned before the Design Office named interfaces. New programs get a skeleton and an ICD at the brief gate." />;
   const f = icd.interfaces.find(x => x.id === sel) ?? icd.interfaces[0];
   const canEdit = program.can_edit !== false;
@@ -307,6 +310,8 @@ export default function Interfaces({ program }: { program: Program }) {
               onClick={() => void separate([kept.item], false)}>Connect it instead</button>}</li>;
         })}</ul>
       </Card>}
+      <PlanPreview data={pv.data} loading={pv.isFetching} error={pv.error ?? undefined} hot={hot} onHot={setHot} testId="icd"
+        highlight={f ? [f.a.item, f.b.item] : undefined} title={`Layout preview: ICD v${icd.version}`} height={380} />
       <SkeletonCard icd={icd} />
       <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)]">
         <Card className="overflow-x-auto">

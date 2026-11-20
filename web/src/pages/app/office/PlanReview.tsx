@@ -10,6 +10,9 @@ import { BASE } from "./api";
 import SpeedPanel from "./SpeedPanel";
 import DesignGraphCard, { GraphQuestions } from "./DesignGraph";
 import LayoutPathCard from "./MasterModel";
+import PlanPreview, { useProgramPreview } from "./preview/PlanPreview";
+import { FROM_PART_PATH, itemOfRow, PATH_COLOR, PATH_LABEL } from "./preview/build";
+import type { BuildPath as BuildPathP } from "./preview/types";
 import { estimateRange, fmtEta, fmtRange, partPath, planPreview, type BuildPath } from "./model";
 
 const PATH_WORD: Record<BuildPath, string> = { toolbox: "Toolbox", direct: "from the interfaces", template: "workspace template", agent: "AI designer" };
@@ -51,8 +54,17 @@ export default function PlanReview({ program }: { program: Program }) {
   const [notes, setNotes] = useState("");
   const canEdit = program.can_edit !== false;
   const k = program.constants;
+  const [hot, setHot] = useState<string | null>(null);   // the part under the cursor, in the preview or the rows
+  const pv = useProgramPreview(program, dirty ? plan : null);
+  const rowItem = (si: number, pi: number, p: PlanPart, sid: string) => (pv.data ? itemOfRow(pv.data.rows, si, pi, p.name, sid, p.id) : `i_${sid}_${p.id}`);
   useEffect(() => { if (!dirty) setPlan(structuredClone(program.plan!)); }, [program.plan, dirty]);
   const paths = program.plan_estimate?.paths ?? null;
+  // the preview colours each part by the build path its estimate uses (one source for both)
+  const previewPaths: Record<string, BuildPathP> = {};
+  plan.subassemblies.forEach((sb, si) => sb.parts.forEach((q, pi) => {
+    const it = rowItem(si, pi, q, sb.id);
+    if (it) previewPaths[it] = FROM_PART_PATH[partPath(q, paths)] ?? "ai";
+  }));
   const preview = useMemo(() => planPreview(plan, k, program.concurrency, program.threads ?? null,
     f => program.families.find(x => x.code === f)?.specialist ?? "mill", paths), [plan, k, program.concurrency, program.threads, program.families, paths]);
   const team = useMemo(() => {
@@ -101,9 +113,14 @@ export default function PlanReview({ program }: { program: Program }) {
     const path = partPath(p, paths);
     const est = estimateRange(p.family, p.family === "standard" ? 1 : p.complexity, path, k);
     const sp = program.families.find(f => f.code === p.family)?.specialist ?? "mill";
+    const item = rowItem(si, pi, p, plan.subassemblies[si]!.id);
+    const row = item ? pv.data?.rows[item] : undefined;
+    const pc = FROM_PART_PATH[path] ?? "ai";
     return (
-      <tr key={p.id} className="border-t border-border align-top">
-        <td className="py-1.5 pr-2"><AgentAvatar code={sp} size={26} still label={`${AGENT[sp]?.name}, ${AGENT[sp]?.role}`} /></td>
+      <tr key={p.id} className={cx("border-t border-border align-top transition-colors", item && hot === item && "bg-primary/[.07]")}
+        onMouseEnter={() => setHot(item)} onMouseLeave={() => setHot(null)} data-plan-row={item ?? undefined} data-hot={item && hot === item ? "1" : undefined}>
+        <td className="relative py-1.5 pr-2"><AgentAvatar code={sp} size={26} still label={`${AGENT[sp]?.name}, ${AGENT[sp]?.role}`} />
+          {row && <span className="absolute left-[19px] top-[24px] h-2.5 w-2.5 rounded-full ring-2 ring-panel" style={{ background: PATH_COLOR[pc] }} title={PATH_LABEL[pc] + (row.why && pc === "ai" ? `: ${row.why}` : "")} />}</td>
         <td className="py-1.5 pr-2">
           <Input aria-label="Part name" className="h-8" value={p.name} disabled={!canEdit} onChange={e => edit(n => { n.subassemblies[si]!.parts[pi]!.name = e.target.value; })} />
           {p.description && <div className="mt-1 line-clamp-2 text-[11.5px] text-muted" title={p.description}>{p.description}</div>}
@@ -159,6 +176,8 @@ export default function PlanReview({ program }: { program: Program }) {
 
         {program.plan && <LayoutPathCard plan={program.plan} />}
         {program.plan?.graph && <GraphQuestions program={program} graph={program.plan.graph} />}
+        <PlanPreview data={pv.data} loading={pv.isFetching} error={pv.error ?? undefined} hot={hot} onHot={setHot} paths={previewPaths}
+          title={dirty ? "Layout preview (your edits)" : "Layout preview"} />
         {program.plan?.graph && <DesignGraphCard graph={program.plan.graph} />}
 
         {plan.subassemblies.map((s, si) => (

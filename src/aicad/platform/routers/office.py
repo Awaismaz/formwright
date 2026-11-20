@@ -46,6 +46,9 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/supervisor/actions/{aid}/undo     undo one of Archie's actions
   POST   /api/office/programs/{pid}/revision/preview         what a program revision keeps, re-places, redesigns,
                                                              adds and removes (nothing changes)
+  GET    /api/office/programs/{pid}/preview                  the dimensioned 3D preview of the layout (WORKLIST 47)
+  POST   /api/office/programs/{pid}/preview                  the same for the plan review's unsaved edits
+  GET    /api/office/programs/{pid}/preview/compare/{key}    before / after previews of a revision
   POST   /api/office/programs/{pid}/revision                 revise the program (ICD v+1) at any stage
   POST   /api/office/programs/{pid}/revisions/{rid}/undo     undo the latest revision while nothing was rebuilt
 """
@@ -1609,6 +1612,46 @@ def revision_preview(pid: str, body: RevisionIn, ctx: Ctx = Depends(verified_ctx
     except OfficeInputError as e:
         raise HTTPException(409, str(e)) from e
     return {"revision": revision.view(cand), "title": revision.title(cand, doc)}
+
+
+# ----------------------------------------------------------------------------- the instant 3D preview (WORKLIST 47)
+class PreviewIn(BaseModel):
+    plan: dict[str, Any] | None = None   # the plan review's unsaved edits (laid out, never saved)
+
+
+@router.get("/programs/{pid}/preview")
+def program_preview(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The dimensioned 3D preview of the program's layout: its interfaces once they exist, else its plan laid out
+    exactly as approval will lay it out (no CAD build). Read-only."""
+    from aicad.graph import preview
+
+    try:
+        return preview.for_program(_load(ctx, pid))
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.post("/programs/{pid}/preview")
+def program_preview_edited(pid: str, body: PreviewIn, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """The preview of the plan review's unsaved edits (nothing is saved; viewers may look too)."""
+    from aicad.graph import preview
+
+    doc = _load(ctx, pid)
+    try:
+        return preview.for_program(doc, body.plan if doc.get("status") == "plan_review" else None)
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@router.get("/programs/{pid}/preview/compare/{key}")
+def program_preview_compare(pid: str, key: str, ctx: Ctx = Depends(verified_ctx)) -> dict[str, Any]:
+    """Before / after previews of a program revision (applied: its snapshots; proposed by Archie: the candidate)."""
+    from aicad.graph import preview
+
+    try:
+        return preview.compare(_load(ctx, pid), key)
+    except OfficeInputError as e:
+        raise HTTPException(409, str(e)) from e
 
 
 @router.post("/programs/{pid}/revision")

@@ -1,0 +1,152 @@
+{
+ "pair_page_to_preview_ms": 1970,
+ "pair_before": {
+  "render": 404,
+  "server": 8.9,
+  "errors": 0,
+  "dims": 6,
+  "issues": 0,
+  "title": "Layout preview"
+ },
+ "hover_row_dims": [
+  "60",
+  "125.5",
+  "78",
+  "84",
+  "m2 × 20, Ø44 × 20",
+  "Ø20 k6",
+  "Ø20 k6"
+ ],
+ "cd_source": "Centre distance Pinion / Gear×Centre distance 60 design rulea = m (z1 + z2) / 2 = 2 × (20 + 40) / 2",
+ "hover_body_row": "Bearing 6204",
+ "answer_to_updated_preview_ms": 659,
+ "pair_after_answer": {
+  "render": 333,
+  "server": 173.4,
+  "errors": 12,
+  "dims": 6,
+  "issues": 3,
+  "title": "Layout preview"
+ },
+ "issue_texts": [
+  "1Layout conflict: Input open cap is bolted over a bearing seat of Housing base, but no cap fits over the seats at these shaft centres.",
+  "2Layout conflict: Input blind cap is bolted over a bearing seat of Housing base, but no cap fits over the seats at these shaft centres.",
+  "3Layout conflict: Output open cap is bolted over a bearing seat of Housing base, but no cap fits over the seats at these shaft centres."
+ ],
+ "edited": {
+  "coverRow": 1,
+  "render": 80,
+  "server": 111.3,
+  "errors": 4,
+  "dims": 7,
+  "issues": 3,
+  "title": "Layout preview (your edits)"
+ },
+ "reducer_endpoint": [
+  {
+   "wall": 52,
+   "server": 37.5,
+   "bodies": 36,
+   "bytes": 17638
+  },
+  {
+   "wall": 53,
+   "server": 36.2,
+   "bodies": 36,
+   "bytes": 17638
+  },
+  {
+   "wall": 49,
+   "server": 35.5,
+   "bodies": 36,
+   "bytes": 17635
+  },
+  {
+   "wall": 41,
+   "server": 30.2,
+   "bodies": 36,
+   "bytes": 17637
+  },
+  {
+   "wall": 41,
+   "server": 30.9,
+   "bodies": 36,
+   "bytes": 17638
+  }
+ ],
+ "reducer_page_to_preview_ms": 1189,
+ "reducer_preview": {
+  "render": 184,
+  "server": 66.8,
+  "errors": 0,
+  "dims": 8,
+  "issues": 0,
+  "title": "Layout preview"
+ },
+ "reducer_pid": "7a2b95df00b4",
+ "table_endpoint": [
+  {
+   "wall": 23,
+   "server": 13.8,
+   "bodies": 29,
+   "bytes": 12052
+  },
+  {
+   "wall": 23,
+   "server": 13.8,
+   "bodies": 29,
+   "bytes": 12052
+  },
+  {
+   "wall": 23,
+   "server": 13.4,
+   "bodies": 29,
+   "bytes": 12050
+  },
+  {
+   "wall": 23,
+   "server": 13.8,
+   "bodies": 29,
+   "bytes": 12052
+  },
+  {
+   "wall": 23,
+   "server": 14.2,
+   "bodies": 29,
+   "bytes": 12052
+  }
+ ],
+ "table_page_to_preview_ms": 1165,
+ "table_preview": {
+  "render": 246,
+  "server": 31.7,
+  "errors": 0,
+  "dims": 3,
+  "issues": 0,
+  "title": "Layout preview"
+ },
+ "table_pid": "d8604c19abfc",
+ "reducer_brief_approve": 200,
+ "reducer_icd_preview": {
+  "render": 294,
+  "server": 47.1,
+  "errors": 0,
+  "dims": 8,
+  "issues": 0,
+  "title": "Layout preview: ICD v1"
+ },
+ "table_brief": [
+  200,
+  null
+ ],
+ "table_icd_problems": [],
+ "table_icd_approve": [
+  200,
+  null
+ ],
+ "table_revision": [
+  200,
+  "REV-1"
+ ],
+ "compare_badges": "2 re-placed or resized0 added0 removedChanged parts are highlighted in both views; hover a part to find it in the other."
+}
