@@ -4,7 +4,7 @@ Newest first. Each entry: what was done, evidence, blocked, next item, decision 
 
 ---
 
-## 2026-11-20 (b) — Assembly Studio command bar (ASM-RB-1)
+## 2026-11-20 (b) — Assembly Studio command bar (ASM-027)
 
 Founder ask: "Assembly commands should be on a command bar on top, just like Design Studio. Like we have in SOLIDWORKS.
 I do not want users to feel like aliens when they land on this software."
