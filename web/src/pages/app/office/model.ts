@@ -1,6 +1,6 @@
 /** Pure Design Office helpers: formatting, board lanes, and the plan-review estimate preview.
  * The preview mirrors src/aicad/office/estimates.py exactly (same constants, sent by the server). */
-import type { AgentState, ChangeRequest, Column, Constants, Family, GateFix, Interface, Item, LiveInstance, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
+import type { AgentState, ChangeRequest, CheckRow, Column, Constants, Family, GateFix, Interface, Item, LiveInstance, OfficeEvent, Orchestrator, Plan, Ticket } from "./types";
 
 export const COLUMN_STATE: Record<Column, AgentState> = {
   backlog: "idle", ready: "idle", in_design: "working", in_review: "review", changes_requested: "blocked",
@@ -367,4 +367,116 @@ export function fixLines(fix: GateFix): { headline: string; lines: string[]; ope
   const first = rm?.text ? [`${rm.ok ? "Done" : "Not done"}: ${rm.text}.`] : [];
   return { headline: head.charAt(0).toUpperCase() + head.slice(1), lines: [...first, ...done.map(x => `Done: ${x}.`), ...asked.map(x => `Proposed: ${x}.`)],
     open: left ? (a?.open?.length ? a.open : fix.problems) : [], asked };
+}
+
+// ------------------------------------------------------------------ the board's part thumbnails (line art)
+/** Feature groups of a thumbnail (``src/aicad/drawing/thumb.py`` KINDS). */
+export type FeatureKind = "envelope" | "profile" | "chamfer" | "bore" | "groove" | "keyway" | "teeth";
+export const FEATURE_KINDS: FeatureKind[] = ["envelope", "profile", "chamfer", "bore", "groove", "keyway", "teeth"];
+
+/** Where a part ticket is, as the card's thumbnail shows it. */
+export type WorkStage = "waiting" | "reading" | "rough" | "features" | "finish" | "measure" | "direct" | "inspect"
+  | "fit" | "review" | "sent_back" | "done";
+
+/** The stage of a part from its column, run status and status line (the agent's own words, part title removed so a
+ * part called "Turning shaft" never reads as turning). Pure; the server's lines are in office/specialists.py. */
+export function workStage(t: Pick<Ticket, "column" | "run_status" | "line" | "title">): WorkStage {
+  const col = t.column, rs = t.run_status ?? null;
+  if (col === "approved" || col === "integrated") return rs === "fitting" ? "fit" : "done";
+  if (col === "changes_requested" || rs === "blocked") return "sent_back";
+  if (rs === "awaiting_review") return "review";
+  const line = (t.line ?? "").split(t.title).join(" ").toLowerCase();
+  if (rs === "fitting" || /\bswapping\b/.test(line)) return "fit";
+  if (/from the interface spec/.test(line)) return "direct";
+  if (rs === "reviewing" || /\binspecting\b/.test(line)) return "inspect";
+  if (/against the brief|\bmiking\b|\bmeasuring\b/.test(line)) return "measure";
+  if (/passes the gating checks|chamfering|deburring|checking the mesh|flattening burrs|trimming the gates/.test(line)) return "finish";
+  if (/facing and grooving|pocketing|cutting the hub|\bbending\b|draft and ribs|\bre-\w+|a check failed/.test(line)) return "features";
+  if (/\bturning\b|roughing out|\bhobbing\b|cutting the blank|filling the cavity/.test(line)) return "rough";
+  if (/reading the brief|\bsearching\b|\blooking\b/.test(line) || rs === "searching") return "reading";
+  if (rs === "designing") return "rough";
+  if (col === "in_review") return "inspect";
+  return "waiting";
+}
+
+/** What the thumbnail shows at a stage: the real part or the placeholder ("ghost"), which feature groups are lit
+ * (the rest faint), whether the whole drawing is faint (waiting), and Gage's scan line. Stock / envelope first, then
+ * the turned profile (and gear teeth), then bores, grooves and keyways, then chamfers; inspection lights everything. */
+export function stageView(stage: WorkStage): { show: "ghost" | "real"; lit: FeatureKind[]; faint: boolean; scan: boolean } {
+  const upTo = (k: FeatureKind[]) => ({ show: "ghost" as const, lit: k, faint: false, scan: false });
+  switch (stage) {
+    case "waiting": return { show: "ghost", lit: [], faint: true, scan: false };
+    case "reading": return upTo(["envelope"]);
+    case "rough": return upTo(["envelope", "profile", "teeth"]);
+    case "features": return upTo(["envelope", "profile", "teeth", "bore", "groove", "keyway"]);
+    case "finish": case "direct": case "sent_back": case "review": return upTo(FEATURE_KINDS);
+    case "measure": case "inspect": return { show: "ghost", lit: FEATURE_KINDS, faint: false, scan: true };
+    case "fit": case "done": return { show: "real", lit: FEATURE_KINDS, faint: false, scan: false };
+  }
+}
+
+/** The feature group an ICD conformance row is about (office/icd.py labels: "hole 1", "bore Ø20 H7", "keyway 6 × 3.5
+ * (shaft, DIN 6885)", "m2 × 40 teeth", "bearing journal Ø20 k6", "mounting face", "envelope", ...). */
+export function rowKind(feature: string): FeatureKind {
+  const f = feature.toLowerCase();
+  if (/\bteeth\b/.test(f)) return "teeth"; // "m2 × 40 teeth" (never "M6", a thread)
+  if (/keyway/.test(f)) return "keyway";
+  if (/groove/.test(f)) return "groove";
+  if (/chamfer/.test(f)) return "chamfer";
+  if (/clearance|opening|relief|recess|counterbore/.test(f)) return "bore";
+  if (/journal|^shaft\b|stepped shaft|\bboss\b/.test(f)) return "profile";
+  if (/hole|bore|seat/.test(f)) return "bore";
+  return "envelope";
+}
+
+const DIA = /Ø\s*(\d+(?:\.\d+)?)/;
+/** The diameters a row can be matched by: the ICD's (feature label or spec) and the measured one. */
+export function rowDiameters(r: Pick<CheckRow, "feature" | "spec" | "d_mm">): number[] {
+  const out: number[] = [];
+  for (const s of [r.feature, r.spec]) { const m = DIA.exec(s ?? ""); if (m) out.push(Number(m[1])); }
+  if (typeof r.d_mm === "number") out.push(r.d_mm);
+  return [...new Set(out)];
+}
+
+export interface ThumbGroupRef { g: number; feature: string; d?: number | null }
+
+/** Gage's rows ticked onto the thumbnail's feature groups: a group is "fail" when any row matched to it fails, "ok"
+ * when every matched row passes. Rows match by feature kind, and for round features by diameter (the ICD's Ø, or the
+ * measured one); a row that matches no drawn group marks nothing (the card's chip still names it). A turned part's
+ * outline is its largest turned diameter, so the envelope row falls to that when no flat body edge is drawn. */
+export function reviewMarks(rows: Pick<CheckRow, "feature" | "spec" | "ok" | "d_mm">[], groups: ThumbGroupRef[]): Map<number, "ok" | "fail"> {
+  const out = new Map<number, "ok" | "fail">();
+  for (const r of rows) {
+    const kind = rowKind(r.feature);
+    let cands = groups.filter(g => g.feature === kind);
+    if (kind === "envelope" && !cands.length) {
+      const outer = Math.max(...groups.filter(g => g.feature === "profile").map(g => g.d ?? 0));
+      cands = groups.filter(g => g.feature === "profile" && (g.d ?? 0) === outer && outer > 0);
+    }
+    const ds = rowDiameters(r);
+    if (ds.length && (kind === "bore" || kind === "profile" || kind === "groove")) {
+      const near = cands.filter(g => typeof g.d === "number" && ds.some(d => Math.abs(d - (g.d as number)) <= Math.max(0.6, 0.03 * d)));
+      if (near.length) cands = near;
+      else if (cands.some(g => typeof g.d === "number")) cands = [];
+    }
+    for (const g of cands) out.set(g.g, !r.ok || out.get(g.g) === "fail" ? "fail" : "ok");
+  }
+  return out;
+}
+
+/** Every conformance row of a ticket (the envelope and each interface's rows). */
+export function icdRows(t: Pick<Ticket, "icd_check">): CheckRow[] {
+  const c = t.icd_check;
+  if (!c) return [];
+  return [...(c.envelope ? [c.envelope] : []), ...c.interfaces.flatMap(i => i.rows)];
+}
+
+/** The reason chip of a sent-back or blocked card: the first failing feature, else the office's own reason. */
+export function sentBackReason(t: Pick<Ticket, "icd_check" | "run" | "column" | "run_status">): string | null {
+  const reworking = !!t.icd_check && !t.icd_check.ok && t.column !== "approved" && t.column !== "integrated";
+  if (t.column !== "changes_requested" && t.run_status !== "blocked" && !reworking) return null;
+  const bad = icdRows(t).find(r => !r.ok);
+  if (bad) return `Off: ${bad.feature}`;
+  const why = t.run?.blocked;
+  return why ? (why.length > 48 ? `${why.slice(0, 47).trimEnd()}…` : why) : null;
 }

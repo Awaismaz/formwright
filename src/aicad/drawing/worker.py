@@ -6,6 +6,7 @@ here; no user script is executed (the worker reads the verified ``part.step`` / 
 Protocol (one JSON object per line):
   parent -> worker  {"op": "generate", "out": str, "dest": str, "options": {...}, "meta": {...}, "edits": {...}}
                     {"op": "assembly", "nodes": [...], "rows": [...], "dest": str, "meta": {...}}  (DRW-014)
+                    {"op": "thumb", "step": str, "info": {...}, "opts": {...}, "dest": str}  (board thumbnails)
   worker -> parent  {"ok": bool, "rc": int, "error": str | None, "result": {...}, "elapsed_s": float}
 """
 
@@ -44,6 +45,11 @@ def serve() -> None:
                 res = assembly_sheet.generate(req["nodes"], req["rows"], Path(req["dest"]), req.get("meta") or {},
                                               req.get("size") or "A3")
                 resp = {"ok": True, "rc": 0, "result": res}
+            elif req.get("op") == "thumb":  # a Design Office card's line-art thumbnail of a part snapshot
+                from aicad.drawing import thumb
+
+                resp = {"ok": True, "rc": 0, "result": thumb.write(req["step"], req.get("info") or {},
+                                                                   req.get("opts") or {}, req["dest"])}
             elif req.get("op") != "generate":
                 resp: dict[str, Any] = {"ok": False, "rc": 2, "error": f"unknown op {req.get('op')}"}
             else:
@@ -92,6 +98,12 @@ async def assembly(key: str, nodes: list[dict[str, Any]], rows: list[dict[str, A
                    meta: dict[str, Any], size: str = "A3", timeout: float = 300) -> dict[str, Any]:
     return await get_worker(key).request({"op": "assembly", "nodes": nodes, "rows": rows, "dest": str(dest),
                                           "meta": meta, "size": size}, timeout)
+
+
+async def thumb(key: str, step: Path, info: dict[str, Any], opts: dict[str, Any], dest: Path,
+                timeout: float = 60) -> dict[str, Any]:
+    return await get_worker(key).request({"op": "thumb", "step": str(step), "info": info, "opts": opts,
+                                          "dest": str(dest)}, timeout, weight=0.2)
 
 
 async def shutdown_all() -> None:

@@ -13,6 +13,7 @@ import { assignable, fmtMinutes, fmtRange, runChip } from "./model";
 
 const PATH_WORDS = { toolbox: "Toolbox", direct: "from the interfaces", template: "workspace template", agent: "AI designer" } as const;
 import PartPreview from "./PartPreview";
+import { ThumbPair } from "./PartThumb";
 import { errorTone, fmtError } from "./timeline";
 import type { Column, DesignPath, OfficeEvent, Program, Ticket } from "./types";
 
@@ -95,6 +96,7 @@ export default function TicketDrawer({ program, ticket, onClose }: { program: Pr
               {!t.run && !done && <div className="mt-1 text-[11.5px] text-muted">Waiting for the office: press Run on the program, or start it by hand.</div>}
             </div>
           </div>
+          <ThumbPair program={program} t={t} />
           {t.project_id && (t.kind === "part" || t.kind === "standard") && t.milestones.includes("first_build") &&
             <PartPreview projectId={t.project_id} version={t.updated_at} done={done} onOpen={() => nav(`/app/projects/${t.project_id}`)} />}
           {t.run_status === "awaiting_review" && <div className="rounded-md border border-warning/40 bg-warning/5 p-3" data-review-gate>
