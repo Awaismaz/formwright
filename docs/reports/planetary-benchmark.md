@@ -43,3 +43,5 @@ now absorbed by code, not by hoping the model repeats itself.
 
 **Standing (after V5):** the founder's brief right four times in a row (A7 to A10) and six of its variants right
 (ratios 4.5, 5 and 6, 4 planets, module 1.5 and 2.5, a stated shaft size), each in 3 to 5 minutes with no AI part work.
+| A11 | "Build a single stage planetary Gearbox" | Wrong: master path, 19 clashes, a stopped ticket | The model added a lip seal in each open cap (good design). No layout places a seal part, so the fast layout reported it unreachable and gave way to a master model | Radial shaft seals end to end (Toolbox seal, ICD interface in the cap's recess, Fitz seats it; agent on `wip/shaft-seals`) |
+| A12 | "Build a single stage planetary Gearbox" | **Right.** 23 of 23, fast path, carrier built from the interfaces (0 AI parts). Built at 189 s, complete at 231 s; slower than A10 because two agents were running CAD test suites on the same machine at the time, so the effect of the direct-build slots is not measured yet | None | None |

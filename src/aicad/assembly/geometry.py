@@ -116,8 +116,9 @@ def prepare(dest: Path, step: str | None = None, toolbox_spec: dict[str, Any] | 
         holes = rec.get("holes", [])
         patterns = rec.get("patterns", [])
         component = rec.get("component")
+        partials = rec.get("partials", [])
     except Exception:  # noqa: BLE001 - recognition is a convenience; the part stays usable without it
-        holes, patterns, component = [], [], None
+        holes, patterns, component, partials = [], [], None, []
     refs = exact_refs(shape)
     _write_json(dest / "refs.json", refs)
     out_holes = []
@@ -139,6 +140,10 @@ def prepare(dest: Path, step: str | None = None, toolbox_spec: dict[str, Any] | 
             "center": [(bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2, (bb.min.Z + bb.max.Z) / 2],
             "holes": out_holes,
             "patterns": [{"kind": p["kind"], "d": p["d"], "count": p["count"], "holes": p["holes"]} for p in patterns]}
+    if partials:  # half bores (a housing split on its axis) and other partial bores: never holes, kept with their angle
+        info["partials"] = [{"d": p["d"], "axis": p["axis"], "center": p["center"], "depth": p["depth"],
+                             "through": p["through"], "angle": p["angle"], "faces": _hole_face_ids(shape, p)}
+                            for p in partials]
     if component:  # a recognised gear: teeth, module, axis (ICD conformance, CD-010)
         info["component"] = {k: component.get(k) for k in ("kind", "params", "axis", "origin")}
     _write_json(dest / "info.json", info)
@@ -190,7 +195,8 @@ def exact_refs(shape: Any) -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def _hole_face_ids(shape: Any, h: dict[str, Any]) -> list[int]:
-    """topo.json face ids of the cylindrical faces of a recognised hole (coaxial, same radius)."""
+    """topo.json face ids of the cylindrical faces of a recognised hole (coaxial, same radius, within its stretch
+    along the axis: two holes of one Ø on one line are two holes, each with its own faces)."""
     from OCP.BRepAdaptor import BRepAdaptor_Surface
     from OCP.GeomAbs import GeomAbs_Cylinder
 
@@ -199,6 +205,7 @@ def _hole_face_ids(shape: Any, h: dict[str, Any]) -> list[int]:
     r = h["d"] / 2
     c = np.array(h["center"], dtype=float)
     d = xform.unit(h["axis"])
+    half = float(h["depth"]) / 2 + 1e-3 if h.get("depth") is not None else math.inf
     ids = []
     for i, f in enumerate(topo_faces(shape)):
         s = BRepAdaptor_Surface(f.wrapped)
@@ -214,6 +221,9 @@ def _hole_face_ids(shape: Any, h: dict[str, Any]) -> list[int]:
             continue
         w = o - c
         if float(np.linalg.norm(w - d * float(w @ d))) > 1e-3:
+            continue
+        ts = [float((np.array([v.X, v.Y, v.Z]) - c) @ d) for v in f.vertices()]
+        if ts and (max(ts) < -half or min(ts) > half):
             continue
         ids.append(i)
     return ids

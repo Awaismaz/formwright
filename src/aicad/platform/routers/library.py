@@ -233,8 +233,10 @@ def _current_recognition(p: Project) -> dict[str, Any] | None:
     ws = workspace_for(p)
     st = _read(ws / "out" / "status.json") or {}
     rec = _read(ws / "out" / "recognition.json")
-    if rec is None or rec.get("build_id") != st.get("build_id"):
-        return None
+    from aicad.recognize import VERSION
+
+    if rec is None or rec.get("build_id") != st.get("build_id") or rec.get("version") != VERSION:
+        return None  # older than the build, or read by an older recogniser
     ai = _read(ws / ".fw" / "recognition_ai.json")
     if ai and ai.get("build_id") == st.get("build_id"):
         rec["ai"] = ai

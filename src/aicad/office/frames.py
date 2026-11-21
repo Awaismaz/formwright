@@ -110,6 +110,9 @@ def info_in(info: dict[str, Any], R: Mat, t: list[float]) -> dict[str, Any]:
     out = dict(info)
     out["holes"] = [{**h, "center": [a + b for a, b in zip(apply(R, h["center"]), t, strict=True)],
                      "axis": apply(R, h["axis"])} for h in info.get("holes") or []]
+    if info.get("partials"):
+        out["partials"] = [{**h, "center": [a + b for a, b in zip(apply(R, h["center"]), t, strict=True)],
+                            "axis": apply(R, h["axis"])} for h in info["partials"]]
     comp = info.get("component")
     if comp:
         o = comp.get("origin") or [0, 0, 0]
