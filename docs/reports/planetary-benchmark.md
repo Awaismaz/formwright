@@ -37,3 +37,9 @@ now absorbed by code, not by hoping the model repeats itself.
 | V1 | "...with a 5:1 ratio" | **Right.** 22 of 22: sun 24, planets 36, ring 96 (1 + 96 / 24 = 5), complete, fast path | None | None |
 | V2 | "...with 4 planets" | **Right.** 21 of 21: 4 planets 90° apart, (30 + 90) / 4 = 30 whole, complete, fast path | None | None |
 | V3 | "...module 1.5, sun gear 24 teeth" | Wrong: master path, 24 clashes, a stopped ticket | Each planet copy's bearing seat is worked out in its own frame and rounded to 0.01 mm: with a = 40.5 one came out at (0, -0.01) and another at (0, 0.01), and the ICD check read one seat as two seats 32 mm into each other, so the fast layout gave way to a master model | Feature centres within 0.02 mm (a fifth of the position tolerance) are one place, both for the overlap check and for merging a part's features |
+| V3b | "...module 1.5, sun gear 24 teeth" (V3 again) | **Right.** 21 of 21: 24 / 30 / 84, complete in 3.2 min, fast path | None | None |
+| V4 | "...with a 6:1 ratio and module 2.5" | **Right.** 22 of 22: sun 24, planets 48, ring 120 (1 + 120 / 24 = 6), complete in 5 min, fast path | None | None |
+| V5 | "...for a 20 mm input shaft, 3 planets, ratio 4.5:1" | **Right.** 22 of 22: 24 / 30 / 84 (1 + 84 / 24 = 4.5), complete in 3 min | None | None |
+
+**Standing (after V5):** the founder's brief right four times in a row (A7 to A10) and six of its variants right
+(ratios 4.5, 5 and 6, 4 planets, module 1.5 and 2.5, a stated shaft size), each in 3 to 5 minutes with no AI part work.
