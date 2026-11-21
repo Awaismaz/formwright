@@ -1,0 +1,32 @@
+/* Board part thumbnails (PartThumb.tsx). Short, quiet motion only (each under a second); all of it stops under
+   prefers-reduced-motion, where the drawing simply shows its final state. */
+
+.fw-th-g { transition: opacity .3s ease, color .3s ease; }
+.fw-th--faint svg { opacity: .5; }
+
+/* Gage's scan: a soft line that sweeps the part (0.9 s), then rests */
+.fw-th-scan {
+  position: absolute; left: 0; right: 0; top: 0; height: 2px; pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(var(--primary) / .85), transparent);
+  box-shadow: 0 0 6px rgb(var(--primary) / .5);
+  animation: fw-th-scan 1.6s ease-in-out infinite;
+}
+@keyframes fw-th-scan {
+  0% { transform: translateY(0); opacity: 0; }
+  8% { opacity: 1; }
+  56% { transform: translateY(var(--fw-th-h, 52px)); opacity: 1; }
+  60%, 100% { transform: translateY(var(--fw-th-h, 52px)); opacity: 0; }
+}
+
+/* placeholder -> approved part, once */
+.fw-th-in { animation: fw-th-in .6s ease-out both; }
+.fw-th-out { animation: fw-th-out .6s ease-out both; }
+@keyframes fw-th-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fw-th-out { from { opacity: 1; } to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .fw-th-g { transition: none; }
+  .fw-th-in, .fw-th-out { animation: none; }
+  .fw-th-out { display: none; }
+  .fw-th-scan { animation: none; top: 50%; opacity: .6; }
+}

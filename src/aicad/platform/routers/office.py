@@ -21,6 +21,8 @@ the engineer role. Archie's planning turn is metered like any design-agent run; 
   POST   /api/office/programs/{pid}/change-requests         raise an interface change request (Archie decides)
   GET    /api/office/programs/{pid}/assembly                the live program assembly (placeholders / real parts)
   POST   /api/office/programs/{pid}/assembly/rebuild        rebuild it from the skeleton (keeps approved parts)
+  GET    /api/office/programs/{pid}/items/{item}/thumb?state=ghost|real[&k=key]   a card's line-art thumbnail (SVG;
+                                                            202 while it is drawn, 404 when there is no such part)
   POST   /api/office/programs/{pid}/tickets/{tid}/move      board column
   PATCH  /api/office/programs/{pid}/tickets/{tid}           title, specialist, complexity
   POST   /api/office/programs/{pid}/tickets/{tid}/milestones
@@ -760,6 +762,34 @@ def program_assembly_view(pid: str, ctx: Ctx = Depends(verified_ctx)) -> dict[st
             "at": state.get("at"), "view": v, "items": items, "can_edit": ctx.role != "viewer",
             "check": state.get("check"),  # PD-71: the advisory whole-program clash check
             "looks": _looks(ctx, pid, doc)}  # PD-73: the visual checks (layout, each level), advisory
+
+
+@router.get("/programs/{pid}/items/{item}/thumb")
+async def item_thumb(pid: str, item: str, state: str = "real", k: str | None = None,
+                     ctx: Ctx = Depends(verified_ctx)) -> Response:
+    """The board card's thumbnail: blueprint line art of the item's placeholder (``ghost``) or its approved part
+    (``real``), drawn once per part snapshot in the drawing worker and cached next to it. Never waits for the
+    drawing: 202 while it is being drawn. ``k``: the snapshot key the card expects (then the answer is cacheable)."""
+    from aicad.assembly import store as astore
+    from aicad.office import thumbs
+
+    if state not in ("ghost", "real"):
+        raise HTTPException(422, "state is ghost or real")
+    doc = _load(ctx, pid)
+    aroot = astore.org_root(get_settings().data_dir, ctx.require_org().id)
+    r = thumbs.resolve(aroot, doc, item, state)
+    if r is None or (k is not None and k != r["key"]):
+        raise HTTPException(404, "No preview for this part yet")
+    svg = thumbs.cached(aroot, r)
+    if svg is not None:
+        return Response(svg, media_type="image/svg+xml", headers={
+            "Cache-Control": "private, max-age=86400, immutable" if k else "private, no-cache",
+            "ETag": f'"{r["key"]}-{r["hash"]}"', "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"})
+    if thumbs.ensure(aroot, ctx.require_org().id, r) == "failed":
+        raise HTTPException(404, "No preview for this part")
+    return Response('{"status":"drawing"}', status_code=202, media_type="application/json",
+                    headers={"Retry-After": "1", "Cache-Control": "no-store"})
 
 
 def _looks(ctx: Ctx, pid: str, doc: dict[str, Any]) -> list[dict[str, Any]]:

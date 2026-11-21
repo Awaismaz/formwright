@@ -153,7 +153,8 @@ export interface ChangeRequest {
 }
 export interface AssemblyState {
   status: "building" | "ready" | "failed" | "unavailable"; final?: string; subs?: Record<string, string>;
-  parts?: Record<string, { key: string; kind: "placeholder" | "real"; icd_version: number }>;
+  /** ``ghost``: the placeholder a real part replaced (the board's before / after thumbnails). */
+  parts?: Record<string, { key: string; kind: "placeholder" | "real"; icd_version: number; ghost?: string }>;
   summary?: string; clashes?: { a: string; b: string; a_name?: string; b_name?: string; volume_mm3: number }[];
   mates?: number; at?: string; solve?: string | null; problems?: string[];
 }

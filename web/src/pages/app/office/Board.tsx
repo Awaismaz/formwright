@@ -8,7 +8,8 @@ import { Progress, Tip } from "@/components/ui";
 import { AgentAvatar, AGENT } from "./Avatars";
 import { BASE } from "./api";
 import { CrCard } from "./Interfaces";
-import { boardLanes, canDrop, COLUMN_STATE, fmtEta, fmtMinutes, progressAfterMove, runChip, type Handoff } from "./model";
+import { boardLanes, canDrop, COLUMN_STATE, fmtEta, fmtMinutes, progressAfterMove, runChip, sentBackReason, type Handoff } from "./model";
+import PartThumb from "./PartThumb";
 import type { Column, Program, Ticket } from "./types";
 
 const COLUMN_TONE: Record<Column, string> = {
@@ -53,7 +54,8 @@ function HandoffSlide({ h, size }: { h: Handoff; size: number }) {
   );
 }
 
-export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticket; maxEst: number; onOpen: () => void; draggable: boolean; handoff?: Handoff }) {
+export function TicketCard({ t, maxEst, onOpen, draggable, handoff, program }: { t: Ticket; maxEst: number; onOpen: () => void; draggable: boolean; handoff?: Handoff; program?: Program }) {
+  const reason = sentBackReason(t);
   const outline = Math.max(18, Math.min(100, (100 * t.estimate_min) / Math.max(maxEst, 0.1)));
   const busy = ACTIVE.has(t.run_status ?? "");
   const chip = runChip(t);
@@ -98,11 +100,17 @@ export function TicketCard({ t, maxEst, onOpen, draggable, handoff }: { t: Ticke
               {t.comments.length > 0 && <span className="inline-flex items-center gap-0.5" title="Comments"><MessageSquare className="h-3 w-3" />{t.comments.length}</span>}
             </span>
           </div>
-          <div className="line-clamp-2 text-[12.5px] font-medium leading-snug">{t.title}</div>
+          <div className="flex items-start gap-2">
+            <div className="line-clamp-2 min-w-0 flex-1 text-[12.5px] font-medium leading-snug">{t.title}</div>
+            {program && <PartThumb program={program} t={t} size={48} className="mt-0.5" />}
+          </div>
         </div>
       </div>
-      {(t.line || chip) && <div className="mt-1 space-y-0.5">
-        {chip && <span className={cx("inline-block rounded-full border px-1.5 text-[10px] font-medium leading-4", CHIP_TONE[chip.tone])}>{chip.label}</span>}
+      {(t.line || chip || reason) && <div className="mt-1 space-y-0.5">
+        {(chip || reason) && <div className="flex flex-wrap gap-1">
+          {chip && <span className={cx("inline-block rounded-full border px-1.5 text-[10px] font-medium leading-4", CHIP_TONE[chip.tone])}>{chip.label}</span>}
+          {reason && <span className={cx("inline-block max-w-full truncate rounded-full border px-1.5 text-[10px] font-medium leading-4", CHIP_TONE.danger)} data-reason-chip title={reason}>{reason}</span>}
+        </div>}
         {t.line && <div key={t.line} className={cx("line-clamp-2 animate-fade-in text-[11px] leading-snug", busy ? "text-text" : "text-muted")}>{t.line}</div>}
       </div>}
       <div className="mt-1.5" title={`Estimate ${fmtMinutes(t.estimate_min)} (outline) · ${t.progress} % done (fill)`}>
@@ -177,7 +185,7 @@ export default function Board({ program, onOpen, handoffs }: { program: Program;
                         if (canDrop(t, c.code)) move(t, c.code);
                       }}
                       className={cx("min-h-[72px] space-y-2 rounded-md p-1 transition", over === zone ? "bg-primary-soft ring-2 ring-primary/30" : "bg-transparent")}>
-                      {cards.map(t => <TicketCard key={t.id} t={t} maxEst={maxEst} draggable={canEdit} onOpen={() => onOpen(t)} handoff={handoffs?.get(t.id)} />)}
+                      {cards.map(t => <TicketCard key={t.id} t={t} maxEst={maxEst} draggable={canEdit} onOpen={() => onOpen(t)} handoff={handoffs?.get(t.id)} program={program} />)}
                     </div>);
                 })}
               </div>}

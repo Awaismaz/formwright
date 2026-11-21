@@ -245,6 +245,14 @@ async def _placeholder(aroot: Path, org_id: str, prog: dict[str, Any], item: str
         "program_id": prog["id"], "item_id": item, "icd_version": prog["icd"]["version"]})
 
 
+def _ghost(before: dict[str, Any] | None, key: str) -> dict[str, str]:
+    """The placeholder a real part replaced (the board's before / after thumbnails): kept while the item is real."""
+    if key.startswith("h_") or not before:
+        return {}
+    old = before["key"] if str(before.get("key", "")).startswith("h_") else before.get("ghost")
+    return {"ghost": old} if old else {}
+
+
 def _sub_base(prog: dict[str, Any], sub: str) -> str | None:
     sk = prog["skeleton"]
     mine = [i for i, v in sk["items"].items() if v["sub"] == sub]
@@ -269,7 +277,8 @@ async def build(aroot: Path, org_id: str, user_id: str, prog: dict[str, Any],
     for item in sk["items"]:
         real = (keys or {}).get(item)
         key = real or await _placeholder(aroot, org_id, prog, item)
-        parts[item] = {"key": key, "kind": "real" if real else "placeholder", "icd_version": prog["icd"]["version"]}
+        parts[item] = {"key": key, "kind": "real" if real else "placeholder", "icd_version": prog["icd"]["version"],
+                       **_ghost((state.get("parts") or {}).get(item), key)}
     problems: list[str] = []
     sub_docs: dict[str, dict[str, Any]] = {}
     for sub in subs_of(prog):
@@ -427,7 +436,7 @@ async def swap(aroot: Path, org_id: str, prog: dict[str, Any], updates: dict[str
     parts = dict(state.get("parts") or {})
     for i, key in updates.items():
         parts[i] = {"key": key, "kind": "placeholder" if key.startswith("h_") else "real",
-                    "icd_version": prog["icd"]["version"]}
+                    "icd_version": prog["icd"]["version"], **_ghost(parts.get(i), key)}
     state["summary"] = summarize(parts, final)
     state.update(parts=parts, clashes=clashes, at=astore.now(), problems=problems[:20],
                  solve=((final or {}).get("solve") or {}).get("status"), mates=len((final or {}).get("mates") or []))
