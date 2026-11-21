@@ -280,6 +280,36 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-283 | What re-reads after recognition v4 | Assembly snapshots, the engineering geometry cache and out/recognition.json; an imported STEP project's own RECOGNITION file is kept (its ids drive the model script) | If imported projects should be re-recognised too |
 | PD-284 | A split ICD hole in conformance | Matched against the part's half bores | None expected |
 | PD-285 | Thread engagement and tap depth | Engagement 1.5 d in steel, cast iron and copper alloys, 2 d in aluminium, light alloys, plastics and unknown (common practice, verify); tap depth max(2.5 d + 3, 2 d + 2P + 5) rounded up to 0.5 mm, so a standard screw length always fits (M6 19, M8 23.5) | If a deeper tap is not wanted in thin walls |
+| PD-290 | Seal size when the design names another D / b | The Toolbox DIN 3760 size for the shaft Ø passing the cap; a note names the difference | See shaft-seals.md |
+| PD-291 | Seal geometry | Simplified type A: plain case, back web, one lip meeting the shaft at nominal d (no spring, dust lip, rubber cover or interference); D and b as catalogued | See shaft-seals.md |
+| PD-292 | Recess and shaft tolerances | Recess H8 (gate-checked, Gage-measured); shaft h11 recorded in the ICD but no shaft feature added | See shaft-seals.md |
+| PD-293 | A seal with no open cap to sit in (housing seat with no cap, blind cap) | Not placed: noted, stays in the BOM; no seal bore in a housing wall yet | See shaft-seals.md |
+| PD-294 | Cap too thin for its seal | The cap grows to b + relief + 2 mm unless its thickness was edited (then the gate says `seal_depth`) | See shaft-seals.md |
+| PD-295 | Assignment order | Mounted on a cap, then on a shaft, then on the housing or loose; names "input" / "output" pick their end first; one piece per cap copy | See shaft-seals.md |
+| PD-296 | What Hex stocks as a seal | Radial shaft (lip) seals only; O-rings, gaskets and static, face, rod, piston and wiper seals stay "not stocked" (designed as bought-out parts) | See shaft-seals.md |
+| PD-297 | Toolbox VERSION | Bumped to 4 as asked, although no existing component's geometry changed | See shaft-seals.md |
+| PD-298 | ICD kind | New `seal_seat` (not `shaft_bore`): no editable values at the gate (the size follows the shaft) | See shaft-seals.md |
+| PD-299 | Golden (l) geometry | Box relations (within / touch) in the TOML, which hold for any sizes; exact seal spans are checked on the ICD in pytest, since the graph path does not fix a plan's sizes for `modes = ["simulated"]` | See shaft-seals.md |
+| PD-300 | Card previews style | Blueprint line art (exact hidden-line projection), not shaded renders | See board-previews.md |
+| PD-301 | Sound on the board | None | See board-previews.md |
+| PD-302 | Next board slice | The live assembly viewport above the board (two-way hover), then program replay | See board-previews.md |
+| PD-303 | When thumbnails are drawn | Lazily on the first card request, in the org's drawing worker (shared with drawings); no eager drawing at placeholder or swap time, so no CAD process starts for programs nobody is watching | See board-previews.md |
+| PD-304 | Thumbnail view | Iso; a disc 35 degrees off its axis; framed by the item's skeleton envelope, real parts turned through Gage's frame so ghost and real line up | See board-previews.md |
+| PD-305 | Ghost-to-real cross-fade | 0.6 s, only when the card saw the swap live, once per part per browser session | See board-previews.md |
+| PD-306 | Matching Gage's rows to drawn features | By feature kind and diameter (ICD or measured); envelope rows on a turned part mark its largest diameter; a row that matches nothing marks nothing | See board-previews.md |
+| PD-307 | Reason chip | Shown on sent-back and blocked cards, and while a part with a failing ICD measurement is reworked, until Gage measures it again | See board-previews.md |
+| PD-308 | Which tickets get a thumbnail | Items with a placeholder in the program assembly (designed parts and Toolbox parts that are skeleton items, e.g. a gear); keys and bolts outside the skeleton get none | See board-previews.md |
+| PD-309 | Large drawings | Hidden lines are left out when the SVG would pass 90 KB (visible lines never); while a real drawing loads the card keeps the placeholder | See board-previews.md |
+| PD-310 | How freeform skins are built | Own tensor-product B-spline interpolation (C2 periodic around, C2 along, G1 dome poles), not ThruSections / MakePipeShell / MakeFilling; straight X spine in slice 1 | See freeform-bodies.md |
+| PD-311 | CHK-10 "smooth" threshold | worst normal angle across freeform edges and at poles ≤ 1.0° | See freeform-bodies.md |
+| PD-312 | G2 bound | relative curvature jump ≤ 0.25 reported as "curvature continuous", not gating | See freeform-bodies.md |
+| PD-313 | CHK-10 cost cap | 5 points per edge, at most 400 edges (longest first, the rest counted), 8 normals per face at each pole | See freeform-bodies.md |
+| PD-314 | Freeform envelope tolerance | `bbox_tol` = max(1 mm, 2 % of the largest size), stated in EXPECTED; CHK-04 accepts it | See freeform-bodies.md |
+| PD-315 | When CHK-10 gates | only for declared freeform parts (`freeform_body`, `fw.freeform()`); otherwise informational, and no line when nothing is freeform | See freeform-bodies.md |
+| PD-316 | What counts as sharp by design | edges where a plane, cylinder or cone meets anything; creases named with `fw.crease` within 0.5 mm | See freeform-bodies.md |
+| PD-317 | Shell default | closed hollow (offset, converted to B-splines, subtracted); openings by the slice 2 parting line | See freeform-bodies.md |
+| PD-318 | Ergonomic population and sources | combined = female 5th to male 95th; Bodyspace, Kong & Lowe, MIL-STD-1472H, ISO 9241-410, thumb arc estimate; all "verify" | See freeform-bodies.md |
+| PD-319 | STL mesh for smooth skins | keep 0.01 mm absolute (about 18 s on the controller, in the background); the alternative is a coarser or relative deflection for freeform parts | See freeform-bodies.md |
 | PD-320 | Intermediate shaft between planetary stages | Floats on the planets, no housing bearings (no wall between the stages); housing bearings the model gave it are left out, said in the notes | If a centre web with a bearing is wanted |
 | PD-321 | A carrier joined straight to the next sun | Becomes an intermediate shaft keyed to both (a part is added, said in the notes) | If an integral carrier and sun (one part) is preferred |
 | PD-322 | Separate rings of stages | Stacked: stage 1's ring against the -Y wall, each later ring against the one before and long enough to hold the carrier before it, which turns inside it at least 1 mm clear of its tooth tips | If rings should be located by their own housing shoulders |
@@ -287,3 +317,13 @@ Each ADR: context, decision, alternatives, consequences, revisit trigger.
 | PD-324 | A stated ratio on a multi-stage brief | A ratio marked "each" / "per stage" is per stage; otherwise the first ratio is the overall one, split evenly (r ^ (1 / N)), within 2.5 to 12 a stage | If uneven splits are wanted (a smaller last stage) |
 | PD-325 | Gear pairs in different planes | Two gears at a mesh distance with no face overlap are not a pair when each is in mesh with another gear in its own plane (gearbox stages); a lone gear off its only partner is still stopped | None expected |
 | PD-326 | Nuts and washers of a bolted joint | Follow the bolts when the bolts are planned to the holes (per bolt as planned) | None expected |
+| PD-330 | The library: how many looks and which | 20 looks in 7 groups (above); neutral grey kept as the default and as a choice | See appearances.md |
+| PD-331 | Precedence when the material and the kind disagree | Override, then a finish named in the material, then the material family with the kind picking the finish inside it, then the kind, then neutral. An aluminium gear is aluminium; a steel bearing is chrome | See appearances.md |
+| PD-332 | Steel housings, covers and caps | Machine grey paint (cast iron housings stay cast iron, aluminium stays satin aluminium) | See appearances.md |
+| PD-333 | Fastener finish by standard | Zinc plated by default; black oxide for socket head screws (ISO 4762 / DIN 912), set screws, ISO 7380 / 10642, property class 12.9 or "black"; stainless fasteners stay stainless | See appearances.md |
+| PD-334 | Where the part override is stored | The project's settings (`.fw/project.json`, beside the material), so it follows the part into assemblies and the Design Office | See appearances.md |
+| PD-335 | Where the instance override is stored | On the assembly instance; it beats the part's own override; it does not count as a geometric change | See appearances.md |
+| PD-336 | Multi-body parts | By body label: balls / rollers / needles chrome, cage brass, seal / lip / shield / O-ring rubber, seal case steel, garter spring black oxide; a body named like a part kind resolves as that part | See appearances.md |
+| PD-337 | Lighting | A generated studio environment (gradient dome + five soft boxes, PMREM once per viewer); no downloaded HDRI; dielectrics at 0.55 of the environment | See appearances.md |
+| PD-338 | Dark (Blueprint) theme | The same looks; looks darker than 30 % lightness lifted 10 % toward grey so they keep a shape on the dark viewport | See appearances.md |
+| PD-339 | Viewers that keep their own colours | Office plan preview (build path legend), 3D Print Prep (overhangs), the marketing hero, and the agents' assembly pictures (numbered item colours) | See appearances.md |
