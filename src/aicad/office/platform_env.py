@@ -890,7 +890,9 @@ TOOLBOX_FOR_PARTS = {"fastener", "dowel", "gear"}
 # which must not be read as that host (a key read as a spur gear, a circlip as a shaft; live run 2026-11-19)
 # Keys (DIN 6885) and shaft retaining rings (DIN 471) are stocked now (2026-11-19) and read before any host noun
 # (``librarian.read_toolbox``); with an ICD they are seated in their keyseats / grooves (``icd.seated``).
-NOT_STOCKED = re.compile(r"\b(e-?clips?|internal circlips?|seals?|o-?rings?|springs?|grease nipples?|lock ?nuts?|"
+# Radial shaft seals (DIN 3760) are stocked now (2026-11-21, ``toolbox.shaft_seal``): in an ICD they sit in their open
+# cap's recess (``seal_seat``); other seals (O-rings, gaskets, static seals) are read as not stocked by ``librarian``.
+NOT_STOCKED = re.compile(r"\b(e-?clips?|internal circlips?|o-?rings?|springs?|grease nipples?|lock ?nuts?|"
                          r"tab washers?|spacer sleeves?)\b", re.IGNORECASE)
 # a plan's material name in a description: EN steel names (42CrMo4, 16MnCr5, 18CrNiMo7-6, C45E), AISI / SAE
 # numbers, common non-ferrous metals and plastics

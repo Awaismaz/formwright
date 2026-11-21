@@ -218,12 +218,13 @@ FAMILY = {"key": "key", "keys": "key", "circlip": "ring", "circlips": "ring", "s
           "pinions": "gear", "shaft": "shaft", "shafts": "shaft", "axle": "shaft", "axles": "shaft",
           "bolt": "fastener", "bolts": "fastener", "screw": "fastener", "screws": "fastener", "nut": "nut",
           "nuts": "nut", "washer": "washer", "washers": "washer", "dowel": "dowel", "dowels": "dowel", "pin": "pin",
-          "pins": "pin", "standoff": "standoff", "standoffs": "standoff", "spacer": "standoff", "spacers": "standoff"}
+          "pins": "pin", "standoff": "standoff", "standoffs": "standoff", "spacer": "standoff", "spacers": "standoff",
+          "seal": "seal", "seals": "seal"}
 FAMILY_CODES = {"fastener": ("hex_bolt", "shcs"), "nut": ("hex_nut",), "washer": ("washer",), "key": ("parallel_key",),
                 "ring": ("retaining_ring",), "bearing": ("bearing",), "gear": ("spur_gear",), "shaft": ("shaft",),
-                "dowel": ("dowel",), "pin": ("dowel",), "standoff": ("standoff",)}
+                "dowel": ("dowel",), "pin": ("dowel",), "standoff": ("standoff",), "seal": ("shaft_seal",)}
 # a different kind of a stocked noun (the Toolbox has ISO 4017 / 4762 screws, ISO 4032 nuts, ISO 7089 washers,
-# DIN 6885 A keys, DIN 471 rings, deep-groove ball bearings, ISO 8734 dowels and spur gears)
+# DIN 6885 A keys, DIN 471 rings, deep-groove ball bearings, ISO 8734 dowels, spur gears and DIN 3760 radial shaft seals)
 OTHER_KIND = {
     "fastener": re.compile(r"\b(?:set|grub|wood|self[- ]?tapping|tapping|countersunk|csk|button|pan|shoulder|eye|"
                            r"carriage|anchor|banjo|thumb|wing|u|t|tee|expansion)[- ]?(?:head\s+)?(?:bolts?|screws?)\b"),
@@ -234,6 +235,9 @@ OTHER_KIND = {
     "bearing": re.compile(r"\b(?:needle|roller|taper(?:ed)?|thrust|plain|sleeve|linear|angular[- ]contact|spherical|"
                           r"self[- ]aligning|flanged|pillow[- ]block|housed|cam[- ]follower|slewing)\b"),
     "key": re.compile(r"\b(?:woodruff|gib(?:[- ]head)?|taper)\b"),
+    # the Toolbox seal is a radial shaft (lip) seal: static, face, rod and piston seals, O-rings and gaskets are not
+    "seal": re.compile(r"\b(?:o-?ring|static|face|mechanical|labyrinth|v-?ring|wiper|rod|piston|hydraulic|pneumatic|"
+                       r"bonded|dust|cord|flat|gasket|door|window|lid)[- ]?seals?\b|o-?rings?|gaskets?"),
     "ring": re.compile(r"\b(?:internal|bore|housing)\s+(?:\w+\s+)?(?:circlips?|rings?)\b|\bdin\s*472\b"),
     "pin": re.compile(r"\b(?:spring|roll|cotter|split|clevis|taper|grooved|slotted|hinge|shear|tension)[- ]?pins?\b"),
     "dowel": re.compile(r"\b(?:spring|roll|taper|grooved|slotted|tension)[- ]?(?:dowels?|pins?)\b"),
@@ -324,6 +328,17 @@ def read_toolbox(core: str, extra: str = "") -> dict[str, Any] | None:
         return {"code": "retaining_ring", "params": None, "title": "Retaining ring DIN 471 (size from the shaft)",
                 "standard": "DIN 471", "name": "Retaining ring for shafts", "confidence": "medium", "read": [],
                 "kind": "retaining_ring"}
+    if fam == "seal":  # a DIN 3760 radial shaft seal: "20x35x7", "for a 20 mm shaft", "Ø20"
+        if re.search(r"\bseals?\s+(?:carriers?|holders?|retainers?|housings?|plates?|covers?|caps?|seats?)\b", lead):
+            return None  # the part that carries a seal, not the seal
+        g = re.search(NUM + r"\s*x\s*" + NUM + r"\s*x\s*" + NUM, t)
+        f_ = re.search(r"\bfor (?:a |an |the )?ø?\s*" + NUM + r"\s*(?:mm)?\s*shaft", t)
+        dd = float(g.group(1)) if g else (float(f_.group(1)) if f_ else _dia(t))
+        if dd and round(dd, 3) in toolbox.SEALS:
+            return out("shaft_seal", {"D": dd}, ["D"], "high", "shaft_seal")
+        return {"code": "shaft_seal", "params": None, "title": "Radial shaft seal DIN 3760 (size from the shaft)",
+                "standard": "DIN 3760 / ISO 6194-1", "name": "Radial shaft seal", "confidence": "medium", "read": [],
+                "kind": "shaft_seal"}
     if fam == "nut" or (not fam and words & {"nut", "nuts"} and d is not None):
         return out("hex_nut", {"D": d}, ["D"], "high") if d is not None else out("hex_nut", {}, [], "low")
     if fam == "washer" or (not fam and words & {"washer", "washers"} and d is not None):

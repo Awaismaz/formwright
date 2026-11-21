@@ -1,0 +1,771 @@
+{
+ "brief": "Build a single stage planetary Gearbox",
+ "graph": {
+  "schema": "fw-design-graph",
+  "version": 1,
+  "name": "Planetary with seals",
+  "brief": "Build a single stage planetary Gearbox",
+  "summary": "Single stage planetary gearbox: sun gear keyed on the input shaft drives three planet gears on bearings and pins in a carrier keyed to the output shaft, meshing with an internal ring gear fixed in a split housing.",
+  "components": [
+   {
+    "id": "housing",
+    "kind": "housing",
+    "name": "Housing base",
+    "qty": 1,
+    "group": "",
+    "material": "Cast iron",
+    "params": {
+     "style": {
+      "value": "split",
+      "source": "assumed",
+      "note": "the model's guess"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "cover",
+    "kind": "cover",
+    "name": "Housing cover",
+    "qty": 1,
+    "group": "",
+    "material": "Cast iron",
+    "params": {},
+    "implied": false
+   },
+   {
+    "id": "input_shaft",
+    "kind": "shaft",
+    "name": "Input shaft",
+    "qty": 1,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "role": {
+      "value": "input",
+      "source": "assumed",
+      "note": "the model's guess"
+     },
+     "stepped": {
+      "value": true,
+      "source": "rule",
+      "note": "a part locates against its shoulder"
+     },
+     "d": {
+      "value": 20.0,
+      "source": "assumed",
+      "note": "no size in the brief"
+     },
+     "shoulder_d": {
+      "value": 26.0,
+      "source": "rule",
+      "note": "shoulder step max(2.5, 0.1 d + 1) per side"
+     },
+     "journal_d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "the bore of the 6204"
+     },
+     "length": {
+      "value": 87.0,
+      "source": "layout",
+      "note": "laid out from what it carries"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "output_shaft",
+    "kind": "shaft",
+    "name": "Output shaft",
+    "qty": 1,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "role": {
+      "value": "output",
+      "source": "assumed",
+      "note": "the model's guess"
+     },
+     "stepped": {
+      "value": true,
+      "source": "rule",
+      "note": "a part locates against its shoulder"
+     },
+     "d": {
+      "value": 20.0,
+      "source": "assumed",
+      "note": "no size in the brief"
+     },
+     "shoulder_d": {
+      "value": 26.0,
+      "source": "rule",
+      "note": "shoulder step max(2.5, 0.1 d + 1) per side"
+     },
+     "journal_d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "the bore of the 6204"
+     },
+     "length": {
+      "value": 96.0,
+      "source": "layout",
+      "note": "laid out from what it carries"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "sun_gear",
+    "kind": "spur_gear",
+    "name": "Sun gear",
+    "qty": 1,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "role": {
+      "value": "pinion",
+      "source": "assumed",
+      "note": "the model's guess"
+     },
+     "module": {
+      "value": 2.0,
+      "source": "assumed",
+      "note": "no module in the brief"
+     },
+     "teeth": {
+      "value": 30,
+      "source": "assumed",
+      "note": "no teeth count in the brief"
+     },
+     "face_width": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "face width 10 m"
+     },
+     "bore": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "bored to the Ø20 seat"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "planet_gear",
+    "kind": "spur_gear",
+    "name": "Planet gear",
+    "qty": 3,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "module": {
+      "value": 2.0,
+      "source": "assumed",
+      "note": "no module in the brief"
+     },
+     "teeth": {
+      "value": 30,
+      "source": "assumed",
+      "note": "no teeth count in the brief"
+     },
+     "face_width": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "face width 10 m"
+     },
+     "bore": {
+      "value": 42.0,
+      "source": "rule",
+      "note": "the outer ring of its bearing"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "ring_gear",
+    "kind": "spur_gear",
+    "name": "Ring gear",
+    "qty": 1,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "internal": {
+      "value": true,
+      "source": "assumed",
+      "note": "the model's guess"
+     },
+     "role": {
+      "value": "wheel",
+      "source": "assumed",
+      "note": "the model's guess"
+     },
+     "module": {
+      "value": 2.0,
+      "source": "assumed",
+      "note": "no module in the brief"
+     },
+     "teeth": {
+      "value": 90,
+      "source": "rule",
+      "note": "z_ring = z_sun + 2 z_planet (coaxial sun and ring)"
+     },
+     "face_width": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "face width 10 m"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "planet_pin",
+    "kind": "shaft",
+    "name": "Planet pin",
+    "qty": 3,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "d": {
+      "value": 20.0,
+      "source": "assumed",
+      "note": "no size in the brief"
+     },
+     "journal_d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "the bore of the 6004"
+     },
+     "role": {
+      "value": "intermediate",
+      "source": "rule",
+      "note": "a planet pin"
+     },
+     "length": {
+      "value": 46.0,
+      "source": "layout",
+      "note": "laid out from what it carries"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "planet_bearing",
+    "kind": "bearing",
+    "name": "Planet bearing",
+    "qty": 3,
+    "group": "",
+    "material": "",
+    "params": {
+     "designation": {
+      "value": 6004,
+      "source": "standard",
+      "note": "ISO 15, largest 62xx bore not above Ø20"
+     },
+     "d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "ISO 15 6004"
+     },
+     "D": {
+      "value": 42.0,
+      "source": "standard",
+      "note": "ISO 15 6004"
+     },
+     "B": {
+      "value": 12.0,
+      "source": "standard",
+      "note": "ISO 15 6004"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "carrier",
+    "kind": "hub",
+    "name": "Planet carrier",
+    "qty": 1,
+    "group": "",
+    "material": "Alloy steel",
+    "params": {
+     "bore": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "bored to the Ø20 seat"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "sun_key",
+    "kind": "key",
+    "name": "Sun gear key",
+    "qty": 1,
+    "group": "",
+    "material": "Steel",
+    "params": {
+     "shaft_d": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "the seat it sits in"
+     },
+     "b": {
+      "value": 6.0,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "h": {
+      "value": 6.0,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "t1": {
+      "value": 3.5,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "t2": {
+      "value": 2.8,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "length": {
+      "value": 18.0,
+      "source": "rule",
+      "note": "floor(max(b + 2, B - 2)) for the hub width"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "carrier_key",
+    "kind": "key",
+    "name": "Carrier key",
+    "qty": 1,
+    "group": "",
+    "material": "Steel",
+    "params": {
+     "shaft_d": {
+      "value": 20.0,
+      "source": "rule",
+      "note": "the seat it sits in"
+     },
+     "b": {
+      "value": 6.0,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "h": {
+      "value": 6.0,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "t1": {
+      "value": 3.5,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     },
+     "t2": {
+      "value": 2.8,
+      "source": "standard",
+      "note": "DIN 6885-1 for Ø20"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "input_bearing",
+    "kind": "bearing",
+    "name": "Input shaft bearing",
+    "qty": 2,
+    "group": "",
+    "material": "",
+    "params": {
+     "designation": {
+      "value": 6204,
+      "source": "standard",
+      "note": "ISO 15, largest 62xx bore not above Ø20"
+     },
+     "d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     },
+     "D": {
+      "value": 47.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     },
+     "B": {
+      "value": 14.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "output_bearing",
+    "kind": "bearing",
+    "name": "Output shaft bearing",
+    "qty": 2,
+    "group": "",
+    "material": "",
+    "params": {
+     "designation": {
+      "value": 6204,
+      "source": "standard",
+      "note": "ISO 15, largest 62xx bore not above Ø20"
+     },
+     "d": {
+      "value": 20.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     },
+     "D": {
+      "value": 47.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     },
+     "B": {
+      "value": 14.0,
+      "source": "standard",
+      "note": "ISO 15 6204"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "input_open_cap",
+    "kind": "bearing_cap",
+    "name": "Input open cap",
+    "qty": 1,
+    "group": "",
+    "material": "Cast iron",
+    "params": {
+     "style": {
+      "value": "open",
+      "source": "assumed",
+      "note": "the model's guess"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "output_open_cap",
+    "kind": "bearing_cap",
+    "name": "Output open cap",
+    "qty": 1,
+    "group": "",
+    "material": "Cast iron",
+    "params": {
+     "style": {
+      "value": "open",
+      "source": "assumed",
+      "note": "the model's guess"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "input_seal",
+    "kind": "seal",
+    "name": "Input shaft seal",
+    "qty": 1,
+    "group": "",
+    "material": "",
+    "params": {},
+    "implied": false
+   },
+   {
+    "id": "output_seal",
+    "kind": "seal",
+    "name": "Output shaft seal",
+    "qty": 1,
+    "group": "",
+    "material": "",
+    "params": {},
+    "implied": false
+   },
+   {
+    "id": "cap_screws",
+    "kind": "fastener",
+    "name": "Cap screws",
+    "qty": 8,
+    "group": "",
+    "material": "",
+    "params": {
+     "style": {
+      "value": "shcs",
+      "source": "rule",
+      "note": "PD-114"
+     },
+     "size": {
+      "value": 6,
+      "source": "rule",
+      "note": "PD-114: housing cap screws"
+     },
+     "length": {
+      "value": 16,
+      "source": "rule",
+      "note": "PD-114"
+     }
+    },
+    "implied": false
+   },
+   {
+    "id": "cover_bolts",
+    "kind": "fastener",
+    "name": "Cover bolts",
+    "qty": 4,
+    "group": "",
+    "material": "",
+    "params": {
+     "style": {
+      "value": "hex_bolt",
+      "source": "rule",
+      "note": "PD-114"
+     },
+     "size": {
+      "value": 8,
+      "source": "rule",
+      "note": "PD-114: housing cover bolts"
+     },
+     "length": {
+      "value": 30,
+      "source": "rule",
+      "note": "PD-114"
+     }
+    },
+    "implied": false
+   }
+  ],
+  "connections": [
+   {
+    "id": "c1",
+    "kind": "bearing_journal",
+    "host": "input_shaft",
+    "guest": "input_bearing",
+    "via": [],
+    "params": {
+     "count": {
+      "value": 2,
+      "source": "assumed",
+      "note": ""
+     }
+    }
+   },
+   {
+    "id": "c2",
+    "kind": "bearing_seat",
+    "host": "housing",
+    "guest": "input_bearing",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c3",
+    "kind": "bearing_journal",
+    "host": "output_shaft",
+    "guest": "output_bearing",
+    "via": [],
+    "params": {
+     "count": {
+      "value": 2,
+      "source": "assumed",
+      "note": ""
+     }
+    }
+   },
+   {
+    "id": "c4",
+    "kind": "bearing_seat",
+    "host": "housing",
+    "guest": "output_bearing",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c5",
+    "kind": "keyed_hub",
+    "host": "input_shaft",
+    "guest": "sun_gear",
+    "via": [
+     "sun_key"
+    ],
+    "params": {
+     "fit": {
+      "value": "H7/k6",
+      "source": "standard",
+      "note": "ISO 286 transition fit"
+     }
+    }
+   },
+   {
+    "id": "c6",
+    "kind": "bearing_journal",
+    "host": "planet_pin",
+    "guest": "planet_bearing",
+    "via": [],
+    "params": {
+     "count": {
+      "value": 1,
+      "source": "assumed",
+      "note": ""
+     }
+    }
+   },
+   {
+    "id": "c7",
+    "kind": "mounted_on",
+    "host": "planet_bearing",
+    "guest": "planet_gear",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c8",
+    "kind": "mounted_on",
+    "host": "carrier",
+    "guest": "planet_pin",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c9",
+    "kind": "keyed_hub",
+    "host": "output_shaft",
+    "guest": "carrier",
+    "via": [
+     "carrier_key"
+    ],
+    "params": {
+     "fit": {
+      "value": "H7/k6",
+      "source": "standard",
+      "note": "ISO 286 transition fit"
+     }
+    }
+   },
+   {
+    "id": "c10",
+    "kind": "mounted_on",
+    "host": "housing",
+    "guest": "ring_gear",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c11",
+    "kind": "gear_mesh",
+    "host": "sun_gear",
+    "guest": "planet_gear",
+    "via": [],
+    "params": {
+     "centre_distance": {
+      "value": 60.0,
+      "source": "rule",
+      "note": "a = m (z1 + z2) / 2"
+     },
+     "ratio": {
+      "value": 1.0,
+      "source": "rule",
+      "note": "z2 / z1"
+     }
+    }
+   },
+   {
+    "id": "c12",
+    "kind": "gear_mesh",
+    "host": "planet_gear",
+    "guest": "ring_gear",
+    "via": [],
+    "params": {
+     "centre_distance": {
+      "value": 60.0,
+      "source": "rule",
+      "note": "a = m (z_ring - z_planet) / 2 (internal)"
+     },
+     "ratio": {
+      "value": 3.0,
+      "source": "rule",
+      "note": "z2 / z1"
+     }
+    }
+   },
+   {
+    "id": "c13",
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "cover",
+    "via": [
+     "cover_bolts"
+    ],
+    "params": {}
+   },
+   {
+    "id": "c14",
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "input_open_cap",
+    "via": [
+     "cap_screws"
+    ],
+    "params": {}
+   },
+   {
+    "id": "c15",
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "output_open_cap",
+    "via": [
+     "cap_screws"
+    ],
+    "params": {}
+   },
+   {
+    "id": "c16",
+    "kind": "mounted_on",
+    "host": "input_open_cap",
+    "guest": "input_seal",
+    "via": [],
+    "params": {}
+   },
+   {
+    "id": "c17",
+    "kind": "mounted_on",
+    "host": "output_open_cap",
+    "guest": "output_seal",
+    "via": [],
+    "params": {}
+   }
+  ],
+  "constraints": {
+   "named": [
+    "housing"
+   ],
+   "excluded": [],
+   "exclusive": false
+  },
+  "assumptions": [
+   "Three planet gears, the usual choice for load sharing and balance.",
+   "Input and output shafts are coaxial and leave the housing at opposite ends, each running on two deep-groove ball bearings in the housing.",
+   "Open bearing caps where each shaft leaves the housing, sealed against oil.",
+   "No sizes were given, so module, teeth, shaft diameters and bearings are left for standard sizing.",
+   "Gears, shafts and pins in alloy steel; housing and cover in cast iron."
+  ],
+  "questions": [],
+  "answers": {
+   "planet_count": "3",
+   "material_housing": "Cast iron"
+  },
+  "notes": [
+   "Ring gear: 90 internal teeth (z_ring = z_sun + 2 z_planet = 30 + 2 x 30), so the sun and the ring are coaxial.",
+   "Planet bearing: 6004 (Ø20 x Ø42 x 12) instead, because 6204 (OD 47) left a rim of 4 mm = 2 m under the planet's Ø55 root, less than 2.7 m.",
+   "Planet bearing 6004: rim (Ø55 root - Ø42) / 2 = 6.5 mm = 3.25 m under the planet teeth, at least 2.7 m (ISO 6336-3 / AGMA 2001-D04: rim at least 1.2 tooth depths, 1.2 x 2.25 m (verify)).",
+   "Planet bearing is not carried by Housing base in a planetary set: that joint is left out (it runs on its own axis in the set).",
+   "Cover bolts: 4, one per hole the layout made for them (6 were planned)."
+  ],
+  "source": "intent"
+ }
+}

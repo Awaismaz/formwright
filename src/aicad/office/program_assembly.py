@@ -867,12 +867,13 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                         say(f"{t['title']}: {e}", "warn")
                         continue
                     for n, at in enumerate(seat["at"]):
-                        T = frames.to12(seat["R"], at) if seat.get("R") else xform.to12(xform.translate(tuple(at)))
+                        R = (seat.get("Rs") or [])[n] if n < len(seat.get("Rs") or []) else seat.get("R")
+                        T = frames.to12(R, at) if R else xform.to12(xform.translate(tuple(at)))
                         inst = aservice.add_instance(aroot, adoc, key, T=T,
                                                      name=t["title"])
                         inst["office"] = {"program": prog["id"], "item": t["item_id"], "copy": n, "seated": seat["interface"]}
                     what = {"bearing": "bearing", "dowel": "dowel pin", "parallel_key": "key",
-                            "retaining_ring": "retaining ring"}.get(seat["code"], "part")
+                            "retaining_ring": "retaining ring", "shaft_seal": "shaft seal"}.get(seat["code"], "part")
                     seated[what] = seated.get(what, 0) + len(seat["at"])
                     if any(f["kind"] == "bearing_journal" and f["b"]["item"] == t["item_id"] for f in ifaces):
                         # bearings on shaft journals (no housing): mated to their shafts by interface name

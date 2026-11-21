@@ -242,6 +242,7 @@ The user watches a live 3D viewer that updates every time you call `build_model`
   spur_gear(M, Z, B, BORE, KEY_B=0, KEY_T2=0, KEY_ANG=0) (optional DIN 6885 hub keyway),
   internal_gear(M, Z, B, OD, N=0, PCD=0, HOLE=0) (ring gear, plain rim OD, optional holes), shaft(D, L, KEY_L, C),
   parallel_key(D, L) (DIN 6885 A for shaft Ø D), retaining_ring(D) (DIN 471 for shaft Ø D, as fitted),
+  shaft_seal(D) (DIN 3760 radial lip seal for shaft Ø D: D × b from the table, air face on Z 0, lip toward +Z),
   flange(OD, T, BORE, N, HOLE, PCD), l_bracket(A, B, W, T, HOLE).
   D is the metric size (M3 to M24) for fasteners. Use them for standard parts inside assemblies (position with Pos/Rot, set
   .label) instead of re-modelling them, so they are always identical.

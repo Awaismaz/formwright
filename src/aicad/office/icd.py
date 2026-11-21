@@ -45,6 +45,7 @@ from aicad.office import frames
 from aicad.toolbox import BEARING as _BEARING
 from aicad.toolbox import BEARING_RS as _BEARING_RS
 from aicad.toolbox import DIN471 as _DIN471
+from aicad.toolbox import SEALS as _SEALS
 
 # ----------------------------------------------------------------------------- constants (documented, PD-xx)
 CLEARANCE = {3: 3.4, 4: 4.5, 5: 5.5, 6: 6.6, 8: 9.0, 10: 11.0, 12: 13.5, 16: 17.5}  # ISO 273 medium series
@@ -79,12 +80,13 @@ SHAFT_END = 10.0     # mm of shaft beyond each outer bearing face (at least half
 SEAT_END = 2.0       # mm of seat beyond the free face of the hub on a stepped shaft with no bearings (a sub-assembly)
 KIND_LABEL = {"hole_pattern": "bolted joint", "shaft_bore": "shaft / bore fit", "face": "seating face",
               "gear_mesh": "gear mesh", "bearing_seat": "bearing seat", "key": "keyed joint", "dowel": "dowel pins",
-              "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring", "belt_drive": "belt drive"}
+              "bearing_journal": "bearing on journal", "retaining_ring": "retaining ring", "belt_drive": "belt drive",
+              "seal_seat": "shaft seal seat"}
 EDITABLE = {"hole_pattern": ("fastener", "d", "count", "inset", "flatness", "position_tol"),
             "shaft_bore": ("d", "fit"), "face": ("flatness", "position_tol"),
             "gear_mesh": ("module", "teeth_a", "teeth_b"), "bearing_seat": ("designation", "housing_fit"),
             "key": ("length",), "dowel": ("d",), "bearing_journal": ("designation",), "retaining_ring": (),
-            "belt_drive": ()}
+            "belt_drive": (), "seal_seat": ()}
 ROTATIONS = (0, 90, 180, 270)  # quarter turns of a part frame about +Z (Archie's ``rotate`` hint or an ICD edit)
 
 # Deep-groove ball bearings (the Toolbox table, ISO 15): designation -> (bore d, OD D, width B). 62xx first: the
@@ -95,6 +97,10 @@ BEARINGS: dict[int, tuple[float, float, float]] = {k: (float(v[0]), float(v[1]),
 # n min groove edge distance)
 RINGS: dict[int, tuple[float, float, float, float, float]] = {k: tuple(float(x) for x in v) for k, v in _DIN471.items()}  # type: ignore[misc]
 HOUSING_FITS = ("H7", "J7", "K7")
+# DIN 3760 / ISO 6194-1 radial shaft seals (the Toolbox table): shaft d -> (D outside Ø, b width). The recess for the
+# seal's outside Ø is H8 (DIN 3760 / ISO 6194-1 housing bore tolerance; verify against the seal maker)
+SEALS: dict[float, tuple[float, float]] = {float(k): (float(v[0]), float(v[1])) for k, v in _SEALS.items()}
+SEAL_FIT = "H8"
 SHAFT_FIT_BEARING = "k6"  # rotating inner ring, normal load (ISO 286 values; verify against the bearing maker)
 # DIN 6885-1 form A parallel keys: shaft Ø (over, up to) -> (b, h, t1 shaft depth, t2 hub depth)
 KEYS = [((8, 10), (3, 3, 1.8, 1.4)), ((10, 12), (4, 4, 2.5, 1.8)), ((12, 17), (5, 5, 3.0, 2.3)),
@@ -2399,6 +2405,15 @@ def side_features(skel: dict[str, Any], f: dict[str, Any], which: str) -> list[d
         else:  # the ring (a Toolbox part, not in the skeleton): its own frame, a face on Z 0, axis along +Z
             out.append({"type": "seat", "c": [0.0, 0.0], "z0": 0.0, "z1": float(d["s"]), "d": d["d2"], "tol": tol,
                         "label": f"ring bore Ø{d['d2']:g} as fitted ({d['ring']})"})
+    elif f["kind"] == "seal_seat":
+        if which == "a":  # the cap: the recess for the seal's outside Ø, from its outer face, the seal's width deep
+            g = _axial(skel, side, d, d["axis"], d["z"][0], d["z"][1])
+            out.append({"type": "seat", **g, "d": d["D"], "fit": d.get("fit") or SEAL_FIT, "tol": tol, "seal": True,
+                        "label": f"lip seal recess Ø{d['D']:g} {d.get('fit') or SEAL_FIT} × {d['b']:g} deep from the "
+                                 f"outer face ({d['seal']})"})
+        else:  # the seal (a Toolbox part, not in the skeleton): its own frame, the air-side face on Z 0, axis +Z
+            out.append({"type": "seat", "c": [0.0, 0.0], "z0": 0.0, "z1": float(d["b"]), "d": d["d"], "tol": tol,
+                        "label": f"seal lip Ø{d['d']:g} on the shaft, at nominal ({d['seal']})"})
     elif f["kind"] == "dowel":
         for k, xy in enumerate(d["positions"]):
             out.append({"type": "hole", **_axial(skel, side, d, xy, d["plane_z"]), "d": d["d"],
@@ -2576,10 +2591,22 @@ def key_frame(d: dict[str, Any]) -> tuple[list[list[float]], list[float]]:
     return R, [_r2(mid[i] + w[i] * r) for i in range(3)]
 
 
+def seal_frame(d: dict[str, Any]) -> list[list[float]]:
+    """Rotation of the Toolbox shaft seal of a ``seal_seat`` interface (``toolbox._shaft_seal``: axis Z, air-side face
+    on Z 0, lip toward +Z) into the program: its Z along the interface axis, pointing inward (away from the outer face
+    the recess opens to; ``side`` is the outward sign along the axis)."""
+    R = CANON[ax_of(d)]
+    if int(d.get("side") or -1) > 0:  # the outer face looks along +axis: the seal's Z runs back along -axis
+        R = frames.mul(R, [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+    return R
+
+
 def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
     """Where the ICD puts a standard part (a bearing in its seats, dowel pins in their holes, a parallel key in its
-    keyseat under the hub, a DIN 471 ring in its shaft groove): the Toolbox component, its sizes and one placement
-    per piece (the part's base point, program frame; ``R`` turns the part's own frame when it isn't the program's)."""
+    keyseat under the hub, a DIN 471 ring in its shaft groove, a DIN 3760 shaft seal in its cap's recess): the Toolbox
+    component, its sizes and one placement per piece (the part's base point, program frame; ``R`` turns the part's own
+    frame when it isn't the program's; ``Rs``, when given, per piece: seals face inward at both ends of a shaft
+    line)."""
     keys = [f for f in ifs if f["kind"] == "key" and f["data"].get("key_item") == item]
     if keys:
         d0 = keys[0]["data"]
@@ -2611,6 +2638,21 @@ def seated(ifs: list[dict[str, Any]], item: str) -> dict[str, Any] | None:
             out_r["at"].append([_r2(x) for x in point3(ax_of(d), d["axis"], float(d["z"][0]))])
             out_r["interfaces"].append(f["id"])
         return out_r
+    seals = [f for f in ifs if f["kind"] == "seal_seat" and f["data"].get("seal_item") == item]
+    if seals:
+        d0 = seals[0]["data"]
+        out_s: dict[str, Any] = {
+            "code": "shaft_seal", "params": {"D": float(d0["d"])}, "at": [], "Rs": [], "interface": seals[0]["id"],
+            "interfaces": [], "standard": "DIN 3760 / ISO 6194-1", "what": "seal recesses", "title": d0["seal"]}
+        for f in seals:  # the seal's air-side face on Z 0 of its frame, flush with the outer face; its +Z inward
+            d = f["data"]
+            if abs(float(d["d"]) - float(d0["d"])) > 1e-9:
+                continue  # one Toolbox part per standard item: another size is not this item's place
+            out_s["at"].append([_r2(x) for x in point3(ax_of(d), d["axis"], float(d["face_z"]))])
+            out_s["Rs"].append(seal_frame(d))
+            out_s["interfaces"].append(f["id"])
+        out_s["R"] = out_s["Rs"][0]
+        return out_s
     out: dict[str, Any] | None = None
     for f in ifs:  # bearings: every seat / journal of this item, in ICD order (copy n is the n-th place)
         d = f["data"]
@@ -2822,6 +2864,26 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
             if wall is not None and d["B"] + 1.0 > wall + 1e-6:
                 add("bearing_wall", f"{f['id']}: the {d['B']:g} mm wide bearing {d['designation']} needs a wall of at "
                     f"least {d['B'] + 1:g} mm; the {host['name']} walls are {wall:g} mm.", [f["a"]["item"]], [f["id"]])
+        if f["kind"] == "seal_seat":
+            d = f["data"]
+            if zone(d["D"], d.get("fit") or SEAL_FIT) is None:
+                add("fit_unknown", f"{f['id']}: fit {d.get('fit') or SEAL_FIT} is not in the ISO 286 table used here.",
+                    [f["a"]["item"]], [f["id"]])
+            cap = skel["items"].get(f["a"]["item"])
+            if cap is not None:
+                deep = float(cap["size"][2])
+                need = float(d["b"]) + float(d.get("relief_depth") or 0.0) + 2.0
+                if need > deep + 1e-6:
+                    add("seal_depth", f"{f['id']}: the {d['seal']} ({d['b']:g} wide) needs a cap at least {need:g} mm "
+                        f"thick (the seal, the relief and 2 mm between them); {cap['name']} is {deep:g} mm.",
+                        [f["a"]["item"]], [f["id"]])
+                bore = float(cap.get("bore") or 0.0)
+                if bore and float(d["D"]) <= bore + 1e-6:
+                    add("seal_bore", f"{f['id']}: the seal recess Ø{d['D']:g} is not larger than the Ø{bore:g} bore "
+                        f"of {cap['name']}.", [f["a"]["item"]], [f["id"]])
+            if abs(float(d["d"]) - float(d.get("shaft_d") or d["d"])) > 1e-6:
+                add("seal_bore", f"{f['id']}: the {d['seal']} runs on Ø{d['d']:g}, but the shaft is "
+                    f"Ø{float(d['shaft_d']):g} where it passes the seal.", [f["a"]["item"]], [f["id"]])
         if f["kind"] == "bearing_journal":
             d = f["data"]
             sh = skel["items"].get(f["a"]["item"])
@@ -2936,7 +2998,8 @@ def _bearing_issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dic
     # every other bought-out part (a pin, a key, a ring, an oil plug) that no interface places: said at the gate,
     # never vanishing silently (golden suite F3). Fasteners, nuts and washers are placed by the bolted joints' stacks.
     named = {str(v) for f in ifs for k, v in (f.get("data") or {}).items()
-             if k in ("fastener_item", "key_item", "ring_item", "pin_item", "bearing_item", "cap_item") and v}
+             if k in ("fastener_item", "key_item", "ring_item", "pin_item", "bearing_item", "cap_item", "seal_item")
+             and v}
     for st in skel.get("standard") or []:
         nm = st.get("name") or ""
         if _BEARINGY.search(nm) or re.search(r"screw|bolt|\bnut|washer|\bstud", nm, re.IGNORECASE) \

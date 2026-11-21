@@ -19,7 +19,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-VERSION = 3  # v3 (2026-11-20): spur gear flanks are true involute splines (were polylines: faceted teeth). v2: bearing ISO 582 chamfers
+VERSION = 4  # v4 (2026-11-21): radial shaft seal (DIN 3760). v3 (2026-11-20): spur gear flanks are true involute splines (were polylines: faceted teeth). v2: bearing ISO 582 chamfers
 SQ3 = math.sqrt(3.0)
 
 # ------------------------------------------------------------------------------------------------ tables
@@ -74,6 +74,14 @@ DIN471 = {8: (0.8, 1.5, 7.6, 0.9, 0.6), 9: (1.0, 1.7, 8.6, 1.1, 0.6), 10: (1.0, 
           52: (2.0, 5.2, 49.0, 2.15, 4.5), 55: (2.0, 5.4, 52.0, 2.15, 4.5), 56: (2.0, 5.5, 53.0, 2.15, 4.5),
           58: (2.0, 5.6, 55.0, 2.15, 4.5), 60: (2.0, 5.8, 57.0, 2.15, 4.5), 62: (2.0, 6.0, 59.0, 2.15, 4.5),
           63: (2.0, 6.2, 60.0, 2.15, 4.5), 65: (2.5, 6.3, 62.0, 2.65, 4.5)}
+# DIN 3760 / ISO 6194-1 radial shaft (lip) seals, type A, one common size per shaft Ø: shaft d -> (D outside Ø, b
+# width), mm. Typed from public seal makers' size lists; unverified against the standard itself (PD-13): verify
+# against the seal maker's catalogue. One table for the Toolbox seal, the open cap's recess (``office/generators``)
+# and the layout's seal seat (``graph/layout``).
+SEALS: dict[float, tuple[float, float]] = {
+    10: (22, 7), 12: (22, 7), 15: (26, 7), 17: (30, 7), 20: (35, 7), 22: (35, 7), 25: (40, 7), 28: (42, 7),
+    30: (42, 7), 32: (47, 7), 35: (50, 7), 40: (55, 8), 45: (62, 8), 50: (68, 8), 55: (72, 8), 60: (80, 8)}
+SEALS_SOURCE = "DIN 3760 / ISO 6194-1 lip seal sizes (verify against the seal maker's catalogue)"
 METRIC = sorted(HEX_HEAD)
 
 
@@ -357,6 +365,46 @@ def _retaining_ring(D: float) -> tuple[Any, dict[str, Any]]:
                   "solids": 1}
 
 
+def seal_row(D: float) -> tuple[float, float]:
+    """DIN 3760 (D outside Ø, b width) of the radial shaft seal for a shaft Ø D, else ToolboxError."""
+    key = round(float(D), 3)
+    if key not in SEALS:
+        raise ToolboxError(f"Shaft seal: Ø{D:g} is not a size in the DIN 3760 table here "
+                           f"({', '.join(f'{k:g}' for k in sorted(SEALS))})")
+    Dd, b = SEALS[key]
+    return float(Dd), float(b)
+
+
+def seal_profile(d: float, Dd: float, b: float) -> list[tuple[float, float]]:
+    """The (r, z) section of the simplified radial shaft seal, counter-clockwise: z 0 is the air-side (outer) face,
+    z b the oil side. A plain metal case (wall 0.15 h, full width) and a back web (0.25 b) carry a lip that hangs
+    toward the oil side and meets the shaft at r = d / 2 over 0.55 b .. 0.7 b (contact at nominal, no
+    interference). h = (D - d) / 2. Fractions of h and b only, so every size has the same (simple) polygon."""
+    h = (Dd - d) / 2
+    r0, R = d / 2, Dd / 2
+    return [(r0 + 0.3 * h, 0.0), (R, 0.0), (R, b), (R - 0.15 * h, b), (R - 0.15 * h, 0.25 * b),
+            (r0 + 0.5 * h, 0.25 * b), (r0 + 0.2 * h, 0.7 * b), (r0, 0.7 * b), (r0, 0.55 * b)]
+
+
+def _shaft_seal(D: float) -> tuple[Any, dict[str, Any]]:
+    """DIN 3760 type A radial shaft seal for a shaft Ø D (simplified): the section ``seal_profile`` revolved about
+    Z. Frame: axis Z, the air-side face on Z 0, the lip toward +Z (the oil side). Volume by Pappus over the polygon:
+    V = 2 pi sum (r_i + r_i+1)(r_i z_i+1 - r_i+1 z_i) / 6."""
+    from build123d import Axis, Plane, Polyline, make_face, revolve
+
+    from aicad import fw
+
+    Dd, b = seal_row(D)
+    pts = seal_profile(float(D), Dd, b)
+    face = make_face(Plane.XZ * Polyline(*pts, close=True))
+    part = fw.feature("Lip seal (case, web and lip)", revolve(face, Axis.Z, 360))
+    part.label = f"Radial shaft seal DIN 3760 A {D:g}×{Dd:g}×{b:g}"
+    m = sum((pts[k][0] + pts[(k + 1) % len(pts)][0]) * (pts[k][0] * pts[(k + 1) % len(pts)][1]
+                                                       - pts[(k + 1) % len(pts)][0] * pts[k][1])
+            for k in range(len(pts)))
+    return part, {"bbox": [Dd, Dd, b], "volume": abs(2 * math.pi * m / 6), "solids": 1}
+
+
 def _dowel(D: float, L: float) -> tuple[Any, dict[str, Any]]:
     from build123d import chamfer
 
@@ -476,6 +524,16 @@ COMPONENTS: dict[str, Component] = {c.code: c for c in [
               "Spring steel", _retaining_ring, lambda p: f"Retaining ring DIN 471 {p['D']:g}×{ring_row(p['D'])[0]:g}",
               "Modelled as fitted: a plain annulus from the groove Ø d2 out by the radial width b (no lugs, holes "
               "or gap). Table typed from a distributor's DIN 471 reprint (verify).", "circle"),
+    Component("shaft_seal", "Radial shaft seal", "Seals", "DIN 3760 / ISO 6194-1, type A",
+              ["shaft seal", "shaft seals", "lip seal", "lip seals", "oil seal", "oil seals", "radial shaft seal",
+               "rotary shaft seal", "radial seal", "3760", "6194"],
+              [P("D", "Shaft Ø d", 20, options=[float(k) for k in sorted(SEALS)],
+                 help="D × b from the DIN 3760 table for the shaft Ø")],
+              "NBR on a steel case", _shaft_seal,
+              lambda p: "Radial shaft seal DIN 3760 A {:g}×{:g}×{:g}".format(p["D"], *seal_row(p["D"])),
+              "Simplified: a plain metal case, a back web and one lip meeting the shaft at d (no spring, dust lip or "
+              "rubber cover); outside Ø D and width b as catalogued. Table typed from public seal makers' lists "
+              "(verify).", "circle"),
     Component("shaft", "Shaft with keyway", "Power transmission", "DIN 6885-1 keyway", ["shaft", "keyway", "key way", "axle"],
               [P("D", "Diameter", 25, min=9, max=65), P("L", "Length", 120, min=20, max=2000), P("KEY_L", "Keyway length", 40, min=5, max=1000),
                P("C", "End chamfer", 1, min=0, max=5)], "Steel C45", _shaft,
@@ -588,7 +646,7 @@ def match(prompt: str) -> list[dict[str, Any]]:
                                   # edits and plain prismatic parts are not standard components (STU-15)
                                   "chamfer", "fillet", "block", "plate", "through hole", "holes", "add a", "add an"))
     # "Pinion key", "Gear circlip": the part is the key / ring, the gear or shaft word only says where it goes
-    small = re.search(r"\b(?:keys?|circlips?|retaining rings?|snap rings?)\b", t)
+    small = re.search(r"\b(?:keys?|circlips?|retaining rings?|snap rings?|(?:shaft|lip|oil|radial) seals?)\b", t)
     host = re.search(r"\b(?:pinion|gears?|shafts?|hub|wheel|pulley)\b", t)
     for c in COMPONENTS.values():
         score = 0
@@ -597,7 +655,7 @@ def match(prompt: str) -> list[dict[str, Any]]:
                 score += 2 if " " in k or len(k) > 4 else 1
         if score == 0:
             continue
-        if small and c.code not in ("parallel_key", "retaining_ring"):
+        if small and c.code not in ("parallel_key", "retaining_ring", "shaft_seal"):
             score -= 2
         if c.code == "parallel_key" and host and re.search(r"\bkeys?\b", t):
             score += 1
@@ -624,6 +682,12 @@ def match(prompt: str) -> list[dict[str, Any]]:
                     vals[key] = float(g.group(1))
         if c.code in ("shaft", "dowel", "parallel_key", "retaining_ring"):
             g = re.search(r"(?:ø|dia(?:meter)?\s*)\s*" + _NUM, t)
+            if g:
+                vals["D"] = float(g.group(1))
+        if c.code == "shaft_seal":  # "20x35x7" (d × D × b), "for a 20 mm shaft", "Ø20"
+            g = (re.search(r"\b" + _NUM + r"\s*[x×]\s*" + _NUM + r"\s*[x×]\s*" + _NUM, t)
+                 or re.search(r"\bfor (?:a |an |the )?ø?\s*" + _NUM + r"\s*(?:mm)?\s*shaft", t)
+                 or re.search(r"(?:ø|dia(?:meter)?\s*)\s*" + _NUM, t))
             if g:
                 vals["D"] = float(g.group(1))
         if c.code == "parallel_key":  # "6x6x18" (b × h × l): the table row of that b gives the shaft range

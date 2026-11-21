@@ -85,6 +85,7 @@ from aicad.office.icd import (
     WASHER_OD,
     _r2,
 )
+from aicad.toolbox import SEALS_SOURCE
 
 ENV = "FW_GRAPH_LAYOUT"   # "0": graph plans use the template layout (icd.build) too
 COLLAR = BEARING_CLEAR    # mm: a shoulder collar with no bearing against it (the same room a gear keeps to a bearing)
@@ -99,6 +100,10 @@ CORNER = 30.0             # mm from a base's edges to a connector at its corner 
 PLANET_GAP = 3.0          # mm: the planetary set's gears to the -Y wall face and to the carrier (the ring's lands)
 PIN_END = 2.0             # mm of planet pin beyond its bearing / planet on the free (-Y) side
 PIVOT_CLEAR = 2.0         # mm between a pivoting member's upper end and the base it hangs under
+SEAL_WALL = 2.0           # mm of cap left between a shaft seal's recess and the relief over the bearing
+# seals a radial shaft seal can't be: static seals and seals of other kinds (left to the design, not seated in a cap)
+_NOT_LIP = re.compile(r"o-?rings?|gaskets?|\bstatic\b|mechanical seal|labyrinth|v-?rings?|wiper|\brod seal|piston seal|"
+                      r"sealant|sealing washer|\bcord\b", re.IGNORECASE)
 _TOPPY = re.compile(r"\btop\b|table|desk|deck|shelf|seat|worktop|\blid\b", re.IGNORECASE)
 ROLE = {"shaft": "shaft", "spur_gear": "gear", "pulley": "hub", "hub": "hub", "spacer": "hub", "bearing_cap": "hub",
         "coupling": "hub"}
@@ -1236,6 +1241,9 @@ class _Layout:
                 f"of seat Ø + tap drill + 2 × {lig:g} mm: at least {lig:g} mm of wall between the seat and each "
                 "tapped hole.")
         hm.update(caps=caps, cap_m=cap_m, cap_item=cap_item)
+        # shaft seals in the open caps where the shafts leave the housing (EXIT_SIDE)
+        self._plan_seals([(self.cid_of[st[0]], st[1], hs[n], sd, self._exit_d(hs[n])) for st, n, sd in caps
+                          if sd == EXIT_SIDE and self.spec[self.cid_of[st[0]]].get("cap") == "open"])
         lid_x = next((x for x in self.joints if x.host == h and self.comp[x.guest].kind == "cover"), None)
         hm["lid"] = lid_x.guest if lid_x is not None else None
         hm["lid_x"] = lid_x
@@ -1446,6 +1454,9 @@ class _Layout:
                     ks["cap"] = "blind"
                 bdes = BEARINGS[self._des(self.brg[sh][0][0])]
                 ks["relief"] = _r2((bdes[0] + bdes[1]) / 2)
+        # shaft seals in the open caps (both shafts leave the housing, one at each end)
+        self._plan_seals([(cid, c, inp if side < 0 else out, side, float(self.spec[inp if side < 0 else out]["seat"]))
+                          for side, (cid, c) in sorted(by_end.items()) if self.spec[cid].get("cap") == "open"])
         caps_od = max([self.spec[c]["OD"] for c, _k in by_end.values()] or [0.0])
         lid_x = next((x for x in self.joints if x.host == h and self.comp[x.guest].kind == "cover"), None)
         # the housing: walls, the stack along +Y, the cavity around the rings
@@ -1653,6 +1664,7 @@ class _Layout:
             self._riders(sh)
         for st, nn, side in hm["caps"]:
             self._cap_joint((self.item[st[0]], st[1]), nn, side)
+        self._seal_seats()
         prev_ring = None
         for ring, R in self.prings.items():
             o = self.nxt()
@@ -2117,6 +2129,7 @@ class _Layout:
                 self._riders(sh)
             for st, n, side in hm["caps"]:
                 self._cap_joint(st, n, side)
+            self._seal_seats()
         elif self.kind == "guide":
             for x in self.joints:  # the end blocks on the base
                 if self.role(x.host) == "block" and self.role(x.guest) == "block" and x.guest in self.at:
@@ -2483,6 +2496,122 @@ class _Layout:
             "relief": {"d": ks["relief"], "depth": CAP_RELIEF} if ks.get("relief") else None,
             "flatness": float(o.get("flatness") or FLATNESS), "position_tol": float(o.get("position_tol") or POS_TOL)},
             ["A", "B", "C"], f"{ks.get('cap') or 'open'} bearing cap over the {'+' if side > 0 else '-'}Y seat")
+
+    def _plan_seals(self, slots: list[tuple[str, int, str, int, float]]) -> None:
+        """Radial shaft seals (DIN 3760) in the open caps the shafts pass. ``slots``: (cap, copy, shaft, side, shaft Ø
+        there) for every open cap copy a shaft runs through, ``side`` the outward sign along +Y. A seal goes where its
+        connections say (``mounted_on`` a cap; carried by a shaft; on the housing: any cap a shaft leaves by), named
+        ends first ("Input shaft seal" by the input shaft), one piece per cap, in the cap's recess from its outer face.
+        Its size is the Toolbox table's for the shaft Ø there (the cap's recess and the Toolbox seal agree by
+        construction); the cap grows to the seal, the relief and ``SEAL_WALL`` between them when it is too thin."""
+        self.seal_at: list[dict[str, Any]] = []
+        seals = [c for c in self.g.components if c.kind == "seal" and c.id in self.bought and not _NOT_LIP.search(c.name)]
+        if not seals:
+            return
+        taken: set[tuple[str, int]] = set()
+        recess: dict[str, tuple[float, float, float]] = {}  # cap -> (d, D, b): one recess per cap part (its copies)
+
+        def cls(sh: str) -> str:
+            c = self.comp[sh]
+            return {"input": "input", "output": "output"}.get(str(c.v("role") or "")) or icd._line_class(c.name) or ""
+
+        plans: list[tuple[int, int, Any, list[tuple[str, int, str, int, float]]]] = []
+        for n_sc, sc in enumerate(seals):  # where each seal may go; the most specific first (a cap, a shaft, any)
+            targets: list[tuple[str, int, str, int, float]] = []
+            loose, rank = True, 2
+            for x in self.g.connections:
+                if sc.id not in (x.host, x.guest) or sc.id in x.via:
+                    continue
+                other = self.comp.get(x.guest if x.host == sc.id else x.host)
+                if other is None:
+                    continue
+                loose = False
+                if other.kind == "bearing_cap":
+                    rank = 0
+                    hit = [t for t in slots if t[0] == other.id]
+                    if not hit:
+                        self.notes.append(f"{sc.name}: {other.name} is not an open cap a shaft runs through, so it has "
+                                          "no seal recess: the seal is not placed there.")
+                    targets += hit
+                elif other.kind == "shaft":
+                    rank = min(rank, 1)
+                    targets += [t for t in slots if t[2] == other.id]
+                else:  # on the housing (or the cover): any cap a shaft leaves the housing by
+                    targets += slots
+            if loose:
+                targets = list(slots)
+            nm = sc.name.lower()
+            named = [w for w in ("input", "output") if w in nm]
+            targets = sorted(dict.fromkeys(targets), key=lambda t, named=named: (
+                0 if named and cls(t[2]) in named else 1, slots.index(t)))
+            plans.append((rank, n_sc, sc, targets))
+        for _rank, _n, sc, targets in sorted(plans, key=lambda x: (x[0], x[1])):
+            want = int(sc.qty)
+            placed = 0
+            for cap, cc, sh, side, dsh in targets:
+                if placed >= want or (cap, cc) in taken:
+                    continue
+                row = icd.SEALS.get(round(float(dsh), 3))
+                if row is None:
+                    self.notes.append(f"{sc.name}: no DIN 3760 seal for the Ø{dsh:g} {self.name(sh)} in the Toolbox "
+                                      f"table, so {self.name(cap)} has no seal recess for it.")
+                    continue
+                D, b = row
+                if cap in recess and recess[cap] != (float(dsh), D, b):
+                    continue  # another copy of this cap already has a recess of another size
+                given = [(v, w) for v, w in ((sc.v("d"), dsh), (sc.v("D"), D), (sc.v("B"), b)) if v is not None]
+                if any(abs(float(v) - w) > 1e-6 for v, w in given):  # the table's size for the shaft decides
+                    named_size = " x ".join(f"{float(v):g}" for v, _w in given)
+                    self.notes.append(f"{sc.name}: the design names a {named_size} seal; the {self.name(sh)} is "
+                                      f"Ø{dsh:g} where it passes {self.name(cap)}, so the seal is {dsh:g} x {D:g} x "
+                                      f"{b:g} (DIN 3760, the Toolbox table).")
+                ks = self.spec[cap]
+                relief = CAP_RELIEF if ks.get("relief") else 0.0
+                need = _r2(b + relief + SEAL_WALL)
+                if float(ks.get("H") or 0.0) < need - 1e-9:
+                    if "H" in self.o(cap):  # an edited thickness stays; the gate says the seal doesn't fit it
+                        self.notes.append(f"{self.name(cap)}: {float(ks['H']):g} mm thick (an edit) is thinner than its "
+                                          f"seal needs ({need:g} mm).")
+                    else:
+                        ks["H"] = float(math.ceil(need))
+                if D <= float(ks.get("bore") or 0.0) + 1e-6:
+                    continue
+                recess[cap] = (float(dsh), D, b)
+                taken.add((cap, cc))
+                self.seal_at.append({"seal": sc.id, "piece": placed, "cap": cap, "copy": cc, "shaft": sh, "side": side,
+                                     "d": float(dsh), "D": D, "b": b, "relief": relief})
+                placed += 1
+            if placed < want:
+                self.notes.append(f"{sc.name}: {want - placed} of {want} have no open cap with a shaft through it to "
+                                  "sit in, so they stay in the bill of materials (the parts bin).")
+        if self.seal_at:
+            self.notes.append("Shaft seals: " + "; ".join(
+                f"{self.name(z['seal'])} ({z['d']:g} x {z['D']:g} x {z['b']:g}, DIN 3760 A) in the recess of the "
+                f"{self.name(z['cap'])}, flush with its outer face, its lip on the {self.name(z['shaft'])}"
+                for z in self.seal_at) + f". {icd.SEAL_FIT} recesses; sizes from {SEALS_SOURCE}.")
+
+    def _seal_seats(self) -> None:
+        """The ``seal_seat`` interfaces (``_plan_seals``): the cap's recess for the seal's outside Ø, from its outer
+        face, the seal's width deep; the seal coaxial with the shaft, its air-side face flush with the cap's outer
+        face, its lip on the shaft (at nominal: a contact, not a clash)."""
+        for z in getattr(self, "seal_at", []):
+            cap, cc = z["cap"], z["copy"]
+            pos = self.at[cap][cc]
+            assert pos is not None
+            H = float(self.spec[cap]["H"])
+            face = pos[1] + z["side"] * H / 2
+            z0, z1 = sorted((face, face - z["side"] * z["b"]))
+            sc = self.comp[z["seal"]]
+            title = f"Radial shaft seal DIN 3760 A {z['d']:g}×{z['D']:g}×{z['b']:g}"
+            o = self.nxt()
+            self.add("seal_seat", (self.item[cap], cc), (self.item[sc.id], z["piece"]), {
+                "d": z["d"], "D": z["D"], "b": z["b"], "fit": str(o.get("fit") or icd.SEAL_FIT), "shaft_fit": "h11",
+                "ax": "y", "axis": [_r2(pos[0]), _r2(pos[2])], "z": [_r2(z0), _r2(z1)], "face_z": _r2(face),
+                "side": z["side"], "seal_item": self.item[sc.id], "seal": title, "shaft_item": self.item[z["shaft"]],
+                "shaft_d": z["d"], "relief_depth": z["relief"], "count": 1,
+                "standard": "DIN 3760 / ISO 6194-1 (Toolbox table, verify)", "position_tol": POS_TOL},
+                ["A", "B", "C"], f"shaft seal {z['d']:g}×{z['D']:g}×{z['b']:g} in the cap's recess, flush with its "
+                                 f"outer face, its lip on the {self.name(z['shaft'])}")
 
     def _rings(self) -> None:
         """DIN 471 rings in their grooves at the free face of the part they hold (the face away from a shoulder)."""

@@ -1,0 +1,87 @@
+# (l) The founder's planetary benchmark with shaft seals (attempt A11, 2026-11-21): the model added a radial shaft seal
+# mounted on each open bearing cap, which is good design, but the fast layout placed no seal ("no interface in this
+# layout places it"), so the program fell to the master-model path, which models planetary sets poorly. The layout now
+# seats each seal in its cap's recess (``seal_seat``) and Fitz fits the Toolbox seal there.
+# The simulated run replays A11's intent reply (l_planetary_seals.intent.json, rebuilt from A11's resolved graph,
+# tests/golden/seals/planetary_with_seals.graph.json). Hand values:
+#   the planetary set as case (k): sun 30, 3 planets of 30, ring 90 (internal), m2; a = m (z_s + z_p) / 2 = 60;
+#   i = 1 + z_r / z_s = 4; planet bearing 6004 (rim (55 - 42) / 2 = 6.5 mm >= 2.7 m = 5.4)
+#   seals: both shafts Ø20 where they leave the housing, DIN 3760 for d 20: D 35, b 7 (Toolbox table, verify)
+#   housing width W = t_in + stack + t_out: t_in = t_out = 2 B + 4 = 2 x 14 + 4 = 32 (6204, B 14; >= the M6 tapped
+#   depth max(2.5 x 6 + 3, 2 x 6 + 2 x 1 + 5) = 19, + 3 = 22), stack = ring (b + 2 x 3 = 26) + running gap 1 + carrier max(15, 20) = 20 + 12 = 59,
+#   so W = 32 + 59 + 32 = 123 and the end walls' outer faces are at Y = -61.5 and +61.5
+#   caps: thickness round(max(8, 0.25 D)) = round(11.75) = 12 for the 6204 (D 47), at least b + relief + 2 = 7 + 1 + 2
+#   = 10 for the seal; outer faces at Y = -61.5 - 12 = -73.5 and +73.5
+#   seals flush with the caps' outer faces, b = 7 deep: input Y -73.5 .. -66.5, output Y 66.5 .. 73.5; recess Ø35 H8
+#   pieces: 20 part lines, 38 pieces (A11 planned 8 cap screws and 4 cover bolts)
+id = "planetary-seals"
+title = "Single stage planetary gearbox with shaft seals (benchmark A11)"
+letter = "l"
+source = "Founder's standing benchmark, attempt A11 2026-11-21 (docs/reports/shaft-seals.md)"
+brief = "Build a single stage planetary Gearbox"
+
+[sim]
+intent = "l_planetary_seals.intent.json"  # A11's intent reply, replayed on the design-graph path (the default)
+
+[limits]
+tokens = 600
+wall_simulated_s = 900
+wall_live_s = 3600
+
+[expect]
+complete = true
+path = "fast"            # A11 went to the master model over the seals; the fast layout places them now
+parts = 20
+pieces = 38
+only_simulated = ["parts", "pieces"]
+# pieces by head noun: gears = sun, 3 planets, ring; bearings = 2 + 2 shaft and 3 planet; caps = cover and 2 open
+# caps; supports = housing base and carrier; fasteners = 8 cap screws and 4 cover bolts; seals = 2
+kinds = { gear = 5, bearing = 7, pin = 3, shaft = 2, key = 2, cap = 3, support = 2, fastener = 12, seal = 2 }
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+
+[[expect.planetary]]
+planets = 3
+ratio = 4.0
+centre_distance = 60.0
+rim_min_m = 2.7
+running_gap = 1.0        # max(1 mm, 0.5 m) for m2
+tol = 0.05
+
+[[expect.count]]
+name = "(?i)\\bshaft seal"
+n = 2
+
+[[expect.reuse]]
+title = "Input shaft seal"
+code = "shaft_seal"
+
+[[expect.reuse]]
+title = "Output shaft seal"
+code = "shaft_seal"
+
+# where the seals sit (box relations, true for any sizes): each inside its open cap along the shaft axis (flush with
+# the cap's outer face, b deep: Y -73.5 .. -66.5 and 66.5 .. 73.5 for this reply, checked on the ICD by
+# tests/test_shaft_seals.py) and touching its shaft (the lip runs on it)
+[[expect.within]]
+inner = { name = "(?i)^input shaft seal" }
+outer = { name = "(?i)^input open cap" }
+axis = "y"
+
+[[expect.within]]
+inner = { name = "(?i)^output shaft seal" }
+outer = { name = "(?i)^output open cap" }
+axis = "y"
+
+[[expect.touch]]
+a = { name = "(?i)^input shaft seal" }
+b = { name = '(?i)^input shaft(?! seal| bearing)' }
+
+[[expect.touch]]
+a = { name = "(?i)^output shaft seal" }
+b = { name = '(?i)^output shaft(?! seal| bearing)' }

@@ -152,6 +152,11 @@ def part(g: DesignGraph, c: Component) -> dict[str, Any]:
     elif k == "retaining_ring":
         p["description"] = f"DIN 471 retaining ring for a Ø{_f(c.v('shaft_d'))} shaft." if c.v("shaft_d") else \
             "DIN 471 retaining ring sized to the shaft."
+    elif k == "seal" and not re.search(r"o-?rings?|gaskets?", c.name, re.IGNORECASE):
+        sd, sD, sB = c.v("d"), c.v("D"), c.v("B")
+        p["description"] = ("Radial shaft seal DIN 3760 type A" + (f" {_f(sd)} x {_f(sD)} x {_f(sB)}" if sd and sD and sB
+                                                                  else ", sized to the shaft it runs on") + ".")
+        p["toolbox"] = "shaft_seal"
     elif k == "housing":
         p["description"] = ("Lower half of the split housing: mounting feet, the bearing bores for every shaft and the "
                             "flange the cover bolts to." if c.v("style", "split") == "split" else

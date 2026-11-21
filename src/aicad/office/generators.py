@@ -38,6 +38,7 @@ from typing import Any
 
 from aicad import fw_std
 from aicad.office import icd
+from aicad.toolbox import SEALS, SEALS_SOURCE
 
 VERSION = 1
 
@@ -218,11 +219,8 @@ def header(name: str, what: str, icd_version: int, lines: list[str], notes: list
 
 
 # ============================================================================ standards used here (verify, PD-13)
-# DIN 3760 / ISO 6194-1 rotary shaft lip seals, one common size per shaft Ø: d -> (D outside Ø, b width), mm.
-SEALS: dict[float, tuple[float, float]] = {
-    10: (22, 7), 12: (22, 7), 15: (26, 7), 17: (30, 7), 20: (35, 7), 22: (35, 7), 25: (40, 7), 28: (42, 7),
-    30: (42, 7), 32: (47, 7), 35: (50, 7), 40: (55, 8), 45: (62, 8), 50: (68, 8), 55: (72, 8), 60: (80, 8)}
-SEALS_SOURCE = "DIN 3760 / ISO 6194-1 lip seal sizes (verify against the seal maker's catalogue)"
+# DIN 3760 / ISO 6194-1 rotary shaft lip seals: ``toolbox.SEALS`` (shaft d -> (D outside Ø, b width), mm), one table
+# for the Toolbox seal, the layout's seal seat and the recess cut here (``SEALS`` / ``SEALS_SOURCE`` imported above).
 # timing belts: pitch (mm) and the pitch line differential u (PD - OD = 2u), verify against the belt maker
 BELTS: dict[str, tuple[float, float]] = {"GT2": (2.0, 0.254), "GT3": (3.0, 0.381), "HTD 3M": (3.0, 0.381),
                                          "HTD 5M": (5.0, 0.5715), "HTD 8M": (8.0, 0.686), "T2.5": (2.5, 0.3),
@@ -1169,7 +1167,8 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
     known: set[float] = {OD, H, float(d["pcd"]), float(d["d"]), float(d["seat_D"])}
     face = next((x for x in cx.feats if x["type"] == "face"), None)
     holes = [x for x in cx.feats if x["type"] == "hole"]
-    relief = [x for x in cx.feats if x["type"] == "seat"]
+    relief = [x for x in cx.feats if x["type"] == "seat" and not x.get("seal")]
+    seal_f = [x for x in cx.feats if x["type"] == "seat" and x.get("seal")]  # the ICD's recess for its shaft seal
     other = [x for x in cx.feats if x["type"] not in ("face", "hole", "seat")]
     if other:
         raise Undetermined(f"{other[0]['label']} is not a feature of a bearing cap this can build")
@@ -1216,7 +1215,19 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
         lines.append(f"open cap: the Ø{_g(shaft)} shaft passes through a Ø{_g(bore)} bore")
         seal = None
         src = ""
-        if seal_txt and abs(seal_txt[0] - shaft) < 1e-6:
+        if seal_f:  # the ICD seats a shaft seal here (``seal_seat``): its recess is the ICD's, from the outer face
+            x = seal_f[0]
+            depth = abs(float(x["z1"]) - float(x["z0"]))
+            outer = -mz * H / 2
+            if x.get("ax") or abs(float(x["c"][0])) > 1e-6 or abs(float(x["c"][1])) > 1e-6 \
+                    or min(abs(float(x["z0"]) - outer), abs(float(x["z1"]) - outer)) > 0.01:
+                raise Undetermined(f"{x['label']} is not coaxial from the cap's outer face")
+            seal, src = (float(x["d"]), depth), "the ICD's"
+            sd = next((float(g["data"]["d"]) for g in cx.ifs if g["id"] == x["if"]), shaft)
+            if abs(sd - shaft) > 1e-6:
+                raise Undetermined(f"{x['label']} is for a Ø{_g(sd)} shaft; Ø{_g(shaft)} passes the cap")
+            lines.append(f"{x['if']}  {x['label']}")
+        elif seal_txt and abs(seal_txt[0] - shaft) < 1e-6:
             seal, src = (seal_txt[1], seal_txt[2]), "the plan's"
         else:
             gs = next((c for c in graph_kinds(cx.doc) if c["kind"] == "seal"
@@ -1234,8 +1245,8 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
         rd = max((float(x["d"]) for x in relief), default=0.0)
         rh = max((abs(float(x["z1"]) - float(x["z0"])) for x in relief), default=0.0)
         if seal and seal[0] > bore and seal[1] + rh <= H - 2.0:
-            SD = S.p("SEAL_D", seal[0], f"lip seal recess Ø, mm ({_g(shaft)} × {_g(seal[0])} × {_g(seal[1])}, {src})",
-                     "Seal", "Seal recess Ø")
+            SD = S.p("SEAL_D", seal[0], f"lip seal recess Ø, mm ({_g(shaft)} × {_g(seal[0])} × {_g(seal[1])}, {src}"
+                     + (f" {icd.SEAL_FIT}" if seal_f else "") + ")", "Seal", "Seal recess Ø")
             SW = S.p("SEAL_WIDTH", seal[1], "lip seal recess depth, mm (the seal's width)", "Seal", "Seal recess depth",
                      lo=2, hi=20)
             span = (-(T / 2), -(T / 2) + SW) if mz > 0 else (T / 2 - SW, T / 2)
@@ -1247,6 +1258,8 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
                              f"({SEALS_SOURCE if src == 'DIN 3760' else src + ' size for the shaft that passes'}).")
             _ = rd
         else:
+            if seal_f:
+                raise Undetermined(f"{seal_f[0]['label']} doesn't fit the {_g(H)} mm cap over its Ø{_g(bore)} bore")
             notes.append("Seal: no recess (no standard seal for this shaft Ø fits the cap); add one if the brief needs "
                          "it.")
             if _SEALY.search(text):
@@ -1271,7 +1284,8 @@ def cap_spec(cx: Ctx) -> dict[str, Any]:
                + (", relief" if relief else "") + (", shaft bore and lip seal recess" if style == "open" and any(
                    c["name"] == "Lip seal recess" for c, _w in cuts) else ", shaft bore" if style == "open" else ""))
     return {"kind": "cap", "S": S, "cuts": cuts, "chamfers": chamfers, "lines": lines, "notes": notes, "known": known,
-            "m_sizes": {int(d["fastener_size"])}, "n_features": len(holes) + len(relief) + 1, "summary": summary,
+            "m_sizes": {int(d["fastener_size"])}, "n_features": len(holes) + len(relief) + len(seal_f) + 1,
+            "summary": summary,
             "allowed": {"a hole", "a thread", "a flange", "a web or recess", "an undercut"}
             | ({"a seal or oil feature"} if style == "open" else set()), "style": style}
 
