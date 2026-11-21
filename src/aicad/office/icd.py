@@ -2451,6 +2451,16 @@ def _near(a: Any, b: Any) -> bool:
     return abs(float(a) - float(b)) < 1e-6
 
 
+CENTRE_TOL = 0.02  # mm: two feature centres closer than this are one place (a fifth of the position tolerance)
+
+
+def _near_c(a: Any, b: Any) -> bool:
+    """Feature centres in a part frame: the same place within ``CENTRE_TOL``. Each copy's features are worked out in
+    its own frame and rounded to 0.01 mm, so one planet's bearing seat came out at (0, -0.01) for one copy and (0, 0.01)
+    for another, and read as two seats 32 mm into each other (benchmark V3, 2026-11-21)."""
+    return abs(float(a) - float(b)) < CENTRE_TOL + 1e-9
+
+
 def _same_feature(x: dict[str, Any], y: dict[str, Any]) -> bool:
     if x["type"] != y["type"] or x.get("ax") != y.get("ax"):
         return False
@@ -2458,7 +2468,7 @@ def _same_feature(x: dict[str, Any], y: dict[str, Any]) -> bool:
         return x["n"] == y["n"] and _near(x["z"], y["z"])
     if x["type"] == "gear":
         return True
-    same_c = _near(x["c"][0], y["c"][0]) and _near(x["c"][1], y["c"][1])
+    same_c = _near_c(x["c"][0], y["c"][0]) and _near_c(x["c"][1], y["c"][1])
     if x["type"] == "keyway":
         return same_c and x["on"] == y["on"] and _near(x["z0"], y["z0"])
     if x["type"] == "seat":
@@ -2739,7 +2749,7 @@ def issues(skel: dict[str, Any], ifs: list[dict[str, Any]]) -> list[dict[str, An
                     continue
                 if a.get("z0") is not None and b.get("z0") is not None and (a["z1"] <= b["z0"] or b["z1"] <= a["z0"]):
                     continue  # one behind the other along the axis (seats / tapped holes in opposite walls)
-                if _near(a["c"][0], b["c"][0]) and _near(a["c"][1], b["c"][1]):
+                if _near_c(a["c"][0], b["c"][0]) and _near_c(a["c"][1], b["c"][1]):
                     continue  # concentric: a seat over a clearance bore, a bore that is also a hole
                 gap = math.hypot(a["c"][0] - b["c"][0], a["c"][1] - b["c"][1]) - (a["d"] + b["d"]) / 2
                 if gap < 1.0:

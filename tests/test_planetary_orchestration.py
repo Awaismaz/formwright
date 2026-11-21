@@ -493,3 +493,26 @@ def test_a6_blind_caps_are_left_out_of_a_planetary_set_and_the_screws_follow() -
     assert g.comp(screws).qty == 8
     assert any("Input blind cap, Output blind cap: left out" in n for n in g.notes)
     assert decide.decide(gc.to_plan(g, resolved=True), BRIEF, "Planetary")["path"] == "fast"
+
+
+# ============================================================================ benchmark V3: one seat, three copies
+def test_v3_module_1_5_planets_keep_one_bearing_seat_and_the_fast_path() -> None:
+    from aicad.master import decide
+
+    reply = copy.deepcopy(REPLY["reply"])
+    for c in reply["components"]:
+        if c["id"] in ("sun_gear", "planet_gear", "ring_gear"):
+            c["params"] = {**{k: v for k, v in (c.get("params") or {}).items() if k != "teeth"}, "module": 1.5}
+        if c["id"] == "sun_gear":
+            c["params"]["teeth"] = 24
+    from aicad.graph import office as goffice
+    from aicad.graph import validate
+
+    brief = "Build a single stage planetary gearbox, module 1.5, sun gear 24 teeth"
+    g = _graph(reply, brief)
+    out = goffice.finish(goffice.OfficePlan(None), g, validate.issues(g))  # the plan the office decides the path on
+    d = decide.decide(out.plan, brief, "Planetary")
+    assert d["path"] == "fast", d["reasons"]  # V3: "the bearing seat Ø32 at (0, -0.01) and ... at (0, 0.01)"
+    # a feature worked out in two copies' frames, 0.02 mm apart by rounding, is one feature
+    a = {"type": "seat", "c": [0.0, -0.01], "d": 32.0, "z0": -4.5, "ax": "y"}
+    assert icd._same_feature(a, {**a, "c": [0.0, 0.01]}) and not icd._same_feature(a, {**a, "c": [0.0, 0.05]})

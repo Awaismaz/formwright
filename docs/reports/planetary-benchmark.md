@@ -29,3 +29,11 @@ two bearings in the housing; 0 clashes; nothing floating or left in the parts bi
 **Standing (after A10):** four right in a row (A7 to A10) with the model's replies varying each time. Every failure
 since A1 was a different way the reply could vary (rounding, a long summary, a cap on the lid, blind caps) and each is
 now absorbed by code, not by hoping the model repeats itself.
+
+## Variants of the brief (judged by the same hand rules with the brief's own numbers)
+
+| # | Brief | Result | What went wrong | Fixed by |
+|---|---|---|---|---|
+| V1 | "...with a 5:1 ratio" | **Right.** 22 of 22: sun 24, planets 36, ring 96 (1 + 96 / 24 = 5), complete, fast path | None | None |
+| V2 | "...with 4 planets" | **Right.** 21 of 21: 4 planets 90° apart, (30 + 90) / 4 = 30 whole, complete, fast path | None | None |
+| V3 | "...module 1.5, sun gear 24 teeth" | Wrong: master path, 24 clashes, a stopped ticket | Each planet copy's bearing seat is worked out in its own frame and rounded to 0.01 mm: with a = 40.5 one came out at (0, -0.01) and another at (0, 0.01), and the ICD check read one seat as two seats 32 mm into each other, so the fast layout gave way to a master model | Feature centres within 0.02 mm (a fifth of the position tolerance) are one place, both for the overlap check and for merging a part's features |
