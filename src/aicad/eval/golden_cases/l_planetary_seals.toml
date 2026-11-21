@@ -8,7 +8,7 @@
 #   i = 1 + z_r / z_s = 4; planet bearing 6004 (rim (55 - 42) / 2 = 6.5 mm >= 2.7 m = 5.4)
 #   seals: both shafts Ø20 where they leave the housing, DIN 3760 for d 20: D 35, b 7 (Toolbox table, verify)
 #   housing width W = t_in + stack + t_out: t_in = t_out = 2 B + 4 = 2 x 14 + 4 = 32 (6204, B 14; >= the M6 tapped
-#   depth 2.5 x 6 + 3 + 3 = 21), stack = ring (b + 2 x 3 = 26) + running gap 1 + carrier max(15, 20) = 20 + 12 = 59,
+#   depth max(2.5 x 6 + 3, 2 x 6 + 2 x 1 + 5) = 19, + 3 = 22), stack = ring (b + 2 x 3 = 26) + running gap 1 + carrier max(15, 20) = 20 + 12 = 59,
 #   so W = 32 + 59 + 32 = 123 and the end walls' outer faces are at Y = -61.5 and +61.5
 #   caps: thickness round(max(8, 0.25 D)) = round(11.75) = 12 for the 6204 (D 47), at least b + relief + 2 = 7 + 1 + 2
 #   = 10 for the seal; outer faces at Y = -61.5 - 12 = -73.5 and +73.5
