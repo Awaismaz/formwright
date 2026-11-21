@@ -410,3 +410,21 @@ def test_templates_kept_in_the_office_and_reused_by_the_next_program(office: Any
 
 
 from test_office_orchestrator import office  # noqa: F401  (fixture)
+
+
+def test_a_planet_carrier_is_built_from_the_interfaces(tmp_path: Path) -> None:
+    """Planetary benchmark A10: the carrier was the last part sent to a designer ("bore Ø20 H7 is not a feature of a
+    hub this can build": its pin bores are off the axis). A turned hub now carries axial through bores on a pitch
+    circle: 3 x Ø20 on PCD 2 x 60 = 120 (a = m (z_s + z_p) / 2 = 2 x 60 / 2 = 60), built exactly (not at the 0.01 mm
+    rounded centres). By hand V = π/4 (OD² - 20²) H - 3 π/4 20² H - keyway (b (r + t2) - segment) H."""
+    doc = _graph_doc(GC / "k_planetary.intent.json")
+    p = direct.plan(doc, _t(doc, "Planet carrier"))
+    assert p["path"] == "direct" and p["kind"] == "hub", p.get("reasons")
+    s = p["script"]
+    assert _num(s, "PINS_PCD") == 120.0 and _num(s, "PIN_BORE") == 20.0 and "3 bores Ø20 on PCD 120" in p["summary"]
+    assert "math.radians(270)" in s and "math.radians(150)" in s and "math.radians(30)" in s
+    st, _res, _src = _gate(tmp_path, doc, "Planet carrier")
+    OD, H, bore, b, t2 = _num(s, "OD"), _num(s, "WIDTH"), _num(s, "BORE"), _num(s, "KEY_B"), _num(s, "KEY_T2")
+    v = math.pi / 4 * (OD ** 2 - bore ** 2) * H - 3 * math.pi / 4 * 20 ** 2 * H
+    v -= (b * (bore / 2 + t2) - fw_std._keyway_segment(bore / 2, b)) * H
+    assert st["fingerprint"]["volume"] == pytest.approx(v, rel=1e-6)

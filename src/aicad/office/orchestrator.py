@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import re
 import time
 from collections.abc import Callable
@@ -71,6 +72,10 @@ STAGE_AGENT = {"hex": "hex", "integrate": "fitz", "review": "gage", "fit": "fitz
 # stages that never take an LLM agent slot: Hex's Toolbox / parts lookup is deterministic (no model, no tokens; the
 # live run 2026-11-19 had bearings wait 87 s for a slot), Fitz's swap-in is one shared step (CD-032)
 FREE_STAGES = frozenset({"hex", "fit"})
+# parts built from the interfaces (no model, no tokens) run beside the agent slots, up to the CAD worker pool: the
+# concurrency cap is about agents and tokens, and three parts at a time made the planetary benchmark's ten direct parts
+# queue behind one designer (A10: 70 s of the 141 s build). The worker pool still bounds the CPU.
+DIRECT_SLOTS = max(1, int(os.environ.get("FW_DIRECT_SLOTS", "4") or 4))
 MAX_CLASH_ROUNDS = 2       # times Fitz sends a part back for clashes before it waits for the engineer
 PRIORITY = {"high": 1, "normal": 0, "low": -1}
 MAX_ATTEMPTS = 2           # failed design runs retried before the ticket waits for the engineer
@@ -199,6 +204,15 @@ def claimable(doc: dict[str, Any], t: dict[str, Any], now: float) -> str | None:
             return "review"  # the engineer finished it by hand: Gage still checks it
         return None
     return r.get("next") or first_stage(t)
+
+
+def is_direct(t: dict[str, Any]) -> bool:
+    """A part ticket the office builds from the interfaces (no model): decided at approval (``estimate_path``) and
+    not handed to an agent since (a direct build that fell back to the agent takes an agent slot again)."""
+    d = t.get("direct") or {}
+    if d.get("path") == "agent" or d.get("superseded"):  # handed to an agent (a fallback or a takeover)
+        return False
+    return t.get("kind") == "part" and (t.get("estimate_path") == "direct" or d.get("path") == "direct") and         not t.get("taken_over")
 
 
 def queue(doc: dict[str, Any], now: float) -> list[tuple[dict[str, Any], str]]:
@@ -726,6 +740,7 @@ class Runner:
         self.root, self.pid, self.env = root, pid, env
         self.tasks: dict[str, asyncio.Task[None]] = {}
         self.stages: dict[str, str] = {}  # the stage each running task is in now (fit runs outside the slots)
+        self.direct: set[str] = set()  # running tasks claimed as direct builds (outside the agent slots)
         self.labels: dict[str, tuple[str, int]] = {}
         self.wake = asyncio.Event()
         self.loop = asyncio.get_running_loop()
@@ -849,6 +864,7 @@ class Runner:
             # swapping a part into the program assembly is one shared step (it batches every part waiting) and Hex's
             # lookups are deterministic: neither takes an agent slot from design, review or integration (CD-032)
             free = max(0, int(doc["concurrency"]) - self.slots_used())
+            direct_free = max(0, DIRECT_SLOTS - sum(1 for x in self.tasks if x in self.direct))
             threads = service.threads_of(doc) or {}
             busy: dict[str, int] = {}  # running work per agent: per-agent threads cap it (CD-027)
             for x in doc["tickets"]:
@@ -858,14 +874,18 @@ class Runner:
             for t, stage in queue(doc, now):
                 if t["id"] in self.tasks:
                     continue
+                as_direct = stage == "design" and is_direct(t)
                 if stage == "fit":
                     if fitting:
                         continue
                     fitting.add(t["id"])
+                elif as_direct:
+                    if direct_free <= 0:
+                        continue
                 elif stage not in FREE_STAGES and free <= 0:
                     continue
                 code = STAGE_AGENT.get(stage, t["specialist"])
-                if stage not in FREE_STAGES and threads.get(code) and busy.get(code, 0) >= threads[code]:
+                if stage not in FREE_STAGES and not as_direct and threads.get(code) and busy.get(code, 0) >= threads[code]:
                     continue
                 busy[code] = busy.get(code, 0) + 1
                 lbl = self.label(t["id"], code)
@@ -876,7 +896,10 @@ class Runner:
                              service.agent_actor(code), t["id"], stage=stage, agent=code)
                 claims.append((t["id"], stage))
                 self.stages[t["id"]] = stage
-                if stage not in FREE_STAGES:
+                if as_direct:
+                    self.direct.add(t["id"])
+                    direct_free -= 1
+                elif stage not in FREE_STAGES:
                     free -= 1
             return False
 
@@ -889,7 +912,7 @@ class Runner:
 
     def slots_used(self) -> int:
         """Running work that holds an agent slot (everything but Hex's lookups and Fitz's swap-in)."""
-        return sum(1 for t in self.tasks if self.stages.get(t) not in FREE_STAGES)
+        return sum(1 for t in self.tasks if self.stages.get(t) not in FREE_STAGES and t not in self.direct)
 
     async def work(self, tid: str, stage: str | None) -> None:
         try:
@@ -916,6 +939,7 @@ class Runner:
         finally:
             self.tasks.pop(tid, None)
             self.labels.pop(tid, None)
+            self.direct.discard(tid)
             self.wake.set()
 
     def _segment(self, tid: str, stage: str, code: str, lbl: str, t0: float) -> None:

@@ -325,15 +325,19 @@ def _pos_exprs(S: Script, pts: list[tuple[float, float]], pre: str, group: str, 
     if kind == "circle" or centre is not None and len(pts) >= 3:
         cx, cy = (centre[0].val, centre[1].val) if centre else (d[0], d[1])
         rs = [math.hypot(p[0] - cx, p[1] - cy) for p in pts]
-        if max(rs) - min(rs) > 1e-3:
+        # centres come rounded to 0.01 mm (60 cos 30° = 51.9615 reads 51.96, radius 59.9985): within the feature
+        # centre tolerance they are one pitch circle, built exactly (a literal 51.96 put a carrier's pin bore 0.0015
+        # off its pin)
+        if max(rs) - min(rs) > icd.CENTRE_TOL:
             return [(V.of(p[0]), V.of(p[1])) for p in pts]
+        rs = [sum(rs) / len(rs)] * len(rs)
         ang = [_r(math.degrees(math.atan2(p[1] - cy, p[0] - cx)) % 360) for p in pts]
         if centre is None:
             centre = (S.p(f"{pre}_{u_n}", cx, f"{what}: pattern centre {u_n}, mm", group, f"{_cap(_slug(what))} centre {u_n}",
                           lo=cx - 50, hi=cx + 50),
                       S.p(f"{pre}_{v_n}", cy, f"{what}: pattern centre {v_n}, mm", group, f"{_cap(_slug(what))} centre {v_n}",
                           lo=cy - 50, hi=cy + 50))
-        pv = pcd if pcd is not None and abs(pcd - 2 * rs[0]) < 0.05 else _r(2 * rs[0])
+        pv = pcd if pcd is not None and abs(pcd - 2 * rs[0]) < 0.05 else round(2 * rs[0], 2)  # inputs are 0.01 mm
         pcd = S.p(f"{pre}_PCD", pv, f"{what}: pitch circle Ø, mm", group, f"{_cap(what)} PCD")
         out = []
         ang = [float(round(a)) if abs(a - round(a)) < 0.05 else a for a in ang]
@@ -1470,17 +1474,20 @@ _FLEX = re.compile(r"\b(jaw|spider|flexible|elastomer\w*|oldham|bellows|disc|gri
                    r"cardan)\b", re.IGNORECASE)
 
 
-def _hub_features(cx: Ctx, what: str) -> dict[str, Any]:
-    """Bore(s), hub keyways and end faces of a turned hub (all along its axis)."""
+def _hub_features(cx: Ctx, what: str, pattern_ok: bool = False) -> dict[str, Any]:
+    """Bore(s), hub keyways and end faces of a turned hub (all along its axis); with ``pattern_ok`` also through holes
+    off the axis, parallel to it (a planet carrier's pin bores, a flange's bolt holes)."""
     from aicad.office import direct
 
     H = float(cx.it["size"][2])
-    bores, keys, faces = [], [], []
+    bores, keys, faces, holes = [], [], [], []
     for x in cx.feats:
         if x.get("ax"):
             raise Undetermined(f"{x['label']} is off the {what}'s axis")
         if x["type"] == "hole" and abs(float(x["c"][0])) < 1e-6 and abs(float(x["c"][1])) < 1e-6:
             bores.append(x)
+        elif pattern_ok and x["type"] == "hole" and x.get("z0") is None:
+            holes.append(x)
         elif x["type"] == "keyway" and x.get("on") == "hub":
             f = cx.byif[x["if"]]
             keys.append({**x, "angle": direct._key_angle(cx.sk, f, cx.side(f)), "data": f["data"]})
@@ -1488,7 +1495,7 @@ def _hub_features(cx: Ctx, what: str) -> dict[str, Any]:
             faces.append(x)
         else:
             raise Undetermined(f"{x['label']} is not a feature of a {what} this can build")
-    return {"bores": bores, "keys": keys, "faces": faces}
+    return {"bores": bores, "keys": keys, "faces": faces, "holes": holes}
 
 
 def _keyway_rows(S: Script, keys: list[dict[str, Any]], bore_of: Any, H: float) -> tuple[list[str], set[float]]:
@@ -1666,7 +1673,7 @@ def coupling_spec(cx: Ctx, what: str = "coupling") -> dict[str, Any]:
     if fm:
         raise Undetermined(f"a {fm.group(1).lower()} coupling needs the designer (rigid sleeves are built from the "
                            "interfaces)")
-    hf = _hub_features(cx, what)
+    hf = _hub_features(cx, what, pattern_ok=what == "hub")
     if not hf["bores"]:
         raise Undetermined(f"the {what} has no bore in its interfaces")
     S = Script()
@@ -1700,6 +1707,23 @@ def coupling_spec(cx: Ctx, what: str = "coupling") -> dict[str, Any]:
         lines.append(f"{k['if']}  {k['label']}")
     for x in hf["faces"]:
         lines.append(f"{x['if']}  {x['label']} at Z {_g(x['z'])}")
+    pattern_words: list[str] = []
+    by_d: dict[float, list[dict[str, Any]]] = {}
+    for x in hf["holes"]:  # through holes off the axis: one pitch-circle pattern per size (a carrier's pin bores)
+        by_d.setdefault(float(x["d"]), []).append(x)
+    for n, (d, xs) in enumerate(sorted(by_d.items()), start=1):
+        sfx = "" if len(by_d) == 1 else f"_{n}"
+        HD = S.p(f"PIN_BORE{sfx}", d, f"axial bore Ø, mm ({x_fit(xs[0]) or 'H7'}, the ICD's)", "Pin bores",
+                 f"Pin bore{sfx.replace('_', ' ')} Ø", lo=1)
+        pts = [(float(x["c"][0]), float(x["c"][1])) for x in xs]
+        P = _pos_exprs(S, pts, f"PINS{sfx}", "Pin bores", f"pin bores Ø{_g(d)}", "z", (V.of(0.0), V.of(0.0)))
+        for x, p in zip(xs, P, strict=True):
+            cuts.append(({"name": f"Pin bore Ø{_g(d)}", "ax": "z", "c": p, "d": HD, "span": None},
+                         f"{x['if']} {x['label']}"))
+            lines.append(f"{x['if']}  {x['label']} at ({_g(x['c'][0])}, {_g(x['c'][1])})")
+        known.add(d)
+        r = math.hypot(*pts[0])
+        pattern_words.append(f"{len(xs)} bores Ø{_g(d)} on PCD {_g(round(2 * r, 3))}")
     info = fw_std.machined_volume(("disc", OD, H), [], [_num(c) for c, _w in cuts])
     if info["problems"]:
         raise Undetermined("the coupling's bores overlap: " + info["problems"][0])
@@ -1707,16 +1731,20 @@ def coupling_spec(cx: Ctx, what: str = "coupling") -> dict[str, Any]:
                + " / ".join(f"Ø{_g(d)}" for d in bore_names) + (f", {len(hf['keys'])} keyway"
                                                                 + ("s" if len(hf["keys"]) != 1 else "") if hf["keys"]
                                                                 else ""))
+    if pattern_words:
+        summary += ", " + ", ".join(pattern_words)
     return {"kind": "coupling", "S": S, "cuts": cuts, "key_rows": key_rows, "lines": lines, "notes": notes,
-            "known": known, "m_sizes": set(), "n_features": len(hf["bores"]) + len(hf["keys"]) + len(hf["faces"]),
-            "summary": summary, "allowed": {"a hole"}, "keyways": hf["keys"], "what": "rigid sleeve coupling"}
+            "known": known, "m_sizes": set(), "n_features": len(hf["bores"]) + len(hf["keys"]) + len(hf["faces"])
+            + len(hf["holes"]), "summary": summary, "allowed": {"a hole"}, "keyways": hf["keys"],
+            "what": "rigid sleeve coupling"}
 
 
 def coupling_script(spec: dict[str, Any], name: str, material: str, icd_version: int) -> str:
     S: Script = spec["S"]
     cuts = [(_clean(c), w) for c, w in spec["cuts"]]
+    rows = "\n".join(_rows("cuts", cuts))
     out = [header(name, spec.get("what") or "rigid sleeve coupling", icd_version, spec["lines"], spec["notes"]),
-           *_imports(False),
+           *_imports("math." in rows),
            f'NAME = "{name}"', f'MATERIAL = "{material}"', "", *S.block(), "", *_rows("cuts", cuts), "",
            'part, info = fw_std.machined(("disc", OD, WIDTH), cuts=cuts, name=NAME)', 'volume = info["volume"]',
            *spec["key_rows"], "", "result = part", 'EXPECTED = {"bbox": info["bbox"], "volume": volume, "solids": 1}',

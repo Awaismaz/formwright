@@ -306,7 +306,10 @@ def test_program_runs_end_to_end(office: Any, monkeypatch: pytest.MonkeyPatch) -
     assert h["programs"][0]["orchestrator"]["state"] == "complete"
 
 
-def test_concurrency_cap_is_never_exceeded(office: Any) -> None:
+def test_concurrency_cap_is_never_exceeded(office: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aicad.office import direct
+
+    monkeypatch.setenv(direct.ENV, "0")  # the agent path: the cap is about agents (direct builds have their own slots)
     c = office
     parts = [{"name": f"Plate {i}", "family": "machined", "complexity": 1, "qty": 1,
               "description": f"Plate {40 + i} x 30 x 5 mm."} for i in range(5)]
@@ -614,7 +617,8 @@ def test_hex_lookups_run_outside_the_agent_slots(office: Any) -> None:
     pid = v["id"]
     c.post(f"/api/office/programs/{pid}/run")
     v = _wait(c, pid, lambda v: _tk(v, "Cover bolt")["column"] == "approved")
-    busy = [t for t in v["tickets"] if (t.get("run") or {}).get("status") == "designing"]
+    busy = [t for t in v["tickets"] if (t.get("run") or {}).get("status") == "designing"
+            and not orchestrator.is_direct(t)]  # parts built from the interfaces run beside the agent slots
     assert len(busy) == 1 and not gate_ev.is_set()  # the one slot is still held by a design turn
     assert "Toolbox" in _tk(v, "Cover bolt")["run"]["line"] or _tk(v, "Cover bolt")["reuse"]
     gate_ev.set()
@@ -649,3 +653,28 @@ def test_a_run_stopped_at_its_budget_is_never_approved(office: Any) -> None:
                 and mm["id"] == m["id"])
     assert done["label"].startswith("Retried 1 blocked part") and "0 blocked" not in done["label"]
     v = _wait(c, pid, lambda v: _tk(v, "Spacer")["column"] in ("approved", "integrated"))
+
+
+def test_parts_built_from_the_interfaces_run_beside_the_agent_slots(office: Any) -> None:
+    """Planetary benchmark A10: ten parts built from the interfaces (no model, no tokens) queued three at a time behind
+    the agent cap, 70 s of a 141 s build. They now take their own slots, up to the CAD worker pool (DIRECT_SLOTS)."""
+    c = office
+    parts = [{"name": f"Plate {i}", "family": "machined", "complexity": 1, "qty": 1,
+              "description": f"Plate {40 + i} x 30 x 5 mm."} for i in range(6)]
+    plan = {"source": "standard", "summary": "", "assumptions": [],
+            "subassemblies": [{"name": "Stack", "description": "", "parts": parts}]}
+    fake_agents.SCRIPT.append((r"Plate", {"delay": 0.3}))
+    v = _program(c, "directslots@x.com", plan, concurrency=1)
+    pid = v["id"]
+    assert all(orchestrator.is_direct(t) for t in v["tickets"] if t["kind"] == "part")
+    c.post(f"/api/office/programs/{pid}/run")
+    seen = 0
+    t0 = time.time()
+    while time.time() - t0 < 90:
+        v = c.get(f"/api/office/programs/{pid}").json()
+        seen = max(seen, sum(1 for t in v["tickets"] if (t.get("run") or {}).get("status") == "designing"))
+        if v["status"] == "complete":
+            break
+        time.sleep(0.03)
+    assert v["status"] == "complete"
+    assert 1 < seen <= orchestrator.DIRECT_SLOTS  # more than the one agent slot, never past the worker pool
