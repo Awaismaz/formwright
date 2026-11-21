@@ -39,9 +39,10 @@ SOURCES = [
 THROUGH_RULE = ("Through joint: L ≥ grip + washers + nut height m + 2 × pitch, so at least two full threads "
                 "protrude beyond the nut; then the next length in the ISO 888 series. Common design practice: verify "
                 "against your company standard.")
-TAPPED_RULE = ("Tapped joint: thread engagement ≥ 1.0 × d in steel, 1.5 × d in cast iron and copper alloys, 2.0 × d in "
-               "aluminium and plastics (rule of thumb; VDI 2230 gives the calculated value), and the screw must not "
-               "bottom out in a blind hole; then a length from the ISO 888 series. Verify.")
+TAPPED_RULE = ("Tapped joint: thread engagement ≥ 1.5 × d in steel, cast iron and copper alloys, 2.0 × d in "
+               "aluminium, other light alloys and plastics (common practice, e.g. Machinery's Handbook / VDI 2230 "
+               "guidance; VDI 2230 gives the calculated value), and the screw stays 2 × pitch clear of the bottom of a "
+               "blind hole; then a length from the ISO 888 series. Verify.")
 
 
 def pitch(d: int) -> float:
@@ -82,16 +83,23 @@ def next_length(L_min: float, lo: float = 0.0, hi: float = math.inf) -> int | No
     return None
 
 
+UNKNOWN_MATERIAL = "unknown material (conservative)"
+
+
 def engagement_factor(material: str | None) -> tuple[float, str]:
+    """Minimum thread engagement in the tapped part, as a multiple of d, by that part's material (PD-285): 1.5 d in
+    steel, cast iron and copper alloys (cast iron is often 1.5 d, steel 1 to 1.5 d), 2 d in aluminium, other light
+    alloys and plastics, 2 d when the material is unknown. Common practice (e.g. Machinery's Handbook / VDI 2230
+    guidance), verify."""
     t = (material or "").lower()
-    if any(k in t for k in ("cast iron", "brass", "bronze", "copper")):
+    if any(k in t for k in ("cast iron", "grey iron", "gray iron", "ductile iron", "brass", "bronze", "copper")):
         return 1.5, "cast iron / copper alloy"
     if any(k in t for k in ("steel", "stainless", "titanium")) and "alumin" not in t:
-        return 1.0, "steel"
-    if any(k in t for k in ("alumin", "abs", "pla", "petg", "nylon", "pa1", "pa6", "pom", "acetal", "delrin",
-                            "polycarb", "peek", "uhmw", "plastic")):
-        return 2.0, "aluminium / plastic"
-    return 2.0, "unknown material (conservative)"
+        return 1.5, "steel"
+    if any(k in t for k in ("alumin", "magnesium", "zinc", "zamak", "abs", "pla", "petg", "nylon", "pa1", "pa6",
+                            "pom", "acetal", "delrin", "polycarb", "peek", "uhmw", "plastic")):
+        return 2.0, "aluminium / light alloy / plastic"
+    return 2.0, UNKNOWN_MATERIAL
 
 
 def through_length(d: int, grip: float, washer_head: bool, washer_nut: bool) -> dict[str, Any]:
@@ -208,7 +216,12 @@ def propose(probe: dict[str, Any], style: str = "hex_bolt", washers: str = "both
             base["error"] = (f"The tapped hole is too shallow: it gives {ln['usable_thread']:g} mm of usable thread, "
                              f"M{d} needs at least {ln['terms'][-1]['mm']:g} mm of engagement.")
         else:
-            base["error"] = f"No standard M{d} length fits (needs ≥ {ln['L_min']:g} mm; Toolbox range up to {lim:g} mm)."
+            top = ln.get("L_max")
+            if kind == "tapped" and probe["tapped"].get("blind") and top is not None and top < lim:  # the bottom limits
+                base["error"] = (f"No standard M{d} length fits between {ln['L_min']:g} and {top:g} mm (the engagement "
+                                 "the material needs, and the bottom of the tapped hole).")
+            else:
+                base["error"] = f"No standard M{d} length fits (needs ≥ {ln['L_min']:g} mm; Toolbox range up to {lim:g} mm)."
         return base
     L = ln["L"]
     items = [_item("screw", style, {"D": d, "L": L})]

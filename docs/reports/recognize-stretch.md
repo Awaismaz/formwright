@@ -77,12 +77,14 @@ Reproduced before the fix (a split housing half, 120 long, Ø40 half bores in 15
 | `test_io_roundtrip` + `test_office_orchestrator` | 32 passed |
 | `test_office_gearbox_caps` | 16 passed |
 | after the `_hole_index` change: `test_planetary_orchestration` + `test_office_direct`, `test_office_orchestrator` + `test_no_long_dashes` | 29 passed; 23 passed |
-| `uv run aicad golden --simulated` | **13 of 14** (was 14 on main): c reducer "shcs M6 fastener stacks: got 8, want 16", see below; the other 13 pass |
+| `uv run aicad golden --simulated` (recognition change alone) | 13 of 14: c reducer "shcs M6 fastener stacks: got 8, want 16", see below |
+| after the PD-285 fix, in pairs: `test_office_gearbox_caps` + `test_office_icd` 34, `test_office_orchestrator` + `test_fixtures_asm` 31, `test_toolbox_keys` + `test_planetary_orchestration` 31, `test_assembly` + `test_assembly_pairs` 30, `test_plan_preview` + `test_office_supervisor` 35, `test_office_phase5` + `test_office_direct` 19, `test_office_shaft_line` + `test_master_icd_fix` 14, `test_master_model` + `test_generators` 32, `test_golden` + `test_office_small` 21, `test_connection_layout` + `test_design_graph` 57, `test_office_layout_envelopes` + `test_drawings` 32, `test_drawing_depth` + `test_recognize_stretch` 27, `test_office_phase6_layout` 5, `test_generators` + `test_tapped_engagement` (new, 13) 24 | all passed (hand values moved, with the arithmetic in comments: tap depths M6 19 and M4 14.5 in `test_office_gearbox_caps`, `test_office_phase6_layout` (incl. the drawing's TAPPED HOLES notes), `test_generators` (wall min 22); the steel M5 case in `test_assembly` at 1.5 d: L 13.5 to M5 x 16) |
+| `uv run aicad golden --simulated` (after PD-285) | **14 of 14** |
 | `ruff check src tests` | clean |
 
-## The golden reducer case (c): a real design gap the old reading hid
+## The golden reducer case (c): a real design gap the old reading hid (PD-285, fixed)
 
-With this change the reducer case fits 8 of its 16 M6 cap screws: the two input caps' 8 are not fitted ("No standard
+With the recognition change alone the reducer case fitted 8 of its 16 M6 cap screws: the two input caps' 8 are not fitted ("No standard
 M6 length fits (needs >= 25.6 mm)"). This is not a recognition error; the old reading was wrong in a way that made it
 pass:
 
@@ -93,9 +95,23 @@ pass:
   1.6, so L from 12 + 1.6 + 12 = 25.6 to 12 + 1.6 + (18 - 2) = 29.6. ISO 4762 has 25 and 30: none fits. With main's
   19 mm the top was 30.6, so M6 x 30 "fitted". The output caps (flange 16: 29.6 to 33.6) take M6 x 30 either way;
 - the cause is the ICD rule: `tap_depth` leaves a window of 0.5 d + 3 - 2 P (4 mm for M6, 4.5 for M8), narrower than
-  the 5 mm step of standard lengths, so some cap thicknesses have no standard screw. Fixing it (a deeper tap, a cap
-  flange chosen for a standard length, or no washer under the cap screw head) changes the ICD, the wall thickness
-  (`tap_depth + 3`) and hand values in several office tests, so it is parked (PD-285), not done here.
+  the 5 mm step of standard lengths, so some cap thicknesses have no standard screw.
+
+Fixed in two parts (the coordinator's order: material first, then the tap depth):
+
+1. **Engagement by the tapped part's material** (`assembly/fasteners.engagement_factor`, `TAPPED_RULE`): 1.5 d in
+   steel, cast iron and copper alloys (was 1.0 d in steel), 2 d in aluminium, other light alloys (magnesium, zinc) and
+   plastics, 2 d when unknown. Source: common practice (e.g. Machinery's Handbook / VDI 2230 guidance), verify. The
+   tapped part's material is the part snapshot's (its project's MATERIAL); when that is unknown, the program's housing
+   material from the plan's design graph (`program_assembly.program_material`: the housing component's material, else
+   a material answer such as A4's "Cast iron"). The 2 P tip clearance at the bottom stays. The reducer housing is
+   Aluminium 6061-T6, so this alone did not fit the input caps.
+2. **`icd.tap_depth`** (also used by `graph/layout`): depth = max(2.5 d + 3, 2 d + 2 P + 5), rounded up to 0.5 mm, so
+   the admissible window (depth - 2 P - 2 d) is at least the 5 mm step between ISO 888 lengths for any clamped
+   thickness. M3 12, M4 14.5 (was 13), M5 17 (15.5), M6 19 (18), M8 23.5 (23), M10 28, M12 33, M16 43 (unchanged).
+   Reducer input cap: 25.6 to 30.6, M6 x 30. Walls are `tap_depth + 3` where that rules (22 instead of 21 for M6 caps).
+- Fitz's message for a blind tap now names the window: "No standard M6 length fits between 25.6 and 29.6 mm (the
+  engagement the material needs, and the bottom of the tapped hole)", not "Toolbox range up to 120 mm".
 
 ## Behaviour changes to know
 
@@ -124,4 +140,4 @@ pass:
 | PD-282 | Faces of different solids on one line | Never one hole: a hole belongs to one body (a split housing in one compound is four half bores) |
 | PD-283 | Stale recognitions after VERSION 4 | Assembly snapshots, the engineering cache and `out/recognition.json` are read again; an imported STEP project's own `RECOGNITION` file is kept (its feature ids drive the model script) |
 | PD-284 | Conformance of an ICD hole across a joint (`split`) | Matched against holes and partial bores of the part; an ICD hole not marked split is matched against holes only |
-| PD-285 | Tapped depth that leaves no standard screw length (golden c: 12 mm input caps into 18 mm M6 taps) | Not changed: Fitz reports the 8 input cap screws as not fitted (true for the planned geometry); the golden reducer case is 13 of 14 until the ICD rule is decided (deeper `tap_depth` so the window covers one length step, or cap flange sized for a standard length, or no washer under cap screw heads) |
+| PD-285 | Tapped depth that leaves no standard screw length (golden c: 12 mm input caps into 18 mm M6 taps) | Engagement 1.5 d in steel, cast iron and copper alloys, 2 d in light alloys, plastics and unknown materials (the program's housing material from the design graph when the part's is unknown); and `tap_depth` = max(2.5 d + 3, 2 d + 2 P + 5) up to 0.5 mm, so a standard length always fits. Steel went from 1.0 d to 1.5 d (more conservative) |

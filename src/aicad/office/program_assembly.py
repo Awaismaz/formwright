@@ -678,8 +678,22 @@ def _seat_face(aroot: Path, inst: dict[str, Any], point: Any, out: Any) -> int |
     return best[1] if best else None
 
 
+def program_material(prog: dict[str, Any] | None) -> str | None:
+    """The program's housing material, when the plan's design graph knows it: the housing component's material, else
+    the answer to a material question (e.g. "Cast iron"). Used for a tapped part whose own material is unknown."""
+    data = (((prog or {}).get("plan") or {}).get("graph") or {}).get("data") or {}
+    for c in data.get("components") or []:
+        if c.get("kind") == "housing" and str(c.get("material") or "").strip():
+            return str(c["material"])
+    answers = data.get("answers") or {}
+    for k in sorted(answers):
+        if k.startswith("material") and str(answers[k] or "").strip():
+            return str(answers[k])
+    return None
+
+
 def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str, Any], xy: list[float],
-              fitted: set[tuple[str, int]]) -> dict[str, Any] | None:
+              fitted: set[tuple[str, int]], material: str | None = None) -> dict[str, Any] | None:
     """One bolted-joint hole as the stack Fitz fits there, straight from the ICD (PD-71): the hole the ICD put in each
     part (looked up in the part's recognised holes, no kernel work), the clamped thickness from those holes along
     the joint axis, head on the mounted part, nut under the host or a screw into the host's tapped hole. Returns
@@ -733,7 +747,8 @@ def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str
         probe["members"] = [{"inst": ib["id"], "name": names[ib["id"]], "t": round(b1 - b0, 4)}]
         probe["tapped"] = {"inst": ia["id"], "name": names[ia["id"]], "d": float(ha["d"]),
                            "depth": round(a1 - a0, 4), "blind": not ha.get("through"),
-                           "material": (astore.part(aroot, ia["part"]) or {}).get("material")}
+                           "material": _tapped_material((astore.part(aroot, ia["part"]) or {}).get("material"),
+                                                        material)}
     else:
         probe["grip"] = round(b1 - a0, 4)
         probe["members"] = [{"inst": ib["id"], "name": names[ib["id"]], "t": round(b1 - b0, 4)},
@@ -766,13 +781,23 @@ def _stack_hardware(aroot: Path, adoc: dict[str, Any]) -> dict[tuple[str, float]
     return out
 
 
+def _tapped_material(own: str | None, program: str | None) -> str | None:
+    """The tapped part's own material; the program's housing material only when the part's is unknown (PD-285)."""
+    from aicad.assembly import fasteners
+
+    if program and fasteners.engagement_factor(own)[1] == fasteners.UNKNOWN_MATERIAL:
+        return program
+    return own
+
+
 def plan_stacks(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], joints: list[dict[str, Any]],
-                fitted: set[tuple[str, int]]) -> list[dict[str, Any]]:
-    """Every hole of these bolted joints that has no stack yet, as ``icd_stack`` plans it (``fitted`` is updated)."""
+                fitted: set[tuple[str, int]], material: str | None = None) -> list[dict[str, Any]]:
+    """Every hole of these bolted joints that has no stack yet, as ``icd_stack`` plans it (``fitted`` is updated).
+    ``material``: the program's housing material (``program_material``), for tapped parts of unknown material."""
     out = []
     for f in joints:
         for xy in f["data"]["positions"]:
-            h = icd_stack(aroot, adoc, sk, f, xy, fitted)
+            h = icd_stack(aroot, adoc, sk, f, xy, fitted, material)
             if h is not None:
                 out.append(h)
                 fitted.add((h["inst"], h["hole"]))
@@ -866,7 +891,8 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     mine = [f for f in joints if f["data"].get("fastener_item") in (None, t["item_id"])] or \
                         [f for f in joints if not any(t2.get("item_id") == f["data"].get("fastener_item")
                                                       for t2 in prog.get("tickets") or [])]
-                    planned = await asyncio.to_thread(plan_stacks, aroot, adoc, sk, mine, fitted)
+                    planned = await asyncio.to_thread(plan_stacks, aroot, adoc, sk, mine, fitted,
+                                                      program_material(prog))
                     want = int(t.get("qty") or 1)
                     if t.get("_kit"):
                         if not planned:
@@ -985,7 +1011,7 @@ async def integrate(aroot: Path, org_id: str, prog: dict[str, Any], level: str,
                     code = ((tk or {}).get("reuse") or {}).get("code")
                     by_style.setdefault("shcs" if code == "shcs" else "hex_bolt", []).append(f)
                 for style, js in by_style.items():
-                    planned = await asyncio.to_thread(plan_stacks, aroot, final, sk, js, fitted)
+                    planned = await asyncio.to_thread(plan_stacks, aroot, final, sk, js, fitted, program_material(prog))
                     if not planned:
                         continue
                     try:  # PD-71: from the ICD, like every level

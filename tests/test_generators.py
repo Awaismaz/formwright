@@ -131,8 +131,9 @@ def test_reducer_housing_cover_and_caps_go_direct_with_hand_values() -> None:
     assert _num(h, "SEAT_2_X") - _num(h, "SEAT_1_X") == 80  # a = m (z1 + z2) / 2 = 2 (20 + 60) / 2
     assert (_num(h, "SEAT_1_D"), _num(h, "SEAT_1_DEPTH"), _num(h, "SEAT_2_D"), _num(h, "SEAT_2_DEPTH")) == (47, 14, 52, 15)
     assert (_num(h, "CAP_1_PCD"), _num(h, "CAP_2_PCD")) == (58, 63)  # D + tap drill 5 + 2 x 3
-    assert (_num(h, "CAP_TAP_D"), _num(h, "CAP_TAP_DEPTH")) == (5, 18)  # M6: ISO 2306, 2.5 d + 3
-    assert _num(h, "WALL") == 24 and '"WALL": {"min": 21.0' in h  # wall rule max(19, 21, 12) = 21 <= 24
+    # M6: ISO 2306 drill 5; depth max(2.5 d + 3, 2 d + 2 P + 5) = max(18, 12 + 2 + 5) = 19 (PD-285)
+    assert (_num(h, "CAP_TAP_D"), _num(h, "CAP_TAP_DEPTH")) == (5, 19)
+    assert _num(h, "WALL") == 24 and '"WALL": {"min": 22.0' in h  # wall rule max(19, 19 + 3, 12) = 22 <= 24
     assert (_num(h, "FOOT_TAP_D"), _num(h, "FOOT_EDGE")) == (6.8, 12)  # M8 for a 224 long footprint, 1.5 d
     assert paths["Housing base"]["summary"].startswith("gearbox housing 224 × 110 × 146: 2 bearing bores (6204 / 6205) "
                                                        "at 80 centre distance")
