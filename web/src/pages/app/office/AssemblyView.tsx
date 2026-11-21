@@ -133,9 +133,11 @@ export default function AssemblyView({ program, recent }: { program: Program; re
   const nClash = data.clash ? data.clash.count : data.clashes.length;
   const clashList = data.clashes.length ? data.clashes : view.clashes;
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]" data-live-asm>
-      <Card className="relative overflow-hidden">
-        <div ref={host} className="viewport-bg h-[520px] w-full max-sm:h-[380px]"
+    // the viewport is one screen high and stays put; the cards beside it scroll on their own, so the explode bar is
+    // always just under the model (founder 2026-11-21: a long visual check stretched the viewport and pushed it away)
+    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start" data-live-asm>
+      <Card className="relative overflow-hidden lg:sticky lg:top-3">
+        <div ref={host} className="viewport-bg h-[520px] w-full max-sm:h-[380px] lg:h-[clamp(380px,calc(100vh-9rem),640px)]"
           onPointerMove={e => { const id = eng.current?.instanceAt(e.clientX, e.clientY) ?? null; const r = host.current!.getBoundingClientRect(); setTip(id ? { id, x: e.clientX - r.left, y: e.clientY - r.top } : null); }}
           onPointerLeave={() => setTip(null)} />
         {tip && hovered && (
@@ -158,7 +160,7 @@ export default function AssemblyView({ program, recent }: { program: Program; re
           <button className="ml-auto inline-flex items-center gap-1 text-muted hover:text-text" onClick={() => eng.current?.fit()}><Maximize className="h-3.5 w-3.5" />Fit</button>
         </div>
       </Card>
-      <div className="space-y-3">
+      <div className="space-y-3 lg:max-h-[clamp(380px,calc(100vh-9rem),640px)] lg:overflow-y-auto lg:pr-1" data-asm-side>
         <Card className="p-3 text-[12.5px]">
           <div className="mb-1 flex items-center gap-2 font-semibold"><Box className="h-4 w-4 text-primary" />Program assembly
             {nClash === null ? <Badge tone="neutral" className="ml-auto" data-clash-badge>{data.clash?.status === "running" ? "Checking clashes…" : "Clashes not checked"}</Badge>
