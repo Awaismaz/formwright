@@ -107,6 +107,18 @@ def fit_fastener_counts(g: DesignGraph, p: dict[str, Any], ifs: list[dict[str, A
             if noun and re.search(rf"\b{c.qty}\s+(?:\w+\s+){{0,3}}{re.escape(noun)}", g.brief or "", re.IGNORECASE):
                 continue  # the brief's own count
             g.notes.append(f"{c.name}: {n}, one per hole the layout made for them ({c.qty} were planned).")
+            # the nuts and washers of the same joints follow the bolts (founder's 2-stage brief: 8 bolts with 8 nuts
+            # and 16 washers became 4 bolts, and the nuts and washers stayed at 8 and 16)
+            for x in g.connections:
+                if c.id not in x.via:
+                    continue
+                for v in x.via:
+                    o = g.comp(v)
+                    if o is not None and o.id != c.id and o.kind in ("nut", "washer") and o.qty % c.qty == 0:
+                        per = o.qty // c.qty
+                        if o.qty != per * n:
+                            g.notes.append(f"{o.name}: {per * n} ({per} per {c.name.lower().rstrip('s')}).")
+                            o.qty = per * n
             c.qty = n
             changed = True
     return changed

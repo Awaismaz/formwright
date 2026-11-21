@@ -309,7 +309,11 @@ def gear_pairs(root: Path, doc: dict[str, Any]) -> list[dict[str, Any]]:
             out.append({"a": a, "b": b, "a_mm": round(want, 3), "centre_mm": round(radial, 3),
                         "offset_mm": round(abs(axial), 3), "engaged_mm": round(max(0.0, min(ba, bb) - abs(axial)), 3),
                         "face_mm": min(ba, bb)})
-    return out
+    # two gears at a mesh distance but in different planes, each in mesh with another gear in its own plane, are not a
+    # pair: stages of a gearbox (founder's 2-stage planetary, 2026-11-21: stage 1's planets sit exactly a = 60 from
+    # stage 2's sun, 47 mm further along the axis, and the final assembly was stopped for "0 of 20 mm in mesh")
+    meshed = {x for g in out if g["engaged_mm"] > 0 for x in (g["a"], g["b"])}
+    return [g for g in out if g["engaged_mm"] > 0 or not (g["a"] in meshed and g["b"] in meshed)]
 
 
 def quick_doc(root: Path, doc: dict[str, Any]) -> dict[str, Any]:

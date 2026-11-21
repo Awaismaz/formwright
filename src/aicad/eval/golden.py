@@ -37,6 +37,7 @@ the git sha and the model routing in use. Nothing here touches the kernel, a mod
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 import os
@@ -322,6 +323,8 @@ def planetary_rows(n: int, spec: dict[str, Any], insts: list[dict[str, Any]], sn
     from aicad.graph import planetary
     from aicad.graph.model import DesignGraph
 
+    if int(spec.get("stages") or 1) > 1:
+        return stage_rows(n, spec, insts, snap)
     tol = float(spec.get("tol", 0.05))
     pre = f"planetary.{n}"
     rows: list[dict[str, Any]] = []
@@ -430,6 +433,133 @@ def planetary_rows(n: int, spec: dict[str, Any], insts: list[dict[str, Any]], sn
     bad = [k for k, ok in placed.items() if not ok]
     rows.append(_row(f"{pre}.placed", "Sun on the input, carrier on the output, ring in the housing", not bad,
                      bad or "all", "all"))
+    return rows
+
+
+def _spacing(pre: str, label: str, suns: list[dict[str, Any]], plans: list[dict[str, Any]], N: int, a: float,
+             tol: float) -> tuple[list[dict[str, Any]], int | None]:
+    """N planets equally spaced on radius a about the sun (the sun's thin side is the axis): rows, and the axis."""
+    if not suns or len(plans) != N:
+        return [_row(f"{pre}.spacing", f"{label}{N} planets equally spaced at a = {a:g}", False,
+                     f"{len(suns)} sun, {len(plans)} planets", N, "not found")], None
+    sb = suns[0]["box"]
+    ext = [sb[k + 3] - sb[k] for k in range(3)]
+    ax = ext.index(min(ext))
+    keep = [k for k in range(3) if k != ax]
+    cs = centre(sb)
+    rad, ang = [], []
+    for p in plans:
+        cp = centre(p["box"])
+        dx, dy = cp[keep[0]] - cs[keep[0]], cp[keep[1]] - cs[keep[1]]
+        rad.append(round(math.hypot(dx, dy), 3))
+        ang.append(math.degrees(math.atan2(dy, dx)) % 360)
+    ang.sort()
+    steps = [round((ang[(k + 1) % N] - ang[k]) % 360, 2) for k in range(N)]
+    ok = all(abs(r - a) <= tol for r in rad) and all(abs(s_ - 360 / N) <= 0.5 for s_ in steps)
+    return [_row(f"{pre}.spacing", f"{label}{N} planets equally spaced at a = {a:g}", ok,
+                 {"radii": rad, "steps_deg": steps}, {"radius": a, "step_deg": round(360 / N, 2)})], ax
+
+
+def stage_rows(n: int, spec: dict[str, Any], insts: list[dict[str, Any]], snap: dict[str, Any]
+               ) -> list[dict[str, Any]]:
+    """A multi-stage planetary gearbox (``[[expect.planetary]] stages = N``), by hand rules, stage by stage: on the
+    plan's design graph each stage's z_ring = z_sun + 2 z_planet, (z_sun + z_ring) / N whole, the planet bearing's rim,
+    the mounting chain (stage 1's sun on the input shaft, each carrier on the shaft that drives the next stage's sun,
+    the last carrier on the output shaft, the rings fixed, each planet on its bearing on its pin in its carrier); the
+    overall ratio is the product of 1 + z_ring / z_sun. On the final assembly: each stage's planets equally spaced on
+    its own a = m (z_s + z_p) / 2 about its sun, its gears on one mid-plane, the rings inside the housing, the first
+    sun within the input shaft's span and the last carrier within the output shaft's."""
+    from aicad.graph import planetary
+    from aicad.graph.model import DesignGraph
+
+    tol = float(spec.get("tol", 0.05))
+    pre = f"planetary.{n}"
+    data = snap.get("graph")
+    g = DesignGraph.model_validate(data) if data else None
+    sets = planetary.find_all(g) if g is not None else []
+    want = int(spec["stages"])
+    rows = [_row(f"{pre}.stages", "Planetary stages", len(sets) == want, len(sets), want,
+                 "" if g is not None else "no design graph")]
+    if g is None or len(sets) != want:
+        return rows
+
+    def joined(kinds: tuple[str, ...], host: str | None, guest: str | None) -> bool:
+        return any(x.kind in kinds and x.host == host and x.guest == guest for x in g.connections)
+
+    hub = ("keyed_hub", "hub_fit")
+    total = 1.0
+    chain_bad: list[str] = []
+    for st in sets:
+        k = st.stage
+        sun, pl, ring = g.comp(st.sun), g.comp(st.planet), g.comp(st.ring)
+        assert sun is not None and pl is not None and ring is not None
+        zs, zp, zr = int(sun.v("teeth")), int(pl.v("teeth")), int(ring.v("teeth"))
+        m = float(sun.v("module"))
+        N = int(spec.get("planets") or st.n)
+        p = f"{pre}.s{k}"
+        rows.append(_row(f"{p}.coaxial", f"Stage {k}: z_ring = z_sun + 2 z_planet", zr == zs + 2 * zp,
+                         f"{zr} = {zs} + 2 x {zp}" if zr == zs + 2 * zp else zr, zs + 2 * zp))
+        rows.append(_row(f"{p}.planets", f"Stage {k}: planets", st.n == N, st.n, N))
+        rows.append(_row(f"{p}.assembly", f"Stage {k}: (z_sun + z_ring) / N whole", (zs + zr) % st.n == 0,
+                         (zs + zr) / st.n, "whole"))
+        brg = g.comp(st.bearing) if st.bearing else None
+        if spec.get("rim_min_m") is not None and brg is not None and brg.v("D") is not None:
+            s_r = (m * (zp - 2.5) - float(brg.v("D"))) / 2
+            rows.append(_row(f"{p}.rim", f"Stage {k}: planet rim (root Ø - bearing D) / 2",
+                             s_r >= float(spec["rim_min_m"]) * m - 1e-9,
+                             f"{s_r:g} mm = {s_r / m:.3g} m ({brg.v('designation')})", f">= {spec['rim_min_m']} m"))
+        total *= 1 + zr / zs
+        if not (st.input and joined(hub, st.input, st.sun)):
+            chain_bad.append(f"stage {k} sun on its shaft")
+        if not (st.output and st.carrier and joined(hub, st.output, st.carrier)):
+            chain_bad.append(f"stage {k} carrier on its shaft")
+        if not (st.housing and joined(("mounted_on", "bolted_joint"), st.housing, st.ring)):
+            chain_bad.append(f"stage {k} ring fixed")
+        if st.bearing and not (joined(("mounted_on",), st.bearing, st.planet) and
+                               joined(("bearing_journal",), st.pin, st.bearing)):
+            chain_bad.append(f"stage {k} planet on its bearing on its pin")
+        if not (st.carrier and joined(("mounted_on", "shaft_bore"), st.carrier, st.pin)):
+            chain_bad.append(f"stage {k} pins in the carrier")
+        # the final assembly: this stage's planets about its sun, its gears on one plane
+        a = m * (zs + zp) / 2
+        suns = select(insts, {"name": f"^{re.escape(sun.name)}"})
+        plans = select(insts, {"name": f"^{re.escape(pl.name)}"})
+        rws, ax = _spacing(p, f"Stage {k}: ", suns, plans, N, a, tol)
+        rows += rws
+        if ax is not None:
+            mids = [round((i["box"][ax] + i["box"][ax + 3]) / 2, 3) for i in suns + plans]
+            rows.append(_row(f"{p}.coplanar", f"Stage {k}: gears on one mid-plane", max(mids) - min(mids) <= tol,
+                             sorted(set(mids)), "one plane"))
+    for a_, b_ in itertools.pairwise(sets):
+        if not (a_.output and a_.output == b_.input):
+            chain_bad.append(f"stage {a_.stage} carrier drives stage {b_.stage} sun")
+    rows.append(_row(f"{pre}.chain", "Mounting chain, stage to stage", not chain_bad, chain_bad or "all",
+                     "sun in, carrier to the next sun, last carrier out, rings fixed"))
+    if spec.get("ratio") is not None:
+        rows.append(_row(f"{pre}.ratio", "Overall ratio, the product of 1 + z_ring / z_sun",
+                         abs(total - float(spec["ratio"])) <= float(spec.get("ratio_tol", 1e-6)), round(total, 4),
+                         float(spec["ratio"])))
+    else:
+        rows.append(_row(f"{pre}.ratio", "Overall ratio, the product of 1 + z_ring / z_sun", None, round(total, 4), "-"))
+    first, last = sets[0], sets[-1]
+    ins = select(insts, {"name": f"^{re.escape(g.comp(first.input).name)}"}) if first.input else []
+    outs = select(insts, {"name": f"^{re.escape(g.comp(last.output).name)}"}) if last.output else []
+    sun1 = select(insts, {"name": f"^{re.escape(g.comp(first.sun).name)}"})
+    carN = select(insts, {"name": f"^{re.escape(g.comp(last.carrier).name)}"}) if last.carrier else []
+    rings = [i for st in sets for i in select(insts, {"name": f"^{re.escape(g.comp(st.ring).name)}"})]
+    hss = select(insts, {"name": spec.get("housing", "(?i)housing base|gearbox base|\\bhousing\\b")})
+    ax = 1  # the planetary layout's axis is +Y
+
+    def inside(inner: list[dict[str, Any]], outer: list[dict[str, Any]], ks: list[int]) -> bool:
+        return bool(inner and outer) and all(any(all(o["box"][k] - tol <= i["box"][k] and
+                                                     i["box"][k + 3] <= o["box"][k + 3] + tol for k in ks)
+                                                 for o in outer) for i in inner)
+
+    placed = {"first sun within the input shaft's span": inside(sun1, ins, [ax]),
+              "last carrier within the output shaft's span": inside(carN, outs, [ax]),
+              "rings inside the housing": inside(rings, hss, [0, 1, 2])}
+    bad = [k for k, ok in placed.items() if not ok]
+    rows.append(_row(f"{pre}.placed", "Input sun, output carrier, rings in the housing", not bad, bad or "all", "all"))
     return rows
 
 

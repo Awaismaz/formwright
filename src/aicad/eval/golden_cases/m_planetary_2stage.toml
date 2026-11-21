@@ -1,0 +1,53 @@
+# (m) The founder's real test (2026-11-21): "Build a 2 stage planetary gearbox". The single-stage benchmark (case k)
+# had come right, but this prompt failed every time: the planetary rules sized stage 1 only (stage 2's ring kept the
+# planets' 30 teeth, its planet bearing stayed in the housing wall) and the connection solver could not place a
+# second stage ("Stage 2 planet gear meshes or belts but sits on no shaft"), so the program fell to a master model
+# with 22 problems. The foundation is now N stages: every stage found and chained (stage k's carrier drives stage
+# k + 1's sun through an intermediate shaft keyed to both, floating on the planets), each stage sized by the same
+# rules, the stages stacked along the axis in one housing.
+# The simulated run replays the model's own reply from the founder's program "Multistage" (its components,
+# connections and sizes; code's additions left out). Hand values, per stage:
+#   sun 30, planets 3 x 30, ring z_r = z_s + 2 z_p = 90 (internal), module 2; (30 + 90) / 3 = 40, whole
+#   ratio per stage 1 + 90 / 30 = 4, overall 4 x 4 = 16
+#   planet root Ø m (z - 2.5) = 55; rim rule 2.7 m = 5.4 mm, so D <= 55 - 10.8 = 44.2: 6004 (20 x 42 x 12), rim 6.5 mm
+#   a = m (z_s + z_p) / 2 = 60 in both stages; planets 120° apart
+#   the intermediate shaft has no housing bearings (no wall between the stages): it floats on the planets
+id = "planetary-2stage"
+title = "Two stage planetary gearbox (founder's real test)"
+letter = "m"
+source = "Founder's prompt 2026-11-21, program 'Multistage' (docs/reports/planetary-benchmark.md)"
+brief = "Build a 2 stage planetary gearbox"
+
+[sim]
+intent = "m_planetary_2stage.intent.json"
+
+[limits]
+tokens = 800
+wall_simulated_s = 1200
+wall_live_s = 3600
+
+[expect]
+complete = true
+clashes = 0
+binned = 0
+loose = 0
+placeholders = 0
+blocked = 0
+icd_problems = 0
+conformance = true
+path = "fast"
+
+[[expect.planetary]]
+stages = 2
+planets = 3
+ratio = 16.0
+rim_min_m = 2.7
+tol = 0.05
+
+[[expect.count]]
+name = "(?i)\\bplanet gear"
+n = 6
+
+[[expect.count]]
+name = "(?i)\\bplanet pin"
+n = 6

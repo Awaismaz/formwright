@@ -1,0 +1,324 @@
+{
+ "name": "Two stage planetary, shared ring",
+ "brief": "Design a two stage planetary gearbox. Working targets (adjust if needed): overall reduction about 25:1 (two stages of about 5:1 each), rated output torque 50 N·m, input speed up to 3000 rpm. Each stage has a sun gear, three planet gears on pins in a planet carrier, and a ring gear. The first stage carrier drives the second stage sun gear coaxially. Both stages may share one internal ring gear integral with the housing, or use separate rings fixed in the housing. Input shaft and output shaft are coaxial, each supported on ball bearings and sealed with a lip seal at the housing caps. The housing is split into a base and a cover, bolted together, with open caps at input and output. Gears are spur gears in steel, module and face widths sized for the rated torque; the housing is aluminium. Provide a full assembly with all parts, standard bearings, seals and fasteners.",
+ "recorded": "2026-11-21, rebuilt from the founder's live program (the model's own components, connections and sizes)",
+ "reply": {
+  "summary": "Two stage planetary gearbox with one shared ring gear.",
+  "assumptions": [],
+  "components": [
+   {
+    "id": "housing_base",
+    "kind": "housing",
+    "name": "Housing base",
+    "params": {
+     "style": "split"
+    }
+   },
+   {
+    "id": "housing_cover",
+    "kind": "cover",
+    "name": "Housing cover"
+   },
+   {
+    "id": "input_shaft",
+    "kind": "shaft",
+    "name": "Input shaft",
+    "params": {
+     "role": "input",
+     "stepped": true
+    }
+   },
+   {
+    "id": "output_shaft",
+    "kind": "shaft",
+    "name": "Output shaft",
+    "params": {
+     "role": "output",
+     "stepped": true
+    }
+   },
+   {
+    "id": "sun1",
+    "kind": "spur_gear",
+    "name": "Stage 1 sun gear",
+    "params": {
+     "role": "pinion"
+    }
+   },
+   {
+    "id": "sun1_key",
+    "kind": "key",
+    "name": "Stage 1 sun key"
+   },
+   {
+    "id": "planet1",
+    "kind": "spur_gear",
+    "name": "Stage 1 planet gear",
+    "qty": 3
+   },
+   {
+    "id": "pin1",
+    "kind": "shaft",
+    "name": "Stage 1 planet pin",
+    "qty": 3
+   },
+   {
+    "id": "planet1_bearing",
+    "kind": "bearing",
+    "name": "Stage 1 planet bearing",
+    "qty": 3
+   },
+   {
+    "id": "carrier1",
+    "kind": "hub",
+    "name": "Stage 1 planet carrier"
+   },
+   {
+    "id": "sun2",
+    "kind": "spur_gear",
+    "name": "Stage 2 sun gear",
+    "params": {
+     "role": "pinion"
+    }
+   },
+   {
+    "id": "planet2",
+    "kind": "spur_gear",
+    "name": "Stage 2 planet gear",
+    "qty": 3
+   },
+   {
+    "id": "pin2",
+    "kind": "shaft",
+    "name": "Stage 2 planet pin",
+    "qty": 3
+   },
+   {
+    "id": "planet2_bearing",
+    "kind": "bearing",
+    "name": "Stage 2 planet bearing",
+    "qty": 3
+   },
+   {
+    "id": "carrier2",
+    "kind": "hub",
+    "name": "Stage 2 planet carrier"
+   },
+   {
+    "id": "carrier2_key",
+    "kind": "key",
+    "name": "Output carrier key"
+   },
+   {
+    "id": "ring_gear",
+    "kind": "spur_gear",
+    "name": "Ring gear",
+    "params": {
+     "internal": true
+    }
+   },
+   {
+    "id": "input_bearing",
+    "kind": "bearing",
+    "name": "Input shaft bearing",
+    "qty": 2
+   },
+   {
+    "id": "output_bearing",
+    "kind": "bearing",
+    "name": "Output shaft bearing",
+    "qty": 2
+   },
+   {
+    "id": "input_cap",
+    "kind": "bearing_cap",
+    "name": "Input open cap",
+    "params": {
+     "style": "open"
+    }
+   },
+   {
+    "id": "output_cap",
+    "kind": "bearing_cap",
+    "name": "Output open cap",
+    "params": {
+     "style": "open"
+    }
+   },
+   {
+    "id": "input_seal",
+    "kind": "seal",
+    "name": "Input lip seal"
+   },
+   {
+    "id": "output_seal",
+    "kind": "seal",
+    "name": "Output lip seal"
+   },
+   {
+    "id": "cap_screw",
+    "kind": "fastener",
+    "name": "Cap screw",
+    "qty": 8
+   },
+   {
+    "id": "cover_bolt",
+    "kind": "fastener",
+    "name": "Cover bolt",
+    "qty": 8
+   },
+   {
+    "id": "cover_nut",
+    "kind": "nut",
+    "name": "Cover bolt nut",
+    "qty": 8
+   },
+   {
+    "id": "cover_washer",
+    "kind": "washer",
+    "name": "Cover bolt washer",
+    "qty": 16
+   }
+  ],
+  "connections": [
+   {
+    "kind": "keyed_hub",
+    "host": "input_shaft",
+    "guest": "sun1",
+    "via": [
+     "sun1_key"
+    ]
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "sun1",
+    "guest": "planet1"
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "planet1",
+    "guest": "ring_gear"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "pin1",
+    "guest": "planet1_bearing"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "planet1_bearing",
+    "guest": "planet1"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "carrier1",
+    "guest": "pin1"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "carrier1",
+    "guest": "sun2"
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "sun2",
+    "guest": "planet2"
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "planet2",
+    "guest": "ring_gear"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "pin2",
+    "guest": "planet2_bearing"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "planet2_bearing",
+    "guest": "planet2"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "carrier2",
+    "guest": "pin2"
+   },
+   {
+    "kind": "keyed_hub",
+    "host": "output_shaft",
+    "guest": "carrier2",
+    "via": [
+     "carrier2_key"
+    ]
+   },
+   {
+    "kind": "mounted_on",
+    "host": "housing_base",
+    "guest": "ring_gear"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "input_shaft",
+    "guest": "input_bearing"
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing_base",
+    "guest": "input_bearing"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "output_shaft",
+    "guest": "output_bearing"
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing_base",
+    "guest": "output_bearing"
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing_base",
+    "guest": "housing_cover",
+    "via": [
+     "cover_bolt",
+     "cover_nut",
+     "cover_washer"
+    ]
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing_base",
+    "guest": "input_cap",
+    "via": [
+     "cap_screw"
+    ]
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing_base",
+    "guest": "output_cap",
+    "via": [
+     "cap_screw"
+    ]
+   },
+   {
+    "kind": "mounted_on",
+    "host": "input_cap",
+    "guest": "input_seal"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "output_cap",
+    "guest": "output_seal"
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing_base",
+    "guest": "planet2_bearing"
+   }
+  ],
+  "questions": []
+ }
+}

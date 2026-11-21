@@ -90,6 +90,7 @@ def _add_implied(g: DesignGraph) -> None:
 
 def resolve(graph: DesignGraph) -> DesignGraph:
     g = graph.model_copy(deep=True)
+    planetary.structure(g)  # multi-stage planetary: the shafts between stages, before keys and sizes
     _add_implied(g)
     ratio = _ratio(g)
 

@@ -45,3 +45,28 @@ now absorbed by code, not by hoping the model repeats itself.
 (ratios 4.5, 5 and 6, 4 planets, module 1.5 and 2.5, a stated shaft size), each in 3 to 5 minutes with no AI part work.
 | A11 | "Build a single stage planetary Gearbox" | Wrong: master path, 19 clashes, a stopped ticket | The model added a lip seal in each open cap (good design). No layout places a seal part, so the fast layout reported it unreachable and gave way to a master model | Radial shaft seals end to end (Toolbox seal, ICD interface in the cap's recess, Fitz seats it; agent on `wip/shaft-seals`) |
 | A12 | "Build a single stage planetary Gearbox" | **Right.** 23 of 23, fast path, carrier built from the interfaces (0 AI parts). Built at 189 s, complete at 231 s; slower than A10 because two agents were running CAD test suites on the same machine at the time, so the effect of the direct-build slots is not measured yet | None | None |
+
+## Two stage: "Build a 2 stage planetary gearbox" (the founder's real test)
+
+The single-stage benchmark had come right, but the founder's actual test prompt failed every time: his programs
+"Multistage" and "Two stage planetary gearbox" (2026-11-21). The planetary rules found one set, so stage 2 was never
+sized (its ring kept the planets' 30 teeth, its planet bearing stayed in the housing wall, a ring shared by both
+stages was sized for stage 1 only) and the connection solver could not place a second stage ("Stage 2 planet gear
+meshes or belts but sits on no shaft"); the program fell to a master model with 22 problems.
+
+**The foundation now handles N stages** (`graph/planetary.py` `find_all`, `structure`, per-stage `normalise`;
+`graph/layout.py` `_planetary`):
+- every stage found and chained (stage k's carrier drives stage k + 1's sun);
+- an intermediate shaft keyed to both, added when the model joins them directly;
+- the intermediate shaft floats on the planets (no housing bearings);
+- each stage sized by the same rules (teeth, assembly condition, rim rule, planet bearings in the planets);
+- a shared ring fitted by every stage;
+- a stated ratio split over the stages;
+- the stages stacked along the axis in one housing.
+
+The judge reads every stage (`golden.stage_rows`).
+
+| # | Brief | Result | What went wrong | Fixed by |
+|---|---|---|---|---|
+| (sim) m | "Build a 2 stage planetary gearbox" (the model's own reply from "Multistage") | **Right.** Complete, fast path, 0 interface problems, 0 clashes, 0 stops, 0 tokens; both stages 30 / 30 / 90, 6004 planet bearings, planets 120° apart on a = 60, overall 16:1 | First run: the final assembly was stopped for "Stage 1 planet gear #1 and Stage 2 sun gear: 0 of 20 mm in mesh" (identical stages put stage 1's planets exactly a = 60 from stage 2's sun, 47 mm along the axis) | The gear-pair check ignores two gears in different planes when each is in mesh in its own plane (PD-325) |
+| fixture | His detailed brief (shared ring, sun on the carrier, seals) | Fast path; one ring 81 for both stages (stage 2 sun 20 to 21 so its planets fit), an intermediate shaft keyed to the stage 1 carrier and stage 2 sun; 4 cover bolts with 4 nuts and 8 washers (were 8 and 16) | | PD-321, PD-323, PD-326 |

@@ -1,0 +1,371 @@
+{
+ "case": "planetary-2stage",
+ "name": "Two stage planetary",
+ "brief": "Build a 2 stage planetary gearbox",
+ "recorded": "2026-11-21, rebuilt from the founder's live program 'Multistage' (the model's own components, connections and sizes; code's additions left out)",
+ "reply": {
+  "summary": "Two stage planetary gearbox: stage 1 sun on the input shaft, its carrier drives the stage 2 sun on an intermediate shaft, the stage 2 carrier on the output shaft, ring gears fixed in a split housing.",
+  "assumptions": [
+   "Module 2 and 30 teeth assumed for the suns and planets (the brief gives none)."
+  ],
+  "components": [
+   {
+    "id": "input_shaft",
+    "kind": "shaft",
+    "name": "Input shaft",
+    "params": {
+     "role": "input",
+     "stepped": true
+    }
+   },
+   {
+    "id": "inter_shaft",
+    "kind": "shaft",
+    "name": "Intermediate shaft",
+    "params": {
+     "role": "intermediate",
+     "stepped": true
+    }
+   },
+   {
+    "id": "output_shaft",
+    "kind": "shaft",
+    "name": "Output shaft",
+    "params": {
+     "role": "output",
+     "stepped": true
+    }
+   },
+   {
+    "id": "sun1",
+    "kind": "spur_gear",
+    "name": "Stage 1 sun gear",
+    "params": {
+     "role": "pinion"
+    }
+   },
+   {
+    "id": "planet1",
+    "kind": "spur_gear",
+    "name": "Stage 1 planet gear",
+    "qty": 3
+   },
+   {
+    "id": "ring1",
+    "kind": "spur_gear",
+    "name": "Stage 1 ring gear",
+    "params": {
+     "internal": true
+    }
+   },
+   {
+    "id": "pin1",
+    "kind": "shaft",
+    "name": "Stage 1 planet pin",
+    "qty": 3
+   },
+   {
+    "id": "planet_bearing1",
+    "kind": "bearing",
+    "name": "Stage 1 planet bearing",
+    "qty": 3
+   },
+   {
+    "id": "carrier1",
+    "kind": "hub",
+    "name": "Stage 1 planet carrier"
+   },
+   {
+    "id": "key_sun1",
+    "kind": "key",
+    "name": "Stage 1 sun key"
+   },
+   {
+    "id": "key_carrier1",
+    "kind": "key",
+    "name": "Stage 1 carrier key"
+   },
+   {
+    "id": "sun2",
+    "kind": "spur_gear",
+    "name": "Stage 2 sun gear",
+    "params": {
+     "role": "pinion"
+    }
+   },
+   {
+    "id": "planet2",
+    "kind": "spur_gear",
+    "name": "Stage 2 planet gear",
+    "qty": 3
+   },
+   {
+    "id": "ring2",
+    "kind": "spur_gear",
+    "name": "Stage 2 ring gear",
+    "params": {
+     "internal": true
+    }
+   },
+   {
+    "id": "pin2",
+    "kind": "shaft",
+    "name": "Stage 2 planet pin",
+    "qty": 3
+   },
+   {
+    "id": "planet_bearing2",
+    "kind": "bearing",
+    "name": "Stage 2 planet bearing",
+    "qty": 3
+   },
+   {
+    "id": "carrier2",
+    "kind": "hub",
+    "name": "Stage 2 planet carrier"
+   },
+   {
+    "id": "key_sun2",
+    "kind": "key",
+    "name": "Stage 2 sun key"
+   },
+   {
+    "id": "key_carrier2",
+    "kind": "key",
+    "name": "Stage 2 carrier key"
+   },
+   {
+    "id": "housing",
+    "kind": "housing",
+    "name": "Housing base",
+    "params": {
+     "style": "split"
+    }
+   },
+   {
+    "id": "cover",
+    "kind": "cover",
+    "name": "Housing cover"
+   },
+   {
+    "id": "input_bearing",
+    "kind": "bearing",
+    "name": "Input shaft bearing",
+    "qty": 2
+   },
+   {
+    "id": "output_bearing",
+    "kind": "bearing",
+    "name": "Output shaft bearing",
+    "qty": 2
+   },
+   {
+    "id": "input_cap",
+    "kind": "bearing_cap",
+    "name": "Input open cap",
+    "params": {
+     "style": "open"
+    }
+   },
+   {
+    "id": "output_cap",
+    "kind": "bearing_cap",
+    "name": "Output open cap",
+    "params": {
+     "style": "open"
+    }
+   },
+   {
+    "id": "cap_screw",
+    "kind": "fastener",
+    "name": "Cap screw",
+    "qty": 8
+   },
+   {
+    "id": "cover_bolt",
+    "kind": "fastener",
+    "name": "Cover bolt",
+    "qty": 4
+   }
+  ],
+  "connections": [
+   {
+    "kind": "bearing_journal",
+    "host": "input_shaft",
+    "guest": "input_bearing",
+    "params": {
+     "count": 2
+    }
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing",
+    "guest": "input_bearing"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "output_shaft",
+    "guest": "output_bearing",
+    "params": {
+     "count": 2
+    }
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing",
+    "guest": "output_bearing"
+   },
+   {
+    "kind": "keyed_hub",
+    "host": "input_shaft",
+    "guest": "sun1",
+    "via": [
+     "key_sun1"
+    ]
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "sun1",
+    "guest": "planet1"
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "planet1",
+    "guest": "ring1"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "pin1",
+    "guest": "planet_bearing1",
+    "params": {
+     "count": 1
+    }
+   },
+   {
+    "kind": "mounted_on",
+    "host": "planet_bearing1",
+    "guest": "planet1"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "carrier1",
+    "guest": "pin1"
+   },
+   {
+    "kind": "keyed_hub",
+    "host": "inter_shaft",
+    "guest": "carrier1",
+    "via": [
+     "key_carrier1"
+    ]
+   },
+   {
+    "kind": "mounted_on",
+    "host": "housing",
+    "guest": "ring1"
+   },
+   {
+    "kind": "keyed_hub",
+    "host": "inter_shaft",
+    "guest": "sun2",
+    "via": [
+     "key_sun2"
+    ]
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "sun2",
+    "guest": "planet2"
+   },
+   {
+    "kind": "gear_mesh",
+    "host": "planet2",
+    "guest": "ring2"
+   },
+   {
+    "kind": "bearing_journal",
+    "host": "pin2",
+    "guest": "planet_bearing2",
+    "params": {
+     "count": 1
+    }
+   },
+   {
+    "kind": "mounted_on",
+    "host": "planet_bearing2",
+    "guest": "planet2"
+   },
+   {
+    "kind": "mounted_on",
+    "host": "carrier2",
+    "guest": "pin2"
+   },
+   {
+    "kind": "keyed_hub",
+    "host": "output_shaft",
+    "guest": "carrier2",
+    "via": [
+     "key_carrier2"
+    ]
+   },
+   {
+    "kind": "mounted_on",
+    "host": "housing",
+    "guest": "ring2"
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "cover",
+    "via": [
+     "cover_bolt"
+    ]
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "input_cap",
+    "via": [
+     "cap_screw"
+    ]
+   },
+   {
+    "kind": "bolted_joint",
+    "host": "housing",
+    "guest": "output_cap",
+    "via": [
+     "cap_screw"
+    ]
+   },
+   {
+    "kind": "bearing_seat",
+    "host": "housing",
+    "guest": "planet_bearing2",
+    "params": {
+     "count": 1
+    }
+   }
+  ],
+  "questions": [
+   {
+    "id": "planet_count",
+    "question": "How many planet gears per stage?",
+    "options": [
+     "3",
+     "4",
+     "5"
+    ],
+    "default": "3"
+   },
+   {
+    "id": "housing",
+    "question": "Should the gearbox have a full housing with cover?",
+    "options": [
+     "Yes, split housing with cover",
+     "No, gear train only"
+    ],
+    "default": "Yes, split housing with cover"
+   }
+  ]
+ }
+}

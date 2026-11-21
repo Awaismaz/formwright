@@ -29,6 +29,7 @@ consistent, idempotently, and says what it changed in ``graph.notes``:
 
 from __future__ import annotations
 
+import itertools
 import math
 import re
 from dataclasses import dataclass, field
@@ -73,6 +74,7 @@ class Planetary:
     output: str | None = None
     housing: str | None = None
     meshes: list[str] = field(default_factory=list)   # connection ids: sun / planet, planet / ring
+    stage: int = 1                                     # 1 = the input stage (multi-stage sets, ``find_all``)
 
     def members(self) -> set[str]:
         return {x for x in (self.sun, self.planet, self.ring, self.carrier, self.pin, self.bearing) if x}
@@ -93,7 +95,7 @@ def is_internal(c: Component | None) -> bool:
                                             and not _PLANET.search(c.name))
 
 
-def find(g: DesignGraph) -> Planetary | None:
+def _find_one(g: DesignGraph) -> Planetary | None:
     gears = g.of_kind("spur_gear")
     if len(gears) < 3:
         return None
@@ -146,6 +148,165 @@ def find(g: DesignGraph) -> Planetary | None:
     hs = g.of_kind("housing")
     ps.housing = hs[0].id if hs else None
     return ps
+
+
+_NUM = re.compile(r"(\d+)")
+
+
+def _stage_no(c: Component | None) -> int | None:
+    if c is None:
+        return None
+    m = _NUM.search(c.name) or _NUM.search(c.id)
+    return int(m.group(1)) if m else None
+
+
+def _pick(cands: list[Component], k: int | None) -> Component | None:
+    """The candidate of stage ``k`` (by the number in its name or id), else the only one."""
+    if k is not None:
+        same = [c for c in cands if _stage_no(c) == k]
+        if same:
+            return same[0]
+    return cands[0] if len(cands) == 1 else None
+
+
+def _complete(g: DesignGraph, sun: Component, planet: Component, ring: Component) -> Planetary:
+    """One stage's set with its carrier, pins, planet bearings and shafts (found per stage, by its links first)."""
+    ms = _meshes(g)
+    comps = {c.id: c for c in g.components}
+    ps = Planetary(sun=sun.id, planet=planet.id, ring=ring.id, n=max(1, int(planet.qty)),
+                   meshes=[x.id for x in ms if _pair(x, sun.id, planet.id) or _pair(x, planet.id, ring.id)])
+    k = _stage_no(planet) or _stage_no(sun)
+
+    def linked(cid: str) -> list[str]:
+        return [x.guest if x.host == cid else x.host for x in g.connections if cid in (x.host, x.guest)]
+
+    brg = next((comps[o] for o in linked(planet.id) if comps.get(o) is not None and comps[o].kind == "bearing"), None)
+    if brg is None:
+        brg = _pick([c for c in g.of_kind("bearing") if _PLANET.search(c.name)], k)
+    near = set(linked(planet.id)) | (set(linked(brg.id)) if brg is not None else set())
+    pin = next((comps[o] for o in near if comps.get(o) is not None and comps[o].kind in ("shaft", "dowel")
+                and o != sun.id), None)
+    if pin is None:
+        pin = _pick([c for c in g.of_kind("shaft", "dowel") if _PIN.search(c.name)], k)
+    car = None
+    if pin is not None:
+        car = next((comps[x.host] for x in g.connections if x.guest == pin.id and comps.get(x.host) is not None
+                    and comps[x.host].kind not in ("spur_gear", "bearing", "fastener", "key", "housing", "cover")
+                    and x.kind in ("mounted_on", "shaft_bore", "hub_fit", "keyed_hub")), None)
+    if car is None:
+        car = _pick([c for c in g.components if _CARRIER.search(c.name)
+                     and c.kind not in ("spur_gear", "bearing", "fastener", "key")], k)
+    ps.carrier = car.id if car else None
+    ps.bearing = brg.id if brg else None
+    ps.pin = pin.id if pin else None
+    for x in g.connections:
+        if x.kind in HUBS and x.guest == sun.id and comps.get(x.host) and comps[x.host].kind == "shaft":
+            ps.input = x.host
+        if car is not None and x.kind in HUBS and x.guest == car.id and comps.get(x.host) and \
+                comps[x.host].kind == "shaft":
+            ps.output = x.host
+    hs = g.of_kind("housing")
+    ps.housing = hs[0].id if hs else None
+    return ps
+
+
+def _follows(g: DesignGraph, a: Planetary, b: Planetary) -> bool:
+    """Stage b takes its input from stage a's carrier (a shaft both sit on, or a joint between them)."""
+    if a.output and a.output == b.input:
+        return True
+    return bool(a.carrier) and any({x.host, x.guest} == {a.carrier, b.sun} for x in g.connections)
+
+
+def find_all(g: DesignGraph) -> list[Planetary]:
+    """Every planetary stage in the graph, in order from the input (stage 1) to the output: each planet that meshes
+    with an internal ring and an external sun is a stage; stage b follows stage a when a's carrier drives b's sun (a
+    shared intermediate shaft or a joint between them). Stages may share one ring. One stage: the single set."""
+    gears = g.of_kind("spur_gear")
+    rings = [c for c in gears if is_internal(c)]
+    if len(gears) < 3 or not rings:
+        return []
+    ms = _meshes(g)
+    comps = {c.id: c for c in g.components}
+    partners = {c.id: [x.guest if x.host == c.id else x.host for x in ms if c.id in (x.host, x.guest)] for c in gears}
+    trios: list[tuple[Component, Component, Component]] = []
+    for ring in rings:
+        for o in partners.get(ring.id, []):
+            p = comps.get(o)
+            if p is None or p.kind != "spur_gear" or is_internal(p) or any(t[1].id == p.id for t in trios):
+                continue
+            sun = next((comps[x] for x in partners.get(p.id, []) if x != ring.id and comps.get(x) is not None
+                        and comps[x].kind == "spur_gear" and not is_internal(comps[x])), None)
+            if sun is not None:
+                trios.append((sun, p, ring))
+    if len(trios) <= 1:
+        one = _find_one(g)
+        return [one] if one else []
+    sets = [_complete(g, sun, p, ring) for sun, p, ring in trios]
+    first = [a for a in sets if not any(_follows(g, b, a) for b in sets if b is not a)]
+    order: list[Planetary] = []
+    cur: Planetary | None = min(first or sets, key=lambda a: (_stage_no(comps.get(a.planet)) or 99))
+    while cur is not None and cur not in order:
+        order.append(cur)
+        nxt = cur
+        cur = next((b for b in sets if b not in order and _follows(g, nxt, b)), None)
+    order += sorted((a for a in sets if a not in order), key=lambda a: (_stage_no(comps.get(a.planet)) or 99))
+    for i, a in enumerate(order, start=1):
+        a.stage = i
+    return order
+
+
+def find(g: DesignGraph) -> Planetary | None:
+    """The (first, input) planetary stage, or None."""
+    sets = find_all(g)
+    return sets[0] if sets else None
+
+
+def structure(g: DesignGraph) -> None:
+    """Before sizing (``resolve``): the joints between stages. Stage k's carrier drives stage k + 1's sun through an
+    intermediate shaft keyed to both (one is added when the carrier and the next sun are joined directly, or sit on
+    no common shaft); the intermediate shaft floats on the planets (there is no wall between stages for bearings), so
+    housing bearings the model gave it are left out. Founder's "Build a 2 stage planetary gearbox" (2026-11-21): the
+    single-stage rules sized stage 1 only and the layout could not place stage 2."""
+    sets = find_all(g)
+    if len(sets) < 2:
+        return
+    notes: list[str] = []
+    for a, b in itertools.pairwise(sets):
+        car, sun = (g.comp(a.carrier) if a.carrier else None), g.comp(b.sun)
+        if car is None or sun is None:
+            continue
+        if a.output and a.output == b.input:
+            shaft = a.output
+        else:
+            for x in [x for x in g.connections if {x.host, x.guest} == {car.id, sun.id}]:
+                g.connections.remove(x)
+            shaft = a.output or b.input
+            if shaft is None:
+                shaft = g.new_id(f"intermediate shaft {a.stage}")
+                name = "Intermediate shaft" + (f" {a.stage}" if len(sets) > 2 else "")
+                g.components.append(Component(id=shaft, kind="shaft", name=name, qty=1, group=car.group))
+                notes.append(f"{name}: stage {a.stage}'s {car.name} drives stage {b.stage}'s {sun.name} through a "
+                             "shaft keyed to both (added: the carrier and the next sun need a common axis part).")
+            for guest in (car.id, sun.id):
+                if not any(x.kind in HUBS and x.host == shaft and x.guest == guest for x in g.connections):
+                    g.connections.append(Connection(id=g.next_connection_id(), kind="keyed_hub", host=shaft,
+                                                    guest=guest))
+        sh = g.comp(shaft)
+        if sh is None:
+            continue
+        sh.set("role", "intermediate", "rule", "between planetary stages")
+        brgs = [x.guest for x in g.connections if x.kind == "bearing_journal" and x.host == shaft]
+        if brgs:
+            g.connections = [x for x in g.connections if not (x.guest in brgs and x.kind in ("bearing_journal",
+                                                                                              "bearing_seat"))]
+            gone = [c for c in g.components if c.id in brgs and not any(c.id in (x.host, x.guest) or c.id in x.via
+                                                                        for x in g.connections)]
+            g.components = [c for c in g.components if c not in gone]
+            notes.append(f"{sh.name} floats between the stages, centred by the planets (no wall between stages carries "
+                         f"bearings): {', '.join(c.name for c in gone) or 'its housing bearings'} left out.")
+    for n in notes:
+        if n not in g.notes:
+            g.notes.append(n)
 
 
 def _given(c: Component, k: str) -> bool:
@@ -227,7 +388,7 @@ def _teeth_for_ratio(r: float, n: int) -> tuple[int, int, int] | None:
 
 
 def _rim_rule(g: DesignGraph, ps: Planetary, sun: Component, planet: Component, ring: Component, m: float,
-              zs: int, zp: int, notes: list[str]) -> int:
+              zs: int, zp: int, notes: list[str], grow: bool = True) -> int:
     """The planet bearing that leaves the rim ``RIM_MIN_M`` m under the planet teeth (module docstring). Returns the
     planet's teeth (grown when no bearing fits the planet as it is)."""
     from aicad.toolbox import BEARING
@@ -254,7 +415,7 @@ def _rim_rule(g: DesignGraph, ps: Planetary, sun: Component, planet: Component, 
            f"{rim(m, zp, BEARING[cur][1]) / m:.3g} m under the planet's Ø{root_d(m, zp):g} root, less than "
            f"{RIM_MIN_M:g} m" if cur is not None else "no bearing was sized yet")
     des = planet_bearing(m, zp, pin_d, pin_fixed)
-    teeth_free = not any(_given(c, "teeth") for c in (sun, planet, ring))
+    teeth_free = grow and not any(_given(c, "teeth") for c in (sun, planet, ring))
     if des is None and teeth_free:
         for z in range(zp + 1, zp + GROW_MAX + 1):
             if (2 * zs + 2 * z) % ps.n or _planets_touch(m, zs, z, ps.n):
@@ -292,13 +453,11 @@ def _rim_rule(g: DesignGraph, ps: Planetary, sun: Component, planet: Component, 
     return zp
 
 
-def normalise(graph: DesignGraph) -> DesignGraph:
-    """The graph with its planetary set made consistent (see the module docstring). Unchanged without one."""
-    ps = find(graph)
-    if ps is None:
-        return graph
-    g = graph
-    notes: list[str] = []
+def _normalise_stage(g: DesignGraph, ps: Planetary, notes: list[str], r: float | None, ring_fixed: bool,
+                     shared: bool) -> None:
+    """One stage made consistent (the module docstring's rules). ``ring_fixed``: its ring was sized by an earlier
+    stage it shares the ring with, so this stage's sun and planets fit that ring; ``shared``: the ring is shared, so
+    the rim rule may not grow the planets (that would change the ring for the other stage)."""
     sun, planet, ring = g.comp(ps.sun), g.comp(ps.planet), g.comp(ps.ring)
     assert sun is not None and planet is not None and ring is not None
     m = sun.v("module") or planet.v("module") or ring.v("module")
@@ -309,8 +468,7 @@ def normalise(graph: DesignGraph) -> DesignGraph:
     if ring.v("internal") is not True:
         ring.set("internal", True, "rule", "the ring of a planetary set: internal teeth", force=True)
         notes.append(f"{ring.name} is the internal ring gear of the planetary set.")
-    r = _brief_ratio(g.brief)
-    if r and not any(_given(c, "teeth") for c in (sun, planet, ring)):
+    if r and not ring_fixed and not any(_given(c, "teeth") for c in (sun, planet, ring)):
         t = _teeth_for_ratio(r, ps.n)
         if t and (sun.v("teeth"), planet.v("teeth"), ring.v("teeth")) != t:
             for c, z in zip((sun, planet, ring), t, strict=True):
@@ -322,19 +480,35 @@ def normalise(graph: DesignGraph) -> DesignGraph:
     if zs is not None and zp is not None:
         zs, zp = int(zs), int(zp)
         zr = ring.v("teeth")
-        if _given(ring, "teeth") and not _given(planet, "teeth") and zr is not None and (int(zr) - zs) % 2 == 0 \
+        ring_given = _given(ring, "teeth") or ring_fixed
+        if ring_fixed and zr is not None and (int(zr) - zs) % 2 and not _given(sun, "teeth"):
+            zs += 1  # a ring shared with an earlier stage: z_ring - z_sun must be even (z_planet whole)
+            sun.set("teeth", zs, "rule", "z_ring - z_sun even, so the planets fit the shared ring", force=True)
+            notes.append(f"{sun.name}: {zs} teeth, so its planets fit the {ring.name} it shares with stage "
+                         f"{ps.stage - 1} (z_ring - z_sun even).")
+        if ring_given and not _given(planet, "teeth") and zr is not None and (int(zr) - zs) % 2 == 0 \
                 and (int(zr) - zs) // 2 >= MIN_TEETH:
             if zp != (int(zr) - zs) // 2:
                 zp = (int(zr) - zs) // 2
                 planet.set("teeth", zp, "rule", "z_planet = (z_ring - z_sun) / 2 (coaxial sun and ring)", force=True)
                 notes.append(f"{planet.name}: {zp} teeth so it fits between the sun and the ring.")
-        elif not _given(ring, "teeth") and zr != ring_teeth(zs, zp):
+        elif not ring_given and zr != ring_teeth(zs, zp):
             ring.set("teeth", ring_teeth(zs, zp), "rule", "z_ring = z_sun + 2 z_planet (coaxial sun and ring)",
                      force=True)
             notes.append(f"{ring.name}: {ring_teeth(zs, zp)} internal teeth (z_ring = z_sun + 2 z_planet = {zs} + 2 x "
                          f"{zp}), so the sun and the ring are coaxial.")
         zr = int(ring.v("teeth"))
-        if (zs + zr) % ps.n and not any(_given(c, "teeth") for c in (sun, planet, ring)):
+        if (zs + zr) % ps.n and ring_fixed and not any(_given(c, "teeth") for c in (sun, planet)):
+            for dz in (2, -2, 4, -4, 6, -6):  # the shared ring stays: the sun moves by 2 (z_planet stays whole)
+                z2, p2 = zs + dz, (zr - zs - dz) // 2
+                if z2 >= MIN_TEETH and p2 >= MIN_TEETH and (z2 + zr) % ps.n == 0:
+                    zs, zp = z2, p2
+                    sun.set("teeth", zs, "rule", f"(z_sun + z_ring) / {ps.n} planets must be whole", force=True)
+                    planet.set("teeth", zp, "rule", "z_planet = (z_ring - z_sun) / 2 (the shared ring)", force=True)
+                    notes.append(f"{sun.name} {zs} and {planet.name} {zp} teeth, so {ps.n} equally spaced planets "
+                                 f"fit the shared {ring.name} ({zr} teeth; (z_sun + z_ring) / N whole).")
+                    break
+        elif (zs + zr) % ps.n and not any(_given(c, "teeth") for c in (sun, planet, ring)):
             for dz in (1, -1, 2, -2, 3, -3):
                 if zs + dz >= MIN_TEETH and (2 * (zs + dz) + 2 * zp) % ps.n == 0:
                     zs += dz
@@ -348,7 +522,7 @@ def normalise(graph: DesignGraph) -> DesignGraph:
             notes.append(f"Check: (z_sun + z_ring) / {ps.n} = {(zs + zr) / ps.n:g} is not whole, so {ps.n} equally "
                          "spaced planets can't all mesh; the brief's teeth are kept.")
         if m is not None:
-            zp = _rim_rule(g, ps, sun, planet, ring, float(m), zs, zp, notes)
+            zp = _rim_rule(g, ps, sun, planet, ring, float(m), zs, zp, notes, grow=not shared)
         if m is not None and ps.n > 1:
             a = float(m) * (zs + zp) / 2
             if 2 * a * math.sin(math.pi / ps.n) < float(m) * (zp + 2) + PLANET_CLEAR:
@@ -405,6 +579,27 @@ def normalise(graph: DesignGraph) -> DesignGraph:
     if ps.housing and not any(x.guest == ring.id and x.host == ps.housing for x in g.connections):
         hs = g.comp(ps.housing)
         add("mounted_on", ps.housing, ring.id, f"{ring.name} is fixed in the {hs.name if hs else 'housing'}.")
+    if pin is not None and pin.kind == "shaft":
+        pin.set("role", "intermediate", "rule", "a planet pin")
+    # centre distances (the internal mesh by the difference)
+    from aicad.graph.model import Param
+
+    for x in g.connections:
+        if x.kind != "gear_mesh" or x.id not in ps.meshes:
+            continue
+        a, b = g.comp(x.host), g.comp(x.guest)
+        if a is None or b is None or a.v("teeth") is None or b.v("teeth") is None or a.v("module") is None:
+            continue
+        internal = ring.id in (a.id, b.id)
+        cd = centre_distance(float(a.v("module")), int(a.v("teeth")), int(b.v("teeth")), internal)
+        x.params["centre_distance"] = Param(value=cd, source="rule", note="a = m (z_ring - z_planet) / 2 (internal)"
+                                            if internal else "a = m (z1 + z2) / 2")
+        x.params["ratio"] = Param(value=round(int(b.v("teeth")) / int(a.v("teeth")), 4), source="rule", note="z2 / z1")
+
+
+def _shells(g: DesignGraph, ps: Planetary, notes: list[str]) -> None:
+    """The housing side of a planetary gearbox (once, whatever the number of stages): caps on the end walls, no
+    blind caps."""
     # bearing caps sit over the end walls' bearing seats, which are all in the housing in a planetary set (the cover
     # is the lid on top): a cap the model bolted to the cover goes on the housing (benchmark A4, 2026-11-21: the
     # output cap on the cover was reached by no connection, so the fast layout gave way to a master model)
@@ -444,22 +639,42 @@ def normalise(graph: DesignGraph) -> DesignGraph:
                 f.qty = max(1, round(f.qty * kept / before))
         notes.append(f"{', '.join(c.name for c in blind)}: left out. In a planetary set each shaft leaves the housing "
                      "through its own end wall, so each has one open cap and there is no far-side seat to close.")
-    if pin is not None and pin.kind == "shaft":
-        pin.set("role", "intermediate", "rule", "a planet pin")
-    # centre distances (the internal mesh by the difference)
-    from aicad.graph.model import Param
 
-    for x in g.connections:
-        if x.kind != "gear_mesh" or x.id not in ps.meshes:
+
+def _stage_ratio(brief: str, stages: int) -> float | None:
+    """The ratio per stage a brief states: one marked "each" or "per stage" as it is, else the first ratio split
+    evenly over the stages (r ** (1 / stages)); within 2.5 to 12 per stage, else none."""
+    found: list[tuple[float, bool]] = []
+    ms = list(_RATIO.finditer(brief or ""))
+    for k, m in enumerate(ms):
+        a, b = float(m.group(1)), float(m.group(2))
+        if a <= 0 or b <= 0:
             continue
-        a, b = g.comp(x.host), g.comp(x.guest)
-        if a is None or b is None or a.v("teeth") is None or b.v("teeth") is None or a.v("module") is None:
-            continue
-        internal = ring.id in (a.id, b.id)
-        cd = centre_distance(float(a.v("module")), int(a.v("teeth")), int(b.v("teeth")), internal)
-        x.params["centre_distance"] = Param(value=cd, source="rule", note="a = m (z_ring - z_planet) / 2 (internal)"
-                                            if internal else "a = m (z1 + z2) / 2")
-        x.params["ratio"] = Param(value=round(int(b.v("teeth")) / int(a.v("teeth")), 4), source="rule", note="z2 / z1")
+        end = min(m.end() + 30, ms[k + 1].start() if k + 1 < len(ms) else len(brief or ""))
+        tail = (brief or "")[m.end():end].lower()  # up to the next ratio: its "each" is its own
+        found.append((max(a, b) / min(a, b), bool(re.search(r"\beach\b|\bper stage\b|\ba stage\b", tail))))
+    if not found:
+        return None
+    each = next((x for x, e in found if e), None)
+    r = each if each is not None else found[0][0] ** (1 / max(1, stages))
+    return r if 2.5 <= r <= 12 else None
+
+
+def normalise(graph: DesignGraph) -> DesignGraph:
+    """The graph with its planetary stages made consistent (see the module docstring), stage by stage from the
+    input; a ring shared by stages is sized by the first. Unchanged without a planetary set."""
+    sets = find_all(graph)
+    if not sets:
+        return graph
+    g = graph
+    notes: list[str] = []
+    r = _stage_ratio(g.brief, len(sets))
+    sized: set[str] = set()
+    for ps in sets:
+        shared = sum(1 for q in sets if q.ring == ps.ring) > 1
+        _normalise_stage(g, ps, notes, r, ring_fixed=ps.ring in sized, shared=shared)
+        sized.add(ps.ring)
+    _shells(g, sets[0], notes)
     for n in notes:
         if n not in g.notes:
             g.notes.append(n)

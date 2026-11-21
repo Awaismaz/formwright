@@ -159,8 +159,15 @@ def complete_housing(graph: DesignGraph, add: bool = False) -> DesignGraph:
             g.components.append(nb)
             x.guest = nb.id
         notes.append("one bearing pair per shaft")
-    # every shaft runs on two bearings, each in a seat of the housing
+    # every shaft runs on two bearings, each in a seat of the housing; not a planet pin, and not the shaft between
+    # two planetary stages (it floats on the planets: there is no wall between the stages)
+    from aicad.graph import planetary
+
+    sets = planetary.find_all(g)
+    inner = {s.pin for s in sets} | {s.output for s in sets[:-1]} | {s.input for s in sets[1:]}
     for n, sh in enumerate(shafts, start=1):
+        if sh.id in inner:
+            continue
         journals = [x for x in g.connections if x.kind == "bearing_journal" and x.host == sh.id]
         if not journals:
             br = Component(id=g.new_id(f"{sh.id}_bearing"), kind="bearing", name=f"{_prefix(sh, n)} bearing", qty=2,
