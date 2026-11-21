@@ -120,7 +120,8 @@ COMPONENTS: dict[str, ComponentType] = {c.kind: c for c in [
                   toolbox="washer", standard="ISO 7089", complexity=1),
     ComponentType("dowel", "Dowel pin", "standard", "pin", {"d": _D, "length": _L},
                   toolbox="dowel", standard="ISO 8734", complexity=1),
-    ComponentType("seal", "Seal", "standard", "seal", {"d": _D, "D": _D, "B": _L}, complexity=1),
+    ComponentType("seal", "Seal", "standard", "seal", {"d": _D, "D": _D, "B": _L},
+                  toolbox="shaft_seal", standard="DIN 3760 / ISO 6194-1", complexity=1),
     ComponentType("other", "Part", "machined", None, {"L": _L, "W": _L, "H": _L}, complexity=3),
 ]}
 

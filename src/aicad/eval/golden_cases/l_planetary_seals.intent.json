@@ -1,0 +1,258 @@
+{
+  "case": "planetary-seals",
+  "name": "Planetary benchmark A11",
+  "brief": "Build a single stage planetary Gearbox",
+  "recorded": "benchmark attempt A11 (2026-11-21): rebuilt from the program's resolved design graph (tests/golden/seals/planetary_with_seals.graph.json, anonymised), keeping only the values the intent reply gave (note 'the model's guess') and the connection counts. The planets' count (3) was the engineer's answer, written here as the qty. A11 added a radial shaft seal mounted on each open cap; the fast layout placed none and the program fell to the master model.",
+  "reply": {
+    "summary": "Single stage planetary gearbox: sun gear keyed on the input shaft drives three planet gears on bearings and pins in a carrier keyed to the output shaft, meshing with an internal ring gear fixed in a split housing.",
+    "assumptions": [
+      "Three planet gears, per the engineer's answer.",
+      "Input and output shafts are coaxial and leave the housing at opposite ends. Each runs on two deep-groove ball bearings seated in the housing.",
+      "The housing is a split base with a bolted cover. An open bearing cap is fitted where each shaft leaves the housing, with a radial shaft seal in it.",
+      "No sizes were given in the brief. Code sizes the gears, ring (z_ring = z_sun + 2 z_planet), bearings, keys, seals and housing from standards."
+    ],
+    "components": [
+      {
+        "id": "housing",
+        "kind": "housing",
+        "name": "Housing base",
+        "params": {
+          "style": "split"
+        }
+      },
+      {
+        "id": "cover",
+        "kind": "cover",
+        "name": "Housing cover"
+      },
+      {
+        "id": "input_shaft",
+        "kind": "shaft",
+        "name": "Input shaft",
+        "params": {
+          "role": "input"
+        }
+      },
+      {
+        "id": "output_shaft",
+        "kind": "shaft",
+        "name": "Output shaft",
+        "params": {
+          "role": "output"
+        }
+      },
+      {
+        "id": "sun_gear",
+        "kind": "spur_gear",
+        "name": "Sun gear",
+        "params": {
+          "role": "pinion"
+        }
+      },
+      {
+        "id": "planet_gear",
+        "kind": "spur_gear",
+        "name": "Planet gear",
+        "qty": 3
+      },
+      {
+        "id": "ring_gear",
+        "kind": "spur_gear",
+        "name": "Ring gear",
+        "params": {
+          "internal": true,
+          "role": "wheel"
+        }
+      },
+      {
+        "id": "planet_pin",
+        "kind": "shaft",
+        "name": "Planet pin",
+        "qty": 3
+      },
+      {
+        "id": "planet_bearing",
+        "kind": "bearing",
+        "name": "Planet bearing",
+        "qty": 3
+      },
+      {
+        "id": "carrier",
+        "kind": "hub",
+        "name": "Planet carrier"
+      },
+      {
+        "id": "sun_key",
+        "kind": "key",
+        "name": "Sun gear key"
+      },
+      {
+        "id": "carrier_key",
+        "kind": "key",
+        "name": "Carrier key"
+      },
+      {
+        "id": "input_bearing",
+        "kind": "bearing",
+        "name": "Input shaft bearing",
+        "qty": 2
+      },
+      {
+        "id": "output_bearing",
+        "kind": "bearing",
+        "name": "Output shaft bearing",
+        "qty": 2
+      },
+      {
+        "id": "input_open_cap",
+        "kind": "bearing_cap",
+        "name": "Input open cap",
+        "params": {
+          "style": "open"
+        }
+      },
+      {
+        "id": "output_open_cap",
+        "kind": "bearing_cap",
+        "name": "Output open cap",
+        "params": {
+          "style": "open"
+        }
+      },
+      {
+        "id": "input_seal",
+        "kind": "seal",
+        "name": "Input shaft seal"
+      },
+      {
+        "id": "output_seal",
+        "kind": "seal",
+        "name": "Output shaft seal"
+      },
+      {
+        "id": "cap_screws",
+        "kind": "fastener",
+        "name": "Cap screws",
+        "qty": 8
+      },
+      {
+        "id": "cover_bolts",
+        "kind": "fastener",
+        "name": "Cover bolts",
+        "qty": 4
+      }
+    ],
+    "connections": [
+      {
+        "kind": "bearing_journal",
+        "host": "input_shaft",
+        "guest": "input_bearing",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_seat",
+        "host": "housing",
+        "guest": "input_bearing"
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "output_shaft",
+        "guest": "output_bearing",
+        "params": {
+          "count": 2
+        }
+      },
+      {
+        "kind": "bearing_seat",
+        "host": "housing",
+        "guest": "output_bearing"
+      },
+      {
+        "kind": "keyed_hub",
+        "host": "input_shaft",
+        "guest": "sun_gear",
+        "via": [
+          "sun_key"
+        ]
+      },
+      {
+        "kind": "bearing_journal",
+        "host": "planet_pin",
+        "guest": "planet_bearing",
+        "params": {
+          "count": 1
+        }
+      },
+      {
+        "kind": "mounted_on",
+        "host": "planet_bearing",
+        "guest": "planet_gear"
+      },
+      {
+        "kind": "mounted_on",
+        "host": "carrier",
+        "guest": "planet_pin"
+      },
+      {
+        "kind": "keyed_hub",
+        "host": "output_shaft",
+        "guest": "carrier",
+        "via": [
+          "carrier_key"
+        ]
+      },
+      {
+        "kind": "mounted_on",
+        "host": "housing",
+        "guest": "ring_gear"
+      },
+      {
+        "kind": "gear_mesh",
+        "host": "sun_gear",
+        "guest": "planet_gear"
+      },
+      {
+        "kind": "gear_mesh",
+        "host": "planet_gear",
+        "guest": "ring_gear"
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing",
+        "guest": "cover",
+        "via": [
+          "cover_bolts"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing",
+        "guest": "input_open_cap",
+        "via": [
+          "cap_screws"
+        ]
+      },
+      {
+        "kind": "bolted_joint",
+        "host": "housing",
+        "guest": "output_open_cap",
+        "via": [
+          "cap_screws"
+        ]
+      },
+      {
+        "kind": "mounted_on",
+        "host": "input_open_cap",
+        "guest": "input_seal"
+      },
+      {
+        "kind": "mounted_on",
+        "host": "output_open_cap",
+        "guest": "output_seal"
+      }
+    ],
+    "questions": []
+  }
+}

@@ -39,6 +39,8 @@ const DATA_ROWS: Record<Interface["kind"], [string, string][]> = {
     ["axis", "Axis (X, Z)"], ["z", "Along the axis"], ["journal_z", "Journal along the axis"], ["shoulder_z", "Shoulder at"], ["standard", "Table"]],
   retaining_ring: [["ring", "Ring"], ["d", "Shaft Ø d1"], ["d2", "Groove Ø d2"], ["m", "Groove width m (H13)"], ["s", "Ring thickness s"],
     ["groove_z", "Groove along the axis"], ["against", "Bears on"], ["n", "Min. distance to shaft end"], ["standard", "Standard"]],
+  seal_seat: [["seal", "Seal"], ["d", "Shaft Ø d (lip)"], ["D", "Recess Ø D"], ["fit", "Recess fit"], ["b", "Recess depth (width b)"],
+    ["face_z", "Outer face at"], ["axis", "Axis (X, Z)"], ["z", "Along the axis"], ["standard", "Table"]],
   dowel: [["standard", "Standard"], ["d", "Pin Ø"], ["length", "Pin length"], ["fit", "Hole / pin fit"], ["positions", "Positions (X, Y)"],
     ["plane_z", "Joint face Z"], ["joint", "Bolted joint"]],
 };

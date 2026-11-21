@@ -310,12 +310,18 @@ def scene(skel: dict[str, Any], ifs: list[dict[str, Any]], *, plan: dict[str, An
 
             s_, b_, d2, _m, _n = ring_row(float(seat["params"]["D"]))
             kind, g, half = "ring", {"d": float(d2), "D": float(d2 + 2 * b_), "s": float(s_)}, float(s_) / 2
+        elif code == "shaft_seal":  # drawn as a thin ring (its lip runs on the shaft at d)
+            from aicad.toolbox import seal_row
+
+            sD, sb = seal_row(float(seat["params"]["D"]))
+            kind, g, half = "ring", {"d": float(seat["params"]["D"]), "D": sD, "s": sb}, sb / 2
         else:
             kind, g = "cyl", {"d": float(seat["params"]["D"]), "L": float(seat["params"]["L"])}
             half = float(seat["params"]["L"]) / 2
         for c, at in enumerate(seat["at"]):
-            mid = [float(at[k]) + R[k][2] * half for k in range(3)]
-            body(sid, c, nm, kind, g, _T(R, mid), "toolbox", {"standard": True})
+            Rc = (seat.get("Rs") or [])[c] if c < len(seat.get("Rs") or []) else R
+            mid = [float(at[k]) + Rc[k][2] * half for k in range(3)]
+            body(sid, c, nm, kind, g, _T(Rc, mid), "toolbox", {"standard": True})
         rows[sid]["placed"] = len(seat["at"])
 
     # screws of the bolted joints, as simple cylinders through the joint (lengths are chosen at assembly)

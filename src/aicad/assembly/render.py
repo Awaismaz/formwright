@@ -129,10 +129,16 @@ def scene_from_skeleton(skel: dict[str, Any], title: str = "", ifaces: list[dict
 
             s_, b_, d2, _m, _n = ring_row(float(seat["params"]["D"]))
             size = [d2 + 2 * b_, d2 + 2 * b_, s_]
+        elif seat["code"] == "shaft_seal":
+            from aicad.toolbox import seal_row
+
+            sD, sb = seal_row(float(seat["params"]["D"]))
+            size = [sD, sD, sb]
         else:
             size = [float(seat["params"]["D"])] * 2 + [float(seat["params"]["L"])]
         R = seat.get("R") or frames.IDENT
         for c, at in enumerate(seat["at"]):  # the part's base point; the body is centred: half its length along Z
+            R = (seat.get("Rs") or [])[c] if c < len(seat.get("Rs") or []) else (seat.get("R") or frames.IDENT)
             mid = [float(at[k]) + R[k][2] * size[2] / 2 for k in range(3)]
             bodies.append({"id": f"{st['item']}#{c}", "group": f"item:{st['item']}", "prim": prim, "size": size,
                            "label": _clean_label(st.get("name") or seat["title"]), "T": frames.to12(R, mid)})
