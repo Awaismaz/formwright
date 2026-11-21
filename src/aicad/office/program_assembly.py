@@ -622,17 +622,25 @@ async def regenerate(aroot: Path, org_id: str, prog: dict[str, Any], items: set[
 
 
 # ----------------------------------------------------------------------------- integrating one level
-def _hole_index(info: dict[str, Any], c: list[float], lax: str | None = None) -> int | None:
-    """The recognised hole on the axis at ``c`` (canonical frame of part axis ``lax``)."""
+def _hole_index(info: dict[str, Any], c: list[float], lax: str | None = None, z: float | None = None) -> int | None:
+    """The recognised hole on the axis at ``c`` (canonical frame of part axis ``lax``). Holes are read per stretch
+    along their line (recognize VERSION 4): with ``z`` (the joint plane), of several holes on that line (a housing's
+    tapped holes in both end walls) the one nearest the joint."""
     if lax and lax != "z":
         from aicad.office import conformance
 
         info = conformance.in_canon(lax, info, {})[0]
+    best: tuple[float, int] | None = None
     for k, h in enumerate(info.get("holes") or []):
         if abs(abs(float(h["axis"][2])) - 1) < 1e-3 and math.hypot(float(h["center"][0]) - c[0],
                                                                     float(h["center"][1]) - c[1]) <= 0.1:
-            return k
-    return None
+            if z is None:
+                return k
+            zc, half = float(h["center"][2]), float(h.get("depth") or 0.0) / 2
+            gap = max(0.0, abs(z - zc) - half)
+            if best is None or gap < best[0]:
+                best = (gap, k)
+    return best[1] if best else None
 
 
 def _hole_span(aroot: Path, inst: dict[str, Any], k: int, c: Any, u: Any) -> tuple[dict[str, Any], float, float]:
@@ -687,12 +695,14 @@ def icd_stack(aroot: Path, adoc: dict[str, Any], sk: dict[str, Any], f: dict[str
     ia, ib = _inst_of(adoc, f["a"]["item"], f["a"]["copy"]), _inst_of(adoc, f["b"]["item"], f["b"]["copy"])
     if ia is None or ib is None:
         return None
-    gb = icd._axial(sk, f["b"], d, xy, d["plane_z"])
-    kb = _hole_index(_part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1], gb["c"], gb.get("ax"))
+    gb = icd._axial(sk, f["b"], d, xy, d["plane_z"], d["plane_z"])   # z0 = z1: the joint plane in the part's frame
+    kb = _hole_index(_part_data(aroot, ib["part"], (ib.get("office") or {}).get("frame"))[1], gb["c"], gb.get("ax"),
+                     gb["z0"])
     if kb is None or (ib["id"], kb) in fitted:
         return None
-    ga = icd._axial(sk, f["a"], d, xy, d["plane_z"])
-    ka = _hole_index(_part_data(aroot, ia["part"], (ia.get("office") or {}).get("frame"))[1], ga["c"], ga.get("ax"))
+    ga = icd._axial(sk, f["a"], d, xy, d["plane_z"], d["plane_z"])
+    ka = _hole_index(_part_data(aroot, ia["part"], (ia.get("office") or {}).get("frame"))[1], ga["c"], ga.get("ax"),
+                     ga["z0"])
     hb = ((astore.part(aroot, ib["part"]) or {}).get("info") or {})["holes"][kb]
     Tb = xform.from12(ib["T"])
     c = xform.pt(Tb, (hb.get("exact") or {}).get("p") or hb["center"])

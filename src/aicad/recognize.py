@@ -37,7 +37,14 @@ def _v(p: Any) -> list[float]:
 # Bump when recognised results change for the same geometry: cached part snapshots (assembly.store) are re-made.
 # 2: cylinder extents along the canonical axis (negative-axis holes were mirrored: wrong centre and through flag).
 # 3: internal (ring) gears recognised (component kind "internal_gear"); the bounding-box axes are always tried.
-VERSION = 3
+# 4: cylinders read per stretch along their line (PD-276): only faces of one body that overlap or touch axially form
+#    a hole or boss; a concave stretch under HOLE_MIN_DEG of a turn (a half bore of a split housing, a slot's round
+#    end) is a partial bore (``partials``), not a hole; extents in one frame per line.
+VERSION = 4
+
+FULL_DEG = 359.0      # a stretch covering this much of a turn is a full hole / boss
+HOLE_MIN_DEG = 270.0  # a concave stretch under this is a partial bore, not a hole (a keyed bore, ~325, stays a hole)
+PART_MIN_DEG = 179.0  # under this a stretch is not a turn at all: its faces are fillets or partial cylinders
 
 
 def _axis_key(d: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -129,6 +136,32 @@ def _cyl_info(face: Any) -> dict[str, Any] | None:
             "lo": lo, "hi": hi, "area": face.area}
 
 
+def _stretches(segs: list[tuple[Any, ...]], tol: float = TOL) -> list[dict[str, Any]]:
+    """Faces of one cylinder (one body, line and radius) grouped by where they lie along the line: faces that overlap
+    or touch axially are one stretch. ``segs`` rows are (lo, hi, span_deg, fid, ...) with lo / hi in one frame per
+    line. The angle of a stretch is the most it covers at any point along it (the sum of the faces over that point),
+    so the two halves of one bore make a full turn while two half bores at the two ends of a split housing stay two
+    half turns (summed over the whole line they made 360: a "hole" centred on the split face, PD-276)."""
+    out: list[dict[str, Any]] = []
+    for seg in sorted(segs, key=lambda x: (x[0], x[1], x[3])):
+        if out and seg[0] <= out[-1]["hi"] + tol:
+            out[-1]["hi"] = max(out[-1]["hi"], seg[1])
+            out[-1]["segs"].append(seg)
+        else:
+            out.append({"lo": seg[0], "hi": seg[1], "segs": [seg]})
+    for g in out:
+        rows = g["segs"]
+        cuts = sorted({x[0] for x in rows} | {x[1] for x in rows})
+        best = 0.0
+        for a, b in itertools.pairwise(cuts):
+            if b - a > tol:
+                m = (a + b) / 2
+                best = max(best, sum(x[2] for x in rows if x[0] <= m <= x[1]))
+        g["span"] = best if best > 0 else sum(x[2] for x in rows)
+        g["fids"] = sorted(x[3] for x in rows)
+    return out
+
+
 def _line_key(o: Any, d: Any) -> tuple[float, ...]:
     """Key of an infinite line: canonical direction + foot of perpendicular from the world origin."""
     dk = _axis_key(d)
@@ -140,11 +173,14 @@ STD_MODULES = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.25, 1.5, 1.75, 2.0, 2.2
                5.5, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0]
 
 
+def _bodies(shape: Shape) -> list[Any]:
+    kids = [c for c in (getattr(shape, "children", None) or ()) if c.solids()]
+    return kids if kids else (list(shape.solids()) or [shape])
+
+
 def topo_faces(shape: Shape) -> list[Any]:
     """Faces in exactly the order topo.json numbers them (so recognised features can be highlighted)."""
-    kids = [c for c in (getattr(shape, "children", None) or ()) if c.solids()]
-    bodies = kids if kids else (list(shape.solids()) or [shape])
-    return [f for b in bodies for f in b.faces()]
+    return [f for b in _bodies(shape) for f in b.faces()]
 
 
 def _surface_kind(t: Any) -> str:
@@ -266,12 +302,13 @@ def recognize(shape: Shape) -> dict[str, Any]:
     size = [bb.size.X, bb.size.Y, bb.size.Z]
     solids = shape.solids()
     vol = shape.volume
-    faces = topo_faces(shape)
+    bodies = _bodies(shape)
+    faces = [f for b in bodies for f in b.faces()]   # = topo_faces(shape)
+    body_of = [k for k, b in enumerate(bodies) for _f in b.faces()]
     total_area = shape.area
     cls: dict[int, str] = {}  # fid -> feature id (assigned faces)
 
-    holes_raw: dict[tuple[Any, ...], dict[str, Any]] = {}
-    bosses_raw: dict[tuple[Any, ...], dict[str, Any]] = {}
+    lines: dict[tuple[Any, ...], dict[str, Any]] = {}   # cylinder faces by (body, line, radius, concave)
     fillet_faces: list[tuple[int, dict[str, Any]]] = []
     chamfer_faces: list[tuple[int, dict[str, Any]]] = []
     planar_faces: list[int] = []
@@ -296,19 +333,15 @@ def recognize(shape: Shape) -> dict[str, Any]:
             ci = _cyl_info(f)
             assert ci is not None
             axes.append((list(ci["origin"]), list(_axis_key(ci["axis"]))))
-            key = _line_key(ci["origin"], ci["axis"]) + (_r(ci["r"], 3),)
-            if ci["span_deg"] < 179.0:
-                if ci["span_deg"] <= 95.0 and ci["r"] <= 0.5 * max(size):
-                    fillet_faces.append((fid, {"r": _r(ci["r"]), "convex": not ci["concave"]}))
-                else:
-                    other[fid] = "partial cylinder"
-                continue
-            bucket = holes_raw if ci["concave"] else bosses_raw
-            g = bucket.setdefault(key, {"r": ci["r"], "axis": ci["axis"], "origin": ci["origin"], "lo": ci["lo"],
-                                        "hi": ci["hi"], "span": 0.0, "fids": []})
-            g["lo"], g["hi"] = min(g["lo"], ci["lo"]), max(g["hi"], ci["hi"])
-            g["span"] += ci["span_deg"]
-            g["fids"].append(fid)
+            # one frame per line: t measured from the foot of the world origin on it (each face's own axis origin
+            # differs, and mixing them put a hole's extent in the wrong place)
+            f0 = _foot([0.0, 0.0, 0.0], ci["origin"], ci["axis"])
+            base_t = _dot(_sub(ci["origin"], f0), ci["axis"])
+            key = (body_of[fid], *_line_key(ci["origin"], ci["axis"]), _r(ci["r"], 3), bool(ci["concave"]))
+            g = lines.setdefault(key, {"r": ci["r"], "axis": ci["axis"], "origin": f0, "concave": bool(ci["concave"]),
+                                       "segs": []})
+            fillet_like = ci["span_deg"] <= 95.0 and ci["r"] <= 0.5 * max(size)
+            g["segs"].append((base_t + ci["lo"], base_t + ci["hi"], ci["span_deg"], fid, fillet_like))
             continue
         if t == GeomAbs_Torus:
             fillet_faces.append((fid, {"r": _r(s.Torus().MinorRadius()), "convex": None}))
@@ -317,6 +350,29 @@ def recognize(shape: Shape) -> dict[str, Any]:
             other[fid] = "conical face (countersink / tapered feature)"
             continue
         other[fid] = "freeform face"
+
+    # ---- cylinders, one stretch along their line at a time
+    holes_raw: list[dict[str, Any]] = []
+    bosses_raw: list[dict[str, Any]] = []
+    partials_raw: list[dict[str, Any]] = []
+    for g in lines.values():
+        for st in _stretches(g["segs"]):
+            if st["span"] < PART_MIN_DEG:  # not a turn: each face is a fillet or a partial cylinder
+                for _lo, _hi, _span, fid, fillet_like in st["segs"]:
+                    if fillet_like:
+                        fillet_faces.append((fid, {"r": _r(g["r"]), "convex": not g["concave"]}))
+                    else:
+                        other[fid] = "partial cylinder"
+                continue
+            row = {"r": g["r"], "axis": g["axis"], "origin": g["origin"], "lo": st["lo"], "hi": st["hi"],
+                   "span": st["span"], "fids": st["fids"]}
+            if not g["concave"]:
+                bosses_raw.append(row)
+            elif st["span"] >= HOLE_MIN_DEG:
+                holes_raw.append(row)
+            else:
+                partials_raw.append(row)
+    fillet_faces.sort(key=lambda x: x[0])
 
     def finish(g: dict[str, Any], hole: bool = True) -> dict[str, Any]:
         d = _axis_key(g["axis"])
@@ -349,12 +405,16 @@ def recognize(shape: Shape) -> dict[str, Any]:
             open_end, into = (bot, list(d)) if top_closed else (top, [-x for x in d])
         return {"d": _r(2 * g["r"], 4), "axis": [_r(x, 4) for x in d], "center": [_r(x) for x in c],
                 "top": [_r(x) for x in top], "bottom": [_r(x) for x in bot], "depth": _r(depth, 4), "through": bool(through),
-                "full": g["span"] >= 359.0, "faces": g["fids"], "open": [_r(x, 4) for x in open_end],
+                "full": g["span"] >= FULL_DEG, "faces": g["fids"], "open": [_r(x, 4) for x in open_end],
                 "dir": [_r(x, 6) for x in into]}
 
-    holes = sorted((finish(g) for g in holes_raw.values()), key=lambda h: (h["d"], h["center"]))
-    bosses = sorted((finish(g, hole=False) for g in bosses_raw.values()), key=lambda h: -h["d"])
-    hole_fids = {f for h in holes for f in h["faces"]}
+    holes = sorted((finish(g) for g in holes_raw), key=lambda h: (h["d"], h["center"]))
+    bosses = sorted((finish(g, hole=False) for g in bosses_raw), key=lambda h: (-h["d"], h["center"]))
+    # a partial bore: a half bore of a housing split on its axis, a slot's round end; recorded with its angle, never
+    # a hole (no fastener, mate or pattern takes it for one)
+    partials = sorted(({**finish(g), "angle": _r(g["span"], 1)} for g in partials_raw),
+                      key=lambda h: (h["d"], h["center"]))
+    hole_fids = {f for h in holes for f in h["faces"]} | {f for p in partials for f in p["faces"]}
 
     # ---- rotational repetition (gear teeth, splines, spokes, slots around an axis)
     bc = [(bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2, (bb.min.Z + bb.max.Z) / 2]
@@ -443,6 +503,13 @@ def recognize(shape: Shape) -> dict[str, Any]:
                          "faces": h["faces"], "holes": [_hole_entry(h)]})
         for f in h["faces"]:
             cls.setdefault(f, fid)
+    for i, p in enumerate(partials):
+        what = "Half bore" if abs(p["angle"] - 180.0) <= 1.0 else "Partial bore"
+        features.append({"id": f"pb{i + 1}", "name": f"{what} Ø{p['d']} ({p['angle']}° of a turn)",
+                         "kind": "partial_bore", "params": {"d": p["d"], "angle": p["angle"], "length": p["depth"]},
+                         "faces": p["faces"]})
+        for f in p["faces"]:
+            cls.setdefault(f, f"pb{i + 1}")
     for i, b in enumerate(bosses):
         features.append({"id": f"b{i + 1}", "name": f"Cylindrical face Ø{b['d']}", "kind": "boss", "params": {"d": b["d"], "length": b["depth"]},
                          "faces": b["faces"]})
@@ -502,9 +569,11 @@ def recognize(shape: Shape) -> dict[str, Any]:
 
     stock = _stock(shape, size, bosses, vol)
     rec = {
+        "version": VERSION,  # out/recognition.json read by an older recogniser is stale (memory.facts, library)
         "bbox": [_r(x) for x in size], "bbox_min": _v(bb.min), "volume_mm3": _r(vol, 2), "area_mm2": _r(total_area, 2),
         "solids": len(solids), "faces": len(faces), "planar_faces": planar,
         "stock": stock, "holes": [{k: v for k, v in h.items() if k != "faces"} for h in holes], "patterns": patterns,
+        "partials": [{k: v for k, v in p.items() if k != "faces"} for p in partials],
         "bosses": [{k: v for k, v in b.items() if k != "faces"} for b in (bosses[1:] if stock["kind"] == "turned" else bosses)],
         "fillets": sorted(fillets_g.values(), key=lambda e: -e["count"]), "chamfers": list(chamfer_g.values()),
         "unrecognised": dict(unrecognised), "component": component, "features": features,
@@ -595,6 +664,9 @@ def summary(rec: dict[str, Any]) -> list[str]:
     for i, h in enumerate(rec["holes"]):
         if i not in in_pat:
             lines.append(f"Ø{h['d']} {'through' if h['through'] else 'blind ' + str(h['depth']) + ' mm deep'} hole at {h['center']}")
+    for p in rec.get("partials") or []:
+        what = "half bore" if abs(p["angle"] - 180.0) <= 1.0 else "partial bore"
+        lines.append(f"Ø{p['d']} {what} ({p['angle']}° of a turn), {p['depth']} mm long, axis at {p['center']}")
     for b in rec["bosses"]:
         lines.append(f"Cylindrical boss/feature Ø{b['d']} × {b['depth']} mm")
     for f in rec["fillets"]:
@@ -617,8 +689,8 @@ def agent_prompt(rec: dict[str, Any]) -> str:
         "REFERENCE_STEP (do not delete it; keep `REFERENCE_STEP = ...` in model.py so check CHK-09 compares your "
         "model against it). Feature recognition found:\n- " + "\n- ".join(rec["summary"]) +
         "\n\nFull recognition data (mm):\n```json\n" + json.dumps(
-            {k: rec[k] for k in ("bbox", "bbox_min", "volume_mm3", "stock", "holes", "patterns", "bosses", "fillets",
-                                 "chamfers", "unrecognised")}, indent=1)[:12000] + "\n```\n"
+            {k: rec.get(k) for k in ("bbox", "bbox_min", "volume_mm3", "stock", "holes", "patterns", "partials",
+                                     "bosses", "fillets", "chamfers", "unrecognised")}, indent=1)[:12000] + "\n```\n"
         "Model it with real design intent (stock, pockets, hole patterns as patterns, fillets/chamfers last), "
         "expose the driving dimensions as PARAMS with PARAM_META, record each feature with fw.feature, and iterate "
         "until CHK-09 shows the symmetric difference with the reference is ~0. Report anything you could not match."
