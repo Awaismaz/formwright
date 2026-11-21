@@ -50,7 +50,10 @@ def geometry(ws: Path, status: dict[str, Any]) -> dict[str, Any]:
     step = ws / "out" / "part.step"
     if not step.is_file():
         return {}
-    key = f"{status.get('step_sha256') or step.stat().st_mtime_ns}:{GEOMETRY_VERSION}"
+    from aicad.recognize import VERSION as RECOGNIZE_VERSION
+
+    # recognize.VERSION in the key too: a recogniser change re-reads the part (PD-276 half bores)
+    key = f"{status.get('step_sha256') or step.stat().st_mtime_ns}:{GEOMETRY_VERSION}:r{RECOGNIZE_VERSION}"
     cache = eng_dir(ws) / "geometry.json"
     c = _read_json(cache)
     if c.get("key") == key:

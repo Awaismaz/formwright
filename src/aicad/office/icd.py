@@ -194,10 +194,20 @@ def bearing_for(d: float, designation: int | None = None) -> int | None:
     return None
 
 
+LENGTH_STEP = 5.0   # mm between neighbouring ISO 888 screw lengths in the cap screw range (20, 25, 30 ... 70)
+
+
 def tap_depth(m: int) -> float:
     """Depth of a blind tapped hole for an M``m`` screw: 2.5 d of thread room + 3 mm (engagement 2 d in aluminium,
-    thread run-out, chips)."""
-    return float(2.5 * m + 3.0)
+    thread run-out, chips), and deep enough that the admissible screw lengths span one length step (PD-285). Fitz takes
+    L from grip + washer + 2 d (engagement in aluminium or an unknown material) to grip + washer + depth - 2 P (clear of
+    the bottom): that window is depth - 2 P - 2 d, so depth >= 2 d + 2 P + 5 always holds a standard length whatever the
+    clamped thickness. M6: max(2.5 x 6 + 3, 12 + 2 + 5) = max(18, 19) = 19 (18 left 4 mm, and a 12 mm cap flange no
+    length: 25.6 to 29.6). Rounded up to 0.5 mm."""
+    from aicad.assembly.fasteners import PITCH
+
+    need = 2.0 * m + 2.0 * PITCH.get(m, 0.15 * m) + LENGTH_STEP
+    return float(math.ceil(max(2.5 * m + 3.0, need) * 2.0 - 1e-9) / 2.0)
 
 
 def dowel_length(total: float) -> float:

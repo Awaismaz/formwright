@@ -104,7 +104,8 @@ def test_every_seat_gets_its_cap_with_a_ligament_rule() -> None:
         d = f["data"]
         # the plan's cap screws (not the cover's flange bolts), M6 into tapped holes in the wall
         assert (d["fastener"], d["fastener_item"], d["count"], d["d"]) == ("M6", ids["Cap screw M6x16"], 4, 6.6)
-        assert d["tapped"] == {"d": 5.0, "depth": 18.0, "thread": "M6"}  # 2.5 x 6 + 3
+        # max(2.5 x 6 + 3, 2 x 6 + 2 x 1.0 + 5) = max(18, 19): the screw length window spans one 5 mm step (PD-285)
+        assert d["tapped"] == {"d": 5.0, "depth": 19.0, "thread": "M6"}
         lig = d["pcd"] / 2 - d["seat_D"] / 2 - d["tapped"]["d"] / 2
         assert lig == pytest.approx(3.0)  # (58 - 47) / 2 - 2.5 and (63 - 52) / 2 - 2.5
         r = d["pcd"] / 2 / math.sqrt(2)  # four holes at 45, 135, 225, 315 deg

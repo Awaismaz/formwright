@@ -61,15 +61,18 @@ def test_gearbox_layout_hand_checked() -> None:
     seat = ifs[1]["data"]
     assert (seat["ax"], seat["axis"], seat["z"], seat["flush_z"], seat["count"]) == ("y", [-54, -62], [-41, 41], -41, 2)
     assert seat["seats"] == [{"face": "+Y wall", "open": 1, "z": [26, 41]}, {"face": "-Y wall", "open": -1, "z": [-41, -26]}]
-    lid = ifs[0]["data"]  # M6 (span 82 < 150): tapped Ø5 x (2.5 x 6 + 3) = 18 into the rim, at 2 d from the edges
-    assert lid["tapped"] == {"d": 5.0, "depth": 18.0, "thread": "M6"} and lid["through"] is False
+    # M6 (span 82 < 150): tapped Ø5 x max(2.5 x 6 + 3, 2 x 6 + 2 x 1.0 + 5) = 19 into the rim, at 2 d from the edges
+    lid = ifs[0]["data"]
+    assert lid["tapped"] == {"d": 5.0, "depth": 19.0, "thread": "M6"} and lid["through"] is False
     assert lid["positions"] == [[-85.8, -27.8], [85.8, -27.8], [-85.8, 27.8], [85.8, 27.8]]
-    cap = ifs[6]["data"]  # the -Y cap of the input shaft: holes on PCD 61.5 at 45 deg, M4 tapped 3.3 x 13
+    # the -Y cap of the input shaft: holes on PCD 61.5 at 45 deg, M4 tapped 3.3 x max(2.5 x 4 + 3, 2 x 4 + 2 x 0.7 + 5)
+    # = max(13, 14.4) -> 14.5 (rounded up to 0.5 mm, PD-285)
+    cap = ifs[6]["data"]
     r = 61.5 / 2 / math.sqrt(2)
     assert (61.5 - 52) / 2 - 3.3 / 2 == 3.1  # the wall left between the seat and each tapped hole
     assert (cap["ax"], cap["plane_z"], cap["normal"], cap["centre"]) == ("y", -41, [0, -1, 0], [-54, -62])
     assert cap["positions"][0] == [round(-54 + r, 2), round(-62 + r, 2)]
-    assert cap["tapped"] == {"d": 3.3, "depth": 13.0, "thread": "M4"}
+    assert cap["tapped"] == {"d": 3.3, "depth": 14.5, "thread": "M4"}
     mesh = ifs[10]["data"]
     assert (mesh["ax"], mesh["axis_a"], mesh["axis_b"], mesh["centre_distance"]) == ("y", [-54, -62], [18, -62], 72)
     assert abs(it[GEAR]["phase"] - 10 / 3) < 1e-5  # same tooth phasing as Phase 5 (the mesh runs along +X)
@@ -92,7 +95,7 @@ def test_gearbox_layout_hand_checked() -> None:
     assert [T[2], T[6], T[10]] == [0, 1, 0] and [T[3], T[7], T[11]] == [-54, 19, -62]
     ex = icd.excerpt(sk, {"version": 1, "interfaces": ifs}, H)
     assert "bearing seat Ø52 H7 (-Y wall) on the axis along Y at (X, Z) (-54, 5), from Y -41 to -26" in ex
-    assert "4 × M4 tapped holes (tap drill Ø3.3, blind, 13 deep from the mounting face, along Y)" in ex
+    assert "4 × M4 tapped holes (tap drill Ø3.3, blind, 14.5 deep from the mounting face, along Y)" in ex
     assert "Gear cavity (keep clear" in ex and "Gearbox layout" in " ".join(sk["notes"])
     assert "laid along program +Y" in icd.excerpt(sk, {"version": 1, "interfaces": ifs}, S_IN)
     # drawings: tapped holes become one thread note per size (not a hole Ø to tag); found in the walkthrough, where a
@@ -100,8 +103,8 @@ def test_gearbox_layout_hand_checked() -> None:
     from aicad.office import deliverables
 
     spec = deliverables.icd_spec(sk, {"version": 1, "interfaces": ifs}, H)
-    assert spec["notes"][:2] == ["TAPPED HOLES M4, 13 DRILLED (IF-07, IF-08, IF-09, IF-10).",
-                                 "TAPPED HOLES M6, 18 DRILLED (IF-01)."]
+    assert spec["notes"][:2] == ["TAPPED HOLES M4, 14.5 DRILLED (IF-07, IF-08, IF-09, IF-10).",
+                                 "TAPPED HOLES M6, 19 DRILLED (IF-01)."]
     assert not any(k.startswith("ICD_IF01_D") for k in spec["params"])
     # an engineer can keep the Phase 5 row: layout override "row" -> vertical shafts on the housing's top face
     sk2, ifs2 = icd.build(parts, BRIEF, {"items": {H: {"layout": "row"}}, "interfaces": {}})
@@ -147,7 +150,7 @@ def test_gearbox_placeholders_conform_and_y_defects_fail(tmp_path: Path) -> None
     rows = [(x["interface"], r["feature"], r["measured"]) for x in conformance.measure(sk, doc, H, info, refs)["interfaces"]
             for r in x["rows"] if not r["ok"]]
     assert ("IF-02", "bearing seat Ø52 H7 (-Y wall)", "Ø52.100, axis 0.000 mm from position") in rows
-    assert any(f == "tapped hole 1 M4 × 13 deep" and "through, the ICD says blind" in m for _i, f, m in rows)
+    assert any(f == "tapped hole 1 M4 × 14.5 deep" and "through, the ICD says blind" in m for _i, f, m in rows)
     # the real Toolbox gears, keyed and bored to the ICD, conform in their own (horizontal) part frames
     for name, z in (("Pinion", 18), ("Output gear", 54)):
         g, _e = toolbox.build("spur_gear", M=2, Z=z, B=20, BORE=25)

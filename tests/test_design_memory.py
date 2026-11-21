@@ -24,6 +24,7 @@ from sqlalchemy import select
 from test_collab import _member, _org_id
 from test_platform import app_client, signup  # noqa: F401  (fixture re-export)
 
+from aicad import recognize
 from aicad.memory import context as mctx
 from aicad.memory import extract, learn
 from aicad.memory import facts as F
@@ -101,7 +102,8 @@ def test_topo_census_matches_hand_values_and_skips_rounded_corners(tmp_path: Pat
     line = F.fact_line(flange, 300)
     assert len(line) <= 300 and line.startswith("Flange (Carbon steel): 150 × 150 × 18 mm")
     # recognition, when current for the build, is preferred and says "thru"
-    rec = {"build_id": json.loads((tmp_path / "pipe_flange" / "out" / "status.json").read_text())["build_id"],
+    rec = {"version": recognize.VERSION,
+           "build_id": json.loads((tmp_path / "pipe_flange" / "out" / "status.json").read_text())["build_id"],
            "stock": {"kind": "prismatic"}, "holes": [{"d": 14.0, "through": True, "depth": 18, "center": [60, 0, 9],
                                                       "axis": [0, 0, 1]}] * 6,
            "patterns": [{"kind": "circular", "d": 14.0, "count": 6, "pcd": 120.0, "axis": [0, 0, 1],

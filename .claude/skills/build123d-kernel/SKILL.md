@@ -75,6 +75,11 @@ Acceptance is deterministic checks, never renders (`src/aicad/checks.py`, `src/a
   50 s to 1.3 s on a 1083-face gear by caching. Profile before assuming the kernel is slow.
 
 ## Imported geometry (DS-018/019)
+- Recognition (`recognize.py`, VERSION 4) reads cylinders **per stretch along their line**, per body: only faces that
+  overlap or touch axially form a hole; the angle is the most covered at one point, never a sum over the line. A
+  concave stretch under 270 degrees (a split housing's half bore, a slot end) is a `partials` entry, not a hole; a keyed
+  bore (~325) stays a hole with `full` false. Never key extents on a face's own axis origin: use one frame per line.
+  Bump `recognize.VERSION` on any change of results (assembly snapshots, engineering cache, `out/recognition.json`).
 - Imports stay **exact**: `fw.imported_blank(REFERENCE_STEP, RECOGNITION)`. Edit by booleans on the blank or by
   `fw.redefine_holes` (fill and recut). Never swap in an approximation unless a full parametric rebuild is requested,
   and then drive CHK-09 to about 0.

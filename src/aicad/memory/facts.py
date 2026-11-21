@@ -50,8 +50,11 @@ def current_revision(ws: Path) -> int | None:
 
 
 def recognition_current(ws: Path, st: dict[str, Any]) -> dict[str, Any] | None:
+    from aicad.recognize import VERSION
+
     rec = _read(ws / "out" / "recognition.json")
-    if rec and st.get("build_id") is not None and rec.get("build_id") == st.get("build_id"):
+    if (rec and st.get("build_id") is not None and rec.get("build_id") == st.get("build_id")
+            and rec.get("version") == VERSION):  # an older recogniser's reading is read again
         return rec
     return None
 

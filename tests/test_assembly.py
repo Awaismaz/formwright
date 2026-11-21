@@ -135,13 +135,14 @@ def test_through_bolt_length_hand_cases(d: int, grip: float, washers: str, L_min
 
 
 def test_tapped_lengths_hand_cases() -> None:
-    # M5 SHCS + washer clamping 5 mm into a 10 mm through-tapped steel plate: L ≥ 5 + 1.0 + 1.0 × 5 = 11 → 12
+    # M5 SHCS + washer clamping 5 mm into a 10 mm through-tapped steel plate (engagement 1.5 d in steel, PD-285):
+    # L ≥ 5 + 1.0 + 1.5 × 5 = 13.5 → 16 (ISO 888: 12, 16); engagement min(16 - 5 - 1.0, 10) = 10
     pr = {"kind": "tapped", "hole_d": 5.5, "grip": 5.0, "members": [],
           "tapped": {"name": "Base", "d": 4.2, "depth": 10.0, "blind": False, "material": "Steel 1045"}}
     p = fasteners.propose(pr, "shcs", "head")
-    assert p["ok"] and p["length"]["L_min"] == pytest.approx(11.0) and p["length"]["L"] == 12
-    assert p["length"]["engagement"] == pytest.approx(6.0) and [i["role"] for i in p["items"]] == ["screw", "washer_head"]
-    assert p["items"][0]["title"] == "Socket head cap screw ISO 4762 M5×12"
+    assert p["ok"] and p["length"]["L_min"] == pytest.approx(13.5) and p["length"]["L"] == 16
+    assert p["length"]["engagement"] == pytest.approx(10.0) and [i["role"] for i in p["items"]] == ["screw", "washer_head"]
+    assert p["items"][0]["title"] == "Socket head cap screw ISO 4762 M5×16"
     # M6 into a 15 mm blind tapped hole in aluminium: engagement ≥ 2 × 6 = 12, usable thread 15 − 2 × 1.0 = 13,
     # clamped 10 + washer 1.6 → L in [23.6, 24.6]: no ISO 888 length there → honest failure
     pr = {"kind": "tapped", "hole_d": 6.6, "grip": 10.0, "members": [],

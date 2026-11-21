@@ -66,6 +66,8 @@ def _hole(f: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     c = _xy(f["c"])
     tol = float(f.get("tol") or icd.POS_TOL)
     cands = [h for h in info.get("holes") or [] if _along_z(h["axis"])]
+    if f.get("split"):  # half of a bore split across a joint: the part has a half bore there (recognize ``partials``)
+        cands += [h for h in info.get("partials") or [] if _along_z(h["axis"])]
     spec_txt = f"Ø{f['d']:g}{' ' + f['fit'] if f.get('fit') else ''} at {_fmt(c)}"
     if not cands:
         return {"feature": f["label"], "spec": spec_txt, "measured": "no hole along Z", "ok": False}
